@@ -181,11 +181,11 @@ class OwnershipOfferServiceTest extends AbstractServiceTest {
     @Test void pendingTargetsAndEveryInternalOwnerJoinAreRefused() {
         User target = newUser();
         jdbc.update("UPDATE workspace_member SET status = 'pending' WHERE workspace_id = ? AND user_id = ?", workspace.getId(), target.getId());
-        assertThrows(BadRequestException.class, () -> offer(target));
+        assertThrows(ResourceNotFoundException.class, () -> offer(target));
         assertThrows(BadRequestException.class, () -> workspaces.addPendingMember(workspace.getId(), currentUser, target, "owner"));
         assertThrows(BadRequestException.class, () -> workspaces.ensureActiveMember(workspace.getId(), target.getId(), "owner"));
         workspaceMapper.updateMemberRole(workspace.getId(), target.getId(), "owner");
-        assertThrows(BadRequestException.class, () -> offer(target));
+        assertThrows(ResourceNotFoundException.class, () -> offer(target));
         assertThrows(BadRequestException.class, () -> workspaces.approveMembership(workspace.getId(), target.getId()));
         assertEquals("pending", workspaceMapper.getMember(workspace.getId(), target.getId()).getStatus());
     }

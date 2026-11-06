@@ -88,22 +88,17 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertEquals(currentUser.getId(), stored(note).get(0).getRefId());
     }
 
-    /**
-     * A pending (invited-but-not-yet-joined) member is a valid mention target:
-     * their reference is persisted so the chip renders, and they are returned as
-     * newly-added so the caller can notify them; they see it once they accept.
-     */
+    /** A pending invitation cannot disclose or acquire a member identity through mentions. */
     @Test
-    void syncReferences_persistsPendingMemberMention() {
+    void syncReferences_excludesPendingMemberMention() {
         User pending = newPendingMember();
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
             "Welcome " + mention("Invitee", pending));
 
-        assertEquals(List.of(pending.getId()), added);
-        assertEquals(1, stored(note).size());
-        assertEquals(pending.getId(), stored(note).get(0).getRefId());
+        assertTrue(added.isEmpty());
+        assertTrue(stored(note).isEmpty());
     }
 
     /**
@@ -122,11 +117,11 @@ class ReferenceServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void memberTargetVisibilityIncludesPendingMembersAndExcludesNonMembers() {
+    void memberTargetVisibilityExcludesPendingAndNonMembers() {
         int active = newUser().getId();
         int pending = newPendingMember().getId();
         int outsider = newNonMember().getId();
-        assertEquals(java.util.Set.of(active, pending),
+        assertEquals(java.util.Set.of(active),
                 referenceService.visibleMemberIds(workspace.getId(), List.of(active, pending, outsider, active)));
     }
 
@@ -145,8 +140,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
         var result = identifierResolver.resolve(text);
 
         assertEquals(List.of(
-                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Active Name"),
-                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Pending Name")),
+                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Active Name")),
                 result.identifiers());
         assertTrue(result.resources().isEmpty());
     }
@@ -168,14 +162,14 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertEquals(java.util.Set.of(active.getId(), pending.getId(), removed.getId(), outsider.getId()),
                 candidates.stream().flatMap(reference -> reference.memberIds().stream())
                         .collect(java.util.stream.Collectors.toSet()));
-        assertEquals(java.util.Set.of(active.getId(), pending.getId()), referenceService.visibleMemberIds(workspace.getId(),
+        assertEquals(java.util.Set.of(active.getId()), referenceService.visibleMemberIds(workspace.getId(),
                 List.of(active.getId(), pending.getId(), removed.getId(), outsider.getId())));
         assertEquals("(unavailable reference)", referenceService.redactInvisibleTargets(workspace.getId(),
                 List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
 
         var resolution = identifierResolver.resolve(content);
 
-        assertEquals(java.util.Set.of("Active Parser Alias", "Pending Parser Alias"), resolution.identifiers().stream()
+        assertEquals(java.util.Set.of("Active Parser Alias"), resolution.identifiers().stream()
                 .map(AiAssistantIdentifierResolver.Identifier::value).collect(java.util.stream.Collectors.toSet()));
         assertTrue(resolution.resources().isEmpty());
         Note note = newNote(currentUser, null, null);

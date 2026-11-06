@@ -462,7 +462,7 @@ public class ReferenceService {
 
     private boolean isVisible(int workspaceId, String type, int refId, int currentUserId, String personWorkspaceIdsJson) {
         return switch (type) {
-            case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
+            case TYPE_USER -> workspaceService.isMember(workspaceId, refId);
             case TYPE_PERSON -> personMapper.exists(workspaceId, personWorkspaceIdsJson, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
             case TYPE_COMPANY -> companyMapper.exists(workspaceId, personWorkspaceIdsJson, refId);
@@ -475,7 +475,7 @@ public class ReferenceService {
         };
     }
 
-    /** Resolves distinct active or pending member ids in bounded, workspace-scoped batches. */
+    /** Resolves distinct active member ids in bounded, workspace-scoped batches. */
     public Set<Integer> visibleMemberIds(int workspaceId, Collection<Integer> memberIds) {
         if (memberIds == null || memberIds.isEmpty()) {
             return Set.of();
@@ -483,7 +483,7 @@ public class ReferenceService {
         List<Integer> ids = memberIds.stream().filter(id -> id != null && id > 0).distinct().toList();
         Set<Integer> visible = new HashSet<>();
         for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
-            visible.addAll(workspaceMapper.getMemberIdsIncludingPending(
+            visible.addAll(workspaceMapper.getActiveMemberIdsIn(
                     workspaceId, ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()))));
         }
         return Set.copyOf(visible);
@@ -660,7 +660,7 @@ public class ReferenceService {
     private List<Integer> visibleIds(
             int workspaceId, String type, List<Integer> ids, int currentUserId, String personWorkspaceIdsJson) {
         return switch (type) {
-            case TYPE_USER -> workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids);
+            case TYPE_USER -> workspaceMapper.getActiveMemberIdsIn(workspaceId, ids);
             case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);
             case TYPE_DEAL -> dealMapper.getVisibleIdsIn(workspaceId, ids);
             case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);

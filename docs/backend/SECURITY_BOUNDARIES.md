@@ -34,6 +34,25 @@ Every tenant-owned query uses server-resolved tenant/workspace scope; every endp
 
 Workspace teams are tenant-plane configuration. Reads require active workspace membership; every mutation requires the grantable `TEAM_MANAGE` permission and revalidates it from locked authorization rows before locking or changing a team. Team seats may name only active members of the same workspace. Path-addressed membership removal performs preliminary authorization against the path workspace before resolving its placement, then pins that workspace's catalog and tenant identity before opening the transaction, regardless of the active-header workspace. Active removal, pending-invitation decline, leave, fresh re-invitation, and account erasure delete team seats and clear manager references in the routed catalog without treating those configuration references as authored content.
 
+### Workspace invitation disclosure
+
+Both email invitation creation and the compatibility member-add route return the same token
+invitation for every address. Creation does not resolve recipient accounts. Before acceptance,
+administrators see the addressed email, requested role, invitation status, expiry and revocation
+control; account ids, names, usernames, avatars and verification/account state are withheld.
+Member rosters, organization layout rosters, member search and reference hydration expose only
+active memberships. Profile-returning role mutations also require an active target.
+
+Historical pending-membership grants remain acceptable by their recipients. Administrators manage
+them as address-only invitations using opaque membership-generation references, with no invented
+expiry. Revocation rechecks pending status and the same generation under membership-removal locks,
+uses a generic audit description and cannot remove a membership that has since accepted. A historical
+owner-role grant retains the owner-only revocation check. Resending
+supersedes the historical pending grant in the token-creation transaction. These historical grants
+remain distinguishable by their absent expiry; the new contract prevents new account probes but
+does not erase information disclosed before this change or conceal the historical invitation format.
+Invite-link redemption and removed-member rejoin policy are unchanged.
+
 ## AI and model-provider egress
 
 Read `docs/backend/AI_SECURITY.md` before changing AI gates, masking, prompts, media admission, provider adapters, endpoint validation, budgets, streaming, assistant tools, or transcript collaboration.

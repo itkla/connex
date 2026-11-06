@@ -591,7 +591,7 @@ and short names must not corrupt ordinary words. Exact replacements such as `x{{
 precise member provenance, including through echoed write arguments, independently of these raw-text
 rules. At queue time, the shared member-reference collector reads labels and user targets from
 the original text. Distinct target ids are checked in workspace-scoped batches of at most 500 against
-active or pending membership. An authored or decoded label is registered when any of its possible
+active membership. An authored or decoded label is registered when any of its possible
 targets is visible, preserving conservative masking for ambiguous keys. The combined identifier
 budget still refuses excess labels with `identifier_limit_exceeded`. An unrelated invisible target
 that collapses the reader-redacted body cannot suppress an authorized member label. Invisible user
@@ -622,8 +622,9 @@ when those labels enter the MEMBER boundary above; unrelated P1.1 scope is uncha
 `complete_task` and `reschedule_task` also declare every authored member-reference label in their
 stored description snapshots. The task delegates hydrate those descriptions through the existing
 reader-visibility boundary before storing the outcome. Fresh projection and replay register the
-labels as candidates before masking, including labels authored before a rename and references to
-pending members. MEMBER identifiers carried by tool results register as candidates without eager
+labels as candidates before masking, including labels authored before a rename whose references
+remain visible to the reader. Historical authored provenance retains the separate replay rules above.
+MEMBER identifiers carried by tool results register as candidates without eager
 allocation; actual dispatch exposure remains required for demasking. This adds no directory lookup,
 mutation, outcome field or token kind.
 

@@ -232,6 +232,8 @@
         "sendInvite": "招待を送信",
         "sending": "送信中",
         "inviteCreated": "招待リンクをクリップボードにコピーしました",
+        "invitationCreated": "招待を作成しました",
+        "inviteNoExpiry": "有効期限なし",
         "memberInvited": "招待を送信しました。相手の通知に表示されます。",
         "inviteFailed": "招待を作成できませんでした",
         "pendingTitle": "保留中の招待",

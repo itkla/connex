@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 
 import { activeWorkspaceId, csrfBootstrap, registerUser, seeder } from "./support/api";
 import { message } from "./support/messages";
+import { acceptEmailInvitation } from "./support/invitations";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -79,14 +80,10 @@ test("omitted API fields preserve audit diagnostics and member disqualification"
         await registerUser(member.request, {
             username: `null_member_${runId}`, password, email: `null_member_${runId}@example.com`,
         });
-        await seed.post(`/api/workspaces/${workspaceId}/members`, {
+        const invitation = await seed.post(`/api/workspaces/${workspaceId}/members`, {
             email: `null_member_${runId}@example.com`, role: "member",
         });
-        const memberCsrf = await csrfBootstrap(member.request);
-        const accepted = await member.request.post(`/api/workspaces/${workspaceId}/accept`, {
-            headers: { [memberCsrf.headerName]: memberCsrf.token },
-        });
-        expect(accepted.ok()).toBe(true);
+        await acceptEmailInvitation(member.request, invitation);
         const memberSeed = seeder(member.request, workspaceId, await csrfBootstrap(member.request));
         const contact = await memberSeed.post("/api/persons", { name: `Lifecycle regression ${runId}` });
         if (typeof contact.id !== "number") throw new Error("Expected contact id");

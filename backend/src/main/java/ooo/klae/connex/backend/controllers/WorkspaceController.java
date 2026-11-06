@@ -149,7 +149,7 @@ public class WorkspaceController {
 
     @DeleteMapping("/{id}/invites/{inviteId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void revokeInvite(@PathVariable int id, @PathVariable int inviteId) {
+    public void revokeInvite(@PathVariable int id, @PathVariable String inviteId) {
         inviteService.revokeInvite(id, inviteId, authService.getCurrentUser().getId());
     }
 
@@ -192,7 +192,7 @@ public class WorkspaceController {
     }
 
     @PostMapping("/{id}/members")
-    public MemberDto addMember(@PathVariable int id, @Valid @RequestBody AddMemberRequest request) {
+    public InviteResultDto addMember(@PathVariable int id, @Valid @RequestBody AddMemberRequest request) {
         return inviteService.addExistingMember(id, authService.getCurrentUser().getId(), request.getEmail(), request.getRole());
     }
 

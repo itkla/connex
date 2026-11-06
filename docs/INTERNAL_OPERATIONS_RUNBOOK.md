@@ -228,27 +228,23 @@ is no suspended, disabled, or removed state — removal deletes the row.
 | `active` | **Yes** | Every auth and RBAC read filters on `status = 'active'`. |
 | `pending` | **No** | Tenant resolution rejects with `Not a member of workspace …` and the effective permission set is empty. |
 
-`pending` rows are still visible in the settings roster (so admins can see who has not accepted), in
-the user's own pending list (`GET /api/workspaces/pending`), and to @-mention lookup. That
-mention-visibility helper is explicitly documented as **never to be used for auth or RBAC**.
-
-**Which path produces which state is not intuitive:**
+Historical `pending` rows remain in the user's own pending list
+(`GET /api/workspaces/pending`). Administrators see an address-only entry under pending invitations,
+with an opaque revocation handle and no expiry. Pending profiles do not appear in the active roster,
+member search, organization layout or reference hydration.
 
 | How the person joins | Resulting state |
 |---|---|
-| Redeems an emailed token invite | **`active` immediately** |
+| Accepts an emailed token invite | **`active` immediately after acceptance** |
 | Redeems a shareable invite link | **`active` immediately** |
-| Added by an admin when the email **already belongs to a Connex user** | **`pending`** — they must accept |
-| **Emailed an invite** at an address that **already belongs to a Connex user** | **`pending`** — and **no email is sent** |
+| Historical account-backed invitation | **`pending`** until the recipient accepts |
 
-**That last row is the trap.** `createInvite` checks the address first: when it already belongs to a
-Connex account it silently switches to `addPendingMember` and returns a member instead of an invite
-— **no token row, no email, no link to hand over**. The invitee gets only an in-app
-`workspace.join` notification and a row in their own pending list, neither of which they will see
-until they happen to sign in. From the admin's side the roster just shows `pending`, which looks
-identical to an invite that was emailed and ignored. **So a `pending` row does not mean "they
-ignored the email" — on this path there was never an email.** Chase it by telling the person
-directly to sign in and accept at **Settings → Membership**.
+Both email invitation creation and the compatibility member-add endpoint now create the same token
+invitation for every address. They do not resolve recipient account existence, and mail delivery uses
+the same attempt path. The invitation is listed separately from active members until acceptance.
+Resending an address supersedes any historical pending grant in the replacement transaction.
+Historical invitation formats remain distinguishable by their absent expiry; see the
+[disclosure contract](backend/SECURITY_BOUNDARIES.md#workspace-invitation-disclosure).
 
 `pending → active` happens only via the invitee's own `POST /api/workspaces/{id}/accept`, which
 re-applies the organization email-domain ceiling on activation. Declining deletes the row. A user
@@ -436,9 +432,8 @@ blocks creating the invite. When no sender is configured the invite is still cre
 is skipped." From the operator's side both are indistinguishable from success. The link path removes
 the ambiguity: you hold the credential and deliver it yourself.
 
-**Also remember the existing-account branch:** emailing an invite to an address that already belongs
-to a Connex user sends **no mail at all** and produces a `pending` member instead — see "Membership
-states" above.
+Email invitation creation follows the same mail-attempt and token path for every address. A
+historical pending membership may predate this uniform flow — see "Membership states" above.
 
 Shareable links are created in the UI at **Settings → Members**, or directly:
 

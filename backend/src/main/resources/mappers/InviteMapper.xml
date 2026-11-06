@@ -37,13 +37,20 @@
   </select>
 
   <select id="findPendingByWorkspace" resultType="ooo.klae.connex.backend.dto.InviteDto">
-    SELECT i.id, i.email, i.role, i.status,
+    SELECT SHA2(CONCAT('workspace-invite:', i.id), 256) AS id, i.email, i.role, i.status,
            i.expires_at AS expiresAt, i.created_at AS createdAt,
            u.display_name AS invitedByLabel
     FROM workspace_invite i
     LEFT JOIN app_user u ON u.id = i.invited_by_id
     WHERE i.workspace_id = #{workspaceId} AND i.status = 'pending'
-    ORDER BY i.created_at DESC, i.id DESC
+    UNION ALL
+    SELECT SHA2(CONCAT('pending-membership:', wm.membership_id), 256) AS id,
+           u.email, wm.role, 'pending' AS status,
+           NULL AS expiresAt, wm.created_at AS createdAt, NULL AS invitedByLabel
+    FROM workspace_member wm
+    JOIN app_user u ON u.id = wm.user_id
+    WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'pending'
+    ORDER BY createdAt DESC, id DESC
   </select>
 
   <update id="claimExchangeByHash">
@@ -98,6 +105,13 @@
       AND workspace_id = #{workspaceId}
       AND status = 'pending'
       AND expires_at &gt; UTC_TIMESTAMP()
+  </update>
+
+  <update id="markRevokedByReference">
+    UPDATE workspace_invite
+    SET status = 'revoked'
+    WHERE workspace_id = #{workspaceId} AND status = 'pending'
+      AND SHA2(CONCAT('workspace-invite:', id), 256) = #{reference}
   </update>
 
   <update id="markRevoked">

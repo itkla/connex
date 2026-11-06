@@ -204,7 +204,7 @@ Known scope cut: evidence peek and write-tool approval are still not driven from
 `note-persistence.spec.ts` covers contact mentions in both note editors after typing and on
 an immediate save, saved link preservation, response-driven header links, explicit removal
 through the dialog selectors, and unchanged body bytes during metadata edits. Its notification
-case registers two isolated accounts, completes the owner's passkey step-up, adds and accepts
+case registers two isolated accounts, completes the owner's passkey step-up, invites and accepts
 the second workspace member, then verifies a real `note.mention` notification after saving a
 member mention. The ordinary notifications spec still does not mark a real notification as read.
 
@@ -248,3 +248,9 @@ in for persistence proof.
 ## Ownership-offer confinement parity
 
 Slice 4o changes only the shared API confinement gate in this backend lane. Run `pnpm exec vitest run test/unit/passkeyApprovalApi.test.ts` for exact server/client method/path allowlist parity. Authenticated `GET /api/ownership-offers` and self-only `POST /api/ownership-offers/{id}/decline` remain reachable while confined; acceptance, creation and revocation require the normal privileged gate. The frontend implementation owns card/member-panel and browser coverage against [the actual backend contract](backend/OWNERSHIP_OFFERS.md). Shared/default-catalog inbox tests retain ordinary notification behavior; the self-offer card is authoritative on every catalog layout.
+
+`invitation-privacy.spec.ts` drives email invitations in English and Japanese. Pending entries stay
+address-only and outside the active member count, including after the recipient exchanges the link
+but before final acceptance. After acceptance the collaborator appears normally. The test also
+covers replacement invitations and revocation; membership fixtures redeem the same purpose-bound
+email invitation through `support/invitations.ts`.

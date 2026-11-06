@@ -218,7 +218,7 @@ class AiAssistantIdentifierResolverTest {
         member.setDisplayName("Current Name");
         when(workspace.getMembers(7)).thenReturn(List.of(member));
         var members = mock(WorkspaceMapper.class);
-        when(members.getMemberIdsIncludingPending(7, List.of(42))).thenReturn(List.of(42));
+        when(members.getActiveMemberIdsIn(7, List.of(42))).thenReturn(List.of(42));
         var references = memberReferences(workspace, members);
         String text = "[Former Name](user:42) [x](person:999 \"title\")";
         assertEquals("(unavailable reference)", references.redactInvisibleTargets(7,
@@ -244,7 +244,7 @@ class AiAssistantIdentifierResolverTest {
         when(workspace.getCurrentWorkspaceId()).thenReturn(7);
         when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
         var members = mock(WorkspaceMapper.class);
-        when(members.getMemberIdsIncludingPending(eq(7), anyList())).thenReturn(List.of(42, 43));
+        when(members.getActiveMemberIdsIn(eq(7), anyList())).thenReturn(List.of(42, 43));
         var people = mock(PersonMapper.class);
         when(people.getVisibleIdsIn(7, "[7,8,9]", List.of(1))).thenReturn(List.of(1));
         var references = new ReferenceService(mock(EntityReferenceMapper.class), workspace, people,
@@ -261,7 +261,7 @@ class AiAssistantIdentifierResolverTest {
                 result.identifiers().stream().map(AiAssistantIdentifierResolver.Identifier::value).toList());
         assertTrue(result.identifiers().stream().allMatch(identifier -> identifier.kind() == EntityKind.MEMBER));
         assertTrue(result.resources().isEmpty());
-        verify(members).getMemberIdsIncludingPending(7, List.of(42, 99, 43));
+        verify(members).getActiveMemberIdsIn(7, List.of(42, 99, 43));
         verify(workspace, never()).isMemberIncludingPending(anyInt(), anyInt());
         verifyNoInteractions(people);
     }
@@ -276,7 +276,7 @@ class AiAssistantIdentifierResolverTest {
         when(workspace.getCurrentWorkspaceId()).thenReturn(7);
         when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
         List<List<Integer>> batches = new ArrayList<>();
-        when(members.getMemberIdsIncludingPending(eq(7), anyList())).thenAnswer(call -> {
+        when(members.getActiveMemberIdsIn(eq(7), anyList())).thenAnswer(call -> {
             List<Integer> ids = call.getArgument(1);
             batches.add(List.copyOf(ids));
             return List.of();
@@ -290,7 +290,7 @@ class AiAssistantIdentifierResolverTest {
 
         assertEquals(List.of(), result.identifiers());
         assertEquals(List.of(), result.resources());
-        verify(members, times((count + 499) / 500)).getMemberIdsIncludingPending(eq(7), anyList());
+        verify(members, times((count + 499) / 500)).getActiveMemberIdsIn(eq(7), anyList());
         assertTrue(batches.stream().allMatch(batch -> !batch.isEmpty() && batch.size() <= 500));
         assertEquals(IntStream.rangeClosed(1, count).boxed().toList(), batches.stream().flatMap(List::stream).toList());
         verify(workspace, never()).isMemberIncludingPending(anyInt(), anyInt());
@@ -305,7 +305,7 @@ class AiAssistantIdentifierResolverTest {
         var members = mock(WorkspaceMapper.class);
         when(workspace.getCurrentWorkspaceId()).thenReturn(7);
         when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
-        when(members.getMemberIdsIncludingPending(7, List.of(99, 42, 43)))
+        when(members.getActiveMemberIdsIn(7, List.of(99, 42, 43)))
                 .thenReturn(visible ? List.of(42) : List.of());
         var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, memberReferences(workspace, members));
 
@@ -313,7 +313,7 @@ class AiAssistantIdentifierResolverTest {
 
         assertEquals(visible ? List.of(new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Name"))
                 : List.of(), result.identifiers());
-        verify(members).getMemberIdsIncludingPending(7, List.of(99, 42, 43));
+        verify(members).getActiveMemberIdsIn(7, List.of(99, 42, 43));
     }
 
     @ParameterizedTest
@@ -325,7 +325,7 @@ class AiAssistantIdentifierResolverTest {
         var members = mock(WorkspaceMapper.class);
         when(workspace.getCurrentWorkspaceId()).thenReturn(7);
         when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
-        when(members.getMemberIdsIncludingPending(eq(7), anyList())).thenAnswer(call -> {
+        when(members.getActiveMemberIdsIn(eq(7), anyList())).thenAnswer(call -> {
             List<Integer> ids = call.getArgument(1);
             return visible && ids.contains(1_599) ? List.of(1_599) : List.of();
         });
@@ -343,7 +343,7 @@ class AiAssistantIdentifierResolverTest {
                 assertTrue(resolver.resolve(text).identifiers().isEmpty());
             }
         });
-        verify(members, times(2)).getMemberIdsIncludingPending(eq(7), anyList());
+        verify(members, times(2)).getActiveMemberIdsIn(eq(7), anyList());
     }
 
     private static ReferenceService memberReferences(WorkspaceService workspace, WorkspaceMapper members) {

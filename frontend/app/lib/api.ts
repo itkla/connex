@@ -5918,7 +5918,7 @@ export function getActiveWorkspaceMembers(init: RequestInit = {}): Promise<Types
 }
 
 export function addWorkspaceMember(workspaceId: number, email: string, role: Types.WorkspaceRole) {
-    return postJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members`, { email, role });
+    return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/members`, { email, role });
 }
 
 /**
@@ -7434,7 +7434,7 @@ export function createWorkspaceInvite(workspaceId: number, email: string, role: 
     return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/invites`, { email, role });
 }
 
-export function revokeWorkspaceInvite(workspaceId: number, inviteId: number) {
+export function revokeWorkspaceInvite(workspaceId: number, inviteId: string) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/invites/${inviteId}`);
 }
 

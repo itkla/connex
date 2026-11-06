@@ -232,6 +232,8 @@
         "sendInvite": "Send invite",
         "sending": "Sending",
         "inviteCreated": "Invite link copied to clipboard",
+        "invitationCreated": "Invitation created",
+        "inviteNoExpiry": "No expiry",
         "memberInvited": "Invitation sent — they'll see it in their notifications.",
         "inviteFailed": "Couldn't create the invite",
         "pendingTitle": "Pending invites",
