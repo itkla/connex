@@ -181,6 +181,7 @@ export default function WorkflowInspector({
                         recordType={document.recordType ?? "deal"}
                         options={options}
                         advanced
+                        context="workflow"
                         triggerProps={fieldProps("config")}
                         focusPath={focusFieldPath}
                         focusDescriptionId={focusFieldPath ? describedBy(focusFieldPath) : undefined}
@@ -192,6 +193,7 @@ export default function WorkflowInspector({
                 <ActionFields
                     node={node}
                     recordType={document.recordType ?? "deal"}
+                    executionMode={document.executionMode}
                     fields={fields}
                     options={options}
                     readOnly={readOnly}
@@ -442,6 +444,7 @@ function TriggerFields({
 function ActionFields({
     node,
     recordType,
+    executionMode,
     fields,
     options,
     readOnly,
@@ -454,6 +457,7 @@ function ActionFields({
 }: {
     node: Extract<WorkflowNode, { type: "ACTION" }>;
     recordType: string;
+    executionMode: WorkflowExecutionMode;
     fields: SegmentFields | null;
     options: RuleBuilderOptions | null;
     readOnly: boolean;
@@ -579,6 +583,35 @@ function ActionFields({
             {(node.config.type === "create_task" || node.config.type === "notify")
                 ? <LabeledField label={tr("actionTitlePlaceholder")}>{textInput("title", tr("actionTitlePlaceholder"), 255)}</LabeledField>
                 : null}
+            {(node.config.type === "create_task" || node.config.type === "notify") ? (
+                <LabeledField
+                    label={tr(node.config.type === "create_task" ? "taskAssignee" : "notificationRecipient")}
+                    hint={tr("recipientHelp")}
+                >
+                    <Select
+                        value={node.config.targetUserId == null ? "run_as" : String(node.config.targetUserId)}
+                        onValueChange={(value) => update({
+                            ...node.config,
+                            targetUserId: value === "run_as" ? undefined : Number(value),
+                        }, "commit")}
+                        disabled={readOnly}
+                    >
+                        <SelectTrigger
+                            size="sm"
+                            aria-label={tr(node.config.type === "create_task" ? "taskAssignee" : "notificationRecipient")}
+                            {...fieldProps("config.targetUserId")}
+                        >
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="run_as">{tr(executionMode === "system" ? "workflowCreator" : "workflowMember")}</SelectItem>
+                            {(options?.owners ?? []).map((owner) => (
+                                <SelectItem key={owner.id} value={String(owner.id)}>{owner.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </LabeledField>
+            ) : null}
             {node.config.type === "notify"
                 ? <LabeledField label={tr("actionBodyPlaceholder")}>{textInput("body", tr("actionBodyPlaceholder"), 2_000)}</LabeledField>
                 : null}
@@ -586,10 +619,12 @@ function ActionFields({
                 ? <LabeledField label={tr("actionNotePlaceholder")}>{textInput("body", tr("actionNotePlaceholder"), 2_000)}</LabeledField>
                 : null}
             {node.config.type === "create_task" ? (
-                <LabeledField label={tr("dueIn")}>
+                <LabeledField label={tr("dueIn")} hint={tr("dueInHelp")}>
                     <Input
                         type="number"
-                        min={1}
+                        min={0}
+                        max={365}
+                        aria-label={tr("dueIn")}
                         value={node.config.dueInDays ?? 3}
                         onChange={(event) => update({ ...node.config, dueInDays: Number(event.target.value) }, "transient")}
                         onBlur={onCommitTransient}

@@ -9,7 +9,8 @@ migration-discipline part of #87 §9 / #102).
 
 The active rollback floor for this release is tenant V245, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V245. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240 → tenant V241 → tenant V242 → tenant V243 → reserved tenant V244 → tenant V245
+permit rollback after V245. Apply control V236 → tenant V237 → tenant V238 → tenant V239 →
+tenant V240 → tenant V241 → tenant V242 → tenant V243 → tenant V244 → tenant V245
 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
 [the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
 [the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
@@ -86,8 +87,9 @@ privacy admission require a later semantic cutover; V233 alone authorizes neithe
 V245 adds a non-null consent counter at one with `ALGORITHM=INSTANT, LOCK=DEFAULT`, then creates
 `trg_contact_consent_version`. Every UPDATE, including trusted unsubscribe/provider revocation,
 advances it. There is no historical consent rewrite or new index. Reserve version zero in the API
-for explicit absence. Apply the reserved V244 migration before V245; the global lineage remains
-consecutive. Deploy the backend before the frontend that sends required expected consent versions.
+for explicit absence. Apply `tenant/V244__record_search_keys.sql` before
+`tenant/V245__contact_consent_version.sql`; the global lineage remains consecutive. Deploy the
+backend before the frontend that sends required expected consent versions.
 
 The ALTER and CREATE TRIGGER take metadata locks. Deploy outside long consent transactions and
 resolve blockers without relaxing the algorithm/lock guards. DDL commits independently: after an
@@ -1323,3 +1325,20 @@ Rollback must use a compatible serving binary; retain the additive column and ro
 INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
 inspect the column and Flyway history before following the deployment recovery procedure.
 Do not edit an applied migration or blindly rerun a partially committed ALTER.
+
+## Record search projections (tenant V244)
+
+V244 adds search-only name/phone columns, phone indexes and legacy-write invalidation triggers.
+It contains DDL only. Recurring tenant-routed reconciliation fills and repairs projections in
+independently committed pages after migration success; a repair interruption does not rerun DDL
+on startup. A compatible partial DDL prefix replays through schema-verified column/index operations
+and trigger creation without an invalidation gap. Supported equivalent search forms remain
+available through NULL-key fallback before reconciliation; startup prioritizes missing keys.
+V244 is additive, and earlier compatible binaries can still serve safely. For V244 alone,
+the rollback floor remains V243. This release also applies V245 afterward, raising the active
+floor to V245 because older binaries do not enforce consent versions and can overwrite a newer
+revocation from a stale confirmation. Follow the
+[consent-version cutover](#contact-channel-consent-versions-tenant-v245) for the serving drain
+and forward-recovery requirements. See
+[record-search operation and recovery](backend/RECORD_SEARCH.md) for page bounds, cursor wrap,
+legacy-write repair, scheduling controls and partial-DDL recovery.

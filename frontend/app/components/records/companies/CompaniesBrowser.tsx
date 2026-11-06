@@ -30,7 +30,8 @@ import { useRecordPeekController } from '@/app/components/records/useRecordPeekC
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
-import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
+import SegmentBuilder from '@/app/components/records/SegmentBuilder';
+import { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/lib/segmentLabels';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
@@ -870,7 +871,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         ...facetChips(facets, filterState, setFilterState),
         ...(!showArchived ? segmentConditionEntries(definition) : []).map(({ condition, groupPath, conditionIndex }) => ({
             id: `segment:${[...groupPath, conditionIndex].join(':')}`,
-            label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
+            label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName, 'company', condition.op === 'in' ? segmentOptions : undefined),
             onRemove: () => setDefinition((current) => removeSegmentCondition(current, groupPath, conditionIndex)),
         })),
     ];

@@ -123,6 +123,26 @@ Campaign creation asks for the minimum facts required by the backend (name and t
 
 Fine-pointer calendar interaction may use an anchored event peek followed by the detail sheet; coarse pointers may go directly to the sheet. This is a sequenced handoff between different overlay primitives, not a shared-element morph. Keep header continuity and clear an anchored peek when its owning calendar period/view/filter changes.
 
+### Tags and deal stakeholders
+
+Library tag tiles open a membership drawer; the row menu retains tag editing. Membership lists
+contacts, companies and deals with links to their records, counts for the visible membership,
+and permission-gated add/remove actions. Removing membership preserves the record. The contacts
+link opens the list with its Tag facet applied; page results, select-all and export share that
+filter. Selecting several tags matches any of them. A workflow launched from a tag-filtered
+contact list or saved view stays bounded to the selected matching contacts.
+
+The deal stakeholder panel adds contacts directly, including when the deal has no company.
+Its focused editor selects a workspace contact and an optional role; role edits reuse the same
+guarded sheet. Successful writes refresh stakeholder membership and deal risk evidence.
+
+Segment and workflow name fields always mean the selected record's own name: Company name,
+Contact name or Deal name. Linked company means the company record selected on a contact,
+not a text comparison with the company's name. The condition builder explains that distinction
+without adding unsupported operators or changing saved conditions. Workflow condition controls
+and summaries describe conditions rather than creating saved smart segments. Summaries preserve
+negated comparisons and wrap negated groups explicitly, including nested groups.
+
 ### Products
 
 Products are managed in-place through their existing dialog rather than a separate detail route. Do not fake unsupported record-browser capabilities. Export copy must state backend filtering limitations rather than promise filters that are not applied.
@@ -247,6 +267,22 @@ The same principle applies generally: extend an existing shared composer/control
 ## Unsaved work and destructive actions
 
 Any dialog/drawer that accumulates meaningful input participates in the shared unsaved-changes/discard-confirm pattern. Quick-edit shells inherit this through their existing dirty-state contract. Keep the draft-guard inventory/gate current when adding an eligible surface; do not increase a baseline to hide a missing guard.
+
+Workflow, report, and document-template pages reuse `useUnsavedChangesGuard` and `ConfirmDiscardDialog` for dirty editor exits, including links, global search/actions, browser Back/Forward, and native document-leave warnings. Keep editing preserves content and restores the requesting control's focus. Back returns workflows to `/workflows` and templates to `/library/documents`. Report Cancel returns to `/insights/reports/{id}` when editing, or `/insights/reports` when creating, even on a direct entry with no prior app history. Pending and failed saves stay protected; only a successful save bypasses confirmation.
+
+Shell operations that own their router, including Ask Connex full view, notification opens/actions that depart, and workspace selection, must request the shared guard before changing their surface or workspace. Notification operations request confirmation before selecting or publishing their workspace, marking state, executing a cross-workspace action, or routing. Same-workspace notification actions that do not navigate stay local. Organization overview and saved-view workspace departures follow the same rule. Every confirmed editor departure invalidates workflow creation continuations synchronously. Ordinary dismissals resolve the latest close callback at confirmation; explicit navigation keeps its chosen destination. Template initialization and editability changes do not count as user edits, and empty document bodies normalize to null.
+
+Route callers within a stable workspace supply their destination to the existing guard helper. Workspace-changing operations cannot use a pathname/search match to skip selection or its guard. A request matching the current origin, pathname and search is a no-op: it neither asks to discard nor disables draft protection. Hash-only destinations do not count as editor departures.
+
+Discard disposes the entire draft instance, even when the accepted navigation keeps the same editor route mounted. The editor owner refreshes server props and remounts its form (including workflow canvas/undo state); existing records reload persisted state and creation routes show a fresh form. Discarded requests may still complete server-side, but cannot lock, clean, redirect or supply identity to the replacement draft. Keep editing preserves the current instance and any pending save. Known history replay completes and explicitly reconciles the router before disposal, so remounting cannot remove its traversal handler too early.
+
+Dirty protection lasts for each mounted draft's entire lifetime. A synchronous `instrumentation-client.ts` entry installs the existing guard registry's one native history dispatcher before hydration registers Next's popstate listener. Native Chromium Window events visit target listeners in registration order even when capture is requested; a capture listener added after Next can run too late. Each mounted editor publishes its current handler, mount state and native leave predicate in layout effects with the rendered edit. A browser event before passive effects therefore cannot use the prior clean predicate or miss the mounted guard. Accepted navigation versions invalidate older redirect continuations; they never disable the dirty predicate or native leave warning. Successful saves update their matching draft's saved baseline independently of redirect permission. The draft instance/record identity and rendered workspace must still match the submission; an old response cannot clean another draft or workspace. Workspace-selection epochs also fence redirects, without preventing a matching draft's saved baseline from updating.
+
+Same-document Back/Forward uses that early `popstate` dispatcher, which delegates to the current editor in the shared registry. With no editor registered or a clean editor and no guarded restoration/replay in progress, it leaves routing and custom history state untouched for Next. Capture alone is not the ordering guarantee. Editors supply their rendered pathname and search from Next's route context. When native Navigation API entry indices provide a known delta, a dirty editor's guard traverses back to the original editor entry before asking. Keep editing therefore preserves the native cursor, destination entry and its query context. Discard replays that known traversal once, then explicitly calls the router's `replace` so even a null-state destination renders. No dirty-state latch is disabled during replay. Same-path/search fragment traversal in a dirty editor also explicitly reconciles the router and keeps protection active.
+
+List-state writers check their owning pathname against the address bar before changing history. Native Back/Forward moves the address bar before React unmounts the outgoing list; late query, view/filter, saved-view, owned-param or peek writes must not overwrite an editor entry. Deals deliberately canonicalizes its selected desktop view into `?view=table`; this is valid list state, not a failed editor departure.
+
+No indices are added to history state, no global history tracker is installed, and no entries or guessed distances are used. If native positions are unavailable or do not identify a nonzero delta, the existing safe fallback restores the rendered editor's URL/state in the reached slot using the native history prototype. This unknown-distance fallback replaces that slot rather than restoring the cursor: Keep editing can consume a Back/Forward destination and lose its query context. Discard explicitly routes to the captured destination. This bounded limitation preserves URL/page consistency without guessing. Cross-document departures retain the native leave warning.
 
 Use the shared record delete confirmation for ordinary record deletion. Organization-level permanent deletion may use stronger typed confirmation. A surface contributes its object label and consequence details; it does not rewrite the common destructive grammar.
 

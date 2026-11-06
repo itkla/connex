@@ -18,9 +18,11 @@ import { riskFactorIcon, useRiskText } from './dealRisk';
 export default function DealRiskPanel({
     risk,
     className,
+    hasNoHistoryStakeholders = false,
 }: {
     risk?: DealRisk | null;
     className?: string;
+    hasNoHistoryStakeholders?: boolean;
 }) {
     const timeZone = useTimeZone();
     const t = useTranslations('DealRisk');
@@ -79,6 +81,9 @@ export default function DealRiskPanel({
                         );
                     })}
                 </ul>
+            )}
+            {hasNoHistoryStakeholders && (
+                <p className="text-sm text-muted-foreground">{t('noHistoryStakeholders')}</p>
             )}
             <p className="text-xs text-muted-foreground">
                 {t('assessedAt', { date: formatDateTime(risk.assessedAt, locale, timeZone) })}

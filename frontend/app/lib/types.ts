@@ -23,6 +23,7 @@ export type PageParams = {
 };
 
 export type ContactsPageParams = PageParams & MemberScopeParams & {
+    tagIds?: number[];
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
@@ -2599,6 +2600,7 @@ export type CampaignSend = {
     createdById: number | null;
     createdAt: string;
     updatedAt: string;
+    contentRefused?: boolean;
 };
 
 /**
@@ -5556,26 +5558,19 @@ export type Share = {
 };
 
 export type WorkspaceInvite = {
-    id: number;
+    id: string;
     email: string;
     role: WorkspaceRole;
     status: string;
     token?: string | null;
-    invitedByLabel: string | null;
-    expiresAt: string;
+    invitedByLabel?: string | null;
+    expiresAt?: string | null;
     createdAt: string;
 };
 
-/**
- * The outcome of inviting someone by email. Exactly one field is set: `invite`
- * for an emailed token invite (a new address, or one whose account still owes
- * email verification), or `member` when the address belongs to an existing
- * account whose mailbox ownership is settled, which is added as a pending member
- * and notified in-app instead.
- */
+/** The same address-only invitation result for every recipient. */
 export type InviteResult = {
-    invite: WorkspaceInvite | null;
-    member: WorkspaceMember | null;
+    invite: WorkspaceInvite;
 };
 
 export type InvitePreview = {

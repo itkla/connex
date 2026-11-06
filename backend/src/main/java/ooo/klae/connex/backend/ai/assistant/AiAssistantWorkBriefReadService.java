@@ -123,7 +123,7 @@ public class AiAssistantWorkBriefReadService {
             return task;
         }).toList();
         Map<Integer, String> descriptions = new LinkedHashMap<>();
-        for (Task task : referenceService.hydrateTasks(workspaceId, storedProse)) {
+        for (Task task : referenceService.hydrateTasksForMasking(workspaceId, storedProse)) {
             AiAssistantMemberIdentifiers.seedReferences(task.getReferences(), resources.maskingContext());
             descriptions.put(task.getId(), AiAssistantMemberIdentifiers.seedReferenceText(
                     task.getDescription(), resources.maskingContext()));

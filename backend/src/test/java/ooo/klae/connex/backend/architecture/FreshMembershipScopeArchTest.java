@@ -111,10 +111,6 @@ class FreshMembershipScopeArchTest {
                 "acceptInviteByHash",
                 List.of("String", "User", "Runnable")),
             new CallSite(
-                "ooo.klae.connex.backend.services.InviteService",
-                "addExistingMember",
-                List.of("int", "int", "String", "String")),
-            new CallSite(
                 "ooo.klae.connex.backend.services.InviteLinkService",
                 "redeemLink",
                 List.of("String", "User")),

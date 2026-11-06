@@ -1,6 +1,7 @@
 {
   "$comment": "Shared route-constant fixture (WS2, #1338): shipped Next.js app-shell routes + each route's consumed deep-link parameters. Source of truth is the frontend app directory; frontend/test/unit/routeManifest.test.ts keeps this file in sync; backend NotificationActionUrlIntegrityTest validates every setActionUrl value against it.",
   "params": {
+    "/notifications": ["open"],
     "/activity/all": ["activity"],
     "/activity/notes": ["note"],
     "/activity/tasks": ["task"],

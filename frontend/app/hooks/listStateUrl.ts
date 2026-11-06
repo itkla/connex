@@ -24,6 +24,9 @@ export const ACTIVITY_URL_KEY = 'activity';
 /** URL query key that deep-links one record comment, read by the record comments section. */
 export const COMMENT_URL_KEY = 'comment';
 
+/** URL query key that opens an authorized notification in its workspace. */
+export const NOTIFICATION_OPEN_URL_KEY = 'open';
+
 /** URL query key that opens one pipeline in the pipelines browser's edit sheet. */
 export const PIPELINE_EDIT_URL_KEY = 'edit';
 
@@ -35,6 +38,7 @@ export const PIPELINE_EDIT_URL_KEY = 'edit';
  * fail loudly when a producer and its consumer drift apart (#1338).
  */
 export const DEEP_LINK_URL_KEYS = {
+    notification: NOTIFICATION_OPEN_URL_KEY,
     task: TASK_URL_KEY,
     note: NOTE_URL_KEY,
     activity: ACTIVITY_URL_KEY,
@@ -65,6 +69,14 @@ export function listStateAddress(pathname: string, search: string): string {
 }
 
 /**
+ * Native traversal changes location before React unmounts the outgoing list. Its pending effects
+ * must not replace the destination entry with a URL assembled from the list's captured pathname.
+ */
+export function isCurrentListPath(pathname: string): boolean {
+    return window.location.pathname === pathname;
+}
+
+/**
  * Reflects the active saved-view pointer into the URL via shallow `history.replaceState`, following the
  * same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
  * `window.location.search` and only ever set/deletes its own {@link SAVED_VIEW_URL_KEY}, so the
@@ -75,6 +87,7 @@ export function listStateAddress(pathname: string, search: string): string {
  * @param sv - the `<workspaceId>:<id>` pointer, or null to remove it
  */
 export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     if (sv) params.set(SAVED_VIEW_URL_KEY, sv);
     else params.delete(SAVED_VIEW_URL_KEY);
@@ -141,6 +154,7 @@ export function writeOwnedParamsToUrl(
     pathname: string,
     owned: Readonly<Record<string, string | undefined>>,
 ): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(owned)) {
         if (value) params.set(key, value);
@@ -153,6 +167,7 @@ export function writeOwnedParamsToUrl(
 
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
 export function writeListQueryToUrl(pathname: string, query: string): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     if (query) params.set('q', query);
     else params.delete('q');
@@ -170,6 +185,7 @@ export function writeListQueryToUrl(pathname: string, query: string): void {
  * @param sv - the target workspace's saved-view pointer
  */
 export function writeWorkspaceSavedViewToUrl(pathname: string, sv: string): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams({ [SAVED_VIEW_URL_KEY]: sv });
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
@@ -218,6 +234,7 @@ export type ListUrlState = {
  * @param defaultSize - the page size that is considered the default (and so omitted from the URL)
  */
 export function writeListStateToUrl(pathname: string, state: ListUrlState, defaultSize: number): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     const set = (key: string, value: string) => (value ? params.set(key, value) : params.delete(key));
     if (state.q !== undefined) set('q', state.q);

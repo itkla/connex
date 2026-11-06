@@ -55,7 +55,7 @@
       "tag": "タグ",
       "title": "役職",
       "email": "メール",
-      "company": "会社",
+      "company": "関連会社",
       "value": "案件額",
       "stage": "ステージ",
       "owner": "担当者",
@@ -70,6 +70,8 @@
     "op": {
       "is": "である",
       "isNot": "ではない",
+      "in": "のいずれかである",
+      "notIn": "のいずれでもない",
       "contains": "を含む",
       "notContains": "を含まない",
       "has": "を持つ",
@@ -221,7 +223,31 @@
       "label": "関係者なし",
       "labelNot": "関係者あり",
       "description": "案件に紐づく連絡先がありません。"
-    }
+    },
+    "recordName": {
+      "company": "会社名",
+      "person": "連絡先名",
+      "deal": "案件名"
+    },
+    "recordDescription": {
+      "company": "関係性や項目の条件を組み合わせて、会社を絞り込みます。",
+      "person": "関係性や項目の条件を組み合わせて、連絡先を絞り込みます。",
+      "deal": "関係性や項目の条件を組み合わせて、案件を絞り込みます。"
+    },
+    "setCondition": "条件を設定",
+    "conditionTitle": "ワークフローの条件",
+    "conditionDescription": {
+      "company": "会社が次の条件に一致した場合、「はい」に進みます。",
+      "person": "連絡先が次の条件に一致した場合、「はい」に進みます。",
+      "deal": "案件が次の条件に一致した場合、「はい」に進みます。"
+    },
+    "linkedCompanyHint": "「関連会社」は連絡先に紐づく会社を、「連絡先名」は連絡先自身の名前を確認します。会社が未設定の連絡先は、連絡先一覧の会社フィルターで絞り込めます。",
+    "summaryOr": " または ",
+    "summaryAnd": " かつ ",
+    "summaryNot": "次の条件に一致しない（{conditions}）",
+    "valueSeparator": "、",
+    "unavailableValue": "参照できないレコード",
+    "durationDays": "{days}日"
   },
   "SavedViews": {
     "all": "すべて",
