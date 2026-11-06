@@ -5,6 +5,7 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import { auditExportSelection, AUDIT_EXPORT_SELECTION_LIMIT } from "@/app/lib/auditExport";
 import {
     adoptBrowserAccount,
     invalidateAccountStorage,
@@ -5435,6 +5436,14 @@ export function getAuditLogs(params: Types.AuditLogParams = {}, init: RequestIni
     return getJson<Types.AuditLogEntry[]>(`/api/audit${buildQuery(params)}`, init);
 }
 
+/** Downloads only the selected loaded rows, under the existing audit authority and passkey gate. */
+export function exportAuditRowsCsv(ids: readonly number[], orgId?: number, init: RequestInit = {}) {
+    const selection = auditExportSelection(ids);
+    const path = orgId === undefined ? "/api/audit/export" : `/api/orgs/${orgId}/audit/export`;
+    return downloadCsv(`${path}${buildQuery({ ids: selection, limit: AUDIT_EXPORT_SELECTION_LIMIT, offset: 0 })}`,
+        orgId === undefined ? "audit-log.csv" : "org-audit-log.csv", init);
+}
+
 /*
 * == Organization admin (org control plane)
 */
@@ -7418,8 +7427,26 @@ export async function exportReportCsv(
 }
 
 export async function exportReportSnapshotCsv(id: number, snapshotId: number): Promise<void> {
-    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, {});
+    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, { method: "POST" });
     downloadBlob(blob, `report-${id}-snapshot-${snapshotId}.csv`);
+}
+
+/** Assembles a PNG, records authorized release, then downloads it under the original request identity. */
+export async function exportReportPng(
+    id: number,
+    prepare: () => Promise<Blob>,
+    filename = `report-${id}.png`,
+): Promise<void> {
+    const path = `/api/reports/${id}/export-completion`;
+    const pinned = pinWriteNow(path);
+    const blob = await withReportRequestIdentity(async (init) => {
+        const image = await prepare();
+        init.signal?.throwIfAborted();
+        await postJson<void>(path, { format: "png" }, init);
+        init.signal?.throwIfAborted();
+        return image;
+    }, pinned);
+    downloadBlob(blob, filename);
 }
 
 /*

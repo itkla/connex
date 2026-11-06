@@ -31,6 +31,7 @@ import {
     deleteReportSnapshot,
     exportReportCsv,
     exportReportSnapshotCsv,
+    exportReportPng,
     generateReport,
     getReportSnapshot,
     resolveAcceptedAiGeneration,
@@ -39,6 +40,7 @@ import {
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
+import { renderReportPng } from '@/app/lib/reportPng';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
@@ -432,9 +434,10 @@ export default function ReportDocumentBoard({
         if (!paperRef.current) return;
         setExportingPng(true);
         try {
-            await exportElementPng(paperRef.current, `${definition.name}.png`);
-        } catch {
-            toastError(t('document.pngFailed'));
+            const element = paperRef.current;
+            await exportReportPng(definition.id, () => renderReportPng(element), `${definition.name}.png`);
+        } catch (error) {
+            showApiError(error, 'document.pngFailed');
         } finally {
             setExportingPng(false);
         }
@@ -1004,50 +1007,4 @@ function ReportDocumentSkeleton() {
             </div>
         </div>
     );
-}
-
-async function exportElementPng(element: HTMLElement, filename: string): Promise<void> {
-    const clonedNode = element.cloneNode(true);
-    if (!(clonedNode instanceof HTMLElement)) throw new Error('Report cloning is unavailable');
-    const clone = clonedNode;
-    const sources = [element, ...Array.from(element.querySelectorAll('*'))];
-    const targets = [clone, ...Array.from(clone.querySelectorAll('*'))];
-    sources.forEach((source, index) => {
-        const target = targets[index];
-        if (!(target instanceof HTMLElement || target instanceof SVGElement)) return;
-        const computed = window.getComputedStyle(source);
-        target.style.cssText = Array.from(computed)
-            .map((property) => `${property}:${computed.getPropertyValue(property)};`)
-            .join('');
-    });
-    const width = Math.ceil(element.scrollWidth);
-    const height = Math.ceil(element.scrollHeight);
-    const maximumDimension = 16384;
-    const scale = Math.min(2, maximumDimension / width, maximumDimension / height);
-    const serialized = new XMLSerializer().serializeToString(clone);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml">${serialized}</div></foreignObject></svg>`;
-    const svgUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
-    try {
-        const image = new Image();
-        image.src = svgUrl;
-        await image.decode();
-        const canvas = window.document.createElement('canvas');
-        canvas.width = Math.max(1, Math.floor(width * scale));
-        canvas.height = Math.max(1, Math.floor(height * scale));
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('Canvas rendering is unavailable');
-        context.scale(scale, scale);
-        context.drawImage(image, 0, 0, width, height);
-        const blob = await new Promise<Blob>((resolve, reject) => {
-            canvas.toBlob((result) => result ? resolve(result) : reject(new Error('PNG export failed')), 'image/png');
-        });
-        const url = URL.createObjectURL(blob);
-        const anchor = window.document.createElement('a');
-        anchor.href = url;
-        anchor.download = filename;
-        anchor.click();
-        URL.revokeObjectURL(url);
-    } finally {
-        URL.revokeObjectURL(svgUrl);
-    }
 }

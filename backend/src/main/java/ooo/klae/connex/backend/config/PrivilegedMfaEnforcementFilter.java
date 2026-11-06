@@ -54,7 +54,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     private static final Pattern CAMPAIGN_EXPORT = Pattern.compile(
             "/api/campaigns/" + IDENTIFIER_SEGMENT + "/exports");
     private static final Pattern REPORT_EXPORT = Pattern.compile(
-            "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|snapshots/"
+            "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|export-completion|snapshots/"
                     + IDENTIFIER_SEGMENT + "/export\\.csv)");
 
     private final PrivilegedMfaProperties properties;
