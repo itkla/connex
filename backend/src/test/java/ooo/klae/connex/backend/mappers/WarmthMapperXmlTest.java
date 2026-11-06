@@ -17,10 +17,12 @@ import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.WarmthFilter;
@@ -31,6 +33,23 @@ class WarmthMapperXmlTest {
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
     private static final String[] SEGMENT_STATEMENTS = {
         "getSegmentCompaniesPage", "countSegmentCompanies", "getSegmentCompanyIdsFiltered"};
+
+    @Test
+    void personalWarmthImportsResolveTheirNestedFragmentsWithoutADatabase() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = Map.of(
+            "workspaceId", 7, "userId", 51,
+            "reference", LocalDateTime.of(2026, 6, 30, 0, 0),
+            "model", RelationshipWarmthModel.current().sqlParameters(),
+            "coolingOnly", true, "limit", 6);
+        String sql = sql(configuration, MyWorkReadMapper.class, "relationshipIds", parameters);
+        assertTrue(sql.contains("CASE LOWER(a.type)"));
+        assertTrue(sql.contains("p.owner_id = ?"));
+        assertTrue(sql.contains("p.archived_at IS NULL"));
+        assertTrue(sql.contains("p.suspended_at IS NULL"));
+        assertTrue(sql.contains("p.provision_ceased_at IS NULL"));
+        assertEquals(10, timeout(configuration, MyWorkReadMapper.class, "relationshipIds"));
+    }
 
     @Test
     void warmthStatementsParseAndBindModelParameters() throws Exception {
@@ -352,15 +371,20 @@ class WarmthMapperXmlTest {
     private Configuration configuration() throws Exception {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAlias("Company", Company.class);
+        configuration.getTypeAliasRegistry().registerAlias("Activity", Activity.class);
         configuration.getTypeAliasRegistry().registerAlias("Deal", Deal.class);
         configuration.getTypeAliasRegistry().registerAlias("Note", Note.class);
         configuration.getTypeAliasRegistry().registerAlias("Person", Person.class);
         configuration.getTypeAliasRegistry().registerAlias("Tag", Tag.class);
+        configuration.getTypeAliasRegistry().registerAlias("Task", Task.class);
         configuration.getTypeAliasRegistry().registerAlias("User", User.class);
         for (String resource : new String[] {
                 "mappers/PersonMapper.xml",
                 "mappers/CompanyMapper.xml",
-                "mappers/NoteMapper.xml"}) {
+                "mappers/NoteMapper.xml",
+                "mappers/TaskMapper.xml",
+                "mappers/ActivityMapper.xml",
+                "mappers/MyWorkReadMapper.xml"}) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 assertNotNull(input);
                 new XMLMapperBuilder(

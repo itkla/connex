@@ -106,6 +106,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "SavedViewMapper",
         MAPPERS + "SavedViewPreferenceMapper",
         MAPPERS + "UserDashboardMapper",
+        MAPPERS + "MyWorkReadMapper",
         MAPPERS + "SegmentMapper",
         MAPPERS + "RuleMapper",
         MAPPERS + "JobRunMapper",

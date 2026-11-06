@@ -82,14 +82,19 @@ function EmptyRow({ text }: { text: string }) {
     );
 }
 
-export default function NeedsYou({ cooling, risks }: { cooling: CoolingItem[]; risks: RiskItem[] }) {
+export default function NeedsYou({ cooling, risks, coolingFailure, riskFailure }: {
+    cooling: CoolingItem[];
+    risks: RiskItem[];
+    coolingFailure?: React.ReactNode;
+    riskFailure?: React.ReactNode;
+}) {
     const t = useTranslations("MePage");
     const locale = useLocale();
 
     return (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <PanelShell title={t("coolingTitle")} icon={FireIcon} count={cooling.length}>
-                {cooling.length === 0 ? (
+                {coolingFailure ?? (cooling.length === 0 ? (
                     <EmptyRow text={t("coolingEmpty")} />
                 ) : (
                     <ul className="divide-y divide-border">
@@ -126,11 +131,11 @@ export default function NeedsYou({ cooling, risks }: { cooling: CoolingItem[]; r
                             </li>
                         ))}
                     </ul>
-                )}
+                ))}
             </PanelShell>
 
             <PanelShell title={t("riskTitle")} icon={ExclamationTriangleIcon} count={risks.length}>
-                {risks.length === 0 ? (
+                {riskFailure ?? (risks.length === 0 ? (
                     <EmptyRow text={t("riskEmpty")} />
                 ) : (
                     <ul className="divide-y divide-border">
@@ -165,7 +170,7 @@ export default function NeedsYou({ cooling, risks }: { cooling: CoolingItem[]; r
                             </li>
                         ))}
                     </ul>
-                )}
+                ))}
             </PanelShell>
         </div>
     );
