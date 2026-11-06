@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.beans.PersonIdentityBackfillCandidate;
 import ooo.klae.connex.backend.dto.DuplicateCandidateRow;
 import ooo.klae.connex.backend.dto.DuplicateIdentityKey;
 import ooo.klae.connex.backend.dto.DuplicateNameKey;
+import ooo.klae.connex.backend.dto.DuplicateNameMatchState;
 
 /**
  * Workspace-scoped canonical identity persistence and backfill reads.
@@ -63,6 +64,11 @@ public interface IdentityMapper {
         @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("keys") List<DuplicateNameKey> keys,
         @Param("perKeyLimit") int perKeyLimit);
+
+    DuplicateNameMatchState findVisiblePersonNameMatchState(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("pattern") String pattern);
 
     List<DuplicateCandidateRow> findVisibleCompanyNameMatches(
         @Param("workspaceId") int workspaceId,

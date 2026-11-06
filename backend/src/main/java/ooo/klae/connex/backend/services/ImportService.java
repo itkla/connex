@@ -942,7 +942,7 @@ public class ImportService {
             List.copyOf(rowsByRequest));
     }
 
-    private static void applyCompanyDependencyCandidates(
+    private void applyCompanyDependencyCandidates(
             CompanyDependencyReview review,
             List<DuplicatePreflightResponse> responses) {
         if (review.requests().size() != responses.size()) {
@@ -970,7 +970,10 @@ public class ImportService {
                 } else if (!response.candidates().isEmpty()) {
                     row.companyDependencyError = response.candidates().size() > 1
                         ? "Multiple visible companies match the company name"
-                        : "Company name requires an explicit company selection";
+                        : matchingService.normalizeName(review.requests().get(index).name())
+                            .equals(matchingService.normalizeName(response.candidates().getFirst().name()))
+                            ? "Company name requires an explicit company selection"
+                            : "Company name variant requires an explicit company selection";
                 }
             }
         }
@@ -1297,6 +1300,11 @@ public class ImportService {
                 boolean companyKnown =
                     row.companyName == null || row.resolvedCompanyId != null;
                 String normalizedName = normName(row.std.get("name"));
+                if (!companyKnown && normalizedName != null && !SKIP.equals(resolveAction(request.getOnDuplicate()))
+                        && row.companyDependencyCandidates.stream().anyMatch(candidate ->
+                            byNameCompany.containsKey(DealDuplicateKey.of(normalizedName, candidate.recordId())))) {
+                    workspaceService.requirePermission(Permission.DEAL_UPDATE);
+                }
                 List<Integer> matchIds = companyKnown && normalizedName != null
                     ? byNameCompany.get(DealDuplicateKey.of(
                         normalizedName,
@@ -1929,7 +1937,7 @@ public class ImportService {
             if (!def.isArchived()) byId.put(def.getId(), def);
         }
         Map<String, CustomFieldDefinition> result = new HashMap<>();
-        Set<String> targets = new HashSet<>();
+        Map<String, String> columnsByTarget = new HashMap<>();
         for (ColumnMapping cm : mapping) {
             String field = cm.getField();
             String targetKey = null;
@@ -1947,8 +1955,12 @@ public class ImportService {
                 placeholder.setLabel(customLabel(cm));
                 result.put(cm.getColumn(), placeholder);
             }
-            if (targetKey != null && !targets.add(targetKey)) {
-                throw new ImportValidationException("IMPORT_MAPPING_DUPLICATE", "Multiple columns resolve to the same custom field");
+            if (targetKey != null) {
+                String previous = columnsByTarget.putIfAbsent(targetKey, cm.getColumn());
+                if (previous != null) {
+                    throw customColumnCollision("IMPORT_MAPPING_DUPLICATE",
+                        "Multiple columns resolve to the same custom field", previous, cm.getColumn());
+                }
             }
         }
         return result;
@@ -1994,13 +2006,21 @@ public class ImportService {
             String key = customDefinitionKey(workspaceId, entityType, cm);
             String prior = columnsByKey.putIfAbsent(key, cm.getColumn());
             if (prior != null) {
-                throw new ImportValidationException("IMPORT_CUSTOM_COLLISION",
+                throw customColumnCollision("IMPORT_CUSTOM_COLLISION",
                     "Columns '" + prior + "' and '" + cm.getColumn()
-                        + "' would create the same custom field");
+                        + "' would create the same custom field", prior, cm.getColumn());
             }
             keysByColumn.put(cm.getColumn(), key);
         }
         return keysByColumn;
+    }
+
+    private static ImportValidationException customColumnCollision(
+            String code, String diagnostic, String first, String second) {
+        Map<String, String> errors = new LinkedHashMap<>();
+        errors.put(first, "IMPORT_MAPPING_DUPLICATE");
+        errors.put(second, "IMPORT_MAPPING_DUPLICATE");
+        return new ImportValidationException(code, diagnostic, errors);
     }
 
     private String customDefinitionKey(int workspaceId, String entityType, ColumnMapping cm) {

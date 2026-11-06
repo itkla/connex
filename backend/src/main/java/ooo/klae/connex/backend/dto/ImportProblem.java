@@ -33,6 +33,7 @@ public record ImportProblem(String code, String field) {
         else if (diagnostic.contains("deal value") || diagnostic.contains("Deal value")) code = "VALUE_INVALID";
         else if (diagnostic.contains("pipeline or stage")) code = "STAGE_UNKNOWN";
         else if (diagnostic.contains("Company dependency candidates were truncated")) code = "COMPANY_TRUNCATED";
+        else if (diagnostic.startsWith("Company name variant")) code = "COMPANY_VARIANT_CHOICE_REQUIRED";
         else if (diagnostic.contains("company selection") || diagnostic.contains("companies match the company name")) code = "COMPANY_CHOICE_REQUIRED";
         else if (diagnostic.contains("Company selection is no longer available")) code = "COMPANY_CHOICE_UNAVAILABLE";
         else if (diagnostic.contains("Conflicting company choices")) code = "COMPANY_CHOICES_CONFLICT";

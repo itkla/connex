@@ -19,6 +19,89 @@ async function choose(page: Page, trigger: Locator, label: string) {
 }
 
 for (const locale of ['en', 'ja'] as const) {
+    test(`recovers colliding custom mappings and a replaced field in ${locale} @mobile`, async ({ page }) => {
+        const key = `fields${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+        await registerUser(page.request, { username: key, password: `Fields!${key}A1`, email: `${key}@example.invalid` });
+        const workspaceId = await activeWorkspaceId(page.request);
+        const csrf = await csrfBootstrap(page.request);
+        const seed = seeder(page.request, workspaceId, csrf);
+        const originalField = { entityType: 'person', fieldKey: 'territory', label: 'Territory', fieldType: 'text' };
+        const old = await seed.post('/api/custom-fields', originalField);
+        if (typeof old.id !== 'number') throw new Error('Original custom field is missing');
+        const t = createTranslator({ locale, messages: locale === 'en' ? en : ja, namespace: 'importExport' });
+        await useLocale(page, locale);
+        await page.goto('/records/contacts?view=table');
+        await page.getByRole('button', { name: t('moreActions'), exact: true }).click();
+        const schemaLoaded = () => page.waitForResponse((response) => response.url().includes('/api/custom-fields/schema?entityType=person') && response.status() === 200);
+        const initialSchema = schemaLoaded();
+        await page.getByRole('menuitem', { name: t('openImport'), exact: true }).click();
+        await initialSchema;
+        const dialog = page.getByRole('dialog');
+        const mapping = (column: string) => dialog.getByRole('combobox', { name: t('mapColumn', { column }), exact: true });
+        await dialog.locator('input[type="file"]').setInputFiles({ name: 'field-recovery.csv', mimeType: 'text/csv',
+            buffer: Buffer.from(`Name,Email,Region Code,Region-Code,Legacy\nField recovery,${key}@example.invalid,North,South,West\n`) });
+        for (const column of ['Region Code', 'Region-Code']) {
+            await choose(page, mapping(column), t('createCustomField'));
+        }
+        await choose(page, mapping('Legacy'), t('existingCustomField', { name: 'Territory' }));
+        const refusedPreview = page.waitForResponse((response) => response.url().endsWith('/api/imports/persons/preview'));
+        await dialog.getByRole('button', { name: t('next'), exact: true }).click();
+        const refused = await refusedPreview;
+        expect(refused.status()).toBe(400);
+        expect(await refused.json()).toMatchObject({ code: 'IMPORT_MAPPING_DUPLICATE', fieldErrors: {
+            'Region Code': 'IMPORT_MAPPING_DUPLICATE', 'Region-Code': 'IMPORT_MAPPING_DUPLICATE',
+        } });
+        for (const column of ['Region Code', 'Region-Code']) {
+            await expect(dialog.locator(`[data-import-column="${column}"]`).getByRole('alert')).toHaveText(t('duplicateMapping'));
+        }
+        await expect(dialog.getByRole('button', { name: t('next'), exact: true })).toBeDisabled();
+        await choose(page, mapping('Region-Code'), t('ignore'));
+        const firstPreview = page.waitForResponse((response) => response.url().endsWith('/api/imports/persons/preview') && response.status() === 200);
+        await dialog.getByRole('button', { name: t('next'), exact: true }).click();
+        const firstReview: unknown = await (await firstPreview).json();
+        if (!isRecord(firstReview) || typeof firstReview.duplicateReviewProof !== 'string') throw new Error('Initial review proof is missing');
+        const archived = await page.request.put(`/api/custom-fields/${old.id}`, {
+            headers: { 'X-Workspace-Id': String(workspaceId), [csrf.headerName]: csrf.token },
+            data: { ...originalField, archived: true },
+        });
+        expect(archived.status()).toBe(200);
+        const replacement = await seed.post('/api/custom-fields', { ...originalField, fieldKey: 'territory_replacement', label: 'Territory replacement' });
+        if (typeof replacement.id !== 'number') throw new Error('Replacement custom field is missing');
+        const refreshedSchema = schemaLoaded();
+        const refusedCommit = page.waitForResponse((response) => response.url().endsWith('/api/imports/persons') && response.request().method() === 'POST');
+        await dialog.getByRole('button', { name: t('import'), exact: true }).click();
+        expect((await refusedCommit).status()).toBe(400);
+        expect(await (await refusedCommit).json()).toMatchObject({ code: 'IMPORT_CUSTOM_UNAVAILABLE' });
+        await refreshedSchema;
+        await dialog.getByRole('button', { name: t('back'), exact: true }).click();
+        await expect(mapping('Legacy')).toHaveText(t('unavailableCustomField'));
+        await expect(dialog.getByText(t('unavailableCustomFieldHint'), { exact: true })).toBeVisible();
+        await expect(dialog.getByRole('button', { name: t('next'), exact: true })).toBeDisabled();
+        await expect(mapping('Region-Code')).toHaveText(t('ignore'));
+        await choose(page, mapping('Legacy'), t('existingCustomField', { name: 'Territory replacement' }));
+        const manualRefresh = schemaLoaded();
+        await dialog.getByRole('button', { name: t('refreshCustomFields'), exact: true }).click();
+        await manualRefresh;
+        await expect(dialog.getByRole('button', { name: t('refreshCustomFields'), exact: true })).toBeEnabled();
+        await expect(mapping('Legacy')).toHaveText(t('existingCustomField', { name: 'Territory replacement' }));
+        const freshPreview = page.waitForResponse((response) => response.url().endsWith('/api/imports/persons/preview') && response.status() === 200);
+        await dialog.getByRole('button', { name: t('next'), exact: true }).click();
+        const fresh: unknown = await (await freshPreview).json();
+        if (!isRecord(fresh)) throw new Error('Refreshed review is missing');
+        expect(fresh.duplicateReviewProof).not.toBe(firstReview.duplicateReviewProof);
+        const row = dialog.locator('[data-import-row="0"]');
+        await row.getByText(t('editRow'), { exact: true }).click();
+        await expect(row.getByLabel('Legacy', { exact: true })).toHaveValue('West');
+        const committed = page.waitForResponse((response) => response.url().endsWith('/api/imports/persons') && response.request().method() === 'POST');
+        await dialog.getByRole('button', { name: t('import'), exact: true }).click();
+        const result = await committed;
+        expect(result.status()).toBe(200);
+        expect(await result.json()).toMatchObject({ created: 1, failed: [] });
+        expect(result.request().postDataJSON()).toMatchObject({ mapping: expect.arrayContaining([
+            { column: 'Legacy', field: `custom:${replacement.id}` },
+        ]) });
+    });
+
     test(`reviews all rows, corrects errors and applies an explicit company choice in ${locale} @mobile`, async ({ page }) => {
         const key = `review${randomUUID().replaceAll('-', '').slice(0, 12)}`;
         await registerUser(page.request, { username: key, password: `Review!${key}A1`, email: `${key}@example.invalid` });

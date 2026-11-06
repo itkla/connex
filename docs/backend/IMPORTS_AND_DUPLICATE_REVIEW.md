@@ -10,10 +10,25 @@ This document is authoritative for person/company/deal identity matching, duplic
 - Hydrate the same-organization workspace visibility allowlist through the established control-access service, then use visibility-scoped `IdentityMapper` reads.
 - Strong evidence is exact canonical identity (email, phone, domain, external id as applicable).
 - Weak evidence is exact normalized name after a bounded broad candidate read and Java recheck.
+- Company name review also recognizes the boundary legal forms documented in
+  [Duplicate Review](DUPLICATE_REVIEW.md), after Unicode width/case/kana folding. These are weak
+  review keys only; canonical identity/name keys are unchanged. Variants never authorize
+  automatic attachment or merging.
 - Never auto-attach an unreviewed weak, shared, ambiguous, truncated, or aggregate-overflow result.
 - Every mapper statement remains parameterized and tenant/visibility scoped.
 
 Direct responses remain bounded to the established candidate ceiling; CSV responses retain their per-row and whole-request bounds. A truncated result is not acknowledgeable proof of completeness.
+
+Direct person review can explicitly permit separate creation from a bounded name-only result
+through `allowSeparateCreation`, while retaining `truncated=true`. This permission requires
+complete, empty canonical email/phone results, explicit user acknowledgement, and the same
+server-issued keyed proof at the locked final recheck, including when the displayed candidate list
+is empty. The existing duplicate proof store binds actor/workspace, normalized request, displayed
+result and the visible broad-name count/highest ID; expiry and transactional consumption prevent
+forgery and replay. Counts are not a substitute for consumption: deletion could restore them.
+The final preflight echoes the acknowledged proof instead of replacing a still-valid one.
+See [Duplicate Review](DUPLICATE_REVIEW.md#manual-creation-and-client-preflight).
+It never permits reuse or import resolution; company and deal overflow still blocks.
 
 ### Person CSV identity decisions
 
@@ -130,6 +145,8 @@ changing the choice or the visible result requires a fresh one-use proof. Confli
 on rows combined into one mutation fail closed when that dependency is consumed, independent of row
 order. Every same-key contributor must resolve its own choice; bulk application remains explicit.
 Unused dependencies on skipped matches or already-filled company links do not block the import.
+An unresolved company choice that could target an existing owned deal still requires deal-update
+permission at preview admission; this permission check does not choose or attach the company.
 Candidate groups are serialized once in the preview's `companyCandidates` catalogue; source rows
 refer to the group by key. Repeating a dependency across many rows does not multiply the bounded
 candidate response.
@@ -143,6 +160,8 @@ alters the existing target/identity lock order.
 At commit:
 
 - an explicitly selected visible company dependency may be reused;
+- legal-form variants remain weak review evidence and never attach automatically; CSV rows using
+  a variant stay unresolved until an explicit visible candidate choice is reviewed and proof-bound;
 - ambiguous/truncated dependencies fail closed only for rows that consume them;
 - do not create a dependency under the duplicate mutex until all required target/identity revalidation passes;
 - lock writable matched targets individually in ascending record id and canonical identity groups in deterministic kind/value order;
@@ -252,8 +271,12 @@ Structured row `problems` carry stable codes and optional field labels for Engli
 legacy `errors`/`reason` fields are diagnostic compatibility fields and are never rendered directly.
 Batch mapping and review-limit refusals expose stable `IMPORT_*` codes. Existing-field mappings use
 the member-facing active schema. Two columns resolving to one definition (including Create aliases)
-are rejected during preview; a missing or archived mapped definition refuses commit rather than
-silently dropping its values. A failed commit discards its possibly consumed
+are rejected during preview. Server-resolved mapping collisions return stable codes keyed by both
+source columns, so the Map step shows each refusal inline rather than reproducing database key
+resolution in the browser. Changing a mapping clears its stale refusal. A missing or archived mapped
+definition refuses commit rather than silently dropping its values; that refusal refreshes the active
+schema, preserves the draft and old target, and requires an explicit replacement or Ignore choice.
+The Map step also offers Refresh fields without discarding the draft. A failed commit discards its possibly consumed
 proof while retaining the file and choices, shows recovery guidance for its actual refusal category,
 and offers Map or a fresh review. The changed-input banner appears only when the input changed.
 

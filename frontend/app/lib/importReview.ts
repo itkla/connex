@@ -41,6 +41,28 @@ export function duplicateMappingColumns(mapping: ImportColumnMapping[]): Set<str
     return new Set([...byTarget.values()].filter((columns) => columns.length > 1).flat());
 }
 
+/** Server-resolved custom keys remain authoritative when labels or catalogue keys collide. */
+export function importMappingErrorColumns(error: unknown, headers: string[]): Set<string> {
+    if (!(error instanceof ApiError)
+        || !['IMPORT_MAPPING_DUPLICATE', 'IMPORT_CUSTOM_COLLISION'].includes(error.code ?? '')
+        || !error.fieldErrors) return new Set();
+    const columns = new Set<string>();
+    for (const header of headers) {
+        if (Object.hasOwn(error.fieldErrors, header)) columns.add(header);
+    }
+    return columns;
+}
+
+/** Refreshing a schema preserves explicit mappings and identifies targets that need replacement. */
+export function unavailableCustomColumns(mapping: ImportColumnMapping[], fields: CustomFieldSchemaEntry[]): Set<string> {
+    const available = new Set(fields.map((field) => `custom:${field.definitionId}`));
+    const columns = new Set<string>();
+    for (const item of mapping) {
+        if (item.field?.startsWith('custom:') && !available.has(item.field)) columns.add(item.column);
+    }
+    return columns;
+}
+
 /** Exact, unique field labels may be suggested; ambiguous labels stay unmapped. */
 export function existingCustomTarget(header: string, fields: CustomFieldSchemaEntry[]): string | null {
     const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase('en').trim();
@@ -52,10 +74,15 @@ export function existingCustomTarget(header: string, fields: CustomFieldSchemaEn
 export function companyChoiceRows(rows: ImportRowAnalysis[], source: ImportRowAnalysis, companyId: number): number[] {
     const dependency = source.companyDependency;
     if (!dependency || dependency.truncated) return [];
-    return rows.filter((row) => row.companyDependency?.key === dependency.key
-        && !row.companyDependency.truncated
-        && row.companyDependency.candidates?.some((candidate) => candidate.recordId === companyId))
-        .map((row) => row.rowIndex);
+    const indices: number[] = [];
+    for (const row of rows) {
+        const current = row.companyDependency;
+        if (current?.key === dependency.key && !current.truncated
+            && current.candidates?.some((candidate) => candidate.recordId === companyId)) {
+            indices.push(row.rowIndex);
+        }
+    }
+    return indices;
 }
 
 /** Only stable API codes choose presentation copy; server diagnostic text stays out of the UI. */

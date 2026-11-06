@@ -159,12 +159,14 @@ export type DuplicatePreflightResponse = {
     candidates: DuplicateCandidate[];
     truncated: boolean;
     reviewToken: string;
+    allowSeparateCreation?: boolean;
 };
 
 export type PersonDuplicatePreflightRequest = {
     name?: string | null;
     emails: string[];
     phones: string[];
+    reviewToken?: string | null;
 };
 
 export type CompanyDuplicatePreflightRequest = {

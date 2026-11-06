@@ -59,10 +59,30 @@ test.describe("CSV duplicate review", () => {
         const candidates = page.getByLabel("Possible existing records");
         await expect(candidates.getByText(fixture.companyName)).toBeVisible();
         await expect(candidates.getByText("Company", { exact: true })).toBeVisible();
-        await expect(candidates.getByText("Exact name")).toBeVisible();
-        await expect(candidates.getByText("Same name")).toBeVisible();
+        await expect(candidates.getByText(message("en", "importExport", "importExport.candidateCompanyNameStrength"))).toBeVisible();
+        await expect(candidates.getByText(message("en", "importExport", "importExport.candidateCompanyNameEvidence"))).toBeVisible();
         await expect(page.getByRole("button", { name: "Import", exact: true })).toBeDisabled();
         await page.getByRole("button", { name: "Use record", exact: true }).click();
+        await page.getByRole("button", { name: "Refresh review", exact: true }).click();
+        await expect(page.getByRole("button", { name: "Import", exact: true })).toBeEnabled();
+    });
+
+    test("requires review before attaching a company legal-form variant", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        await page.goto("/records/contacts?view=table");
+        await page.getByRole("button", { name: "More actions" }).click();
+        await page.getByRole("menuitem", { name: "Import" }).click();
+        await page.locator('input[type="file"]').setInputFiles({
+            name: "company-variant.csv",
+            mimeType: "text/csv",
+            buffer: Buffer.from(`Name,Company\nVariant review contact,${fixture.companyName} LLC\n`, "utf8"),
+        });
+        await page.getByRole("button", { name: "Next" }).click();
+        await expect(page.getByText(message("en", "importExport", "importExport.companyVariantNeedsReview"))).toBeVisible();
+        const candidates = page.getByLabel("Possible existing records");
+        await expect(candidates.getByText(fixture.companyName, { exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Import", exact: true })).toBeDisabled();
+        await candidates.getByRole("button", { name: "Use record", exact: true }).click();
         await page.getByRole("button", { name: "Refresh review", exact: true }).click();
         await expect(page.getByRole("button", { name: "Import", exact: true })).toBeEnabled();
     });
@@ -87,8 +107,8 @@ test.describe("manual duplicate review", () => {
         await expect(emailField).toHaveValue(email);
 
         await expect(page.getByRole("region", { name: "Possible duplicates" })).toBeVisible();
-        await page.locator("summary").filter({ hasText: "possible matches" }).click();
-        await expect(page.getByText("Exact name")).toBeVisible();
+        await expect(page.getByText("Exact identity", { exact: true })).toBeVisible();
+        await expect(page.getByText("Same email")).toBeVisible();
         await expect(page.getByRole("button", { name: "Create", exact: true })).toBeDisabled();
 
         await page.getByRole("checkbox", {

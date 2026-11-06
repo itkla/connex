@@ -1,7 +1,7 @@
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/app/lib/api';
-import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importReviewRows, reviewPage } from '@/app/lib/importReview';
+import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importMappingErrorColumns, importReviewRows, reviewPage, unavailableCustomColumns } from '@/app/lib/importReview';
 import type { CustomFieldSchemaEntry, DuplicateCandidate, ImportRowAnalysis } from '@/app/lib/types';
 import en from '@/messages/en/importExport.json';
 import ja from '@/messages/ja/importExport.json';
@@ -65,6 +65,22 @@ describe('complete import review', () => {
         expect(existingCustomTarget(' 地域 ', [field])).toBe('custom:1');
         expect(existingCustomTarget('地域名', [field])).toBeNull();
         expect(existingCustomTarget('地域', [field, { ...field, definitionId: 2 }])).toBeNull();
+    });
+
+    it.each([['Region Code', 'Region-Code'], ['Region code', 'Region-code']])('marks both server-resolved aliases %s and %s inline', (first, second) => {
+        const error = new ApiError('Diagnostic only', 400, 'IMPORT_MAPPING_DUPLICATE', {
+            [first]: 'IMPORT_MAPPING_DUPLICATE', [second]: 'IMPORT_MAPPING_DUPLICATE', unrelated: 'IMPORT_MAPPING_DUPLICATE',
+        });
+        expect([...importMappingErrorColumns(error, [first, second])]).toEqual([first, second]);
+        expect(importMappingErrorColumns(new ApiError('Other failure', 400, 'BAD_REQUEST', error.fieldErrors), [first, second]).size).toBe(0);
+    });
+
+    it('keeps an archived mapping explicit until the user selects its replacement', () => {
+        const mapping = [{ column: 'Legacy', field: 'custom:1' }];
+        const replacement: CustomFieldSchemaEntry = { definitionId: 2, label: 'Territory replacement', fieldType: 'text', options: null, required: false };
+        expect([...unavailableCustomColumns(mapping, [replacement])]).toEqual(['Legacy']);
+        expect(mapping).toEqual([{ column: 'Legacy', field: 'custom:1' }]);
+        expect(unavailableCustomColumns([{ column: 'Legacy', field: 'custom:2' }], [replacement]).size).toBe(0);
     });
 
     it.each(['en', 'ja'] as const)('localizes every structured problem and correction in %s', (locale) => {

@@ -21,7 +21,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { commitImport, getCustomFieldSchema, isWorkspaceUnavailableError, previewImport, search } from '@/app/lib/api';
+import { ApiError, commitImport, getCustomFieldSchema, isWorkspaceUnavailableError, previewImport, search } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { usePermission } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -42,7 +42,7 @@ import {
     type ParsedCsv,
     type PersonNameOrder,
 } from '@/app/lib/import';
-import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importReviewRows, needsImportDecision, REVIEW_FILTERS, reviewPage, type ReviewFilter } from '@/app/lib/importReview';
+import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importMappingErrorColumns, importReviewRows, unavailableCustomColumns, needsImportDecision, REVIEW_FILTERS, reviewPage, type ReviewFilter } from '@/app/lib/importReview';
 import type {
     CustomFieldSchemaEntry,
     ImportProblem,
@@ -160,23 +160,27 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     const [skippedRows, setSkippedRows] = useState<number[]>([]);
     const [commitFailure, setCommitFailure] = useState<string | null>(null);
     const [customFieldsAttempt, setCustomFieldsAttempt] = useState(0);
+    const [serverDuplicateColumns, setServerDuplicateColumns] = useState<{
+        key: string; columns: Set<string>;
+    } | null>(null);
     const [customFieldState, setCustomFieldState] = useState<{
-        key: string; fields: CustomFieldSchemaEntry[]; failed: boolean;
+        key: string; fields: CustomFieldSchemaEntry[]; failed: boolean; attempt: number;
     } | null>(null);
     const customFieldKey = `${workspaceKey}:${entity}`;
     const customFields = useMemo(() => customFieldState?.key === customFieldKey ? customFieldState.fields : [], [customFieldState, customFieldKey]);
     const customFieldsFailed = customFieldState?.key === customFieldKey && customFieldState.failed;
+    const customFieldsLoading = customFieldState?.key !== customFieldKey || customFieldState.attempt !== customFieldsAttempt;
     useEffect(() => {
         if (!open) return;
         const scoped = createScopedRequest(requestInit);
         const entityType = entity === 'persons' ? 'person' : entity === 'companies' ? 'company' : 'deal';
         getCustomFieldSchema(entityType, scoped.requestInit).then((fields) => {
             if (!scoped.controller.signal.aborted) {
-                setCustomFieldState({ key: customFieldKey, fields, failed: false });
+                setCustomFieldState({ key: customFieldKey, fields, failed: false, attempt: customFieldsAttempt });
             }
         }).catch((error: unknown) => {
             if (!scoped.controller.signal.aborted) {
-                setCustomFieldState({ key: customFieldKey, fields: [], failed: true });
+                setCustomFieldState({ key: customFieldKey, fields: [], failed: true, attempt: customFieldsAttempt });
                 if (isWorkspaceUnavailableError(error)) showApiError(error);
             }
         });
@@ -208,6 +212,23 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         setCompanyLinks({});
         setSkippedRows([]);
         setCommitFailure(null);
+        setServerDuplicateColumns(null);
+    }
+
+    function recoverMappingFailure(error: unknown) {
+        const affected = importMappingErrorColumns(error, parsed?.headers ?? []);
+        if (affected.size > 0) {
+            setServerDuplicateColumns({ key: mappingSnapshotKey, columns: affected });
+            setStep('map');
+        }
+        if (error instanceof ApiError && error.code === 'IMPORT_CUSTOM_UNAVAILABLE') {
+            setCustomFieldsAttempt((attempt) => attempt + 1);
+        }
+    }
+
+    function refreshCustomFields() {
+        setServerDuplicateColumns(null);
+        setCustomFieldsAttempt((attempt) => attempt + 1);
     }
 
     function handleOpenChange(next: boolean) {
@@ -255,6 +276,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             setReviewedInputKey(null);
             setReviewedProof(null);
             setCommitFailure(null);
+            setServerDuplicateColumns(null);
             setParsed(result);
             setColumns(initial);
             setNameOrder(defaultPersonNameOrder(result.headers, locale));
@@ -298,8 +320,13 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             ).length,
         [columns, canCreateCustomField],
     );
-    const duplicateColumns = duplicateMappingColumns(prepared?.mapping ?? []);
-    const hasName = prepared?.nameColumn != null && !prepared.nameConflict && duplicateColumns.size === 0;
+    const mappingSnapshotKey = JSON.stringify([workspaceKey, prepared?.mapping ?? []]);
+    const duplicateColumns = new Set([...duplicateMappingColumns(prepared?.mapping ?? []),
+        ...(serverDuplicateColumns?.key === mappingSnapshotKey ? serverDuplicateColumns.columns : [])]);
+    const unavailableColumns = !customFieldsLoading && !customFieldsFailed
+        ? unavailableCustomColumns(prepared?.mapping ?? [], customFields) : new Set<string>();
+    const hasName = prepared?.nameColumn != null && !prepared.nameConflict
+        && duplicateColumns.size === 0 && unavailableColumns.size === 0;
     const nameColumn = prepared?.nameColumn ?? null;
     const currentReviewInputKey = prepared
         ? reviewInputKey(
@@ -354,6 +381,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             setStep('review');
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
+            recoverMappingFailure(error);
             reportFailure(error);
         } finally {
             scopedRequest.release();
@@ -389,6 +417,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             setReviewedProof(data.duplicateReviewProof ?? null);
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
+            recoverMappingFailure(error);
             reportFailure(error);
         } finally {
             scopedRequest.release();
@@ -459,6 +488,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             if (requestInit?.signal?.aborted) return;
             setReviewedProof(null);
             setCommitFailure(importFailureKey(error));
+            recoverMappingFailure(error);
             reportFailure(error);
         } finally {
             if (!requestInit?.signal?.aborted) setBusy(false);
@@ -506,7 +536,10 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                             parsed={parsed}
                             entity={entity}
                             columns={columns}
-                            setColumns={setColumns}
+                            setColumns={(updater) => {
+                                setServerDuplicateColumns(null);
+                                setColumns(updater);
+                            }}
                             mappedCount={mappedCount}
                             canCreateCustomField={canCreateCustomField}
                             nameOrder={nameOrder}
@@ -516,8 +549,10 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                             nameSamples={prepared && nameColumn ? columnSamples(prepared.rows, nameColumn, 3) : []}
                             customFields={customFields}
                             customFieldsFailed={customFieldsFailed}
-                            retryCustomFields={() => setCustomFieldsAttempt((attempt) => attempt + 1)}
+                            retryCustomFields={refreshCustomFields}
+                            customFieldsLoading={customFieldsLoading}
                             duplicateColumns={duplicateColumns}
+                            unavailableColumns={unavailableColumns}
                         />
                     )}
                     {step === 'review' && commitFailure && (
@@ -684,7 +719,9 @@ function MapStep({
     customFields,
     customFieldsFailed,
     retryCustomFields,
+    customFieldsLoading,
     duplicateColumns,
+    unavailableColumns,
 }: {
     parsed: ParsedCsv;
     entity: ImportEntity;
@@ -700,7 +737,9 @@ function MapStep({
     customFields: CustomFieldSchemaEntry[];
     customFieldsFailed: boolean;
     retryCustomFields: () => void;
+    customFieldsLoading: boolean;
     duplicateColumns: Set<string>;
+    unavailableColumns: Set<string>;
 }) {
     const t = useTranslations('importExport');
     const nameOrderId = useId();
@@ -743,17 +782,19 @@ function MapStep({
             )}
             {nameConflict && <p className="text-sm text-destructive" role="alert">{t('nameMappingConflict')}</p>}
             {entity === 'deals' && <p className="text-xs text-muted-foreground">{t('dealDateHint')}</p>}
-            {customFieldsFailed && <div role="alert" className="space-y-2 text-sm text-destructive">
-                <p>{t('customFieldsFailed')}</p>
-                <Button variant="outline" size="toolbar" onClick={retryCustomFields}>{t('linkRetry')}</Button>
-            </div>}
+            <Button variant="outline" size="toolbar" disabled={customFieldsLoading}
+                aria-busy={customFieldsLoading} onClick={retryCustomFields}>
+                {customFieldsLoading && <LoaderCircle className="size-4 animate-spin" />}
+                {t(customFieldsLoading ? 'refreshingCustomFields' : 'refreshCustomFields')}
+            </Button>
+            {customFieldsFailed && <p role="alert" className="text-sm text-destructive">{t('customFieldsFailed')}</p>}
             <div className="space-y-2">
                 {parsed.headers.map((header) => {
                     const col = columns[header];
                     const target = resolveColumnTarget(col?.target, canCreateCustomField);
                     const samples = columnSamples(parsed.rows, header, 3).join(', ');
                     return (
-                        <div key={header} className="grid min-w-0 grid-cols-1 items-center gap-3 rounded-lg border border-border px-3 py-2 sm:grid-cols-[1fr_auto_1fr]">
+                        <div key={header} data-import-column={header} className="grid min-w-0 grid-cols-1 items-center gap-3 rounded-lg border border-border px-3 py-2 sm:grid-cols-[1fr_auto_1fr]">
                             <div className="min-w-0">
                                 <p className="truncate text-sm font-medium">{header}</p>
                                 {samples && <p className="truncate text-xs text-muted-foreground">{samples}</p>}
@@ -766,6 +807,7 @@ function MapStep({
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value={IGNORE_COLUMN}>{t('ignore')}</SelectItem>
+                                        {unavailableColumns.has(header) && <SelectItem value={target} disabled>{t('unavailableCustomField')}</SelectItem>}
                                         {fieldOptions.map((f) => (
                                             <SelectItem key={f.key} value={f.key}>{f.label}</SelectItem>
                                         ))}
@@ -792,6 +834,7 @@ function MapStep({
                                     </Select>
                                 )}
                                 {duplicateColumns.has(header) && <p role="alert" className="w-full text-sm text-destructive">{t('duplicateMapping')}</p>}
+                                {unavailableColumns.has(header) && <p role="alert" className="w-full text-sm text-destructive">{t('unavailableCustomFieldHint')}</p>}
                                 {target === CREATE_CUSTOM_FIELD && customFields.filter((field) => field.label.trim() === header.trim() && field.fieldType === col?.customType).length === 1 && (
                                     <p className="w-full text-xs text-muted-foreground">{t('reuseCustomField')}</p>
                                 )}
@@ -848,6 +891,7 @@ function ReviewStep({
     const t = useTranslations('importExport');
     const formatter = useFormatter();
     const missingCloseDates = preview.rows.filter((row) => row.dealDates?.usesImportTime).length;
+    const skipped = useMemo(() => new Set(skippedRows), [skippedRows]);
     const [filter, setFilter] = useState<ReviewFilter>('all');
     const [page, setPage] = useState(0);
     const rows = useMemo(() => importReviewRows(preview), [preview]);
@@ -937,7 +981,7 @@ function ReviewStep({
                                                     {nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : row.matchedLabel}
                                                 </p>
                                                 {row.matchedId != null && <p className="break-words text-xs text-muted-foreground">{t('linkedTo', { name: row.matchedLabel ?? '' })}</p>}
-                                                {row.problems?.map((problem, index) => <p key={index} className="break-words text-sm text-destructive">
+                                                {row.problems?.map((problem) => <p key={`${row.rowIndex}:${problem.code}:${problem.field ?? ''}`} className="break-words text-sm text-destructive">
                                                     {problemText(t, problem)}
                                                 </p>)}
                                                 {!row.problems?.length && row.errors?.length ? <p className="break-words text-sm text-destructive">{t('problems.ROW_INVALID')}</p> : null}
@@ -1004,9 +1048,9 @@ function ReviewStep({
                                         <td role="cell" className="col-span-2 min-w-0 px-3 pb-3 text-left sm:w-56 sm:py-2 sm:text-right sm:align-middle">
                                             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                                             <Button size="toolbar" variant="outline" onClick={() => onSkip(row.rowIndex)}>
-                                                {t(skippedRows.includes(row.rowIndex) ? 'includeRow' : 'skipRow')}
+                                                {t(skipped.has(row.rowIndex) ? 'includeRow' : 'skipRow')}
                                             </Button>
-                                            {!skippedRows.includes(row.rowIndex) && <RowLinker
+                                            {!skipped.has(row.rowIndex) && <RowLinker
                                                 entity={entity}
                                                 linkedLabel={links[row.rowIndex] != null ? linkLabels[row.rowIndex] : undefined}
                                                 onLink={(id, label) => onLink(row.rowIndex, id, label)}
@@ -1106,7 +1150,8 @@ function DuplicateCandidates({
                                     variant={candidate.strength === 'STRONG' ? 'secondary' : 'outline'}
                                     className="h-5 px-1.5 text-[10px]"
                                 >
-                                    {t(`candidateStrength.${candidate.strength}`)}
+                                    {t(candidate.recordType === 'company' && candidate.strength === 'WEAK'
+                                        ? 'candidateCompanyNameStrength' : `candidateStrength.${candidate.strength}`)}
                                 </Badge>
                                 {!candidate.ownedByActiveWorkspace && (
                                     <span className="text-[11px] text-muted-foreground">
@@ -1121,7 +1166,8 @@ function DuplicateCandidates({
                             )}
                             <p className="text-[11px] text-muted-foreground">
                                 {candidate.matches
-                                    .map((match) => t(`candidateEvidence.${match.kind}`))
+                                    .map((match) => t(candidate.recordType === 'company' && match.kind === 'NAME'
+                                        ? 'candidateCompanyNameEvidence' : `candidateEvidence.${match.kind}`))
                                     .join(' · ')}
                             </p>
                         </div>

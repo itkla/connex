@@ -275,4 +275,18 @@ class ImportReviewServiceTest extends AbstractServiceTest {
         assertEquals("COMPANY_TRUNCATED", preview.getRows().getFirst().getProblems().getFirst().code());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"Region Code", "Region code"})
+    void newCustomAliasesReportBothConflictingSourceColumns(String label) {
+        String other = label.replace(' ', '-');
+        ImportRequest request = new ImportRequest(List.of(Map.of("Name", "Alias contact", label, "First", other, "Second")),
+            List.of(new ColumnMapping("Name", "name", null, null, null),
+                new ColumnMapping(label, null, true, "text", label),
+                new ColumnMapping(other, null, true, "text", other)), "fill_empty", null);
+        ImportValidationException exception = assertThrows(ImportValidationException.class,
+            () -> importService.previewPersons(request));
+        assertEquals("IMPORT_MAPPING_DUPLICATE", exception.getCode());
+        assertEquals(Map.of(label, "IMPORT_MAPPING_DUPLICATE", other, "IMPORT_MAPPING_DUPLICATE"), exception.getFieldErrors());
+    }
+
 }
