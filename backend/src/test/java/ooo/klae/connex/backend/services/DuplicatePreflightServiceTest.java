@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,11 +19,14 @@ import static org.mockito.Mockito.when;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -33,6 +38,7 @@ import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicateCandidateRow;
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
 import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
+import ooo.klae.connex.backend.dto.DuplicateNameMatchState;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -42,6 +48,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
+import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
 
 @ExtendWith(MockitoExtension.class)
 class DuplicatePreflightServiceTest {
@@ -58,6 +65,8 @@ class DuplicatePreflightServiceTest {
     @Mock private DuplicatePreflightRateLimiter.CommitAdmission commitAdmission;
 
     private DuplicatePreflightService service;
+    private String personWorkflow;
+    private String personResult;
 
     @BeforeEach
     void setUp() {
@@ -83,6 +92,28 @@ class DuplicatePreflightServiceTest {
         org.mockito.Mockito.lenient()
             .when(dealReviewProofService.issue(anyString(), anyString()))
             .thenReturn("e".repeat(64));
+        org.mockito.Mockito.lenient().when(identityMapper.findVisiblePersonNameMatchState(
+            eq(7), eq("[7,9]"), anyString())).thenReturn(new DuplicateNameMatchState(51, 51));
+        org.mockito.Mockito.lenient().when(dealReviewProofService.issueBoundedPerson(anyString(), anyString()))
+            .thenAnswer(invocation -> {
+                personWorkflow = invocation.getArgument(0, String.class);
+                personResult = invocation.getArgument(1, String.class);
+                return "f".repeat(64);
+            });
+        org.mockito.Mockito.lenient().when(dealReviewProofService.isConsumable(
+            eq("f".repeat(64)), anyString(), anyString())).thenAnswer(invocation ->
+                Objects.equals(personWorkflow, invocation.getArgument(1, String.class))
+                    && Objects.equals(personResult, invocation.getArgument(2, String.class)));
+        org.mockito.Mockito.lenient().when(dealReviewProofService.consume(
+            eq("f".repeat(64)), anyString(), anyString())).thenAnswer(invocation -> {
+                boolean accepted = Objects.equals(personWorkflow, invocation.getArgument(1, String.class))
+                    && Objects.equals(personResult, invocation.getArgument(2, String.class));
+                if (accepted) {
+                    personWorkflow = null;
+                    personResult = null;
+                }
+                return accepted;
+            });
     }
 
     @Test
@@ -98,6 +129,24 @@ class DuplicatePreflightServiceTest {
         DuplicatePreflightResponse interactive = service.preflightDeal(request);
         assertEquals(1, interactive.candidates().size());
         assertTrue(service.dealCandidatesExist(request));
+    }
+
+    @Test
+    void advisoryPersonCheckNeverLocksOrIssuesProofEvenWhenNameResultsOverflow() throws Exception {
+        when(matchingService.normalizeName("Jordan Lee")).thenReturn(Optional.of("jordan lee"));
+        when(identityMapper.findVisiblePersonNameMatches(eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(IntStream.rangeClosed(1, 51).mapToObj(id -> row(
+                id, 7, "Jordan Lee", "name", "jordan lee")).toList())
+            .thenReturn(List.of());
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            "Jordan Lee", List.of(), List.of());
+        assertTrue(service.personCandidatesExist(request));
+        assertFalse(service.personCandidatesExist(request));
+        org.mockito.Mockito.verifyNoInteractions(duplicateDecisionLockService, dealReviewProofService);
+        var method = DuplicatePreflightService.class.getMethod("personCandidatesExist", PersonDuplicatePreflightRequest.class);
+        assertTrue(method.getAnnotation(org.springframework.transaction.annotation.Transactional.class).readOnly());
+        assertEquals(ooo.klae.connex.backend.tenant.Permission.PERSON_CREATE,
+            method.getAnnotation(ooo.klae.connex.backend.tenant.RequirePermission.class).value());
     }
 
     @Test
@@ -334,6 +383,103 @@ class DuplicatePreflightServiceTest {
             () -> service.requireReviewedPersonCreation(request, null));
 
         assertEquals("DUPLICATE_REVIEW_REQUIRED", exception.getCode());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 51})
+    void nameOnlyOverflowAllowsOnlyExplicitSeparateCreation(int exactNames) {
+        when(matchingService.normalizeName(anyString())).thenAnswer(invocation ->
+            CanonicalNameNormalizer.normalize(invocation.getArgument(0, String.class)));
+        when(identityMapper.findVisiblePersonNameMatches(
+                eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(IntStream.rangeClosed(1, 51).mapToObj(id -> row(
+                id, 7, id <= exactNames ? "Jordan Lee" : "Jordan Lee Group " + id,
+                "name", "jordan lee")).toList());
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            "Jordan Lee", List.of(), List.of());
+
+        DuplicatePreflightResponse response = service.preflightPerson(request);
+
+        assertTrue(response.truncated());
+        assertTrue(response.allowSeparateCreation());
+        assertEquals(Math.min(exactNames, 50), response.candidates().size());
+        assertThrows(DuplicateReviewException.class,
+            () -> service.requireReviewedPersonCreation(request, null));
+        service.requireReviewedPersonCreation(request, response.reviewToken());
+        assertThrows(ConflictException.class, () -> service.requireReviewedBusinessCardPersonReuse(
+            request, 1, response.reviewToken()));
+        verify(duplicateDecisionLockService, org.mockito.Mockito.times(4)).lockCurrentOrganization();
+    }
+
+    @Test
+    void nameOverflowCannotAcknowledgeAnIncompleteOrChangedStrongIdentityReview() {
+        when(matchingService.normalizeName("Jordan Lee")).thenReturn(Optional.of("jordan lee"));
+        when(matchingService.normalizeIdentifier(IdentityKind.EMAIL, "new@example.com"))
+            .thenReturn(Optional.of("new@example.com"));
+        when(identityMapper.findVisiblePersonNameMatches(
+                eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(IntStream.rangeClosed(1, 51).mapToObj(id -> row(
+                id, 7, "Jordan Lee", "name", "jordan lee")).toList());
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            "Jordan Lee", List.of("new@example.com"), List.of());
+        DuplicatePreflightResponse response = service.preflightPerson(request);
+        assertTrue(response.allowSeparateCreation());
+
+        when(identityMapper.findVisiblePersonIdentityMatches(
+                eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(List.of(row(1, 7, "Jordan Lee", "email", "new@example.com")));
+
+        DuplicatePreflightResponse changed = service.preflightPerson(request);
+        assertFalse(changed.allowSeparateCreation());
+        assertNotEquals(response.reviewToken(), changed.reviewToken());
+        assertThrows(DuplicateReviewException.class,
+            () -> service.requireReviewedPersonCreation(request, response.reviewToken()));
+        assertThrows(DuplicateReviewException.class,
+            () -> service.requireReviewedPersonCreation(request, changed.reviewToken()));
+        verify(identityMapper, org.mockito.Mockito.times(2)).lockCurrentPersonIdentityGroup(
+            7, "email", "new@example.com");
+
+        when(identityMapper.findVisiblePersonIdentityMatches(
+                eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(IntStream.rangeClosed(1, 51).mapToObj(id -> row(
+                id, 7, "Jordan Lee", "email", "new@example.com")).toList());
+        DuplicatePreflightResponse identityOverflow = service.preflightPerson(request);
+        assertFalse(identityOverflow.allowSeparateCreation());
+        assertThrows(DuplicateReviewException.class,
+            () -> service.requireReviewedPersonCreation(request, identityOverflow.reviewToken()));
+    }
+
+    @Test
+    void boundedNameAcknowledgementIsStaleWhenDisplayedCandidatesChange() {
+        when(matchingService.normalizeName("Jordan Lee")).thenReturn(Optional.of("jordan lee"));
+        when(identityMapper.findVisiblePersonNameMatches(
+                eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(IntStream.rangeClosed(1, 51).mapToObj(id -> row(
+                id, 7, "Jordan Lee", "name", "jordan lee")).toList())
+            .thenReturn(IntStream.rangeClosed(2, 52).mapToObj(id -> row(
+                id, 7, "Jordan Lee", "name", "jordan lee")).toList());
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            "Jordan Lee", List.of(), List.of());
+        DuplicatePreflightResponse response = service.preflightPerson(request);
+
+        assertThrows(DuplicateReviewException.class,
+            () -> service.requireReviewedPersonCreation(request, response.reviewToken()));
+    }
+
+    @Test
+    void personImportNameOverflowRemainsUnresolved() {
+        when(matchingService.normalizeName("Jordan Lee")).thenReturn(Optional.of("jordan lee"));
+        when(identityMapper.findVisiblePersonNameMatches(
+                eq(7), eq("[7,9]"), anyList(), eq(9)))
+            .thenReturn(IntStream.rangeClosed(1, 9).mapToObj(id -> row(
+                id, 7, "Jordan Lee", "name", "jordan lee")).toList());
+        DuplicatePreflightResponse response = service.preflightPersonImportPreview(
+            List.of(new PersonDuplicatePreflightRequest("Jordan Lee", List.of(), List.of())),
+            "a".repeat(64)).responses().getFirst();
+
+        assertTrue(response.truncated());
+        assertFalse(response.allowSeparateCreation());
+        assertEquals(8, response.candidates().size());
     }
 
     @Test

@@ -821,7 +821,8 @@ function ReviewStep({
                                                     row.errors?.length ? 'text-destructive' : 'text-muted-foreground',
                                                 )}>
                                                     {row.errors?.length
-                                                        ? importRowErrorMessage(row.errors, t('currencyInvalid'))
+                                                        ? importRowErrorMessage(row.errors.map((error) => error === 'Company name variant requires an explicit company selection'
+                                                            ? t('companyVariantNeedsReview') : error), t('currencyInvalid'))
                                                         : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
                                                 </p>
                                                 {row.dealDates && (
@@ -925,7 +926,8 @@ function DuplicateCandidates({
                                     variant={candidate.strength === 'STRONG' ? 'secondary' : 'outline'}
                                     className="h-5 px-1.5 text-[10px]"
                                 >
-                                    {t(`candidateStrength.${candidate.strength}`)}
+                                    {t(candidate.recordType === 'company' && candidate.strength === 'WEAK'
+                                        ? 'candidateCompanyNameStrength' : `candidateStrength.${candidate.strength}`)}
                                 </Badge>
                                 {!candidate.ownedByActiveWorkspace && (
                                     <span className="text-[11px] text-muted-foreground">
@@ -940,7 +942,8 @@ function DuplicateCandidates({
                             )}
                             <p className="text-[11px] text-muted-foreground">
                                 {candidate.matches
-                                    .map((match) => t(`candidateEvidence.${match.kind}`))
+                                    .map((match) => t(candidate.recordType === 'company' && match.kind === 'NAME'
+                                        ? 'candidateCompanyNameEvidence' : `candidateEvidence.${match.kind}`))
                                     .join(' · ')}
                             </p>
                         </div>
@@ -1186,7 +1189,9 @@ function DoneStep({ result, entity, parsed }: { result: ImportResult; entity: Im
         result.failed.forEach((failure) => {
             const row = parsed.rows[failure.rowIndex];
             if (!row) return;
-            lines.push([...parsed.headers.map((h) => row[h] ?? ''), importRowErrorMessage(failure.errors ?? failure.reason, t('currencyInvalid'))].map(csvCell).join(','));
+            const reason = importRowErrorMessage(failure.errors ?? failure.reason, t('currencyInvalid'))
+                .replaceAll('Company name variant requires an explicit company selection', t('companyVariantNeedsReview'));
+            lines.push([...parsed.headers.map((h) => row[h] ?? ''), reason].map(csvCell).join(','));
         });
         const blob = new Blob([String.fromCharCode(0xfeff) + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         const url = URL.createObjectURL(blob);

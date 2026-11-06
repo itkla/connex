@@ -31,7 +31,7 @@ describe('manual deal duplicate preflight', () => {
         expect(composer).toContain('!duplicateDecision.duplicateReviewToken');
         expect(composer).toContain('kind="deal"');
         expect(composer).toContain('onAcknowledgedChange={duplicatePreflight.setAcknowledged}');
-        expect(hook).toContain("kind === 'deal' ? response?.reviewToken : undefined");
+        expect(hook).toContain("kind === 'deal' || kind === 'person' ? response?.reviewToken : undefined");
     });
 
     it.each([
