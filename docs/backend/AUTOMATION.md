@@ -310,11 +310,22 @@ already have changed records. History resolves contact, company, deal, and task 
 viewer's existing workspace-pinned record APIs, with no name/link when access is refused. Target
 lookups retain settled results only within the current workspace, fetch each new distinct target
 once, and run at most four requests concurrently. Each result appears independently; switching
-workspaces aborts pending reads and discards the cache. Document
-names cannot be resolved from a document-only history id by the existing deal-scoped read API;
-that case explicitly says the name is unavailable in this history, without claiming deletion or
-lack of permission. Run-number sequences identify the execution ledger, never whether a run was
-migrated; unknown versions are labelled as unrecorded.
+workspaces aborts pending reads and discards the cache. Documents use
+`GET /api/documents/targets?ids=…`, accepting one to fifty positive ids (the cap applies before
+deduplication) and returning only `{id, dealId, title}`. The service reuses the per-deal document
+read's parent-deal gate in the resolved workspace. Empty, non-positive and over-cap numeric batches
+return HTTP 400 with the existing `BAD_REQUEST` code/message envelope before service invocation;
+the service repeats the validation for non-HTTP callers. Deleted, unreadable-parent and other-workspace
+documents are all absent from the response. It returns no document body, deal name, or diagnostic.
+Read authorization remains active workspace membership, as for the existing per-deal document
+GETs; `DEAL_UPDATE` continues to gate document mutations. The mapper statement is covered by the
+existing tenant-scoped `DealDocumentMapper` namespace in `TenantScopeInterceptor`.
+History groups new document ids into batches of at most fifty within the same four-request queue,
+caches absent results too, and links returned titles through the canonical parent deal's documents
+panel. Missing titles and absent entries show the same neutral EN/JA unavailable label without a
+link or a claim about deletion or permission. Unsupported target types retain the explicit
+name-unavailable-in-history state. Run-number sequences identify the execution ledger, never
+whether a run was migrated; unknown versions are labelled as unrecorded.
 
 Publication validation uses the same projection boundary as Publish. A single initial condition may
 terminate its two branches at separate End steps. Delays, multiple conditions, actions on the No
