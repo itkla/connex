@@ -10,61 +10,6 @@ const editors = [
     { key: 'workflow', path: '/workflows/new', destination: '/workflows', namespace: 'workspace', name: 'WorkspaceWorkflows.nameLabel', back: 'WorkspaceWorkflows.backToList' },
 ] as const;
 
-/** Records native event delivery and capture interception in CI traces without patching history. */
-async function observeHistory(page: Page) {
-    await page.addInitScript(() => {
-        const bubbleReached = new WeakMap<Event, boolean>();
-        const propagationStopped = new WeakSet<Event>();
-        const stopImmediate = Event.prototype.stopImmediatePropagation;
-        Event.prototype.stopImmediatePropagation = function () {
-            if (this.type === 'popstate') {
-                propagationStopped.add(this);
-                console.info('[editor-history]', JSON.stringify({
-                    phase: 'propagation-stopped', eventPhase: this.eventPhase,
-                    url: window.location.pathname + window.location.search + window.location.hash,
-                    stack: new Error().stack,
-                }));
-            }
-            stopImmediate.call(this);
-        };
-        window.navigation?.addEventListener('navigate', (event) => {
-            console.info('[editor-history]', JSON.stringify({
-                phase: 'navigate', navigationType: event.navigationType, canIntercept: event.canIntercept,
-                cancelable: event.cancelable, destination: event.destination.url, nativeIndex: event.destination.index,
-                apiVisible: typeof window.navigation !== 'undefined',
-            }));
-        });
-        let sequence = 0;
-        window.addEventListener('popstate', (event) => {
-            const destination = window.location.pathname + window.location.search + window.location.hash;
-            const state: unknown = event.state;
-            const eventNumber = ++sequence;
-            console.info('[editor-history]', JSON.stringify({
-                phase: 'received', sequence: eventNumber, destination, trusted: event.isTrusted,
-                eventPhase: event.eventPhase, targetIsWindow: event.target === window,
-                stateKind: state === null ? 'null' : typeof state,
-                nativeIndex: window.navigation?.currentEntry?.index ?? null,
-            }));
-            bubbleReached.set(event, false);
-            setTimeout(() => {
-                const editor = [...document.querySelectorAll('#report-name')]
-                    .find((element) => element instanceof HTMLElement && element.getClientRects().length > 0);
-                console.info('[editor-history]', JSON.stringify({
-                    phase: 'after-dispatch', sequence: eventNumber,
-                    destination,
-                    afterDispatch: window.location.pathname + window.location.search + window.location.hash,
-                    bubbleReached: bubbleReached.get(event),
-                    propagationStopped: propagationStopped.has(event),
-                    nextState: state !== null && typeof state === 'object' && '__NA' in state && state.__NA === true,
-                    editorVisible: editor instanceof HTMLElement && editor.getClientRects().length > 0,
-                    draftPresent: editor instanceof HTMLInputElement && editor.value.length > 0,
-                }));
-            });
-        }, true);
-        window.addEventListener('popstate', (event) => { bubbleReached.set(event, true); });
-    });
-}
-
 /** Waits for the list's deliberate URL canonicalization before capturing or traversing its entry. */
 async function expectDealsRoute(page: Page, query?: string) {
     await expect.poll(() => {
@@ -147,7 +92,6 @@ test('a cross-document docs history jump confirms leave and renders the destinat
 });
 
 test('a native skip-link entry followed by go(-2) keeps the list URL and rendered route synchronized', async ({ page }) => {
-    await observeHistory(page);
     await page.addInitScript(() => Object.defineProperty(window, 'navigation', { configurable: true, value: undefined }));
     await page.goto('/insights/reports');
     await page.locator('a[href="/insights/reports/new"]').first().click();
@@ -221,9 +165,11 @@ test('report Cancel from a direct link returns to reports without browser histor
 });
 
 test('Keep editing preserves a known Forward destination and its deal search', async ({ page }) => {
-    await observeHistory(page);
     await page.goto('/insights/reports');
     await page.locator('a[href="/insights/reports/new"]').first().click();
+    await expect(page).toHaveURL('/insights/reports/new');
+    const name = page.getByRole('textbox', { name: 'Name', exact: true });
+    await expect(name).toBeVisible();
     await page.locator('a[href="/records/deals"]:visible').first().click();
     await expectDealsRoute(page);
     const search = page.getByPlaceholder(message('en', 'deals', 'DealsBrowser.searchPlaceholder'), { exact: true });
@@ -233,7 +179,6 @@ test('Keep editing preserves a known Forward destination and its deal search', a
     expect(await page.evaluate(() => window.navigation?.currentEntry?.index)).toBeGreaterThanOrEqual(1);
     await page.goBack();
     await expect(page).toHaveURL('/insights/reports/new');
-    const name = page.getByRole('textbox', { name: 'Name', exact: true });
     await name.fill('Preserved Forward draft');
     await page.evaluate(() => window.history.forward());
     const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
@@ -293,12 +238,11 @@ test('Discard after removing a workflow inspection query reloads the saved workf
     await page.locator('a[href="/records/deals"]:visible').first().click();
     await expect(discard).toBeVisible();
     await discard.getByRole('button', { name: 'Discard changes', exact: true }).click();
-    await expect(page).toHaveURL('/records/deals');
+    await expectDealsRoute(page);
 });
 
 for (const navigationApi of [true, false]) {
 test(`sidebar and browser Back/Forward retain a report until discard is confirmed (Navigation API: ${navigationApi})`, async ({ page }) => {
-    await observeHistory(page);
     if (!navigationApi) {
         await page.addInitScript(() => Object.defineProperty(window, 'navigation', { configurable: true, value: undefined }));
     }
