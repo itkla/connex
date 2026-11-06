@@ -19,6 +19,7 @@ import {
 } from "@heroicons/react/24/outline";
 
 import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
+import { requestGuardedNavigation } from "@/app/hooks/useUnsavedChangesGuard";
 import {
     Dialog,
     DialogClose,
@@ -244,20 +245,22 @@ export default function SavedViewsBar({
         if (modified) writeSavedViewToUrl(pathname, null);
     }, [modified, pathname]);
 
-    const confirmSwitchWorkspace = async () => {
+    const confirmSwitchWorkspace = () => {
         if (!switchPrompt || switching) return;
         const target = switchPrompt.workspaceId;
         const targetSv = switchPrompt.sv;
-        try {
-            const switched = await runInWorkspace(target, async () => {
-                navigateAfterWorkspaceSelection(() => writeWorkspaceSavedViewToUrl(pathname, targetSv));
-            });
-            if (!switched) return;
-            setSwitchPrompt(null);
-            navigateAfterWorkspaceSelection(() => window.location.reload());
-        } catch (err) {
-            showApiError(err, "actionFailed");
-        }
+        requestGuardedNavigation(async () => {
+            try {
+                const switched = await runInWorkspace(target, async () => {
+                    navigateAfterWorkspaceSelection(() => writeWorkspaceSavedViewToUrl(pathname, targetSv));
+                });
+                if (!switched) return;
+                setSwitchPrompt(null);
+                navigateAfterWorkspaceSelection(() => window.location.reload());
+            } catch (err) {
+                showApiError(err, "actionFailed");
+            }
+        }, { onCancel: () => setSwitchPrompt(null) });
     };
     const declineSwitchWorkspace = () => {
         setSwitchPrompt(null);
