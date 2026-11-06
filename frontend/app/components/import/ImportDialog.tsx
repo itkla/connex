@@ -1,8 +1,8 @@
 'use client';
 
 import { createServerPickerSearch } from '@/lib/server-picker-search';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { useFormatter, useTranslations } from 'next-intl';
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useFormatter, useLocale, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpTrayIcon, CheckCircleIcon, DocumentTextIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { LoaderCircle } from 'lucide-react';
@@ -29,14 +29,17 @@ import {
     columnSamples,
     CsvEncodingError,
     CREATE_CUSTOM_FIELD,
+    defaultPersonNameOrder,
     IGNORE_COLUMN,
+    importFieldOptions,
     inferColumnType,
     parseCsv,
+    prepareImport,
     resolveColumnTarget,
-    STANDARD_FIELDS,
-    suggestField,
+    suggestColumnTargets,
     type InferredType,
     type ParsedCsv,
+    type PersonNameOrder,
 } from '@/app/lib/import';
 import type {
     DuplicateCandidate,
@@ -124,6 +127,7 @@ export type ImportDialogProps = {
  */
 export default function ImportDialog({ entity, open, onOpenChange, onImported, requestInit }: ImportDialogProps) {
     const t = useTranslations('importExport');
+    const locale = useLocale();
     const showApiError = useApiErrorToast();
     const reportFailure = (error: unknown, fallback: string) => {
         if (isWorkspaceUnavailableError(error)) showApiError(error);
@@ -141,6 +145,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     const [parsing, setParsing] = useState(false);
     const [dragActive, setDragActive] = useState(false);
     const [columns, setColumns] = useState<Record<string, ColumnTarget>>({});
+    const [nameOrder, setNameOrder] = useState<PersonNameOrder>(() => defaultPersonNameOrder([], locale));
     const [onDuplicate, setOnDuplicate] = useState<ImportDuplicateAction>('fill_empty');
     const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
     const [result, setResult] = useState<ImportResult | null>(null);
@@ -163,6 +168,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         setFileName('');
         setParseError(null);
         setColumns({});
+        setNameOrder(defaultPersonNameOrder([], locale));
         setOnDuplicate('fill_empty');
         setPreview(null);
         setResult(null);
@@ -203,20 +209,16 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                 return;
             }
             const initial: Record<string, ColumnTarget> = {};
-            const taken = new Set<string>();
+            const suggestions = suggestColumnTargets(result.headers, entity);
             for (const header of result.headers) {
-                let suggested = suggestField(header, entity);
-                if (suggested && suggested !== 'tags') {
-                    if (taken.has(suggested)) suggested = null;
-                    else taken.add(suggested);
-                }
                 initial[header] = {
-                    target: suggested ?? IGNORE_COLUMN,
+                    target: suggestions[header] ?? IGNORE_COLUMN,
                     customType: inferColumnType(columnSamples(result.rows, header)),
                 };
             }
             setParsed(result);
             setColumns(initial);
+            setNameOrder(defaultPersonNameOrder(result.headers, locale));
             setStep('map');
         } catch (error) {
             setParseError(t(error instanceof CsvEncodingError ? 'errorEncoding' : 'errorParse'));
@@ -225,21 +227,28 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         }
     }
 
-    function buildMapping(): ImportColumnMapping[] {
-        if (!parsed) return [];
-        const mapping: ImportColumnMapping[] = [];
-        for (const header of parsed.headers) {
-            const col = columns[header];
-            const target = resolveColumnTarget(col?.target, canCreateCustomField);
-            if (!col || target === IGNORE_COLUMN) continue;
-            if (target === CREATE_CUSTOM_FIELD) {
-                mapping.push({ column: header, createCustomField: true, customFieldType: col.customType, customFieldLabel: header });
-            } else {
-                mapping.push({ column: header, field: target });
+    const prepared = useMemo(() => {
+        function buildMapping(): ImportColumnMapping[] {
+            if (!parsed) return [];
+            const mapping: ImportColumnMapping[] = [];
+            for (const header of parsed.headers) {
+                const col = columns[header];
+                const target = resolveColumnTarget(col?.target, canCreateCustomField);
+                if (!col || target === IGNORE_COLUMN) continue;
+                if (target === CREATE_CUSTOM_FIELD) {
+                    mapping.push({ column: header, createCustomField: true, customFieldType: col.customType, customFieldLabel: header });
+                } else {
+                    mapping.push({ column: header, field: target });
+                }
             }
+            return mapping;
         }
-        return mapping;
-    }
+        return parsed ? prepareImport(parsed, entity, buildMapping(), nameOrder) : null;
+    }, [parsed, entity, columns, canCreateCustomField, nameOrder]);
+    const preparedCsv = useMemo(
+        () => parsed && prepared ? { ...parsed, rows: prepared.rows } : null,
+        [parsed, prepared],
+    );
 
     const mappedCount = useMemo(
         () =>
@@ -248,17 +257,14 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             ).length,
         [columns, canCreateCustomField],
     );
-    const hasName = useMemo(() => Object.values(columns).some((c) => c.target === 'name'), [columns]);
-    const nameColumn = useMemo(
-        () => Object.entries(columns).find(([, c]) => c.target === 'name')?.[0] ?? null,
-        [columns],
-    );
-    const currentReviewInputKey = parsed
+    const hasName = prepared?.nameColumn != null && !prepared.nameConflict;
+    const nameColumn = prepared?.nameColumn ?? null;
+    const currentReviewInputKey = prepared
         ? reviewInputKey(
             workspaceKey,
             entity,
-            parsed.rows,
-            buildMapping(),
+            prepared.rows,
+            prepared.mapping,
             onDuplicate,
             links,
         )
@@ -279,7 +285,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     }, [workspaceKey]);
 
     async function goToReview() {
-        if (!parsed || !currentReviewInputKey) return;
+        if (!prepared || !hasName || !currentReviewInputKey) return;
         const inputKey = currentReviewInputKey;
         const generation = previewGenerationRef.current + 1;
         previewGenerationRef.current = generation;
@@ -290,7 +296,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         try {
             const data = await previewImport(
                 entity,
-                { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links },
+                { rows: prepared.rows, mapping: prepared.mapping, onDuplicate, links },
                 scopedRequest.requestInit,
             );
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
@@ -314,7 +320,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     }
 
     async function runPreview() {
-        if (!parsed || !currentReviewInputKey) return;
+        if (!prepared || !hasName || !currentReviewInputKey) return;
         const inputKey = currentReviewInputKey;
         const generation = previewGenerationRef.current + 1;
         previewGenerationRef.current = generation;
@@ -325,7 +331,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         try {
             const data = await previewImport(
                 entity,
-                { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links },
+                { rows: prepared.rows, mapping: prepared.mapping, onDuplicate, links },
                 scopedRequest.requestInit,
             );
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
@@ -378,7 +384,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     }
 
     async function commit() {
-        if (!parsed
+        if (!prepared
+                || !hasName
                 || !currentReviewInputKey
                 || currentReviewInputKey !== reviewedInputKey
                 || reviewedProof === null) return;
@@ -387,8 +394,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             const data = await commitImport(
                 entity,
                 {
-                    rows: parsed.rows,
-                    mapping: buildMapping(),
+                    rows: prepared.rows,
+                    mapping: prepared.mapping,
                     onDuplicate,
                     links,
                     duplicateReviewProof: reviewedProof ?? undefined,
@@ -454,10 +461,15 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                             setColumns={setColumns}
                             mappedCount={mappedCount}
                             canCreateCustomField={canCreateCustomField}
+                            nameOrder={nameOrder}
+                            setNameOrder={setNameOrder}
+                            usesNameParts={prepared?.usesNameParts ?? false}
+                            nameConflict={prepared?.nameConflict ?? false}
+                            nameSamples={prepared && nameColumn ? columnSamples(prepared.rows, nameColumn, 3) : []}
                         />
                     )}
                     {step === 'review' && preview && (
-                        <ReviewStep preview={preview} stale={reviewStale} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={parsed} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit} />
+                        <ReviewStep preview={preview} stale={reviewStale} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={preparedCsv} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit} />
                     )}
                     {step === 'done' && result && <DoneStep result={result} entity={entity} parsed={parsed} />}
                     </motion.div>
@@ -588,6 +600,11 @@ function MapStep({
     setColumns,
     mappedCount,
     canCreateCustomField,
+    nameOrder,
+    setNameOrder,
+    usesNameParts,
+    nameConflict,
+    nameSamples,
 }: {
     parsed: ParsedCsv;
     entity: ImportEntity;
@@ -595,10 +612,16 @@ function MapStep({
     setColumns: (updater: (prev: Record<string, ColumnTarget>) => Record<string, ColumnTarget>) => void;
     mappedCount: number;
     canCreateCustomField: boolean;
+    nameOrder: PersonNameOrder;
+    setNameOrder: (order: PersonNameOrder) => void;
+    usesNameParts: boolean;
+    nameConflict: boolean;
+    nameSamples: string[];
 }) {
     const t = useTranslations('importExport');
+    const nameOrderId = useId();
     const fieldOptions = useMemo(
-        () => [...STANDARD_FIELDS[entity], 'tags'].map((key) => ({ key, label: t(`fields.${key}`) })),
+        () => importFieldOptions(entity).map((key) => ({ key, label: t(`fields.${key}`) })),
         [entity, t],
     );
 
@@ -612,7 +635,29 @@ function MapStep({
 
     return (
         <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">{t('mapHint', { mapped: mappedCount, total: parsed.headers.length })}</p>
+            <p className="text-sm text-muted-foreground">{t(entity === 'persons' ? 'mapPersonHint' : 'mapHint', { mapped: mappedCount, total: parsed.headers.length })}</p>
+            <p className="text-xs text-muted-foreground">{t('mappingSuggestionHint')}</p>
+            {usesNameParts && (
+                <div className="space-y-2 rounded-lg border border-border p-3">
+                    <p className="text-sm font-medium" id={nameOrderId}>{t('nameOrder')}</p>
+                    <Select value={nameOrder} onValueChange={(value) => {
+                        if (value === 'given_family' || value === 'family_given') setNameOrder(value);
+                    }}>
+                        <SelectTrigger aria-labelledby={nameOrderId} className="w-full sm:w-64">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="given_family">{t('nameOrderGivenFamily')}</SelectItem>
+                            <SelectItem value="family_given">{t('nameOrderFamilyGiven')}</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    {!nameConflict && nameSamples.length > 0 && (
+                        <p className="break-words text-sm" role="status">{t('namePreview', { names: nameSamples.join(', ') })}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">{t('nameCompositionHint')}</p>
+                </div>
+            )}
+            {nameConflict && <p className="text-sm text-destructive" role="alert">{t('nameMappingConflict')}</p>}
             {entity === 'deals' && <p className="text-xs text-muted-foreground">{t('dealDateHint')}</p>}
             <div className="space-y-2">
                 {parsed.headers.map((header) => {
@@ -628,7 +673,7 @@ function MapStep({
                             <span className="text-muted-foreground" aria-hidden>→</span>
                             <div className="flex items-center gap-2">
                                 <Select value={target} onValueChange={(v) => setTarget(header, v)}>
-                                    <SelectTrigger size="sm" className="w-full">
+                                    <SelectTrigger size="sm" className="w-full" aria-label={t('mapColumn', { column: header })}>
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
