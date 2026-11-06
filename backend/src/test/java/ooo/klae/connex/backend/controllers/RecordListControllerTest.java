@@ -111,6 +111,28 @@ class RecordListControllerTest {
     }
 
     @Test
+    void personReferencesValidateAndDeduplicateBeforeReading() {
+        PersonController controller = personController();
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(null));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(List.of()));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(List.of(0)));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(List.of(-1)));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(java.util.Arrays.asList(1, null)));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(java.util.Collections.nCopies(101, 1)));
+        verifyNoInteractions(personService);
+
+        Person person = new Person();
+        person.setId(7);
+        person.setName("Visible contact");
+        when(personService.getPersonReferences(List.of(7, 8))).thenReturn(List.of(person));
+        var response = controller.getPersonReferences(List.of(7, 8, 7));
+        assertEquals(1, response.size());
+        assertEquals(7, response.getFirst().getId());
+        verify(personService).getPersonReferences(List.of(7, 8));
+        verify(personService, never()).getPersonById(anyInt());
+    }
+
+    @Test
     void personsPageClampsSize() {
         PersonController controller = personController();
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);

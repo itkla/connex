@@ -91,7 +91,7 @@ class ActivityListPagingIntegrationTest {
 
     @Test
     void listsAndMemberOptionsRequireAuthenticationAndWorkspaceMembership() throws Exception {
-        for (String path : List.of("/api/activities/page", "/api/tasks/page", "/api/users/options")) {
+        for (String path : List.of("/api/activities/page", "/api/tasks/page", "/api/users/options", "/api/persons/references")) {
             mvc.perform(get(path)).andExpect(status().isUnauthorized());
             mvc.perform(get(path).session(login()).header("X-Workspace-Id", Integer.MAX_VALUE))
                 .andExpect(status().isForbidden());
@@ -293,6 +293,53 @@ class ActivityListPagingIntegrationTest {
     }
 
     @Test
+    void contactReferencesOmitHiddenArchivedAndOtherOrganizationIdsAndMaskHiddenEmployers() throws Exception {
+        Person hidden = person(sibling, company(sibling));
+        Person shared = person(sibling, company(sibling));
+        Person archived = person(workspace, company);
+        Organization alienOrg = new Organization();
+        alienOrg.setName("Reference organization " + unique());
+        alienOrg.setSlug("reference-org-" + unique());
+        organizationMapper.insert(alienOrg);
+        Workspace alienWorkspace = workspace(alienOrg);
+        Person alien = person(alienWorkspace, company(alienWorkspace));
+        for (Person contact : List.of(shared, alien)) {
+            jdbc.update("INSERT INTO person_share(person_id, workspace_id, granted_by) VALUES (?, ?, ?)",
+                contact.getId(), workspace.getId(), actor.getId());
+        }
+        jdbc.update("UPDATE person SET archived_at = CURRENT_TIMESTAMP WHERE id = ?", archived.getId());
+        sqlSession.clearCache();
+
+        mvc.perform(get("/api/persons/references").session(login()).header("X-Workspace-Id", workspace.getId())
+                .param("ids", List.of(person, hidden, shared, archived, alien).stream()
+                    .map(contact -> String.valueOf(contact.getId())).toArray(String[]::new)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2))
+            .andExpect(jsonPath("$[?(@.id == " + person.getId() + ")].companyId").value(List.of(company.getId())))
+            .andExpect(jsonPath("$[?(@.id == " + shared.getId() + ")].id").value(List.of(shared.getId())))
+            .andExpect(jsonPath("$[?(@.id == " + shared.getId() + ")].companyId").isEmpty());
+        mvc.perform(get("/api/persons/references").session(login()).header("X-Workspace-Id", sibling.getId())
+                .param("ids", String.valueOf(person.getId())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void contactReferenceIdsAreRequiredPositiveAndCappedBeforeDeduplication() throws Exception {
+        var session = login();
+        mvc.perform(get("/api/persons/references").session(session).header("X-Workspace-Id", workspace.getId()))
+            .andExpect(status().isBadRequest());
+        for (String invalid : List.of("", "0", "-1", "invalid")) {
+            mvc.perform(get("/api/persons/references").session(session).header("X-Workspace-Id", workspace.getId()).param("ids", invalid))
+                .andExpect(status().isBadRequest());
+        }
+        mvc.perform(get("/api/persons/references").session(session).header("X-Workspace-Id", workspace.getId())
+                .param("ids", java.util.Collections.nCopies(101, String.valueOf(person.getId())).toArray(String[]::new)))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/persons/references").session(session).header("X-Workspace-Id", workspace.getId())
+                .param("ids", java.util.Collections.nCopies(100, String.valueOf(person.getId())).toArray(String[]::new)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
     void twentyThousandActivitiesReturnOnlyTheRequestedPage() throws Exception {
         jdbc.batchUpdate("INSERT INTO activity(workspace_id, created_by_id, person_id, type, subject, timestamp) VALUES (?, ?, ?, 'Call', 'Paging benchmark', '2026-01-01 12:00:00')",
             IntStream.range(0, 20_000).mapToObj(i -> new Object[] {workspace.getId(), actor.getId(), person.getId()}).toList());
@@ -302,6 +349,17 @@ class ActivityListPagingIntegrationTest {
             .andExpect(jsonPath("$.items.length()").value(25)).andReturn().getResponse();
         assertTrue(response.getContentAsByteArray().length <= 32_768,
             "The 25-row fixture response must fit within 32 KiB");
+        task(workspace, person, "Historical task", true, "2000-01-01");
+        var reference = mvc.perform(get("/api/persons/references").session(session).header("X-Workspace-Id", workspace.getId())
+                .param("ids", String.valueOf(person.getId())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].companyId").value(company.getId()))
+            .andExpect(jsonPath("$[0].activities").doesNotExist()).andExpect(jsonPath("$[0].activityIds").doesNotExist())
+            .andExpect(jsonPath("$[0].tasks").doesNotExist()).andExpect(jsonPath("$[0].taskIds").doesNotExist())
+            .andExpect(jsonPath("$[0].deals").doesNotExist()).andExpect(jsonPath("$[0].dealIds").doesNotExist())
+            .andReturn().getResponse();
+        assertTrue(reference.getContentAsByteArray().length <= 4096,
+            "Contact hydration must remain below 4 KiB despite the 20,000 linked activities");
         mvc.perform(get("/api/activities/page").session(session).header("X-Workspace-Id", workspace.getId()).param("size", "500"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(100));
     }

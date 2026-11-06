@@ -345,6 +345,13 @@ public class PersonService {
             workspaceService.getCurrentWorkspaceId(), () -> getPersonByIdWithinVisibilityScope(id));
     }
 
+    /** Reads only visible contact fields and masked employers for a bounded picker batch. */
+    public List<Person> getPersonReferences(List<Integer> ids) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return personMapper.getByIds(workspaceId, scope.workspaceIdsJson(), ids);
+    }
+
     private Person getPersonByIdWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);

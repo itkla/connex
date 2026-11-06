@@ -5,7 +5,7 @@ import { waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NowProvider } from '@/app/hooks/useNow';
-import { getTasksPage, getActivitiesPage, getTaskById } from '@/app/lib/api';
+import { getTasksPage, getActivitiesPage, getTaskById, getContactReferences, getContactById } from '@/app/lib/api';
 import type { Activity, Contact, Task, TasksPageParams } from '@/app/lib/types';
 import activityMessages from '@/messages/en/activity.json';
 import commonMessages from '@/messages/en/common.json';
@@ -16,6 +16,12 @@ const fixture = vi.hoisted<{ tasks: Task[]; activities: Activity[]; contact: Con
 vi.mock('@/app/lib/api', async (original) => ({
     ...await original<typeof import('@/app/lib/api')>(),
     getTaskById: vi.fn(),
+    getContactById: vi.fn(async () => {
+        if (!fixture.contact) throw new Error('Unexpected contact detail request');
+        return fixture.contact;
+    }),
+    getContactsPage: vi.fn(async () => ({ items: [], total: 0 })),
+    getContactReferences: vi.fn(async (ids: number[]) => fixture.contact && ids.includes(fixture.contact.id) ? [fixture.contact] : []),
     getActivitiesPage: vi.fn(async () => ({ items: fixture.activities, total: fixture.activities.length })),
     getTasksPage: vi.fn(async (params: TasksPageParams) => {
         const items = fixture.tasks.filter((task) => params.queue === 'unassigned' ? !task.assignedToId : params.queue === 'overdue' ? (task.dueDate ?? '') < '2026-11-05'
@@ -23,10 +29,10 @@ vi.mock('@/app/lib/api', async (original) => ({
         return { items, total: items.length };
     }),
 }));
-vi.mock('@/app/hooks/useRecordTargetSearch', () => {
+vi.mock('@/app/hooks/useRecordTargetSearch', async (original) => {
     const result = { serverSearch: { query: '', pending: false, accepts: () => true }, onInputValueChange: vi.fn() };
     return {
-        useContactTargetSearch: (_enabled: boolean, ids: Array<number | null>) => ({ ...result, contacts: fixture.contact && ids.includes(fixture.contact.id) ? [fixture.contact] : [] }),
+        ...await original<typeof import('@/app/hooks/useRecordTargetSearch')>(),
         useDealTargetSearch: () => ({ ...result, deals: [] }),
         useMemberTargetSearch: () => ({ ...result, users: [] }),
     };
@@ -93,6 +99,7 @@ beforeEach(() => {
     navigation.search = ''; navigation.storageReady = true;
     vi.mocked(getTasksPage).mockClear(); vi.mocked(getActivitiesPage).mockClear();
     vi.mocked(getTaskById).mockReset();
+    vi.mocked(getContactReferences).mockClear(); vi.mocked(getContactById).mockClear();
     window.localStorage.clear();
 });
 afterEach(() => window.localStorage.clear());
@@ -130,6 +137,8 @@ describe('paged list mutations and hydration', () => {
             await act(async () => root.render(page('task')));
             await waitFor(() => expect(within(container).getByLabelText('Editor company').textContent).toBe('42'));
             expect(fixture.tasks).toEqual([]);
+            expect(getContactReferences).toHaveBeenCalledWith([777], expect.objectContaining({ signal: expect.any(AbortSignal) }));
+            expect(getContactById).not.toHaveBeenCalled();
         } finally { await act(async () => root.unmount()); container.remove(); }
     });
 

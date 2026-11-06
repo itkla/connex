@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ComboboxRootChangeEventDetails } from '@base-ui/react/combobox';
 
 import {
-    getContactById,
+    getContactReferences,
     getContactsPage,
     getDealById,
     getDealsPage,
@@ -46,7 +46,7 @@ function useRecordTargetSearch<T extends RecordTarget>(
     ids: Array<number | null | undefined>,
     seeds: T[],
     loadPage: (query: string, signal: AbortSignal) => Promise<Page<T>>,
-    loadById: (id: number, signal: AbortSignal) => Promise<T>,
+    loadByIds: (ids: number[], signal: AbortSignal) => Promise<T[]>,
 ) {
     const [query, setQuery] = useState('');
     const [targets, setTargets] = useState<T[]>(seeds);
@@ -65,19 +65,11 @@ function useRecordTargetSearch<T extends RecordTarget>(
         if (!enabled) return;
         const controller = new AbortController();
         const timer = window.setTimeout(() => {
-            const hydrated: T[] = [];
             Promise.all([
                 loadPage(normalizedQuery, controller.signal),
-                Promise.all(stableIds.map((id) =>
-                    loadById(id, controller.signal).then(
-                        (target) => {
-                            hydrated.push(target);
-                        },
-                        () => undefined,
-                    ),
-                )),
+                loadByIds(stableIds, controller.signal),
             ])
-                .then(([page]) => {
+                .then(([page, hydrated]) => {
                     if (controller.signal.aborted) return;
                     setResult({ query: normalizedQuery, idsKey, items: page.items, error: null });
                     setTargets((current) => {
@@ -98,7 +90,7 @@ function useRecordTargetSearch<T extends RecordTarget>(
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [enabled, normalizedQuery, idsKey, stableIds, stableIdSet, seeds, loadPage, loadById]);
+    }, [enabled, normalizedQuery, idsKey, stableIds, stableIdSet, seeds, loadPage, loadByIds]);
 
     return {
         query,
@@ -115,14 +107,18 @@ function useRecordTargetSearch<T extends RecordTarget>(
 const loadContactsPage = (query: string, signal: AbortSignal) =>
     getContactsPage({ q: query || undefined, size: SEARCH_SIZE }, { signal });
 
-const loadContactById = (id: number, signal: AbortSignal) =>
-    getContactById(id, { signal });
+const loadContactsByIds = (ids: number[], signal: AbortSignal) =>
+    getContactReferences(ids, { signal });
 
 const loadDealsPage = (query: string, signal: AbortSignal) =>
     getDealsPage({ q: query || undefined, size: SEARCH_SIZE }, { signal });
 
-const loadDealById = (id: number, signal: AbortSignal) =>
-    getDealById(id, { signal });
+async function loadIndividually<T>(ids: number[], signal: AbortSignal, load: (id: number, init: RequestInit) => Promise<T>) {
+    const targets = await Promise.all(ids.map((id) => load(id, { signal }).catch(() => null)));
+    return targets.filter((target) => target !== null);
+}
+
+const loadDealsByIds = (ids: number[], signal: AbortSignal) => loadIndividually(ids, signal, getDealById);
 
 /** Provides open-only, debounced, server-paged contact targets while retaining selected records. */
 export function useContactTargetSearch(
@@ -135,7 +131,7 @@ export function useContactTargetSearch(
         ids,
         seeds,
         loadContactsPage,
-        loadContactById,
+        loadContactsByIds,
     );
     return { ...result, contacts: result.targets };
 }
@@ -151,7 +147,7 @@ export function useDealTargetSearch(
         ids,
         seeds,
         loadDealsPage,
-        loadDealById,
+        loadDealsByIds,
     );
     return { ...result, deals: result.targets };
 }
@@ -160,7 +156,7 @@ const loadMembersPage = async (query: string, signal: AbortSignal) => {
     const items = await getUserOptions(query, { signal });
     return { items, total: items.length };
 };
-const loadMemberById = (id: number, signal: AbortSignal) => getUserById(id, { signal });
+const loadMembersByIds = (ids: number[], signal: AbortSignal) => loadIndividually(ids, signal, getUserById);
 
 /** Provides bounded active-member search while retaining the selected assignees or creators. */
 export function useMemberTargetSearch(
@@ -168,6 +164,6 @@ export function useMemberTargetSearch(
     ids: Array<number | null | undefined> = EMPTY_IDS,
     seeds: User[] = EMPTY_USERS,
 ) {
-    const result = useRecordTargetSearch(enabled, ids, seeds, loadMembersPage, loadMemberById);
+    const result = useRecordTargetSearch(enabled, ids, seeds, loadMembersPage, loadMembersByIds);
     return { ...result, users: result.targets };
 }
