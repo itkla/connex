@@ -1,5 +1,6 @@
 {
   "importExport": {
+    "dealCurrencyDefault": "New deals with no currency use {currency}, the current workspace default. Updates keep the existing currency unless a currency is provided.",
     "title": {
       "persons": "Import contacts",
       "companies": "Import companies",

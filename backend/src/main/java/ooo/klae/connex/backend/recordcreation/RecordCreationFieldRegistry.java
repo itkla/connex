@@ -231,8 +231,6 @@ public class RecordCreationFieldRegistry {
                 RecordCreationDefaultKind.current_user, null, null, null, null, null, null);
             case "value" -> new RecordCreationDefaultSpecDto(
                 RecordCreationDefaultKind.literal_number, null, BigDecimal.ZERO, null, null, null, null);
-            case "currency" -> new RecordCreationDefaultSpecDto(
-                RecordCreationDefaultKind.literal_string, "USD", null, null, null, null, null);
             default -> null;
         };
         return new RecordCreationTemplateFieldDto(key, false, null, null, defaultSpec);

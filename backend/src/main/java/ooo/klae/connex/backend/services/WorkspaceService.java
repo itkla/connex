@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
@@ -72,6 +73,7 @@ public class WorkspaceService {
             + "assign the built-in owner role to at least one owner first";
 
     private final WorkspaceMapper workspaceMapper;
+    private final WorkspaceCurrencyControlAccess workspaceCurrencyControlAccess;
     private final UserMapper userMapper;
     private final OrganizationMapper organizationMapper;
     private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
@@ -326,6 +328,36 @@ public class WorkspaceService {
         if (updated == null) {
             throw new ForbiddenException("Requires the WORKSPACE_SETTINGS permission in this workspace");
         }
+        return workspaceIdentity(updated);
+    }
+
+    /** Returns the saved creation default, or the historical USD fallback without inferring currencies. */
+    public String getCurrentDefaultCurrency() {
+        return workspaceCurrencyControlAccess.getDefaultCurrency(getCurrentWorkspaceId());
+    }
+
+    /** Saves an explicit creation default under the same locked authority as workspace identity edits. */
+    @Transactional
+    public WorkspaceIdentityDto updateDefaultCurrency(
+            int workspaceId, int actorId, String currency, long expectedIdentityVersion) {
+        requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        String normalized = CurrencyCodes.required(currency);
+        Workspace before = lockWorkspaceIdentityMutation(workspaceId, actorId);
+        if (before.getIdentityVersion() != expectedIdentityVersion) {
+            throw new ConflictException("Workspace settings changed; refresh and retry");
+        }
+        if (!Objects.equals(before.getDefaultCurrency(), normalized)) {
+            if (workspaceMapper.updateDefaultCurrency(workspaceId, normalized) == 0) {
+                throw workspaceSettingsForbidden();
+            }
+            auditService.recordScoped(
+                "workspace.settings.update", "workspace", workspaceId, workspaceId, before.getOrgId(),
+                before.getName(), "Updated workspace default currency",
+                auditService.singleChange("defaultCurrency", before.getDefaultCurrency(), normalized));
+        }
+        Workspace updated = workspaceMapper.getActiveById(workspaceId);
+        if (updated == null) throw workspaceSettingsForbidden();
         return workspaceIdentity(updated);
     }
 
@@ -1285,6 +1317,7 @@ public class WorkspaceService {
             workspace.getName(),
             workspace.getSlug(),
             workspace.getTimezone(),
+            workspace.getDefaultCurrency(),
             workspace.getIdentityVersion(),
             workspace.getUpdatedAt());
     }

@@ -18,6 +18,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -372,6 +375,25 @@ class RecordCreationTemplateValidatorTest {
             names(),
             null,
             definition(field("value", false, number(value))));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"usd,USD", "' kwd ',KWD", "CLF,CLF"})
+    void currencyDefaultsShareMonetaryValidationAndNormalization(String input, String expected) {
+        var spec = new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_string, input, null, null, null, null, null);
+        var result = validator.validateAndCanonicalize(RecordCreationRecordType.deal, names(), null,
+            definition(field("currency", false, spec)));
+        assertEquals(expected, result.definition().groups().getFirst().fields().getFirst().defaultSpec().stringValue());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"YEN", "XXX", "XTS", "XAU"})
+    void nonmonetaryCurrencyDefaultsAreRefused(String currency) {
+        var spec = new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_string, currency, null, null, null, null, null);
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validator.validateAndCanonicalize(
+            RecordCreationRecordType.deal, names(), null, definition(field("currency", false, spec))));
     }
 
     private void validate(RecordCreationTemplateDefinitionDto definition) {

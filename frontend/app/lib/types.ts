@@ -229,6 +229,7 @@ export type ImportRowAnalysis = {
 export type ImportProblem = { code: string; field?: string | null };
 
 export type ImportPreviewResult = {
+    defaultCurrency?: string;
     total: number;
     toCreate: number;
     toUpdate: number;
@@ -4706,6 +4707,7 @@ export type WorkspaceRole = "owner" | "admin" | "member";
 export type OrgRole = "owner" | "admin";
 
 export type Workspace = {
+    defaultCurrency?: string | null;
     id: number;
     name: string;
     slug: string;
@@ -4719,6 +4721,7 @@ export type Workspace = {
 };
 
 export type WorkspaceIdentity = {
+    defaultCurrency?: string | null;
     id: number;
     orgId: number;
     name: string;

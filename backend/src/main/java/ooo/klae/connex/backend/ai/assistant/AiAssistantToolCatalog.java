@@ -557,7 +557,7 @@ public class AiAssistantToolCatalog {
                 string("name", true, 1, 255, Set.of()), string("title", false, 1, 128, Set.of())));
         add(tools, confirm(Toolset.WRITE_CREATE, "create_deal", handle(),
                 string("name", true, 1, 255, Set.of()), string("stage", true, 1, 128, Set.of()),
-                string("value", true, 1, 16, Set.of()), string("currency", true, 3, 3, Set.of()),
+                string("value", true, 1, 16, Set.of()), string("currency", false, 3, 8, Set.of()),
                 string("expected_close_date", false, 10, 10, Set.of())));
         add(tools, confirm(Toolset.WRITE_CREATE, "create_company",
                 string("name", true, 1, 255, Set.of()), string("website", false, 1, 255, Set.of()),

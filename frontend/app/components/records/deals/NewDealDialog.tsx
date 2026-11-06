@@ -27,6 +27,7 @@ import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import DealPipelineSetup from '@/app/components/records/deals/DealPipelineSetup';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError } from '@/app/lib/toast';
 import {
@@ -200,6 +201,7 @@ function NewDealFields({
     pipelineSetup,
 }: NewDealFieldsProps) {
     const t = useTranslations('DealsNewDialog');
+    const { activeWorkspace } = useWorkspace();
     const selectedPipeline = pipelines.find((pipeline) => pipeline.id === payload.pipeline) ?? null;
     const selectedCompany = companySearch.companies.find((company) => company.id === payload.company) ?? null;
     const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
@@ -287,8 +289,13 @@ function NewDealFields({
                             currency: event.target.value.toUpperCase(),
                         }))}
                         className={cn(fieldInputClass, 'px-3')}
-                        placeholder="USD"
+                        placeholder={workspaceDefaultCurrency(activeWorkspace)}
                     />
+                    <p className="text-sm text-muted-foreground">
+                        {t(activeWorkspace?.defaultCurrency ? 'workspaceCurrencySaved' : 'workspaceCurrencyFallback', {
+                            currency: workspaceDefaultCurrency(activeWorkspace),
+                        })}
+                    </p>
                 </div>
             </div>
 

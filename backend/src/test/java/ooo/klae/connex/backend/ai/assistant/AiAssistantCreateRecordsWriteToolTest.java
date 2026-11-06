@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.clearInvocations;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -22,6 +23,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
@@ -216,6 +218,98 @@ class AiAssistantCreateRecordsWriteToolTest {
         verifyNoInteractions(presetService);
     }
 
+    @ParameterizedTest
+    @CsvSource({"EUR,EUR", "GBP,GBP", "' kwd ',KWD", "' clf ',CLF"})
+    void omittedCurrencyIsPinnedShownAndAppliedFromTheSameTemplateSnapshot(String defaultCurrency, String currency) {
+        CreateDeal request = new CreateDeal("r1", "Renewal", "Qualified", "1250.50", null, null);
+        when(pipelineService.getAllStages()).thenReturn(List.of(stage(7, "Qualified")));
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal, field("currency", true, defaultCurrency)));
+        assertDoesNotThrow(() -> dealTool.validateFor("company", objectMapper.valueToTree(request)));
+
+        Map<String, Object> pinned = dealTool.pin(COMPANY, request);
+
+        assertEquals(currency, pinned.get("currency"));
+        Diff currencyDiff = dealTool.diffs(review(request, List.of(stage(7, "Qualified")), 7, pinned))
+                .stream().filter(diff -> diff.field().equals("currency")).findFirst().orElseThrow();
+        assertEquals(currency, currencyDiff.proposedValue());
+        assertEquals(DiffState.CHANGED, currencyDiff.state());
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal, field("currency", true, "JPY")));
+        when(pipelineService.getStageById(7)).thenReturn(stage(7, "Qualified"));
+        Deal created = new Deal();
+        created.setId(64);
+        created.setStageId(7);
+        created.setCurrency(currency);
+        when(creationService.createDeal(any(), eq("Qualified"))).thenReturn(created);
+        clearInvocations(presetService);
+
+        dealTool.apply(execution(request, new Resolution("stage", 7, "Qualified"), pinned));
+
+        ArgumentCaptor<GuidedDealCreateRequestDto> captured = ArgumentCaptor.forClass(GuidedDealCreateRequestDto.class);
+        verify(creationService).createDeal(captured.capture(), eq("Qualified"));
+        assertEquals(currency, captured.getValue().record().currency());
+        verifyNoInteractions(presetService);
+    }
+
+    @Test
+    void omittedCurrencyWithoutAReviewedPinCannotCreate() {
+        CreateDeal request = new CreateDeal("r1", "Renewal", "Qualified", "1250.50", null, null);
+        when(pipelineService.getStageById(7)).thenReturn(stage(7, "Qualified"));
+
+        assertThrows(ConflictException.class,
+                () -> dealTool.apply(execution(request, new Resolution("stage", 7, "Qualified"), pin())));
+
+        Diff currency = dealTool.diffs(review(request, List.of(stage(7, "Qualified")), 7, pin()))
+                .stream().filter(diff -> diff.field().equals("currency")).findFirst().orElseThrow();
+        assertEquals(DiffState.UNRESOLVED, currency.state());
+        verifyNoInteractions(creationService);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"usd,USD", "' kwd ',KWD", "' clf ',CLF"})
+    void explicitCurrencyUsesSharedNormalizationForPinReviewAndApply(String input, String expected) {
+        CreateDeal request = new CreateDeal("r1", "Renewal", "Qualified", "1250.50", input, null);
+        when(pipelineService.getAllStages()).thenReturn(List.of(stage(7, "Qualified")));
+        when(pipelineService.getStageById(7)).thenReturn(stage(7, "Qualified"));
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal, field("currency", true, "EUR")));
+        assertDoesNotThrow(() -> dealTool.validateFor("company", objectMapper.valueToTree(request)));
+
+        Map<String, Object> pinned = dealTool.pin(COMPANY, request);
+
+        assertEquals(expected, pinned.get("currency"));
+        Diff currency = dealTool.diffs(review(request, List.of(stage(7, "Qualified")), 7, pinned))
+                .stream().filter(diff -> diff.field().equals("currency")).findFirst().orElseThrow();
+        assertEquals(expected, currency.proposedValue());
+        assertEquals(DiffState.CHANGED, currency.state());
+        Deal created = new Deal();
+        when(creationService.createDeal(any(), eq("Qualified"))).thenReturn(created);
+        dealTool.apply(execution(request, new Resolution("stage", 7, "Qualified"), pinned));
+        ArgumentCaptor<GuidedDealCreateRequestDto> captured = ArgumentCaptor.forClass(GuidedDealCreateRequestDto.class);
+        verify(creationService).createDeal(captured.capture(), eq("Qualified"));
+        assertEquals(expected, captured.getValue().record().currency());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"YEN", "XXX", "XTS", "XAU"})
+    void nonmonetaryTemplateAndStoredPinsCannotCreate(String currency) {
+        CreateDeal request = new CreateDeal("r1", "Renewal", "Qualified", "1250.50", null, null);
+        when(pipelineService.getAllStages()).thenReturn(List.of(stage(7, "Qualified")));
+        when(pipelineService.getStageById(7)).thenReturn(stage(7, "Qualified"));
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal, field("currency", true, currency)));
+        assertThrows(AiAssistantLoopException.class, () -> dealTool.pin(COMPANY, request));
+        Map<String, Object> pinned = new java.util.LinkedHashMap<>(pin());
+        pinned.put("currency", currency);
+        assertThrows(ConflictException.class, () -> dealTool.apply(
+                execution(request, new Resolution("stage", 7, "Qualified"), pinned)));
+        Diff diff = dealTool.diffs(review(request, List.of(stage(7, "Qualified")), 7, pinned))
+                .stream().filter(row -> row.field().equals("currency")).findFirst().orElseThrow();
+        assertEquals(DiffState.UNRESOLVED, diff.state());
+        verifyNoInteractions(creationService);
+    }
+
     @Test
     void renamedStageRefusesBeforeGuidedCreateAndDuplicateNamesNeverResolve() {
         when(pipelineService.getStageById(7)).thenReturn(stage(7, "Renamed"));
@@ -306,8 +400,10 @@ class AiAssistantCreateRecordsWriteToolTest {
         }
         assertThrows(AiAssistantLoopException.class, () -> dealTool.validateFor("person",
                 objectMapper.valueToTree(DEAL)));
-        assertThrows(AiAssistantLoopException.class, () -> dealTool.validateFor("company",
-                objectMapper.valueToTree(new CreateDeal("r1", "Deal", "Qualified", "1", "usd", null))));
+        for (String currency : List.of("YEN", "XXX", "XTS", "XAU", "JP1", "")) {
+            assertThrows(AiAssistantLoopException.class, () -> dealTool.validateFor("company",
+                    objectMapper.valueToTree(new CreateDeal("r1", "Deal", "Qualified", "1", currency, null))));
+        }
         verifyNoInteractions(creationService, presetService, pipelineService);
     }
 

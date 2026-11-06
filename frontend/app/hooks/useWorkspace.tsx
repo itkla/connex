@@ -122,6 +122,7 @@ function sameWorkspaceIdentity(
         && left.name === right.name
         && left.slug === right.slug
         && left.timezone === right.timezone
+        && left.defaultCurrency === right.defaultCurrency
         && left.identityVersion === right.identityVersion;
 }
 

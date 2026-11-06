@@ -29,10 +29,12 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedPersonCreateRequestDto;
+import ooo.klae.connex.backend.dto.recordcreation.GuidedDealCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.LocalizedTextDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationPresetCatalogDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationFieldDto;
@@ -248,6 +250,46 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
             () -> propose(service, "create_deal", DEAL, "company", 31));
 
         verifyNoInteractions(creationService);
+    }
+
+    @Test
+    void omittedDealCurrencyIsPinnedAtPreparationAndSurvivesReplayAndApproval() throws Exception {
+        stubDeal();
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 31))
+                .thenReturn(preset(RecordCreationRecordType.deal, defaultField("currency", "EUR")));
+        String arguments = """
+                {"handle":"r1","name":"New opportunity","stage":"Proposal","value":"1250.50"}
+                """;
+        AiAssistantWriteToolService service = service();
+
+        AiAssistantPreparedWrite prepared = propose(service, "create_deal", arguments, "company", 31);
+
+        JsonNode stored = objectMapper.readTree(prepared.argumentsJson());
+        assertEquals("EUR", stored.path("pinned").path("currency").asString());
+        assertTrue(stored.path("request").path("currency").isMissingNode()
+                || stored.path("request").path("currency").isNull());
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 31))
+                .thenReturn(preset(RecordCreationRecordType.deal, defaultField("currency", "GBP")));
+        clearInvocations(presetService, duplicatePreflightService);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("company", 31);
+        var replayed = service.prepareReplay("create_deal", objectMapper.readTree(arguments), resources,
+                TURN.restrictionEpoch(), prepared.argumentsJson());
+        assertEquals(stored, objectMapper.readTree(replayed.argumentsJson()));
+        Deal created = new Deal();
+        created.setId(75);
+        created.setName("New opportunity");
+        created.setStageId(6);
+        created.setCurrency("EUR");
+        when(pipelineService.getStageById(6)).thenReturn(stage(6, "Proposal"));
+        when(creationService.createDeal(any(), org.mockito.ArgumentMatchers.eq("Proposal"))).thenReturn(created);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), TOOL_CALL_ID).status());
+
+        ArgumentCaptor<GuidedDealCreateRequestDto> captured = ArgumentCaptor.forClass(GuidedDealCreateRequestDto.class);
+        verify(creationService).createDeal(captured.capture(), org.mockito.ArgumentMatchers.eq("Proposal"));
+        assertEquals("EUR", captured.getValue().record().currency());
+        verifyNoInteractions(presetService, duplicatePreflightService);
     }
 
     @Test

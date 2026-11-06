@@ -104,6 +104,9 @@ public interface WorkspaceMapper {
         @Param("workspaceId") int workspaceId,
         @Param("name") String name,
         @Param("timezone") String timezone);
+    int updateDefaultCurrency(
+        @Param("workspaceId") int workspaceId,
+        @Param("defaultCurrency") String defaultCurrency);
     Integer getOrgId(int workspaceId);
     List<Integer> findWorkspaceIds();
     List<Integer> findWorkspaceIdsPage(

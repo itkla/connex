@@ -19,10 +19,13 @@ New deal and approval-policy currencies use the shared `CurrencyCodes` ISO 4217 
 New values are trimmed and uppercased with `Locale.ROOT`; no-currency, testing and nonmonetary
 codes are refused. Create-request validation uses `ValidCurrency.OnCreate`; update requests defer
 currency admission to the workspace-scoped service, which compares against the persisted record.
-Deal creation defaults an omitted, null or blank currency to the schema's `USD` default;
+Deal creation defaults an omitted, null or blank currency to the explicit workspace setting, or
+the explained historical `USD` fallback when no setting has been saved;
 explicit nonblank input must be ISO-valid. Whole-record edits still require a supplied currency,
 and a blank analytics filter is refused rather than defaulted or dropped. Guided creation applies
-its resolved template currency first, then uses the same create-only default if still absent.
+its resolved template currency first, then uses the same workspace default if still absent.
+Workspace settings, template currency defaults and assistant creation share this validator and
+normalization. The picker is a curated shortlist; supported monetary codes outside it remain valid.
 Normalized equality means trimmed, case-insensitive equality, without aliases or FX. An unchanged
 stored currency, including `X-LOCAL`, `US$`, lowercase or padded ISO codes, retains its exact stored
 spelling. Newly entered values still require ISO validation. Line-item edits use the same normalized
@@ -108,7 +111,8 @@ parent's version through that trigger without making the confirmation request st
 Only current booking value changes; the existing realized-value resolver and win-time freeze remain
 unchanged. Old clients can read the additive response fields but cannot take over a nonzero manual
 value without the new flag. Earlier serving binaries bypass that guard and restoration, so V243 is
-the serving rollback floor; leave the nullable column in place and roll forward with a compatible
+the deal-value component minimum; control V246 is the current release-wide rollback floor.
+Leave the nullable column in place and roll forward with a compatible
 binary rather than rolling back to an unsafe writer.
 
 ### Incremental repair of historical currency mismatches

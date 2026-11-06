@@ -307,3 +307,12 @@ and offers Map or a fresh review. The changed-input banner appears only when the
 - Interaction-history backfill remains direct-batch, replay-safe, and inert.
 - Notification baseline/counterfactual concurrency semantics remain intact.
 - Matching, proof replay, truncation, cross-workspace visibility, concurrent mutation, dependency, rollback, and backfill tests pass.
+
+## Default currency for deal CSV creation
+
+Deal preview returns the effective default currency and binds it to the one-use review context.
+A change to that default before commit refuses the old proof and requires a fresh preview.
+New deal rows with no currency use the active workspace's saved default, or the explained USD
+fallback when no setting exists. An explicit row currency takes precedence. Updates with no
+currency preserve the target deal's currency. Defaults never infer historical currencies or
+perform FX. Workspace settings are read from the control plane using the resolved workspace id.

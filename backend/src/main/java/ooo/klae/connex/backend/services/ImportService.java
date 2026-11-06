@@ -133,7 +133,6 @@ public class ImportService {
     private final DuplicatePreflightService duplicatePreflightService;
 
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
-    private static final String DEFAULT_CURRENCY = "USD";
     private static final int DEAL_VALUE_SCALE = 2;
     private static final int MAX_VALUE_LENGTH = 128;
     private static final int MAX_NUMERIC_DIGITS = 20;
@@ -1088,6 +1087,7 @@ public class ImportService {
 
     private ImportPreviewResult previewDealsWithinVisibilityScope(ImportRequest request, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String defaultCurrency = workspaceService.getCurrentDefaultCurrency();
         RecordVisibilityScope scope = operationVisibilityScope;
         String action = resolveAction(request.getOnDuplicate());
         ImportAnalysis analysis = analyzeDeals(
@@ -1095,7 +1095,7 @@ public class ImportService {
             workspaceId,
             ImportPhase.PREVIEW,
             null,
-            importReviewContext("deal", workspaceId, request), scope);
+            importReviewContext("deal", workspaceId, request, defaultCurrency), scope);
         List<PlanRow> plan = analysis.plan();
         try {
             preflightPreview(
@@ -1108,6 +1108,7 @@ public class ImportService {
             ImportPreviewResult result = summarize(
                 plan, analysis.mutations(), action);
             result.setDuplicateReviewProof(analysis.reviewProof());
+            result.setDefaultCurrency(defaultCurrency);
             return result;
         } catch (RuntimeException exception) {
             duplicatePreflightService.cancelImportPreview(analysis.reviewProof());
@@ -1123,8 +1124,9 @@ public class ImportService {
     @RequirePermission(Permission.DEAL_CREATE)
     public ImportResult commitDeals(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String defaultCurrency = workspaceService.getCurrentDefaultCurrency();
         String action = resolveAction(request.getOnDuplicate());
-        String reviewContext = importReviewContext("deal", workspaceId, request);
+        String reviewContext = importReviewContext("deal", workspaceId, request, defaultCurrency);
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
@@ -1195,7 +1197,7 @@ public class ImportService {
                 bean.setName(row.std.get("name"));
                 bean.setValue(parseValue(row.std.get("value")));
                 String currency = row.std.get("currency");
-                bean.setCurrency(currency != null ? currency : DEFAULT_CURRENCY);
+                bean.setCurrency(currency != null ? currency : defaultCurrency);
                 bean.setExpectedCloseDate(row.std.get("expectedCloseDate"));
                 bean.setClosedAt(row.std.get("closedAt"));
                 bean.setCreatedAt(row.std.get("createdAt"));
@@ -1714,6 +1716,11 @@ public class ImportService {
             String recordType,
             int workspaceId,
             ImportRequest request) {
+        return importReviewContext(recordType, workspaceId, request, null);
+    }
+
+    private static String importReviewContext(
+            String recordType, int workspaceId, ImportRequest request, String defaultCurrency) {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -1722,6 +1729,7 @@ public class ImportService {
         }
         updateReviewDigest(digest, "connex-import-review-v1");
         updateReviewDigest(digest, recordType);
+        if (defaultCurrency != null) updateReviewDigest(digest, defaultCurrency);
         updateReviewDigest(digest, Integer.toString(workspaceId));
         updateReviewDigest(digest, resolveAction(request.getOnDuplicate()));
         updateReviewDigest(digest, Integer.toString(request.getRows().size()));

@@ -1,9 +1,10 @@
 'use client';
 
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -44,11 +45,14 @@ export default function CalendarNewDealContainer({
     const showApiError = useApiErrorToast('Calendar');
 
     const [loadedScope, setLoadedScope] = useState<object | null>(null);
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const defaultCurrency = workspaceDefaultCurrency(activeWorkspace);
+    const seededScopeRef = useRef<string | null>(null);
+    const [seededCurrency, setSeededCurrency] = useState(defaultCurrency);
     const { scope: pipelineScope, pipelines, stagesByPipeline, setPipelines, setStagesByPipeline } = usePipelineChoices();
     const loaded = loadedScope === pipelineScope;
 
-    const [payload, setPayload] = useState<CreateDealPayload>(EMPTY_DRAFT);
+    const [payload, setPayload] = useState<CreateDealPayload>(() => ({ ...EMPTY_DRAFT, currency: defaultCurrency, expectedCloseDate: defaultExpectedCloseDate || undefined }));
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
 
@@ -75,20 +79,28 @@ export default function CalendarNewDealContainer({
     }, [pipelineScope, activeWorkspaceId, setPipelines, setStagesByPipeline, open, loaded]);
 
     useEffect(() => {
-        if (!open) return;
+        if (!open) {
+            seededScopeRef.current = null;
+            return;
+        }
+        const scope = JSON.stringify([activeWorkspaceId, defaultExpectedCloseDate]);
+        if (seededScopeRef.current === scope) return;
         const raf = window.requestAnimationFrame(() => {
-            setPayload({ ...EMPTY_DRAFT, expectedCloseDate: defaultExpectedCloseDate || undefined });
+            seededScopeRef.current = scope;
+            const currency = defaultCurrency;
+            setSeededCurrency(currency);
+            setPayload({ ...EMPTY_DRAFT, currency, expectedCloseDate: defaultExpectedCloseDate || undefined });
             setSucceeded(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [activeWorkspaceId, open, defaultExpectedCloseDate]);
+    }, [activeWorkspaceId, defaultCurrency, open, defaultExpectedCloseDate]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && creating) return;
         onOpenChange(next);
     };
 
-    const seededBaseline: CreateDealPayload = { ...EMPTY_DRAFT, expectedCloseDate: defaultExpectedCloseDate || undefined };
+    const seededBaseline: CreateDealPayload = { ...EMPTY_DRAFT, currency: seededCurrency, expectedCloseDate: defaultExpectedCloseDate || undefined };
     const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
 
     const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
@@ -101,7 +113,7 @@ export default function CalendarNewDealContainer({
                 name: payload.name.trim(),
                 value: Number.isFinite(payload.value) ? payload.value : 0,
                 actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : undefined,
-                currency: payload.currency.trim() || 'USD',
+                currency: payload.currency.trim() || defaultCurrency,
                 pipeline: payload.pipeline || null,
                 stage: payload.stage || null,
                 duplicateReviewToken,

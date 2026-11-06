@@ -1,0 +1,3 @@
+ALTER TABLE workspace
+    ADD COLUMN default_currency VARCHAR(3) NULL,
+    ALGORITHM=INSTANT, LOCK=DEFAULT;

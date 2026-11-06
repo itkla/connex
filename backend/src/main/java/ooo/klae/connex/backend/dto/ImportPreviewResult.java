@@ -3,7 +3,6 @@ package ooo.klae.connex.backend.dto;
 import java.util.List;
 import java.util.Map;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -12,7 +11,6 @@ import lombok.NoArgsConstructor;
  */
 @Data
 @NoArgsConstructor
-@AllArgsConstructor
 public class ImportPreviewResult {
     private int total;
     private int toCreate;
@@ -22,6 +20,21 @@ public class ImportPreviewResult {
     private List<RowAnalysis> rows;
     private String duplicateReviewProof;
     private Map<String, List<DuplicateCandidateDto>> companyCandidates;
+    private String defaultCurrency;
+
+    public ImportPreviewResult(
+            int total, int toCreate, int toUpdate, int toSkip, int invalid,
+            List<RowAnalysis> rows, String duplicateReviewProof,
+            Map<String, List<DuplicateCandidateDto>> companyCandidates) {
+        this.total = total;
+        this.toCreate = toCreate;
+        this.toUpdate = toUpdate;
+        this.toSkip = toSkip;
+        this.invalid = invalid;
+        this.rows = rows;
+        this.duplicateReviewProof = duplicateReviewProof;
+        this.companyCandidates = companyCandidates;
+    }
 
     public ImportPreviewResult(
             int total, int toCreate, int toUpdate, int toSkip, int invalid,

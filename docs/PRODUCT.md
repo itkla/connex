@@ -64,6 +64,19 @@ Numbered and testable. Cite them by number in reviews.
 
 9. **Customize the business, not the software.** Configuration models the customer's world — their pipeline stages, fields, lifecycle, workflows — never the mechanics of Connex itself. Users tune what they sell and how, not runtimes, engines, or internals. *Test: does this setting map to a business decision the customer already makes?*
 
+### New-deal currency
+
+Workspace General offers an explicit default deal currency. Workspace owners, administrators and
+custom roles granted workspace settings may change it. New-deal dialogs, quick create, calendar
+creation, built-in guided templates, Ask Connex creation and CSV creation without a currency use that setting.
+Ask Connex shows the effective currency for review and retains that currency through approval, even
+if an administrator changes the workspace default in the meantime. People
+may choose a different currency for a deal or in a custom template. Existing workspaces without a
+saved setting show USD as the effective default and explain that it is the original fallback until
+an administrator chooses one. Never infer a currency from locale, timezone or historical deals;
+changing the default never rewrites existing deals or converts amounts. Currency choices on Deals
+and Dashboard remain independent view filters.
+
 ### Deal amount comparisons
 
 Dashboard Projections totals all open deals in its currency, including undated deals and dates outside the visible chart. Its chart groups dated open deals by expected close month. Analytics and Deals revenue comparisons retain the value of all deals, including won and lost deals, by expected close date; label that comparison **All deal value** / **全案件の金額**, rather than a forecast of open deals. Forecast accuracy compares actual value with projected value on won deals only; lost deals affect neither amount. The Win rate card remains count-based; its Won amount is realized revenue and its Lost amount is the value of lost deals.

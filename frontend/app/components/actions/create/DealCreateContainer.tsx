@@ -15,6 +15,7 @@ import { createDeal, getCompaniesByIds, getPipelines, getStagesByPipelineId, isF
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { DRAFT_VERSIONS, type DealDraft } from '@/app/lib/formDrafts';
 import { toastError, toastSuccess, toastWarn } from '@/app/lib/toast';
@@ -99,7 +100,10 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     },
     ref,
 ) {
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const defaultCurrency = workspaceDefaultCurrency(activeWorkspace);
+    const seededScopeRef = useRef<string | null>(null);
+    const [seededCurrency, setSeededCurrency] = useState(defaultCurrency);
     const draft = useFormDraft<DealDraft>({
         keyParts: {
             userId: currentUserId,
@@ -129,7 +133,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
         stagesByPipelineRef.current = stagesByPipeline;
     }, [stagesByPipeline]);
 
-    const [payload, setPayload] = useState<CreateDealPayload>(EMPTY_DRAFT);
+    const [payload, setPayload] = useState<CreateDealPayload>(() => ({ ...EMPTY_DRAFT, currency: defaultCurrency }));
     const restoredPayloadRef = useRef<CreateDealPayload | null>(null);
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
@@ -215,12 +219,21 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     }, [pipelineScope, activeWorkspaceId, setPipelines, setStagesByPipeline, open, loaded, defaults?.pipelineId, initialDraft, onOpenChange, requestInit, restoring, t]);
 
     useEffect(() => {
-        if (!open || restoring) return;
+        if (!open || restoring) {
+            seededScopeRef.current = null;
+            return;
+        }
+        const scope = JSON.stringify([activeWorkspaceId, defaults?.companyId, defaults?.pipelineId]);
+        if (seededScopeRef.current === scope) return;
         const raf = window.requestAnimationFrame(() => {
+            seededScopeRef.current = scope;
             const pipelineId = defaults?.pipelineId ?? 0;
             const stages = pipelineId ? stagesByPipelineRef.current[pipelineId] : undefined;
+            const currency = defaultCurrency;
+            setSeededCurrency(currency);
             setPayload({
                 ...EMPTY_DRAFT,
+                currency,
                 company: defaults?.companyId ?? null,
                 pipeline: pipelineId,
                 stage: stages?.[0]?.id ?? 0,
@@ -228,11 +241,12 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
             setSucceeded(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [activeWorkspaceId, open, defaults?.companyId, defaults?.pipelineId, restoring]);
+    }, [activeWorkspaceId, defaultCurrency, open, defaults?.companyId, defaults?.pipelineId, restoring]);
 
     const seedPipelineId = defaults?.pipelineId ?? 0;
     const seededBaseline: CreateDealPayload = {
         ...EMPTY_DRAFT,
+        currency: seededCurrency,
         company: defaults?.companyId ?? null,
         pipeline: seedPipelineId,
         stage: (seedPipelineId ? stagesByPipeline[seedPipelineId] : undefined)?.[0]?.id ?? 0,
@@ -286,7 +300,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                     name: payload.name.trim(),
                     value: Number.isFinite(payload.value) ? payload.value : 0,
                     actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : undefined,
-                    currency: payload.currency.trim() || 'USD',
+                    currency: payload.currency.trim() || defaultCurrency,
                     pipeline: payload.pipeline || null,
                     stage: payload.stage || null,
                     duplicateReviewToken,

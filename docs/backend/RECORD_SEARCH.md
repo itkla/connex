@@ -70,9 +70,10 @@ columns or indexes. Existing trigger table/event/timing/body definitions are ver
 including concurrent legacy/privacy writes. Unknown trigger definitions fail closed rather than
 being dropped. There is no Java Flyway
 callback or data reconciliation inside migration execution. Earlier binaries remain safe for
-V244 alone, whose component rollback floor stays V243. The consent-version cutover in this
-release raises the active floor to V245; follow
-[the release-wide upgrade policy](../UPGRADING.md#contact-channel-consent-versions-tenant-v245).
+V244 alone, whose component rollback floor stays V243. V245 establishes the consent-writer
+component minimum; control V246 is the active release-wide floor. Follow the
+[consent-version cutover](../UPGRADING.md#contact-channel-consent-versions-tenant-v245), then the
+[workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
 
 `RecordSearchReconciler.sweep()` starts without an initial delay and runs every 60 seconds. It reads
 at most 25 active workspace IDs from the control catalog, then enters `TenantWorkScope.inWorkspace`

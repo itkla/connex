@@ -411,7 +411,10 @@ JVM, initialized workspace and organization authority, completed active-attempt 
 and the full compatible reader/writer rollout. Drain incompatible serving binaries, scheduled
 workers and in-flight writers before control V236 → tenant V237 → tenant V238. Upgrades crossing V232 must also retain that
 version's stopped-writer sequence-backfill procedure.
-V238 is the rollback floor, including with AI and missions disabled. Multi-instance activation requires the separately reviewed
+V238 remains the mission component minimum; control V246 is the current release-wide rollback floor,
+including with AI and missions disabled; see the
+[workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
+Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 
 Focused continuation selectors are `AiAgentContinuationCodecTest`, `AiAgentPlanServiceTest`,
@@ -590,6 +593,6 @@ Positive object receipts and placement evidence remain prerequisites for complet
 decodes source JSON using explicit UTF-8 transport and validates runtime, review metadata and
 action provenance; all-chat invalidation cancels affected exports at actual publication.
 
-V238 raises the rollback floor; see [UPGRADING](../UPGRADING.md#mission-singleton-proposals-tenant-v238)
+V238 established the mission component minimum; see [UPGRADING](../UPGRADING.md#mission-singleton-proposals-tenant-v238)
 and the [lock matrix](LOCKING.md#mission-singleton-proposals-v238). Activation still requires a
 single serving JVM and approved live staging evidence; this slice does not authorize a live run.

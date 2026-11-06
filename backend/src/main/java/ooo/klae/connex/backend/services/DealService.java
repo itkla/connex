@@ -1150,6 +1150,7 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
+        applyWorkspaceCurrencyDefault(deal);
         RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createWithinVisibilityScope(deal, resolvedVisibilityScope));
@@ -1172,6 +1173,7 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createReviewed(Deal deal, String duplicateReviewToken) {
+        applyWorkspaceCurrencyDefault(deal);
         RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createReviewedWithinVisibilityScope(deal, duplicateReviewToken, resolvedVisibilityScope));
@@ -1202,6 +1204,7 @@ public class DealService {
             Deal deal,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation, MutationAdmission admission, RecordVisibilityScope scope) {
+        applyWorkspaceCurrencyDefault(deal);
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
                 deal.getName(),
@@ -1256,6 +1259,12 @@ public class DealService {
         ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
+    }
+
+    private void applyWorkspaceCurrencyDefault(Deal deal) {
+        if (deal.getCurrency() == null || deal.getCurrency().isBlank()) {
+            deal.setCurrency(workspaceService.getCurrentDefaultCurrency());
+        }
     }
 
     private static Map<String, Object> withCreationMetadata(

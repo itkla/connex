@@ -326,6 +326,8 @@
         "failedToSave": "案件を保存できませんでした"
     },
     "DealsNewDialog": {
+        "workspaceCurrencySaved": "ワークスペースの既定の通貨は {currency} です。この案件では別の通貨に変更できます。",
+        "workspaceCurrencyFallback": "既定の通貨は {currency} です。ワークスペースで未設定のため、管理者が設定するまでは従来の USD を使用します。",
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "title": "新規案件",
         "description": "パイプラインに案件を追加します。案件はこのワークスペースのメンバー全員と共有されます。",

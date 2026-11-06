@@ -58,6 +58,7 @@ class RecordCreationTemplateResolverTest {
     void setUp() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(11);
+        when(workspaceService.getCurrentDefaultCurrency()).thenReturn("EUR");
         when(customFieldMapper.getByEntityType(7, "person")).thenReturn(List.of());
         when(customFieldMapper.getByEntityType(7, "company")).thenReturn(List.of());
         when(customFieldMapper.getByEntityType(7, "deal")).thenReturn(List.of());
@@ -141,7 +142,8 @@ class RecordCreationTemplateResolverTest {
         var resolved = resolver.resolveSystem(RecordCreationRecordType.deal, null);
 
         assertEquals(0, field(resolved, "value").defaultValue().decimalValue().intValue());
-        assertEquals("USD", field(resolved, "currency").defaultValue().textValue());
+        assertEquals("EUR", field(resolved, "currency").defaultValue().textValue());
+        assertEquals(RecordCreationDefaultOrigin.policy, field(resolved, "currency").defaultOrigin());
         assertEquals(3, field(resolved, "pipeline").defaultValue().intValue());
         assertEquals(7, field(resolved, "stage").defaultValue().intValue());
         assertEquals(11, field(resolved, "owner").defaultValue().intValue());

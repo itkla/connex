@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedDealCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedDealRecordDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationPresetCatalogDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.recordcreation.RecordCreationEntryPoint;
@@ -26,6 +28,7 @@ import ooo.klae.connex.backend.services.GuidedRecordCreationService;
 import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.RecordCreationPresetService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -91,8 +94,9 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
         AiAssistantCreationTemplatePin.requiredText(request, "name", 255);
         AiAssistantCreationTemplatePin.requiredText(request, "stage", 128);
         String value = AiAssistantCreationTemplatePin.requiredText(request, "value", 16);
-        String currency = AiAssistantCreationTemplatePin.requiredText(request, "currency", 3);
-        if (!value.matches("[0-9]{1,13}(\\.[0-9]{1,2})?") || !currency.matches("[A-Z]{3}")) {
+        String currency = AiAssistantCreationTemplatePin.optionalText(request, "currency", 8);
+        if (!value.matches("[0-9]{1,13}(\\.[0-9]{1,2})?")
+                || (currency != null && !CurrencyCodes.isSupported(currency))) {
             throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
         }
         String date = AiAssistantCreationTemplatePin.optionalText(request, "expected_close_date", 10);
@@ -126,16 +130,24 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
     @Override
     public Map<String, Object> pin(Target target, AiAssistantWriteToolRequest request) {
         CreateDeal deal = request(request);
-        Set<String> supplied = deal.expectedCloseDate() == null
-                ? Set.of("name", "company", "stage", "pipeline", "value", "currency")
-                : Set.of("name", "company", "stage", "pipeline", "value", "currency", "expectedCloseDate");
+        Set<String> supplied = new HashSet<>(Set.of("name", "company", "stage", "pipeline", "value"));
+        if (deal.currency() != null) supplied.add("currency");
+        if (deal.expectedCloseDate() != null) supplied.add("expectedCloseDate");
         Stage stage = requestedStage(deal.stage(), pipelineService.getAllStages());
         if (stage == null) {
             throw new ResourceNotFoundException("Deal stage is unavailable or ambiguous");
         }
+        RecordCreationPresetCatalogDto catalog = presetService.deals(RecordCreationEntryPoint.quick_create, target.id());
         Map<String, Object> pinned = new LinkedHashMap<>(AiAssistantCreationTemplatePin.prepare(
-                presetService.deals(RecordCreationEntryPoint.quick_create, target.id()),
-                supplied, Set.of("owner")));
+                catalog, supplied, Set.of("owner")));
+        String currency = deal.currency() == null
+                ? AiAssistantCreationTemplatePin.identityDefault(catalog, "currency").stream()
+                    .findFirst().orElse(null)
+                : deal.currency();
+        if (!CurrencyCodes.isSupported(currency)) {
+            throw AiAssistantLoopException.refusedArguments("template_requires_fields");
+        }
+        pinned.put("currency", CurrencyCodes.required(currency));
         pinned.put("stageId", stage.getId());
         pinned.put("stageName", stage.getName());
         pinned.put("stagePipelineId", stage.getPipeline().getId());
@@ -169,7 +181,7 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
         }
         int companyId = execution.row().target().id();
         Deal created = creationService.createDeal(new GuidedDealCreateRequestDto(
-                new GuidedDealRecordDto(request.name(), new BigDecimal(request.value()), request.currency(),
+                new GuidedDealRecordDto(request.name(), new BigDecimal(request.value()), reviewedCurrency(request, execution.pinned()),
                         pipelineId, stage.getId(), companyId,
                         request.expectedCloseDate() == null ? null : LocalDate.parse(request.expectedCloseDate()),
                         null),
@@ -233,6 +245,14 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
                 resolved ? DiffState.CHANGED : DiffState.UNRESOLVED));
         for (String field : List.of("value", "currency", "expectedCloseDate")) {
             String value = review.requestText("expectedCloseDate".equals(field) ? "expected_close_date" : field);
+            if ("currency".equals(field)) {
+                Object pinned = review.pinned().get("currency");
+                String currency = value == null && pinned instanceof String code ? code : value;
+                boolean supported = CurrencyCodes.isSupported(currency);
+                rows.add(new Diff(field, null, false, supported ? CurrencyCodes.required(currency) : null,
+                        supported ? DiffState.CHANGED : DiffState.UNRESOLVED));
+                continue;
+            }
             if (value != null) {
                 rows.add(new Diff(field, null, false, value, DiffState.CHANGED));
             }
@@ -273,6 +293,19 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
                         && stage.getName().equalsIgnoreCase(name.trim()))
                 .toList();
         return matches.size() == 1 ? matches.getFirst() : null;
+    }
+
+    private static String reviewedCurrency(CreateDeal request, Map<String, Object> pinned) {
+        if (request.currency() != null && !CurrencyCodes.isSupported(request.currency())) {
+            throw new ConflictException("Prepared deal currency is unavailable");
+        }
+        Object value = pinned.get("currency");
+        if (request.currency() != null && value == null) return CurrencyCodes.required(request.currency());
+        if (!(value instanceof String currency) || !CurrencyCodes.isSupported(currency)
+                || (request.currency() != null && !CurrencyCodes.equivalent(request.currency(), currency))) {
+            throw new ConflictException("Prepared deal currency is unavailable");
+        }
+        return CurrencyCodes.required(currency);
     }
 
     private static CreateDeal request(AiAssistantWriteToolRequest request) {

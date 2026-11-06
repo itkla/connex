@@ -51,6 +51,7 @@ import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
 import { useActionSelection } from '@/app/hooks/useActions';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { usePermission } from '@/app/hooks/usePermissions';
@@ -340,7 +341,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const reduce = useReducedMotion() ?? false;
     const searchParams = useSearchParams();
     const pathname = usePathname();
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const defaultCurrency = workspaceDefaultCurrency(activeWorkspace);
     const canUpdateDeals = usePermission('DEAL_UPDATE');
     const canDeleteDeals = usePermission('DEAL_DELETE');
     const [viewState, dispatchViewState] = useReducer(dealsViewReducer, {
@@ -823,14 +825,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newPayload, setNewPayload] = useState<CreateDealPayload>(EMPTY_DEAL_DRAFT);
+    const [newPayload, setNewPayload] = useState<CreateDealPayload>(() => ({ ...EMPTY_DEAL_DRAFT, currency: defaultCurrency }));
 
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
-        if (!open) {
-            setNewPayload(EMPTY_DEAL_DRAFT);
-            setCreationSucceeded(false);
-        }
+        setNewPayload({ ...EMPTY_DEAL_DRAFT, currency: defaultCurrency });
+        setCreationSucceeded(false);
     };
 
     const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
@@ -843,7 +843,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 name: newPayload.name.trim(),
                 value: Number.isFinite(newPayload.value) ? newPayload.value : 0,
                 actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : undefined,
-                currency: newPayload.currency.trim() || 'USD',
+                currency: newPayload.currency.trim() || defaultCurrency,
                 pipeline: newPayload.pipeline || null,
                 stage: newPayload.stage || null,
                 duplicateReviewToken,
@@ -1442,7 +1442,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             <>
                                 <RecordsActions
                                     entity="deals"
-                                    onNew={() => setNewDialogOpen(true)}
+                                    onNew={() => closeNewDialog(true)}
                                     newLabel={t('newButton')}
                                     newAriaLabel={t('addDeal')}
                                     onImported={refreshRecords}
@@ -1749,7 +1749,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     title={t('emptyTitle')}
                                     body={t('emptyBody')}
                                     action={
-                                        <Button variant="brand" onClick={() => setNewDialogOpen(true)}>
+                                        <Button variant="brand" onClick={() => closeNewDialog(true)}>
                                             <PlusIcon strokeWidth={2.5} />
                                             {t('emptyCta')}
                                         </Button>
@@ -1814,7 +1814,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     }}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
-                    isDirty={!isCreating && !creationSucceeded && isDealPayloadDirty(newPayload, EMPTY_DEAL_DRAFT)}
+                    isDirty={!isCreating && !creationSucceeded && isDealPayloadDirty(newPayload, { ...EMPTY_DEAL_DRAFT, currency: defaultCurrency })}
                     createNewDeal={createNewDeal}
                 />
 
