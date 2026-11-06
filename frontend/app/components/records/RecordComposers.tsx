@@ -217,6 +217,7 @@ export function RecordTaskComposer({
                 deals={deals}
                 users={users}
                 currentUserId={currentUserId}
+                recordScope={anchor.kind}
                 defaultPerson={anchor.kind === 'person' ? anchor.person : null}
                 defaultDeal={anchor.kind === 'deal' ? anchor.deal : null}
                 defaultDueDate={defaultDueDate}
@@ -272,6 +273,7 @@ export function RecordActivityComposer({ anchor, currentUserId, open: openProp, 
                 persons={persons}
                 deals={deals}
                 currentUserId={currentUserId}
+                recordScope={anchor.kind}
                 defaultPerson={anchor.kind === 'person' ? anchor.person : null}
                 defaultDeal={anchor.kind === 'deal' ? anchor.deal : null}
                 {...linkEmptyMessages}

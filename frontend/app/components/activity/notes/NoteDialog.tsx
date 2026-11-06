@@ -43,7 +43,7 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
 import { filterByNameQuery } from '@/app/lib/filterByNameQuery';
 import { noteContentToVisibleText } from '@/app/lib/references';
-import type { Contact, Deal, Note, NoteVisibility } from '@/app/lib/types';
+import type { ContactPickerOption, Deal, Note, NoteVisibility } from '@/app/lib/types';
 
 const NOTE_DRAWER_PULL_THRESHOLD = 36;
 
@@ -133,10 +133,10 @@ type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     note: Note | null;
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     currentUserId: number;
-    defaultPerson?: Contact | null;
+    defaultPerson?: ContactPickerOption | null;
     defaultDeal?: Deal | null;
     /** Prefills the note content, e.g. text carried over from the Quick Create panel. */
     defaultContent?: string;
@@ -308,10 +308,10 @@ function ScopedNoteDialog({
 
 type FormProps = {
     note: Note | null;
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     currentUserId: number;
-    defaultPerson: Contact | null;
+    defaultPerson: ContactPickerOption | null;
     defaultDeal: Deal | null;
     defaultContent: string;
     defaultTitle?: string;
@@ -357,9 +357,9 @@ function NoteLinkFields({
     dealOptionsLoading,
     documentStyle = false,
 }: {
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
-    selectedPerson: Contact | null;
+    selectedPerson: ContactPickerOption | null;
     selectedDeal: Deal | null;
     onPersonSelect: (id: number | null) => void;
     onDealSelect: (id: number | null) => void;
@@ -399,7 +399,7 @@ function NoteLinkFields({
                 <Combobox
                     items={personServerSearch ? persons : filteredPersons}
                     serverSearch={personServerSearch}
-                    itemToStringLabel={(person: Contact) => person.name}
+                    itemToStringLabel={(person: ContactPickerOption) => person.name}
                     value={selectedPerson}
                     onInputValueChange={handlePersonQueryChange}
                     onValueChange={(person) => onPersonSelect(person?.id ?? null)}

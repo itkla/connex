@@ -68,6 +68,13 @@ public class UserController {
         return userService.getAllUsers().stream().map(UserDto::from).toList();
     }
 
+    /** Returns a bounded set of active workspace members for searchable pickers. */
+    @GetMapping("/options")
+    public List<UserDto> getUserOptions(@RequestParam(defaultValue = "") String q) {
+        if (q.length() > 200) throw new BadRequestException("q must be 200 characters or fewer");
+        return userService.getUserOptions(q).stream().map(UserDto::from).toList();
+    }
+
     /** Returns bounded display labels for requested active members of the current workspace. */
     @GetMapping("/references")
     public List<UserReferenceDto> getUserReferences(

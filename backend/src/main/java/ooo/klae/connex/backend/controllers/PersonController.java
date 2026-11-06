@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.PersonReferenceDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonQualificationDto;
@@ -72,6 +73,7 @@ import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 import jakarta.validation.Valid;
@@ -126,6 +128,25 @@ public class PersonController {
         else if (dealId != null) persons = personService.getPersonsByDealId(dealId);
         else throw new BadRequestException("A filter is required; use /api/persons/page for workspace-wide lists");
         return persons.stream().map(PersonDto::from).toList();
+    }
+
+    /** Returns bounded visible contact records without relationship-history expansion. */
+    @GetMapping("/references")
+    public List<PersonReferenceDto> getPersonReferences(@RequestParam(required = false) List<Integer> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BadRequestException("ids are required for contact references");
+        }
+        if (ids.size() > PageBounds.MAX_SIZE) {
+            throw new BadRequestException("At most " + PageBounds.MAX_SIZE + " contact references may be requested");
+        }
+        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
+        for (Integer id : ids) {
+            if (id == null || id < 1) {
+                throw new BadRequestException("ids must be positive integers");
+            }
+            normalized.add(id);
+        }
+        return personService.getPersonReferences(List.copyOf(normalized)).stream().map(PersonReferenceDto::from).toList();
     }
 
     /**

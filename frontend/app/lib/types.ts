@@ -69,7 +69,23 @@ export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
     definition: SegmentDefinition;
 };
 
-export type ActivitiesPageParams = PageParams & {
+export type ActivityListParams = PageParams & {
+    companyId?: number;
+    persons?: number[];
+    companies?: number[];
+    deals?: number[];
+    members?: number[];
+};
+
+export type TasksPageParams = ActivityListParams & {
+    queue?: string;
+    personId?: number;
+    dealId?: number;
+    assignedToId?: number;
+};
+
+export type ActivitiesPageParams = ActivityListParams & {
+    type?: string;
     personId?: number;
     dealId?: number;
     createdById?: number;
@@ -1264,6 +1280,12 @@ export type UpdateCompanyPayload = {
     phone?: string;
     address?: string;
 };
+
+/** The only fields returned by the bounded contact reference endpoint. */
+export type ContactReference = Pick<Contact, 'id' | 'name' | 'companyId'>;
+
+/** Picker identity, with optional presentation metadata from page results or caller seeds. */
+export type ContactPickerOption = ContactReference & Partial<Pick<Contact, 'workspaceId' | 'imageUrl'>>;
 
 export type Contact = {
     id: number;

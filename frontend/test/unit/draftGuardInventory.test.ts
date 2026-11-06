@@ -86,6 +86,8 @@ vi.mock("@/app/hooks/useCompanySearch", () => ({
 }));
 
 vi.mock("@/app/hooks/useRecordTargetSearch", () => ({
+    useContactTargetSearch: () => ({ contacts: [], query: "", loading: false, error: null, onInputValueChange: vi.fn() }),
+    useMemberTargetSearch: () => ({ users: [], query: "", loading: false, error: null, onInputValueChange: vi.fn() }),
     useDealTargetSearch: () => ({
         deals: [],
         options: [],

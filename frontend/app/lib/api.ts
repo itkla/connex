@@ -2914,6 +2914,11 @@ export async function getUserReferences(ids: number[], init: RequestInit = {}) {
     return references.flat();
 }
 
+/** Bounded active-member search for activity and task pickers. */
+export function getUserOptions(q = '', init: RequestInit = {}) {
+    return getJson<Types.User[]>(`/api/users/options${buildQuery({ q })}`, init);
+}
+
 export function getUsers(init: RequestInit = {}) {
     return getJson<Types.User[]>(`/api/users`, init);
 }
@@ -2972,7 +2977,7 @@ export function getTasks(init: RequestInit = {}) {
     return getCompletePageItems<Types.Task>(getTasksPage, init);
 }
 
-export function getTasksPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+export function getTasksPage(params: Types.TasksPageParams = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.Task>>(`/api/tasks/page${buildQuery(params)}`, init);
 }
 
@@ -2986,7 +2991,7 @@ export function getTasksFromCookie(cookie: string | null) {
 
 export function getTasksPageResultFromCookie(
     cookie: string | null,
-    params: Types.PageParams = {},
+    params: Types.TasksPageParams = {},
 ) {
     return resultWithCookie<Types.Page<Types.Task>>((init) => getTasksPage(params, init), cookie);
 }
@@ -3587,6 +3592,19 @@ export function getContactIds(params: Types.ContactsPageParams = {}, init: Reque
 
 export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
+}
+
+/** Hydrates visible contact selections in capped batches without relationship history. */
+export async function getContactReferences(ids: number[], init: RequestInit = {}) {
+    const uniqueIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+    const batches = Array.from(
+        { length: Math.ceil(uniqueIds.length / WORKSPACE_LIST_PAGE_SIZE) },
+        (_, index) => uniqueIds.slice(index * WORKSPACE_LIST_PAGE_SIZE, (index + 1) * WORKSPACE_LIST_PAGE_SIZE),
+    );
+    const references = await Promise.all(batches.map((batch) =>
+        getJson<Types.ContactReference[]>(`/api/persons/references${buildQuery({ ids: batch })}`, init),
+    ));
+    return references.flat();
 }
 
 export function getContactEmployment(id: number, init: RequestInit = {}) {

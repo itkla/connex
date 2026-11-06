@@ -52,6 +52,12 @@ and drawer close controls use the bilingual `UI.close` catalogue key.
 The document merge-field menu cancels the menu's default trigger focus restoration and focuses the
 editor at its retained selection when closing, including Escape. Continued typing follows the inserted token.
 
+
+Searchable toolbar filters keep their Radix menu semantics while explicitly focusing the search field
+on open. Down/Up or Tab/Shift+Tab from the field enters the available menu items; Tab from an item
+returns to search, and Up from the first item also returns there. Escape dismisses and restores the
+trigger. Input editing stays outside menu typeahead, and composition keystrokes do not move focus or dismiss the menu.
+
 ## Zone labels
 
 The four zone consumers share `useTimeZoneSearch`: Profile, Workspace identity, report delivery,

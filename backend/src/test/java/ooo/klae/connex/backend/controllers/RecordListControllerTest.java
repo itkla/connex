@@ -53,6 +53,8 @@ import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonOwnerDto;
@@ -109,6 +111,28 @@ class RecordListControllerTest {
         assertThrows(BadRequestException.class, () -> controller.getPersons(null, null, null));
 
         verify(personService, never()).getAllPersons();
+    }
+
+    @Test
+    void personReferencesValidateAndDeduplicateBeforeReading() {
+        PersonController controller = personController();
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(null));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(List.of()));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(List.of(0)));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(List.of(-1)));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(java.util.Arrays.asList(1, null)));
+        assertThrows(BadRequestException.class, () -> controller.getPersonReferences(java.util.Collections.nCopies(101, 1)));
+        verifyNoInteractions(personService);
+
+        Person person = new Person();
+        person.setId(7);
+        person.setName("Visible contact");
+        when(personService.getPersonReferences(List.of(7, 8))).thenReturn(List.of(person));
+        var response = controller.getPersonReferences(List.of(7, 8, 7));
+        assertEquals(1, response.size());
+        assertEquals(7, response.getFirst().id());
+        verify(personService).getPersonReferences(List.of(7, 8));
+        verify(personService, never()).getPersonById(anyInt());
     }
 
     @Test
@@ -1048,13 +1072,13 @@ class RecordListControllerTest {
     @Test
     void tasksPageClampsSize() {
         TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
-        when(taskService.getTasksPage(100, 0)).thenReturn(List.of());
-        when(taskService.countTasks()).thenReturn(0L);
+        ActivityListFilter filter = new ActivityListFilter();
+        when(taskService.getListPage(filter, PageBounds.of(0, 500))).thenReturn(new PageResponse<>(List.of(), 0));
 
-        var response = controller.getTasksPage(0, 500);
+        var response = controller.getTasksPage(0, 500, filter);
 
         assertEquals(0, response.total());
-        verify(taskService).getTasksPage(100, 0);
+        verify(taskService).getListPage(filter, PageBounds.of(1, 100));
     }
 
     @Test
@@ -1093,13 +1117,13 @@ class RecordListControllerTest {
     void activitiesPageClampsSize() {
         ActivityController controller = new ActivityController(
             activityService, workspaceService, memberScopeResolver);
-        when(activityService.getActivitiesPage(null, null, null, 100, 0)).thenReturn(List.of());
-        when(activityService.countActivities(null, null, null)).thenReturn(0L);
+        ActivityListFilter filter = new ActivityListFilter();
+        when(activityService.getListPage(filter, PageBounds.of(0, 500))).thenReturn(new PageResponse<>(List.of(), 0));
 
-        var response = controller.getActivitiesPage(0, 500, null, null, null);
+        var response = controller.getActivitiesPage(0, 500, filter);
 
         assertEquals(0, response.total());
-        verify(activityService).getActivitiesPage(null, null, null, 100, 0);
+        verify(activityService).getListPage(filter, PageBounds.of(1, 100));
     }
 
     @Test

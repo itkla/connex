@@ -28,6 +28,10 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.dto.TaskWorkItem;
 import ooo.klae.connex.backend.dto.TaskWorkPage;
@@ -106,6 +110,18 @@ public class TaskService {
     public List<Task> getTasksPage(int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksPage(workspaceId, limit, offset));
+    }
+
+    /** Reads only one page and its matching count under the same trusted visibility ceiling. */
+    public PageResponse<TaskDto> getListPage(ActivityListFilter filter, PageBounds bounds) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        var today = userCalendarService.today();
+        int actorId = workspaceService.getCurrentUserId();
+        var rows = taskMapper.getListPage(workspaceId, scope, filter, today, actorId, bounds.size(), bounds.offset());
+        var items = referenceService.hydrateTasks(workspaceId, rows).stream().map(TaskDto::from).toList();
+        long total = taskMapper.countList(workspaceId, scope, filter, today, actorId);
+        return new PageResponse<>(items, total);
     }
 
     public long countTasks() {

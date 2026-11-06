@@ -15,6 +15,7 @@ import { contact, deal, deferred } from './helpers/workspaceChainBackend';
 const api = vi.hoisted(() => ({
     contacts: vi.fn<typeof import('@/app/lib/api').getContactsPage>(),
     contact: vi.fn<typeof import('@/app/lib/api').getContactById>(),
+    contactReferences: vi.fn<typeof import('@/app/lib/api').getContactReferences>(),
     deals: vi.fn<typeof import('@/app/lib/api').getDealsPage>(),
     deal: vi.fn<typeof import('@/app/lib/api').getDealById>(),
     add: vi.fn<typeof import('@/app/lib/api').addContactConnection>(),
@@ -22,6 +23,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/app/lib/api', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/app/lib/api')>(),
     getContactsPage: api.contacts, getContactById: api.contact,
+    getContactReferences: api.contactReferences,
     getDealsPage: api.deals, getDealById: api.deal, addContactConnection: api.add,
 }));
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
@@ -51,6 +53,7 @@ beforeEach(() => {
     api.contacts.mockReset().mockResolvedValue(page(contactSeeds));
     api.deals.mockReset().mockResolvedValue(page(dealSeeds));
     api.contact.mockReset().mockResolvedValue(oldContact);
+    api.contactReferences.mockReset().mockResolvedValue([oldContact]);
     api.deal.mockReset().mockResolvedValue(oldDeal);
     api.add.mockReset();
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });

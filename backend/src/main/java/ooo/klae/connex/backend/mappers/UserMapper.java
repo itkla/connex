@@ -29,6 +29,7 @@ public interface UserMapper {
             @Param("afterId") int afterId, @Param("limit") int limit);
 
     List<User> getAllUsers();
+    List<User> getUserOptions(@Param("workspaceId") int workspaceId, @Param("query") String query);
     /** Existing control-plane identities only; callers supply a bounded, nonempty set. */
     List<Integer> findExistingIds(@Param("ids") List<Integer> ids);
     /** Current display labels for the requested control-plane user ids. */
