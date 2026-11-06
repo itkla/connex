@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.dto.DuplicateNameMatchState;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ImportValidationException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.DuplicateReviewException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -662,7 +663,7 @@ public class DuplicatePreflightService {
                 .mapToInt(response -> response.candidates().size())
                 .sum();
             if (aggregateCandidates > IMPORT_AGGREGATE_CANDIDATE_LIMIT) {
-                throw new BadRequestException(
+                throw new ImportValidationException("IMPORT_REVIEW_TOO_LARGE",
                     "Duplicate review exceeds 1000 candidates; split the import");
             }
             List<DuplicatePreflightResponse> immutable = List.copyOf(responses);
@@ -924,7 +925,7 @@ public class DuplicatePreflightService {
                 aggregateCandidates += response.candidates().size();
                 if (enforceImportAggregateLimit
                         && aggregateCandidates > IMPORT_AGGREGATE_CANDIDATE_LIMIT) {
-                    throw new BadRequestException(
+                    throw new ImportValidationException("IMPORT_REVIEW_TOO_LARGE",
                         "Duplicate review exceeds 1000 candidates; split the import");
                 }
                 responses.add(response);
@@ -1219,7 +1220,7 @@ public class DuplicatePreflightService {
     private static <T> List<T> boundedImportRequests(List<T> requests) {
         Objects.requireNonNull(requests, "import requests");
         if (requests.size() > IMPORT_REQUEST_LIMIT) {
-            throw new BadRequestException(
+            throw new ImportValidationException("IMPORT_REVIEW_TOO_LARGE",
                 "At most " + IMPORT_REQUEST_LIMIT + " import rows may be checked");
         }
         return List.copyOf(requests);

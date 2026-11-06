@@ -66,6 +66,8 @@ vi.mock("@/app/hooks/useWorkspace", () => ({
     useWorkspace: () => ({ activeWorkspaceId: 17 }),
 }));
 
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => true }));
+
 vi.mock("@/app/hooks/useFormDraft", () => ({
     useFormDraft: () => ({ persist: vi.fn(), clear: vi.fn() }),
 }));

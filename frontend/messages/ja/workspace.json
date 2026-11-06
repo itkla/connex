@@ -730,6 +730,7 @@
             "failureRecovery": "再実行する前に、ワークフローの設定とレコードをご確認ください。成功した操作による変更は、すでに保存されている場合があります。",
             "reviewWorkflow": "ワークフローを確認",
             "targetUnavailable": "レコード名を読み込めませんでした",
+            "documentTargetUnavailable": "ドキュメントを表示できません",
             "targetLoading": "レコード名を読み込み中…",
             "targetNameNotRecorded": "この履歴ではレコード名を表示できません",
             "failureTitle": "この実行をご確認ください",
