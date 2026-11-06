@@ -9,7 +9,7 @@ migration-discipline part of #87 §9 / #102).
 
 The active rollback floor for this release is tenant V243, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V243. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240 → tenant V241 → tenant V242 → tenant V243
+permit rollback after V243. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240 → tenant V241 → tenant V242 → tenant V243 → tenant V244
 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
 [the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
 [the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
@@ -1304,3 +1304,16 @@ Rollback must use a compatible serving binary; retain the additive column and ro
 INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
 inspect the column and Flyway history before following the deployment recovery procedure.
 Do not edit an applied migration or blindly rerun a partially committed ALTER.
+
+## Record search projections (tenant V244)
+
+V244 adds search-only name/phone columns, phone indexes and legacy-write invalidation triggers.
+It contains DDL only. Recurring tenant-routed reconciliation fills and repairs projections in
+independently committed pages after migration success; a repair interruption does not rerun DDL
+on startup. A compatible partial DDL prefix replays through schema-verified column/index operations
+and trigger creation without an invalidation gap. Supported equivalent search forms remain
+available through NULL-key fallback before reconciliation; startup prioritizes missing keys.
+Earlier compatible binaries
+can still serve safely, so the rollback floor remains V243. See
+[record-search operation and recovery](backend/RECORD_SEARCH.md) for page bounds, cursor wrap,
+legacy-write repair, scheduling controls and partial-DDL recovery.
