@@ -127,7 +127,7 @@ export default function PipelineChart({
                             {t('activePipeline')}
                         </span>
                         <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border">
-                            {currency}
+                            {t('currencyScope', { currency })}
                         </span>
                     </div>
                     <span className="text-sm text-muted-foreground">{t('chartDescription')}</span>
