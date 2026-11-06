@@ -18,6 +18,7 @@ import { actionLabel, actionSearchText, type MessageResolver } from '@/app/lib/a
 import { formatShortcut } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
+import { isSearchComposing } from '@/app/lib/search/composition';
 import {
     EMPTY_SEARCH_CACHE,
     entriesForWorkspace,
@@ -111,6 +112,9 @@ export default function GlobalSearch() {
 
     const [mode, setMode] = useState<Mode>('inline');
     const [query, setQuery] = useState(urlQuery);
+    const [composing, setComposing] = useState(false);
+    const composingRef = useRef(false);
+    const suppressSubmitRef = useRef(false);
     const [inlineOpen, setInlineOpen] = useState(false);
     const [expanded, setExpanded] = useState(false);
     const [scopedCache, setScopedCache] = useState<ScopedSearchCache>(
@@ -134,7 +138,7 @@ export default function GlobalSearch() {
     const trimmed = query.trim();
     const lowerQuery = trimmed.toLowerCase();
     const isPalette = mode === 'palette';
-    const shouldSearch = (inlineOpen || isPalette) && trimmed.length >= MIN_QUERY_LENGTH;
+    const shouldSearch = !composing && (inlineOpen || isPalette) && trimmed.length >= MIN_QUERY_LENGTH;
     const showInlineDropdown = mode === 'inline' && inlineOpen && trimmed.length >= MIN_QUERY_LENGTH;
 
     useEffect(() => {
@@ -149,6 +153,7 @@ export default function GlobalSearch() {
         if (!shouldSearch) return;
         const controller = new AbortController();
         const timer = setTimeout(() => {
+            if (composingRef.current) return;
             if (cached !== null && isFresh(cached, Date.now())) return;
             setFailedQuery((current) => (current === trimmed ? null : current));
             searchApi(trimmed, { signal: controller.signal })
@@ -202,6 +207,8 @@ export default function GlobalSearch() {
     }, [available, lowerQuery, tActions, tMessage]);
 
     const closePalette = useCallback(() => {
+        composingRef.current = false;
+        setComposing(false);
         setMode('inline');
         setExpanded(false);
         const opener = lastFocusedRef.current;
@@ -216,6 +223,7 @@ export default function GlobalSearch() {
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
+            if (isSearchComposing(event, composingRef.current)) return;
             if (event.repeat) return;
             if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === 'k' || event.key === 'K')) {
                 event.preventDefault();
@@ -282,7 +290,7 @@ export default function GlobalSearch() {
     };
 
     const goToSearchPage = () => {
-        if (!trimmed) return;
+        if (!trimmed || composingRef.current) return;
         setInlineOpen(false);
         setActiveIndex(-1);
         router.push(`/search?query=${encodeURIComponent(trimmed)}`);
@@ -299,6 +307,11 @@ export default function GlobalSearch() {
     };
 
     const onInlineKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (isSearchComposing(event.nativeEvent, composingRef.current)) {
+            if (event.key === 'Enter') suppressSubmitRef.current = true;
+            return;
+        }
+        suppressSubmitRef.current = false;
         if (event.key === 'Escape') {
             setInlineOpen(false);
             return;
@@ -341,10 +354,21 @@ export default function GlobalSearch() {
         }
     };
 
+    const onCompositionStart = () => {
+        composingRef.current = true;
+        setComposing(true);
+    };
+
+    const onCompositionEnd = (event: React.CompositionEvent<HTMLInputElement>) => {
+        composingRef.current = false;
+        setQuery(event.currentTarget.value);
+        setComposing(false);
+    };
+
     const inlineRecordCount = flatRows.length;
     const paletteRecordCount = paletteRecordGroups.reduce((sum, group) => sum + group.rows.length, 0);
     const commandCount = commandGroups.reduce((sum, entry) => sum + entry.actions.length, 0);
-    const showNoResults = trimmed.length > 0 && !searching && !searchFailed && commandCount + paletteRecordCount === 0;
+    const showNoResults = !composing && trimmed.length > 0 && !searching && !searchFailed && commandCount + paletteRecordCount === 0;
     const availablePanelHeight = Math.max(0, Math.floor(currentViewportHeight / 2 - PANEL_VIEWPORT_CLEARANCE));
     const collapsedPanelHeight = Math.min(PANEL_COLLAPSED, availablePanelHeight);
     const expandedPanelHeight = Math.min(PANEL_EXPANDED, availablePanelHeight);
@@ -360,6 +384,7 @@ export default function GlobalSearch() {
                         role="search"
                         onSubmit={(event) => {
                             event.preventDefault();
+                            if (suppressSubmitRef.current) return;
                             goToSearchPage();
                         }}
                         className={PILL_SHELL}
@@ -376,6 +401,8 @@ export default function GlobalSearch() {
                             }}
                             onClick={() => setInlineOpen(true)}
                             onKeyDown={onInlineKeyDown}
+                            onCompositionStart={onCompositionStart}
+                            onCompositionEnd={onCompositionEnd}
                             placeholder={tSearch('placeholder')}
                             className={PILL_INPUT}
                             role="combobox"
@@ -409,7 +436,7 @@ export default function GlobalSearch() {
                             {searchFailed ? (
                                 <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('searchFailed')}</p>
                             ) : null}
-                            {!searching && !searchFailed && inlineRecordCount === 0 ? (
+                            {!composing && !searching && !searchFailed && inlineRecordCount === 0 ? (
                                 <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('noResults', { query: trimmed })}</p>
                             ) : null}
                             {inlineGroups.map((group) => (
@@ -504,6 +531,13 @@ export default function GlobalSearch() {
                                     ref={paletteInputRef}
                                     value={query}
                                     onValueChange={setQuery}
+                                    onCompositionStart={onCompositionStart}
+                                    onCompositionEnd={onCompositionEnd}
+                                    onKeyDown={(event) => {
+                                        if (event.key !== 'Tab' && isSearchComposing(event.nativeEvent, composingRef.current)) {
+                                            event.stopPropagation();
+                                        }
+                                    }}
                                     placeholder={tActions('palette.placeholder')}
                                     autoFocus
                                     className={PILL_INPUT}

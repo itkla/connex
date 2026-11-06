@@ -705,6 +705,13 @@
     </if>
   </sql>
 
+  <sql id="searchKeys">
+    <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+    <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
+    OR p.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+    OR p.search_phone LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+  </sql>
+
   <sql id="pageWhere">
     <where>
       <choose>
@@ -714,7 +721,8 @@
       <include refid="warmthWhere"/>
       <if test="query != null">
         AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
-          OR p.title LIKE #{query} OR c.name LIKE #{query})
+          OR p.title LIKE #{query} OR c.name LIKE #{query}
+          <include refid="searchKeys"/> OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR})
       </if>
       <if test="(companies != null and companies.size() > 0) or noCompany">
         AND (
@@ -933,7 +941,9 @@
     <include refid="companyJoin"/>
     WHERE <include refid="visible"/>
       AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query} OR p.title LIKE #{query}
-      OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
+      OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query}
+      <include refid="searchKeys"/> OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+      OR c.search_phone LIKE #{searchPhoneQuery,jdbcType=VARCHAR})
     ORDER BY p.name
     LIMIT 10
   </select>
@@ -951,13 +961,16 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO person (workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
-      ai_identifier_source_name, ai_identifier_key_version, email, phone, company_id, title, image_url,
+      ai_identifier_source_name, ai_identifier_key_version, search_name, search_phone, email, phone, company_id, title, image_url,
                         lead_source, lead_source_detail, referrer_person_id, created_at)
     VALUES (
       #{workspaceId}, #{ownerId,jdbcType=INTEGER}, CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
       CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
       CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
-      CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 3, #{email}, #{phone},
+      CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 3,
+      CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.SearchNameTypeHandler} USING utf8mb4),
+      CONVERT(#{phone,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.SearchPhoneTypeHandler} USING utf8mb4),
+      #{email}, #{phone},
       <choose>
         <when test="company != null">#{company.id}</when>
         <otherwise>NULL</otherwise>
@@ -973,14 +986,17 @@
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO person (workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
-      ai_identifier_source_name, ai_identifier_key_version, email, phone, company_id, title, image_url,
+      ai_identifier_source_name, ai_identifier_key_version, search_name, search_phone, email, phone, company_id, title, image_url,
                         lead_source, lead_source_detail, referrer_person_id)
     VALUES
     <foreach collection="list" item="p" separator=",">
       (#{p.workspaceId}, #{p.ownerId,jdbcType=INTEGER}, CONVERT(#{p.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
       CONVERT(#{p.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
       CONVERT(#{p.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
-      CONVERT(#{p.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 3, #{p.email}, #{p.phone},
+      CONVERT(#{p.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 3,
+      CONVERT(#{p.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.SearchNameTypeHandler} USING utf8mb4),
+      CONVERT(#{p.phone,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.SearchPhoneTypeHandler} USING utf8mb4),
+      #{p.email}, #{p.phone},
        <choose><when test="p.company != null">#{p.company.id}</when><otherwise>NULL</otherwise></choose>,
        #{p.title}, #{p.imageUrl},
        #{p.leadSource,jdbcType=VARCHAR}, #{p.leadSourceDetail,jdbcType=VARCHAR},
@@ -997,9 +1013,14 @@
         ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
         ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
         ai_identifier_key_version = 3,
+        search_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.SearchNameTypeHandler} USING utf8mb4),
       </if>
       <if test="email != null">email = #{email},</if>
-      <if test="phone != null">phone = #{phone},</if>
+      <if test="phone != null">
+        phone = #{phone},
+        search_phone = CONVERT(#{phone,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.SearchPhoneTypeHandler} USING utf8mb4),
+      </if>
+      search_key_revision = search_key_revision + 1,
       <if test="title != null">title = #{title},</if>
       company_id = <choose><when test="company != null">#{company.id}</when><otherwise>NULL</otherwise></choose>,
     </set>
