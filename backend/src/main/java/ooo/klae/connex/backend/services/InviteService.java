@@ -4,7 +4,6 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
@@ -49,35 +48,26 @@ public class InviteService {
     /**
      * Creates the same email-bound token invitation for every address. Recipient account
      * existence and mailbox-verification state are never resolved or returned to the inviter.
-     * A previous token invitation for the address is superseded.
+     * A previous token invitation for the address is superseded. This command must start without
+     * an enclosing transaction so it can report mail submission after all invitation locks and
+     * connections have been released.
+     * @throws IllegalStateException when called inside an enclosing transaction
      */
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actor.getId());
-        boolean enclosingTransaction = TransactionSynchronizationManager.isActualTransactionActive();
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Invitation creation must start outside a transaction");
+        }
         PreparedInvitation prepared = freshMembershipTransaction.execute(
             workspaceId,
             () -> createInviteInWorkspace(workspaceId, actor, emailRaw, roleRaw));
-        if (enclosingTransaction) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    try {
-                        inviteEmailService.sendInviteDeferred(workspaceId, prepared.workspaceName(), prepared.email(),
-                                prepared.inviterName(), prepared.role(), prepared.token());
-                    } catch (RuntimeException exception) {
-                        prepared.result().setEmailDelivery(MailDispatchOutcome.FAILED);
-                    }
-                }
-            });
-        } else {
-            try {
-                MailDispatchOutcome outcome = inviteEmailService.sendInvite(workspaceId, prepared.workspaceName(),
-                        prepared.email(), prepared.inviterName(), prepared.role(), prepared.token());
-                prepared.result().setEmailDelivery(outcome == null ? MailDispatchOutcome.UNCONFIRMED : outcome);
-            } catch (RuntimeException exception) {
-                prepared.result().setEmailDelivery(MailDispatchOutcome.FAILED);
-            }
+        try {
+            MailDispatchOutcome outcome = inviteEmailService.sendInvite(workspaceId, prepared.workspaceName(),
+                    prepared.email(), prepared.inviterName(), prepared.role(), prepared.token());
+            prepared.result().setEmailDelivery(outcome == null ? MailDispatchOutcome.FAILED : outcome);
+        } catch (RuntimeException exception) {
+            prepared.result().setEmailDelivery(MailDispatchOutcome.FAILED);
         }
         return prepared.result();
     }
@@ -117,7 +107,7 @@ public class InviteService {
         dto.setExpiresAt(saved.getExpiresAt());
         dto.setCreatedAt(saved.getCreatedAt());
         dto.setInvitedByLabel(actor.getDisplayName());
-        InviteResultDto result = new InviteResultDto(dto, MailDispatchOutcome.UNCONFIRMED);
+        InviteResultDto result = new InviteResultDto(dto, MailDispatchOutcome.FAILED);
         return new PreparedInvitation(result, workspaceNameFor(actor, workspaceId), email,
                 actor.getDisplayName(), role, invite.getToken());
     }

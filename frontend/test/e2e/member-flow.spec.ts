@@ -125,3 +125,27 @@ for (const locale of ["en", "ja"] as const) {
         }
     });
 }
+
+for (const example of [
+    { name: "encoded slashes", path: "/%2f%2fhost" },
+    { name: "encoded backslash", path: "/%5chost" },
+    { name: "absolute destination", path: "https://connex.invalid/invite" },
+]) {
+    test(`authentication switches discard ${example.name}`, async ({ browser, baseURL }) => {
+        const context = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+        try {
+            await useLocale(context, "en");
+            const page = await context.newPage();
+            await page.goto(`/auth/register?${new URLSearchParams({ redirect: example.path })}`);
+            const signIn = page.getByRole("link", { name: message("en", "auth", "AuthRegister.altLabel"), exact: true });
+            await expect(signIn).toHaveAttribute("href", "/auth/login");
+            await signIn.click();
+            await expect(page).toHaveURL(/\/auth\/login$/);
+            await page.goto(`/auth/login?${new URLSearchParams({ redirect: example.path })}`);
+            const register = page.getByRole("link", { name: message("en", "auth", "AuthLogin.altLabel"), exact: true });
+            await expect(register).toHaveAttribute("href", "/auth/register");
+        } finally {
+            await context.close();
+        }
+    });
+}

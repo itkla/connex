@@ -40,7 +40,7 @@ class InviteServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Invite WS", currentUser.getId());
         String email = "newcomer-" + unique() + "@example.com";
 
-        InviteResultDto result = inviteService.createInvite(ws.getId(), currentUser, email, "member");
+        InviteResultDto result = afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser, email, "member"));
         assertNotNull(result.getInvite());
 
         User invitee = register(email);
@@ -64,8 +64,8 @@ class InviteServiceTest extends AbstractServiceTest {
         User recoveryOwner = newUser();
         workspaceMapper.addMember(ws.getId(), recoveryOwner.getId(), "owner");
         String email = "stored-invite-" + unique() + "@example.com";
-        InviteResultDto result = inviteService.createInvite(
-            ws.getId(), currentUser, email, "member");
+        InviteResultDto result = afterFixtureCommit(() -> inviteService.createInvite(
+            ws.getId(), currentUser, email, "member"));
         WorkspaceRole restricted = roleService.createRole(
             ws.getId(), currentUser.getId(), "Restricted invite creator",
             List.of(Permission.MEMBER_MANAGE.name()));
@@ -87,7 +87,7 @@ class InviteServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Notify WS", currentUser.getId());
         User existing = newUser();
 
-        InviteResultDto result = inviteService.createInvite(ws.getId(), currentUser, existing.getEmail(), "admin");
+        InviteResultDto result = afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser, existing.getEmail(), "admin"));
 
         assertNotNull(result.getInvite());
         assertEquals(existing.getEmail(), result.getInvite().getEmail());
@@ -102,9 +102,9 @@ class InviteServiceTest extends AbstractServiceTest {
     void inviteExistingUserTwice_supersedesPendingToken() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Dupe WS", currentUser.getId());
         User existing = newUser();
-        inviteService.createInvite(ws.getId(), currentUser, existing.getEmail(), "member");
+        afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser, existing.getEmail(), "member"));
 
-        InviteResultDto replacement = inviteService.createInvite(ws.getId(), currentUser, existing.getEmail(), "member");
+        InviteResultDto replacement = afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser, existing.getEmail(), "member"));
         assertNotNull(replacement.getInvite());
         assertEquals(1, inviteService.listInvites(ws.getId(), currentUser.getId()).size());
     }
@@ -114,7 +114,7 @@ class InviteServiceTest extends AbstractServiceTest {
     void preview_reportsWorkspaceAndValidity() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Preview WS", currentUser.getId());
         String email = "preview-" + unique() + "@example.com";
-        InviteResultDto result = inviteService.createInvite(ws.getId(), currentUser, email, "member");
+        InviteResultDto result = afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser, email, "member"));
 
         InvitePreviewDto preview = inviteService.previewInvite(result.getInvite().getToken());
 
@@ -127,8 +127,8 @@ class InviteServiceTest extends AbstractServiceTest {
     void accept_rejectsMismatchedEmail() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Mismatch WS", currentUser.getId());
         User other = newUser();
-        InviteResultDto result = inviteService.createInvite(ws.getId(), currentUser,
-            "someone-else-" + unique() + "@example.com", "member");
+        InviteResultDto result = afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser,
+            "someone-else-" + unique() + "@example.com", "member"));
 
         assertThrows(ForbiddenException.class,
             () -> inviteService.acceptInvite(result.getInvite().getToken(), other));
@@ -139,7 +139,7 @@ class InviteServiceTest extends AbstractServiceTest {
     void accept_rejectsRevokedInvite() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Revoke WS", currentUser.getId());
         String email = "revoked-" + unique() + "@example.com";
-        InviteResultDto result = inviteService.createInvite(ws.getId(), currentUser, email, "member");
+        InviteResultDto result = afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser, email, "member"));
 
         inviteService.revokeInvite(ws.getId(), result.getInvite().getId(), currentUser.getId());
 
@@ -156,7 +156,7 @@ class InviteServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(ws.getId(), member.getId(), "member");
 
         assertThrows(ForbiddenException.class,
-            () -> inviteService.createInvite(ws.getId(), member, "x@example.com", "member"));
+            () -> afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), member, "x@example.com", "member")));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -168,13 +168,13 @@ class InviteServiceTest extends AbstractServiceTest {
         authenticateAs(delegate, ws.getId());
         approveForStepUp(delegate);
 
-        InviteResultDto memberInvite = inviteService.createInvite(
-            ws.getId(), delegate, "member-" + unique() + "@example.com", "member");
+        InviteResultDto memberInvite = afterFixtureCommit(() -> inviteService.createInvite(
+            ws.getId(), delegate, "member-" + unique() + "@example.com", "member"));
         assertNotNull(memberInvite.getInvite());
         assertThrows(
             ForbiddenException.class,
-            () -> inviteService.createInvite(
-                ws.getId(), delegate, "admin-" + unique() + "@example.com", "admin"));
+            () -> afterFixtureCommit(() -> inviteService.createInvite(
+                ws.getId(), delegate, "admin-" + unique() + "@example.com", "admin")));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -189,8 +189,8 @@ class InviteServiceTest extends AbstractServiceTest {
 
         assertThrows(
             ForbiddenException.class,
-            () -> inviteService.addExistingMember(
-                ws.getId(), delegate.getId(), existing.getEmail(), "admin"));
+            () -> afterFixtureCommit(() -> inviteService.addExistingMember(
+                ws.getId(), delegate.getId(), existing.getEmail(), "admin")));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -199,7 +199,7 @@ class InviteServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Direct WS", currentUser.getId());
         User existing = newUser();
 
-        InviteResultDto added = inviteService.addExistingMember(ws.getId(), currentUser.getId(), existing.getEmail(), "admin");
+        InviteResultDto added = afterFixtureCommit(() -> inviteService.addExistingMember(ws.getId(), currentUser.getId(), existing.getEmail(), "admin"));
 
         assertEquals("admin", added.getInvite().getRole());
         assertEquals("pending", added.getInvite().getStatus());
@@ -211,8 +211,8 @@ class InviteServiceTest extends AbstractServiceTest {
     void addExistingMember_acceptsUnknownEmailUniformly() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Unknown WS", currentUser.getId());
 
-        assertNotNull(inviteService.addExistingMember(ws.getId(), currentUser.getId(),
-            "ghost-" + unique() + "@example.com", "member").getInvite());
+        assertNotNull(afterFixtureCommit(() -> inviteService.addExistingMember(ws.getId(), currentUser.getId(),
+            "ghost-" + unique() + "@example.com", "member")).getInvite());
     }
 
     private User register(String email) {

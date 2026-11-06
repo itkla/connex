@@ -20,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.transaction.AfterTransaction;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -70,6 +71,20 @@ public abstract class AbstractServiceTest {
     protected String dealScope(int workspaceId) {
         return workspaceMapper.findOrganizationWorkspacesForShare(workspaceId).stream()
             .map(ooo.klae.connex.backend.beans.Workspace::getId).toList().toString();
+    }
+
+    /** Commits staged fixtures for a transaction-owning command, then starts a new rollback transaction. */
+    protected <T> T afterFixtureCommit(Supplier<T> command) {
+        if (!TestTransaction.isActive()) {
+            return command.get();
+        }
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+        try {
+            return command.get();
+        } finally {
+            TestTransaction.start();
+        }
     }
 
     private static final Duration OBJECT_DELETION_DRAIN_SAFETY_MARGIN = Duration.ofMinutes(10);

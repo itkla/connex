@@ -9,7 +9,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.InOrder;
@@ -52,9 +53,14 @@ class SsoLinkAuthenticationSuccessHandlerTest {
     @Mock private OidcUser oidcUser;
     @InjectMocks private SsoAuthenticationSuccessHandler handler;
 
-    @Test
-    void linkRequiredResultClearsAuthenticationBeforeIssuingFlow() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/invite", "/invite-link"})
+    void linkRequiredResultClearsAuthenticationBeforeIssuingFlow(String destination) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
+        if (!destination.isEmpty()) {
+            request.addParameter("redirect", destination);
+            AuthenticationReturnPathSession.remember(request);
+        }
         MockHttpServletResponse response = new MockHttpServletResponse();
         OAuth2AuthenticationToken authentication = new OAuth2AuthenticationToken(
             oidcUser, List.of(), "org-7");
@@ -90,6 +96,7 @@ class SsoLinkAuthenticationSuccessHandlerTest {
             ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256("raw-link-token"));
         verify(oneTimeLinkFlowCookie).set(
             response, Purpose.SSO_LINK, "browser-grant", java.time.Duration.ofMinutes(10));
-        assertEquals("https://app.example/sso/link", response.getRedirectedUrl());
+        assertEquals("https://app.example/sso/link" + (destination.isEmpty() ? "" : "?redirect="
+                + java.net.URLEncoder.encode(destination, java.nio.charset.StandardCharsets.UTF_8)), response.getRedirectedUrl());
     }
 }

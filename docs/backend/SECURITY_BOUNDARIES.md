@@ -58,14 +58,19 @@ Invite-link redemption and removed-member rejoin policy are unchanged.
 
 Invitation creation also reports `emailDelivery`, uniformly for every addressed email: `ACCEPTED`
 means the SMTP server accepted submission, not confirmed inbox delivery; `SKIPPED` means no usable
-sender was available; `FAILED` means preparation or submission failed; `UNCONFIRMED` means no
-submission outcome is available to the caller, including deferred mail in an enclosing transaction.
-None of these outcomes resolves a recipient's Connex
-account. The invitation persists independently of mail success; its creator can share the returned link.
-Ordinary callers submit mail after the invitation transaction fully releases its resources.
-Enclosing transactions enqueue mail asynchronously only after commit and never wait for a
-connection in the callback. The worker explicitly routes the target workspace. SMTP starts after
-sender-resolution locks are released.
+sender was available; `FAILED` means preparation or submission failed. None of these outcomes
+resolves a recipient's Connex account. The command refuses an enclosing transaction before
+invitation writes, then submits mail synchronously after its own transaction fully releases its
+resources. There is no memory-only dispatch queue; every completed creation request reports the submission
+outcome. The creator can share
+the returned link or explicitly replace the invitation after a failed submission. The mail service
+routes the target workspace, and SMTP starts after sender-resolution locks are released.
+
+Authentication return destinations use the same strict relative-path contract on the frontend
+and server. OAuth2/social and SAML start endpoints capture only one validated `redirect` query
+value. Completion consumes it before a session can be replaced; successful login, linking and
+failure continuations use only that captured value. An absent or invalid destination keeps the
+existing dashboard/onboarding fallback. No caller-supplied origin can become the redirect origin.
 
 Self-service registration accepts `skipInitialWorkspace` to suppress optional personal workspace
 creation while returning to invitation acceptance. This preference grants no workspace membership

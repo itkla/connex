@@ -3,7 +3,6 @@ package ooo.klae.connex.backend.services;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -20,7 +19,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * Emails workspace invite links to the invited address. Uses the workspace's own
  * sender (falling back to the instance default) via {@link MailService}. Called after the
  * invitation transaction releases its resources, so a mail outage cannot roll it back or hold
- * membership locks. Enclosing transactions submit deferred work without waiting in afterCommit.
+ * membership locks. The request observes every submission result and can recover with its link.
  */
 @Service
 @RequiredArgsConstructor
@@ -49,14 +48,6 @@ public class InviteEmailService {
         } catch (RuntimeException exception) {
             return MailDispatchOutcome.FAILED;
         }
-    }
-
-    /** Queues post-commit mail without waiting for a connection the caller still retains. */
-    @Async
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public void sendInviteDeferred(int workspaceId, String workspaceName, String toEmail,
-            String inviterName, String role, String token) {
-        sendInvite(workspaceId, workspaceName, toEmail, inviterName, role, token);
     }
 
     private MailDispatchOutcome submitInvite(int workspaceId, String workspaceName, String toEmail,

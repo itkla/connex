@@ -24,7 +24,6 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.User;
@@ -56,9 +55,12 @@ class InviteServiceClaimTest {
     private boolean insideFreshTransaction;
 
     @BeforeEach
-    void runFreshMembershipTransactionInline() {
+    void initializeTransactionState() {
         TransactionSynchronizationManager.initSynchronization();
-        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+
+    private void runFreshMembershipTransactionInline() {
         when(freshMembershipTransaction.execute(anyInt(), any())).thenAnswer(invocation -> {
             insideFreshTransaction = true;
             try {
@@ -76,6 +78,7 @@ class InviteServiceClaimTest {
 
     @Test
     void creatingInvitationNeverResolvesRecipientAccounts() {
+        runFreshMembershipTransactionInline();
         User actor = user("owner@example.com");
         String email = "recipient@example.com";
         when(workspaceService.getOrgId(7)).thenReturn(3);
@@ -88,8 +91,8 @@ class InviteServiceClaimTest {
 
         assertEquals(email, result.getInvite().getEmail());
         assertEquals("pending", result.getInvite().getStatus());
-        assertEquals(MailDispatchOutcome.UNCONFIRMED, result.getEmailDelivery());
-        verifyNoInteractions(inviteEmailService);
+        assertEquals(MailDispatchOutcome.FAILED, result.getEmailDelivery());
+        verify(inviteEmailService).sendInvite(anyInt(), any(), any(), any(), any(), any());
         verifyNoInteractions(userMapper);
         verify(workspaceService).lockInviteGrantAuthorization(7, actor.getId(), null, "member");
     }
@@ -97,6 +100,7 @@ class InviteServiceClaimTest {
     @ParameterizedTest
     @EnumSource(value = MailDispatchOutcome.class, names = {"ACCEPTED", "SKIPPED", "FAILED"})
     void ordinaryMailRunsAfterFreshTransactionReturnsAndReportsTheOutcome(MailDispatchOutcome outcome) {
+        runFreshMembershipTransactionInline();
         TransactionSynchronizationManager.setActualTransactionActive(false);
         User actor = user("owner@example.com");
         String email = "recipient@example.com";
@@ -115,31 +119,22 @@ class InviteServiceClaimTest {
         var result = inviteService.createInvite(7, actor, email, "member");
 
         assertEquals(outcome, result.getEmailDelivery());
-        verify(inviteEmailService, never()).sendInviteDeferred(anyInt(), any(), any(), any(), any(), any());
+        verify(inviteEmailService).sendInvite(anyInt(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void enclosingTransactionQueuesOnlyAfterCommitAndKeepsOutcomeUnconfirmed() {
-        User actor = user("owner@example.com");
-        String email = "recipient@example.com";
-        when(workspaceService.getOrgId(7)).thenReturn(3);
-        when(orgAllowedDomainService.isJoinAllowed(3, email)).thenReturn(true);
-        WorkspaceInvite saved = pendingInvite();
-        saved.setEmail(email);
-        when(inviteMapper.findByTokenHash(org.mockito.ArgumentMatchers.anyString())).thenReturn(saved);
+    void enclosingTransactionIsRejectedBeforeAnyInvitationOrMailSideEffect() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
 
-        var result = inviteService.createInvite(7, actor, email, "member");
+        assertThrows(IllegalStateException.class,
+                () -> inviteService.createInvite(7, user("owner@example.com"), "recipient@example.com", "member"));
 
-        verifyNoInteractions(inviteEmailService);
-        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
-
-        verify(inviteEmailService).sendInviteDeferred(anyInt(), any(), any(), any(), any(), any());
-        verify(inviteEmailService, never()).sendInvite(anyInt(), any(), any(), any(), any(), any());
-        assertEquals(MailDispatchOutcome.UNCONFIRMED, result.getEmailDelivery());
+        verifyNoInteractions(inviteMapper, inviteEmailService, userOffboardingService, auditService);
     }
 
     @Test
     void unexpectedPostCommitMailFailureKeepsTheCreatedInvitationUsable() {
+        runFreshMembershipTransactionInline();
         TransactionSynchronizationManager.setActualTransactionActive(false);
         User actor = user("owner@example.com");
         String email = "recipient@example.com";
@@ -160,24 +155,19 @@ class InviteServiceClaimTest {
     }
 
     @Test
-    void rolledBackInvitationNeverSendsMail() {
-        User actor = user("owner@example.com");
-        String email = "recipient@example.com";
-        when(workspaceService.getOrgId(7)).thenReturn(3);
-        when(orgAllowedDomainService.isJoinAllowed(3, email)).thenReturn(true);
-        WorkspaceInvite saved = pendingInvite();
-        saved.setEmail(email);
-        when(inviteMapper.findByTokenHash(org.mockito.ArgumentMatchers.anyString())).thenReturn(saved);
+    void failedInvitationTransactionNeverSendsMail() {
+        doThrow(new IllegalStateException("Invitation rolled back"))
+            .when(freshMembershipTransaction).execute(anyInt(), any());
 
-        inviteService.createInvite(7, actor, email, "member");
-        TransactionSynchronizationManager.getSynchronizations()
-            .forEach(synchronization -> synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        assertThrows(IllegalStateException.class,
+                () -> inviteService.createInvite(7, user("owner@example.com"), "recipient@example.com", "member"));
 
         verifyNoInteractions(inviteEmailService);
     }
 
     @Test
     void lostClaimStopsBeforeEveryMembershipSideEffect() {
+        runFreshMembershipTransactionInline();
         WorkspaceInvite invite = pendingInvite();
         User user = user("recipient@example.com");
         stubPreliminaryValidation(invite, user);
@@ -207,6 +197,7 @@ class InviteServiceClaimTest {
 
     @Test
     void revokedStoredGrantStopsBeforeInviteClaim() {
+        runFreshMembershipTransactionInline();
         WorkspaceInvite invite = pendingInvite();
         User user = user("recipient@example.com");
         when(inviteMapper.findByToken(invite.getToken())).thenReturn(invite);
@@ -227,6 +218,7 @@ class InviteServiceClaimTest {
 
     @Test
     void lockedGrantAuthorizationStopsBeforeSupersedeAndPendingInsertion() {
+        runFreshMembershipTransactionInline();
         User actor = user("owner@example.com");
         User existing = user("recipient@example.com");
         existing.setId(10);
@@ -251,6 +243,7 @@ class InviteServiceClaimTest {
 
     @Test
     void deniedGrantStopsBeforeInviteSideEffects() {
+        runFreshMembershipTransactionInline();
         User actor = user("delegate@example.com");
         String email = "recipient@example.com";
         when(workspaceService.getOrgId(7)).thenReturn(3);
@@ -270,6 +263,7 @@ class InviteServiceClaimTest {
 
     @Test
     void lockedUserEmailMustStillMatchBeforeClaim() {
+        runFreshMembershipTransactionInline();
         WorkspaceInvite invite = pendingInvite();
         User initialUser = user("recipient@example.com");
         User lockedUser = user("changed@example.com");

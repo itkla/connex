@@ -1,3 +1,4 @@
+import { authSwitchHref } from "@/app/lib/authReturnPath";
 import { publishAiAvailabilityChange } from "@/app/lib/aiAvailabilityEvents";
 const API_BASE =
     typeof window === "undefined"
@@ -2842,11 +2843,13 @@ export function validateSsoLink() {
  * Spring's {@code /saml2} authenticate endpoint (proxied to the backend by the frontend runtime).
  * @param registrationId the {@code org-<id>} registration from discovery
  * @param protocol the connection protocol
+ * @param redirect the local return destination; malformed or absolute values are omitted
  * @returns the absolute path to navigate the browser to
  */
-export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol) {
+export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol, redirect: string | null = null) {
     const id = encodeURIComponent(registrationId);
-    return protocol === "saml" ? `/saml2/authenticate/${id}` : `/api/oauth2/authorization/${id}`;
+    const path = protocol === "saml" ? `/saml2/authenticate/${id}` : `/api/oauth2/authorization/${id}`;
+    return authSwitchHref(path, redirect);
 }
 
 /*
@@ -2858,10 +2861,11 @@ export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol
  * social login. Mirrors {@link ssoStartPath}; the provider's OAuth2 flow starts under the
  * proxied {@code /api} prefix.
  * @param provider the social provider to authenticate with
+ * @param redirect the local return destination; malformed or absolute values are omitted
  * @returns the absolute path to navigate the browser to
  */
-export function socialLoginStartPath(provider: "google" | "microsoft") {
-    return `/api/oauth2/authorization/${provider}`;
+export function socialLoginStartPath(provider: "google" | "microsoft", redirect: string | null = null) {
+    return authSwitchHref(`/api/oauth2/authorization/${provider}`, redirect);
 }
 
 /*

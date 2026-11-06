@@ -1,4 +1,6 @@
 /** @vitest-environment jsdom */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
@@ -245,5 +247,35 @@ describe("member-flow outcomes", () => {
         expect(revokeWorkspaceInviteLink).not.toHaveBeenCalled();
         expect(toastSuccess).toHaveBeenCalledWith(copy.removed, { description: copy.removedDescription });
         expect(host.textContent).not.toContain("Teammate");
+    });
+});
+
+
+describe("member-removal ownership contract", () => {
+    it("names every ownership type cleared by detachMemberContent in both confirmation and result", () => {
+        const source = readFileSync(resolve(process.cwd(), "../backend/src/main/java/ooo/klae/connex/backend/services/UserOffboardingService.java"), "utf8");
+        const start = source.indexOf("public void detachMemberContent(");
+        const end = source.indexOf("/**", start);
+        const method = source.slice(start, end);
+        const labels: Record<string, { en: string; ja: string }> = {
+            company: { en: "companies", ja: "会社" }, person: { en: "contacts", ja: "連絡先" },
+            deal: { en: "deals", ja: "案件" }, campaign: { en: "campaigns", ja: "キャンペーン" },
+            sequence: { en: "sequences", ja: "シーケンス" },
+        };
+        const cleared = [...method.matchAll(/(\w+)Mapper\.clearMember(?:Deal)?Ownership\(/g)].map((match) => match[1]);
+        expect(cleared.length).toBeGreaterThan(0);
+        for (const mapper of cleared) {
+            const label = labels[mapper];
+            if (!label) throw new Error(`Missing ownership copy for ${mapper}`);
+            for (const key of ["removeOwnershipConsequences", "removedDescription"] as const) {
+                expect(english.WorkspaceMembers[key]).toContain(label.en);
+                expect(japanese.WorkspaceMembers[key]).toContain(label.ja);
+            }
+        }
+        expect(method).toContain("taskMapper.unassignMemberTasks");
+        for (const key of ["removeOwnershipConsequences", "removedDescription"] as const) {
+            expect(english.WorkspaceMembers[key]).toContain("tasks");
+            expect(japanese.WorkspaceMembers[key]).toContain("タスク");
+        }
     });
 });

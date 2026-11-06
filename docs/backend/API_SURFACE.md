@@ -81,10 +81,19 @@ counted by this sentinel test. No alternate port, proxy deployment, or productio
 
 Workspace invitation creation returns `{invite, emailDelivery}` for every recipient address.
 `emailDelivery` is `ACCEPTED` only after SMTP accepts submission, `SKIPPED` when no usable sender
-is available, `FAILED` when preparation/submission fails, and `UNCONFIRMED` when the caller has no
-submission outcome, including mail deferred by an enclosing transaction. Submission does not prove
-mailbox delivery. The response and sending path
-never depend on whether the recipient has a Connex account; pending profiles stay withheld.
+is available, and `FAILED` when preparation/submission fails. Submission does not prove mailbox
+delivery. The command rejects an enclosing transaction before invitation writes, commits its own
+invitation transaction, and submits mail synchronously after transaction cleanup. No in-memory
+queue is used; an unsuccessful submission is visible alongside the recoverable invitation link.
+The response and sending path never depend on whether the recipient has a Connex account;
+pending profiles stay withheld.
+
+OAuth2 enterprise/social and SAML start endpoints accept an optional `redirect` query parameter.
+Only a single validated, normalized relative path is kept for the browser's next ceremony.
+Authentication completion consumes it before session rotation and redirects to the configured
+frontend origin plus that path. A link-required result carries the same validated path into its
+confirmation page. Absolute URLs, controls, backslashes and encoded separators/controls are
+rejected before parsing and after one strict UTF-8 decode, matching the frontend's shared vectors.
 
 Self-service registration accepts an optional `skipInitialWorkspace` boolean, defaulting to false.
 It suppresses only the optional personal workspace, so invitation entry can continue without

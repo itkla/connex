@@ -1,10 +1,27 @@
-/** Resolves local authentication destinations without trusting an external origin. */
+const FORBIDDEN_ESCAPES = /%(?:2f|5c|0[0-9a-f]|1[0-9a-f]|7f)|%c2%[89][0-9a-f]/i;
+const ENCODED_UNRESERVED = /%([0-9a-f]{2})/gi;
+
+function forbidden(value: string): boolean {
+    return FORBIDDEN_ESCAPES.test(value) || [...value].some((character) => {
+        const code = character.charCodeAt(0);
+        return character === "\\" || code <= 31 || (code >= 127 && code <= 159);
+    });
+}
+
+/** Validates and normalizes a relative authentication destination before browser URL parsing. */
 export function authReturnPath(candidate: unknown): string | null {
-    if (typeof candidate !== "string" || !candidate.startsWith("/")) return null;
+    if (typeof candidate !== "string" || !candidate.startsWith("/") || candidate.startsWith("//") || forbidden(candidate)
+        || [...candidate].some((character) => ' "<>^`{|}[]'.includes(character))) return null;
     try {
+        const decoded = decodeURIComponent(candidate);
+        if (!decoded.startsWith("/") || decoded.startsWith("//") || forbidden(decoded)) return null;
+        const normalized = candidate.replace(ENCODED_UNRESERVED, (escape, hex: string) => {
+            const character = String.fromCharCode(Number.parseInt(hex, 16));
+            return /[a-z0-9._~-]/i.test(character) ? character : escape;
+        });
         const base = "https://connex.invalid";
-        const url = new URL(candidate, base);
-        if (url.origin !== base || url.pathname.startsWith("//")) return null;
+        const url = new URL(normalized, base);
+        if (url.origin !== base || !url.pathname.startsWith("/") || url.pathname.startsWith("//")) return null;
         return `${url.pathname}${url.search}${url.hash}`;
     } catch {
         return null;
