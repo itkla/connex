@@ -2622,6 +2622,7 @@ export type CampaignSend = {
     createdById: number | null;
     createdAt: string;
     updatedAt: string;
+    contentRefused?: boolean;
 };
 
 /**

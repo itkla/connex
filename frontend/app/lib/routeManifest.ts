@@ -2,6 +2,7 @@ import {
     ACTIVITY_URL_KEY,
     COMMENT_URL_KEY,
     NOTE_URL_KEY,
+    NOTIFICATION_OPEN_URL_KEY,
     PIPELINE_EDIT_URL_KEY,
     TASK_URL_KEY,
 } from '@/app/hooks/listStateUrl';
@@ -106,6 +107,7 @@ export type ShippedAppRoute = (typeof SHIPPED_APP_ROUTES)[number];
 
 /** Query parameters owned by each shipped route's deep-link consumers. */
 export const SHIPPED_ROUTE_QUERY_PARAMS = {
+    '/notifications': [NOTIFICATION_OPEN_URL_KEY],
     '/activity/all': [ACTIVITY_URL_KEY],
     '/activity/notes': [NOTE_URL_KEY],
     '/activity/tasks': [TASK_URL_KEY],

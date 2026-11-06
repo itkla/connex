@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.CampaignAudienceSnapshot;
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignMessage;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
+import ooo.klae.connex.backend.delivery.CampaignMessageTokens;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.capability.Capability;
@@ -225,6 +226,7 @@ public class CampaignTriggeredSendService {
                     "Campaign message revision not found for version: " + request.messageVersion());
         }
         DeliveryChannel channel = resolveChannel(message.getChannel());
+        CampaignMessageTokens.validate(revision);
         requireDeliveryReady(workspaceId, channel);
 
         AudienceEligibilityService.AudienceClassification eligibility =
@@ -250,7 +252,9 @@ public class CampaignTriggeredSendService {
                 workspaceId, actorId, campaign, message, revision);
         CampaignSend send = resolveSend(
                 workspaceId, actorId, campaign, message, revision, snapshot, discoveredSend);
-        if (!"triggered".equals(send.getStatus())) {
+        send = campaignSendMapper.getSendForUpdate(workspaceId, send.getId());
+        if (send == null || !"triggered".equals(send.getStatus()) || send.isContentRefused()
+                || send.getCompletedAt() != null) {
             throw new BadRequestException("The triggered campaign send is not accepting enrollments");
         }
         CampaignDelivery existing = campaignDeliveryMapper.getBySendAndPerson(

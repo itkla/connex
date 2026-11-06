@@ -112,7 +112,9 @@ public final class ArchiveVisibilityRegistry {
          * retroactively rewrite. Checked: the statement is bounded by a report period parameter, so
          * an unbounded live worklist cannot claim this reason.
          */
-        CLOSED_PERIOD_ANALYTICS
+        CLOSED_PERIOD_ANALYTICS,
+        /** Bounded source reads exclusively for source-checked, same-record search projection repair. */
+        SEARCH_PROJECTION_REPAIR
     }
 
     /** One namespace's archive strategy and review rationale. */
@@ -218,6 +220,9 @@ public final class ArchiveVisibilityRegistry {
         declare(entries, "LegacyTenantUploadMigrationMapper", ArchiveStrategy.REACH_ARCHIVED,
             "Offline storage reconciliation must include archived owners so their binaries are not "
                 + "stranded.");
+        declare(entries, "RecordSearchMapper", ArchiveStrategy.REACH_ARCHIVED,
+            "Bounded search projection repair maintains retained archived records for authorized "
+                + "archive searches and restoration; it never returns records to a product caller.");
         declare(entries, "IdentityMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
             "Canonical identity rows remain stored for reversibility, while every parent read used "
                 + "for backfill, active matching, preflight, or identity maintenance excludes "
@@ -274,6 +279,10 @@ public final class ArchiveVisibilityRegistry {
 
     private static List<StatementExemption> buildExemptions() {
         List<StatementExemption> entries = new ArrayList<>();
+        exempt(entries, "RecordSearchMapper", "findMissing", List.of("p", "c"),
+            ExemptionReason.SEARCH_PROJECTION_REPAIR,
+            "Only the bounded maintenance page reads names and phones of retained archived records; "
+                + "source-checked same-row updates maintain search projections without exposing a live worklist.");
         exempt(entries, "PersonMapper", "getOwnedPersonByIdForUpdate", List.of("p"),
             ExemptionReason.RECORD_LIFECYCLE_LOCK,
             "The row lock every contact write takes first. It has to see the archived row so restore "

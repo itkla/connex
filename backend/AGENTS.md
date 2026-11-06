@@ -88,6 +88,7 @@ Read the relevant contract before editing that subsystem:
 | Business-card upload/OCR/fallback/import | `../docs/backend/BUSINESS_CARD_SCANNING.md`, `../ocr/AGENTS.md` |
 | Automation, segments, rules, workflows | `../docs/backend/AUTOMATION.md` |
 | Duplicate review, CSV, interaction-history import | `../docs/backend/IMPORTS_AND_DUPLICATE_REVIEW.md` |
+| Contact/company search normalization | `../docs/backend/RECORD_SEARCH.md` |
 | Tenancy, routing, lifecycle, data planes | `../docs/MULTITENANCY_PLAN.md` |
 | Whole-record edits, optimistic concurrency | `../docs/backend/RECORD_EDIT_CONCURRENCY.md` |
 | Transactions, concurrency, lock order | `../docs/backend/LOCKING.md` |
