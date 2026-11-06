@@ -14,6 +14,13 @@ Schema changes use Flyway under `backend/src/main/resources/db/migration/`.
 - `TablePlaneRegistry` and architecture tests define/enforce table placement. A table must have one deliberate plane.
 - No foreign key crosses the tenant/control plane wall in either direction. Validate cross-plane references in the service layer instead.
 
+Schema-verified conditional DDL may read `information_schema.COLUMNS`, `STATISTICS` and `TRIGGERS`.
+Use one unaliased metadata source with a leading `TABLE_SCHEMA = DATABASE()` (or
+`TRIGGER_SCHEMA = DATABASE()`) predicate joined to the object checks by `AND`. Metadata reads do
+not exempt any tenant/control data access, cross-catalog source, or metadata write from the plane
+wall. V244 uses invalid statement markers to fail preparation on incompatible definitions without
+accessing another table. Every committed DDL prefix must remain safe to replay.
+
 Read `docs/MULTITENANCY_PLAN.md` before deciding a new table's plane.
 
 ## Versioning
