@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, type ComponentProps, type ReactNode } from 'react';
+import { act, Suspense, type ComponentProps, type ReactNode } from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { DndContext, type DragEndEvent } from '@dnd-kit/core';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -18,12 +18,12 @@ vi.mock('@dnd-kit/core', async (original) => {
 vi.mock('@/app/hooks/useDragScroll', () => ({ useDragScroll: () => ({ ref: captured.scrollRef, edges: { left: false, right: false } }) }));
 vi.mock('@/components/ui/icon-button', () => ({ IconButton: ({ label, children, ...props }: ComponentProps<'button'> & { label: string; children: ReactNode }) => <button aria-label={label} {...props}>{children}</button> }));
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const columns = [{ id: 'old', label: 'Original' }, { id: 'next', label: 'Destination' }];
 const items = [{ id: 1, column: 'old' }];
-function content(onMove?: KanbanBoardProps<(typeof items)[number]>['onMove'], onBeforeMove?: KanbanBoardProps<(typeof items)[number]>['onBeforeMove'], boardItems = items) {
+function content(onMove?: KanbanBoardProps<(typeof items)[number]>['onMove'], onBeforeMove?: KanbanBoardProps<(typeof items)[number]>['onBeforeMove'], boardItems = items, accessibility: KanbanBoardProps<(typeof items)[number]>['accessibility'] = { moveRestored: (_, column, position) => `Restored ${column}, position ${position + 1}` }) {
     return <KanbanBoard columns={columns} items={boardItems} getId={(item) => item.id} getColumnId={(item) => item.column}
-        getPosition={() => 0} dragLabel={() => 'Move Example'} reduce countLabel={String} onMove={onMove} onBeforeMove={onBeforeMove} accessibility={{ moveRestored: (_, column, position) => `Restored ${column}, position ${position + 1}` }}
+        getPosition={() => 0} dragLabel={() => 'Move Example'} reduce countLabel={String} onMove={onMove} onBeforeMove={onBeforeMove} accessibility={accessibility}
         renderCard={(_, handle) => <div>{handle}<button>Open Example</button><button>Example actions</button></div>} />;
 }
 function board(onMove?: KanbanBoardProps<(typeof items)[number]>['onMove'], onBeforeMove?: KanbanBoardProps<(typeof items)[number]>['onBeforeMove']) {
@@ -147,4 +147,68 @@ it('keeps a saved destination alongside peers from a refresh received during per
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(document.querySelector('[data-kanban-drag-handle="1"]')?.closest('section')?.textContent).toContain('Destination');
     expect(document.querySelector('[data-kanban-drag-handle="2"]')?.closest('section')?.textContent).toContain('Original');
+});
+
+for (const resolution of ['saved', 'cancelled', 'refused'] as const) {
+it(`replaces a confirmation request in the same live region when ${resolution}`, async () => {
+    let decide: ((accepted: boolean) => void) | undefined;
+    const saved = 'Example is in Destination, position 3. Outcome: Won.';
+    const restored = 'Restored Original, position 1';
+    const save = vi.fn(async () => {
+        if (resolution === 'refused') throw new Error('refused');
+        return { columnId: 'next', index: 0, position: 2, announcement: saved };
+    });
+    render(content(save, () => new Promise<boolean>((resolve) => { decide = resolve; }), items, {
+        announcements: {
+            onDragStart: () => 'Lifted Example',
+            onDragOver: () => undefined,
+            onDragEnd: () => 'Confirm or cancel in the dialog',
+            onDragCancel: () => 'Cancelled Example',
+        },
+        moveRestored: () => restored,
+    }));
+    const event = drag();
+    await act(async () => captured.props?.onDragStart?.(event));
+    await act(async () => captured.props?.onDragOver?.(event));
+    await act(async () => captured.props?.onDragEnd?.(event));
+    const live = screen.getByText('Confirm or cancel in the dialog');
+    expect(live.getAttribute('role')).toBe('status');
+    expect(captured.props?.accessibility?.announcements?.onDragEnd(event)).toBeUndefined();
+    await act(async () => decide?.(resolution !== 'cancelled'));
+    expect(live.textContent).toBe(resolution === 'saved' ? saved : restored);
+    expect(screen.getAllByRole('status').filter((status) => status.textContent)).toEqual([live]);
+    expect(screen.queryByText('Confirm or cancel in the dialog')).toBeNull();
+});
+}
+
+it('restores focus after the enabled card commits despite a delayed render and an earlier animation frame', async () => {
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 0; });
+    let complete: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    let blocked = false;
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    render(<Suspense fallback={<span>Waiting for card</span>}>
+        <KanbanBoard columns={columns} items={items} getId={(item) => item.id} getColumnId={(item) => item.column}
+            getPosition={() => 0} dragLabel={() => 'Move Example'} reduce countLabel={String}
+            onMove={() => new Promise<void>((resolve) => { complete = resolve; })}
+            renderCard={(_, handle) => {
+                if (blocked) throw ready;
+                return <div>{handle}<button>Open Example</button></div>;
+            }} />
+    </Suspense>);
+    const event = drag();
+    await act(async () => captured.props?.onDragStart?.(event));
+    await act(async () => captured.props?.onDragOver?.(event));
+    await act(async () => captured.props?.onDragEnd?.(event));
+    const handle = screen.getByRole('button', { name: 'Move Example' });
+    expect(handle.hasAttribute('disabled')).toBe(true);
+    screen.getByRole('button', { name: 'Open Example' }).focus();
+    blocked = true;
+    await act(async () => complete?.());
+    expect(screen.getByText('Waiting for card')).toBeTruthy();
+    blocked = false;
+    await act(async () => release?.());
+    expect(handle.hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement).toBe(handle);
+    expect(captured.props?.accessibility?.restoreFocus).toBe(false);
 });

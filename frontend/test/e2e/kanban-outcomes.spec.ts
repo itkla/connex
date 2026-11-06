@@ -10,9 +10,9 @@ async function keyboardMove(page: Page, handle: Locator, direction: 'ArrowRight'
     await handle.focus();
     await expect(handle).toBeFocused();
     await page.keyboard.press('Space');
-    await expect(page.locator('[id^="DndLiveRegion"]')).toHaveText(sourceAnnouncement);
+    await expect(page.locator('[data-kanban-announcement]')).toHaveText(sourceAnnouncement);
     await page.keyboard.press(direction);
-    await expect(page.locator('[id^="DndLiveRegion"]')).toHaveText(destinationAnnouncement);
+    await expect(page.locator('[data-kanban-announcement]')).toHaveText(destinationAnnouncement);
     await page.keyboard.press('Space');
 }
 
@@ -70,12 +70,18 @@ for (const locale of ['en', 'ja'] as const) {
             page.on('request', (request) => { if (request.url().endsWith(`/api/deals/${id}/move`)) moves++; });
             await keyboardMove(page, handle, 'ArrowRight', over(openStage.name), over(terminalStage.name));
             const dialog = page.getByRole('dialog');
+            const announcement = page.locator('[data-kanban-announcement]');
+            const pendingMessage = message(locale, 'deals', 'DealsKanban.a11yConfirmMove').replace('{name}', name).replace('{column}', terminalStage.name)
+                .replace('{outcome}', message(locale, 'deals', `DealsKanban.outcome.${won ? 'won' : 'lost'}`));
             await expect(dialog).toBeVisible();
             await expect(sourceColumn.locator('[data-kanban-card]')).toContainText(name);
             await expect(dialog).toContainText(won ? message(locale, 'deals', 'DealsKanban.confirmValueFreshWin').replace('{current}', '100.00 JPY').replace('{currency}', 'JPY') : message(locale, 'deals', 'DealsKanban.confirmValueLost').replace('{current}', '0.00 JPY').replace('{amount}', '0.00 JPY'));
             expect(moves).toBe(0);
             await dialog.getByRole('button', { name: message(locale, 'deals', 'DealsKanban.cancelMove'), exact: true }).click();
             await expect(dialog).not.toBeVisible();
+            const restored = message(locale, 'deals', 'DealsKanban.a11yRestored').replace('{name}', name).replace('{column}', openStage.name).replace('{position}', '1');
+            await expect(announcement).toHaveText(restored);
+            await expect(page.getByRole('status', { includeHidden: true }).filter({ hasText: pendingMessage })).toHaveCount(0);
             await expect(handle).toBeFocused();
             expect(moves).toBe(0);
             const unchanged = await context.request.get(`/api/deals/${id}`);
@@ -90,11 +96,14 @@ for (const locale of ['en', 'ja'] as const) {
                 dialog.getByRole('button', { name: message(locale, 'deals', 'DealsKanban.confirmMove'), exact: true }).click(),
             ]);
             expect(saved.ok()).toBe(true);
-            expect(await saved.json()).toMatchObject({ stage: terminalStage.id, won, position: 0 });
+            const savedDeal: unknown = await saved.json();
+            expect(savedDeal).toMatchObject({ stage: terminalStage.id, won, position: 0 });
+            if (typeof savedDeal !== 'object' || savedDeal === null || !('position' in savedDeal) || typeof savedDeal.position !== 'number') throw new Error('Invalid saved deal position');
+            const savedMessage = message(locale, 'deals', 'DealsKanban.moved').replace('{name}', name).replace('{column}', terminalStage.name)
+                .replace('{position}', String(savedDeal.position + 1)).replace('{outcome}', message(locale, 'deals', `DealsKanban.outcome.${won ? 'won' : 'lost'}`));
+            await expect(announcement).toHaveText(savedMessage);
+            await expect(page.getByRole('status', { includeHidden: true }).filter({ hasText: pendingMessage })).toHaveCount(0);
             await expect(handle).toBeFocused();
-            const boardStatus = page.getByRole('status').filter({ hasText: name }).filter({ hasText: terminalStage.name });
-            await expect(boardStatus.first()).toContainText(message(locale, 'deals', `DealsKanban.outcome.${won ? 'won' : 'lost'}`));
-            await expect(boardStatus.first()).toContainText(locale === 'en' ? 'position 1' : '1番目');
 
             const [back] = await Promise.all([
                 page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/deals/${id}/move`)),
@@ -105,7 +114,7 @@ for (const locale of ['en', 'ja'] as const) {
             await expect(dialog).not.toBeVisible();
             const retained = message(locale, 'deals', 'DealsKanban.movedRetained')
                 .replace('{name}', name).replace('{column}', openStage.name).replace('{outcome}', message(locale, 'deals', `DealsKanban.outcome.${won ? 'won' : 'lost'}`)).replace('{position}', '1');
-            await expect(page.getByRole('status').filter({ hasText: retained }).first()).toBeVisible();
+            await expect(announcement).toHaveText(retained);
             const [reopened] = await Promise.all([
                 page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/deals/${id}/reopen`)),
                 page.getByRole('button', { name: message(locale, 'deals', 'DealsKanban.reopen'), exact: true }).click(),
@@ -116,7 +125,7 @@ for (const locale of ['en', 'ja'] as const) {
             if (typeof reopenedDeal !== 'object' || reopenedDeal === null || !('position' in reopenedDeal) || typeof reopenedDeal.position !== 'number') throw new Error('Invalid reopened deal position');
             const reopenedMessage = message(locale, 'deals', 'DealsKanban.moved').replace('{name}', name).replace('{column}', openStage.name)
                 .replace('{position}', String(reopenedDeal.position + 1)).replace('{outcome}', message(locale, 'deals', 'DealsKanban.outcome.open'));
-            await expect(page.getByRole('status').filter({ hasText: reopenedMessage }).first()).toBeVisible();
+            await expect(announcement).toHaveText(reopenedMessage);
             await expect(sourceColumn.locator('[data-kanban-card]')).toContainText(message(locale, 'deals', 'DealsCard.statusOpen'));
             const stored = await context.request.get(`/api/deals/${id}`);
             const body: unknown = await stored.json();
@@ -151,17 +160,20 @@ for (const locale of ['en', 'ja'] as const) {
         const handle = page.getByRole('button', { name: message(locale, 'activity', 'ActivityTasks.moveCard').replace('{name}', name), exact: true });
         await expect(handle).toBeVisible();
         const over = (column: string) => message(locale, 'activity', 'ActivityTasks.a11yOver').replace('{name}', name).replace('{column}', column);
-        const [saved] = await Promise.all([
+        const [saved, refreshed] = await Promise.all([
             page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/tasks/${task.id}/move`)),
+            page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/activity/tasks' && response.request().headers().rsc === '1'),
             keyboardMove(page, handle, 'ArrowRight', over(message(locale, 'activity', 'ActivityTasks.statusTodo')), over(message(locale, 'activity', 'ActivityTasks.statusInProgress'))),
         ]);
         expect(saved.ok()).toBe(true);
+        expect(refreshed.ok()).toBe(true);
+        expect(await refreshed.finished()).toBeNull();
         const savedTask: unknown = await saved.json();
         expect(savedTask).toMatchObject({ status: 'in_progress' });
         if (typeof savedTask !== 'object' || savedTask === null || !('position' in savedTask) || typeof savedTask.position !== 'number') throw new Error('Invalid saved task position');
         const savedMessage = message(locale, 'activity', 'ActivityTasks.a11ySaved').replace('{name}', name)
             .replace('{column}', message(locale, 'activity', 'ActivityTasks.statusInProgress')).replace('{position}', String(savedTask.position + 1));
-        await expect(page.getByRole('status').filter({ hasText: savedMessage }).first()).toBeVisible();
+        await expect(page.locator('[data-kanban-announcement]')).toHaveText(savedMessage);
         await expect(handle).toBeEnabled();
         await expect(handle).toBeFocused();
         const card = page.locator('[data-kanban-card]').filter({ has: handle });

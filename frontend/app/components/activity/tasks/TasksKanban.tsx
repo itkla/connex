@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useCallback, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useMemo } from 'react';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import type { UniqueIdentifier } from '@dnd-kit/core';
 import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
@@ -59,7 +59,6 @@ export default function TasksKanban({
     const locale = useLocale();
     const timeZone = useTimeZone() ?? 'UTC';
     const now = useLiveNow();
-    const [moveMessage, setMoveMessage] = useState('');
 
     const columns: KanbanColumnDef[] = useMemo(
         () => [
@@ -140,15 +139,14 @@ export default function TasksKanban({
         async (taskId: number, columnId: string, index: number) => {
             try {
                 if (columnId !== 'todo' && columnId !== 'in_progress' && columnId !== 'done') return false;
-                setMoveMessage('');
                 const saved = await moveTask(taskId, columnId, index);
-                setMoveMessage(t('a11ySaved', {
+                const announcement = t('a11ySaved', {
                     name: noteContentToPlainText(saved.description),
                     column: columns.find((column) => column.id === saved.status)?.label ?? '',
                     position: saved.position + 1,
-                }));
+                });
                 onMoved();
-                return { columnId: saved.status, index: saved.position, position: saved.position };
+                return { columnId: saved.status, index: saved.position, position: saved.position, announcement };
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;
@@ -169,8 +167,6 @@ export default function TasksKanban({
     );
 
     return (
-        <>
-        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{moveMessage}</div>
         <KanbanBoard<Task>
             columns={columns}
             items={tasks}
@@ -185,6 +181,5 @@ export default function TasksKanban({
             countLabel={(count) => t('kanbanCount', { count })}
             accessibility={{ announcements, screenReaderInstructions, moveRestored }}
         />
-        </>
     );
 }

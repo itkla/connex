@@ -17,7 +17,7 @@ import { usePermission } from '@/app/hooks/usePermissions';
 import { getCompaniesByIds, getDealBoard, getDealById, getDealRisks, moveDeal, reopenDeal } from '@/app/lib/api';
 import { withDealMoved } from '@/app/lib/dealBoard';
 import { getNumberFormatter } from '@/app/lib/intlFormatters';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError } from '@/app/lib/toast';
 import type { Company, Deal, DealFilterParams, DealRisk, Pipeline, Stage } from '@/app/lib/types';
 import type { RecordReturnSelectionSnapshot } from '@/app/lib/recordReturnPath';
 
@@ -113,6 +113,7 @@ export default function DealsKanban({
     useEffect(() => () => confirmMoveRef.current?.(false), []);
 
     const resolveMove = (confirmed: boolean) => {
+        setMoveMessage('');
         confirmMoveRef.current?.(confirmed);
         confirmMoveRef.current = null;
         setPendingMove(null);
@@ -345,7 +346,6 @@ export default function DealsKanban({
             const originWorkspaceId = renderedWorkspaceId();
             moveWorkspaceRef.current = originWorkspaceId;
             setMoveResult(null);
-            setMoveMessage('');
             const outcome = classifyStage(stage);
             if (deal.stage !== stage.id && outcome !== 'normal') {
                 const money = (value: number) => `${getNumberFormatter(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)} ${deal.currency}`;
@@ -399,11 +399,10 @@ export default function DealsKanban({
                 });
                 setMoveMessage(message);
                 setMoveResult({ deal: moved, workspaceId: originWorkspaceId });
-                toastSuccess(message);
                 const visibleDestination = withDealMoved(loadedBoardDeals, moved)
                     .filter((deal) => deal.stage === moved.stage && matchesBoardDeal(deal))
                     .sort((left, right) => left.position - right.position || left.id - right.id);
-                return { columnId: String(moved.stage), index: visibleDestination.findIndex((deal) => deal.id === moved.id) };
+                return { columnId: String(moved.stage), index: visibleDestination.findIndex((deal) => deal.id === moved.id), position: moved.position, announcement: message };
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;
@@ -422,7 +421,6 @@ export default function DealsKanban({
             setMoveResult(null);
             const message = t('moved', { name: reopened.name, column: stageById.get(reopened.stage ?? -1)?.name ?? '', position: reopened.position + 1, outcome: t('outcome.open') });
             setMoveMessage(message);
-            toastSuccess(message);
             onMoved();
             requestAnimationFrame(() => boardContainerRef.current?.querySelector<HTMLButtonElement>(`[data-kanban-drag-handle="${reopened.id}"]`)?.focus());
         } catch (error) {
@@ -483,7 +481,7 @@ export default function DealsKanban({
             reduce={reduce}
             emptyHint={t('emptyColumn')}
             countLabel={(count) => t('count', { count })}
-            accessibility={{ announcements, screenReaderInstructions, moveRestored }}
+            accessibility={{ announcements, screenReaderInstructions, moveRestored, onAnnouncement: setMoveMessage }}
         />
     );
 
@@ -520,7 +518,7 @@ export default function DealsKanban({
             )}
 
             {boardContent}
-            <div role="status" aria-live="polite" aria-atomic="true" className="flex flex-wrap items-center gap-2 text-sm">
+            <div data-kanban-announcement role="status" aria-live="polite" aria-atomic="true" className="flex flex-wrap items-center gap-2 text-sm">
                 {moveMessage}
             </div>
             {canUpdateDeals && moveResult?.deal.won != null && (

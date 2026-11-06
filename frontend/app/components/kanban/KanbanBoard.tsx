@@ -32,6 +32,12 @@ import { IconButton } from '@/components/ui/icon-button';
 import { useDragScroll } from '@/app/hooks/useDragScroll';
 
 const COL_PREFIX = 'col:';
+const silentAnnouncements: Announcements = {
+    onDragStart: () => undefined,
+    onDragOver: () => undefined,
+    onDragEnd: () => undefined,
+    onDragCancel: () => undefined,
+};
 
 export interface KanbanColumnDef {
     id: string;
@@ -61,6 +67,8 @@ export interface KanbanBoardProps<T> {
         announcements?: Announcements;
         screenReaderInstructions?: ScreenReaderInstructions;
         moveRestored?: (itemId: number, columnId: string, position: number) => string;
+        /** Routes the complete announcement lifecycle to a surface-owned live region. */
+        onAnnouncement?: (message: string) => void;
     };
 }
 
@@ -71,6 +79,8 @@ export interface KanbanMoveResult {
     index: number;
     /** Saved zero-based position for announcements until the incoming item refreshes. */
     position?: number;
+    /** Final localized feedback, including the saved stage, position, and outcome where applicable. */
+    announcement?: string;
 }
 
 type ColumnItems = Record<string, number[]>;
@@ -129,6 +139,14 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const [saving, setSaving] = useState(false);
     const boardRef = useRef<HTMLDivElement>(null);
     const [moveAnnouncement, setMoveAnnouncement] = useState('');
+    const focusRestoreIdRef = useRef<number | null>(null);
+
+    useLayoutEffect(() => {
+        const focusRestoreId = focusRestoreIdRef.current;
+        if (focusRestoreId === null || saving || activeId !== null) return;
+        boardRef.current?.querySelector<HTMLButtonElement>(`[data-kanban-drag-handle="${focusRestoreId}"]`)?.focus();
+        focusRestoreIdRef.current = null;
+    }, [activeId, columnItems, saving]);
 
     const [syncedKey, setSyncedKey] = useState(incomingKey);
     if (syncedKey !== incomingKey && activeId == null && !saving) {
@@ -155,13 +173,18 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     );
 
     const commit = (next: ColumnItems) => setColumnItems(next);
+    const announce = (message: string | undefined) => {
+        if (message === undefined) return;
+        if (accessibility?.onAnnouncement) accessibility.onAnnouncement(message);
+        else setMoveAnnouncement(message);
+    };
     const restoreFocus = (event: DragEndEvent) => {
-        requestAnimationFrame(() => boardRef.current?.querySelector<HTMLButtonElement>(`[data-kanban-drag-handle="${Number(event.active.id)}"]`)?.focus());
+        focusRestoreIdRef.current = Number(event.active.id);
     };
 
     const onDragStart = (event: DragStartEvent) => {
         if (!onMove) return;
-        setMoveAnnouncement('');
+        announce(accessibility?.announcements?.onDragStart(event) ?? '');
         snapshotRef.current = columnItems;
         snapshotColumnByItemIdRef.current = columnByItemId;
         snapshotIncomingKeyRef.current = incomingKey;
@@ -170,6 +193,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
     const onDragOver = (event: DragOverEvent) => {
         if (!onMove) return;
+        announce(accessibility?.announcements?.onDragOver?.(event));
         const { active, over } = event;
         if (!over) return;
         const activeId = Number(active.id);
@@ -192,6 +216,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
     const onDragEnd = (event: DragEndEvent) => {
         if (!onMove) return;
+        announce(accessibility?.announcements?.onDragEnd(event));
         const { active, over } = event;
         setActiveId(null);
         const activeId = Number(active.id);
@@ -246,7 +271,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             const position = confirmed && confirmed.item === item && confirmed.columnId === column
                 ? confirmed.position
                 : item ? getPosition(item) : column ? restored[column].indexOf(activeId) : -1;
-            if (column) setMoveAnnouncement(accessibility?.moveRestored?.(activeId, column, position) ?? '');
+            if (column) announce(accessibility?.moveRestored?.(activeId, column, position) ?? '');
         };
         if (originCol === toCol && originIndex === finalIndex) {
             restorePlacement();
@@ -276,11 +301,12 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
                 }
                 setSyncedKey(latest.key);
                 setColumnItems((current) => placeItem(latest.key === snapshotIncomingKeyRef.current ? current : latest.columns, activeId, placement));
+                announce(saved && typeof saved === 'object' ? saved.announcement ?? '' : '');
             }
         };
         void persist()
             .catch(restorePlacement)
-            .finally(() => { setSaving(false); restoreFocus(event); });
+            .finally(() => { restoreFocus(event); setSaving(false); });
     };
 
     const activeItem = activeId != null ? itemsById.get(activeId) : undefined;
@@ -301,10 +327,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDragEnd={onDragEnd}
-            onDragCancel={(event) => { setActiveId(null); commit(snapshotRef.current); restoreFocus(event); }}
-            accessibility={accessibility}
+            onDragCancel={(event) => { announce(accessibility?.announcements?.onDragCancel(event)); setActiveId(null); commit(snapshotRef.current); restoreFocus(event); }}
+            accessibility={{ announcements: silentAnnouncements, screenReaderInstructions: accessibility?.screenReaderInstructions, restoreFocus: false }}
         >
-            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{moveAnnouncement}</div>
+            {!accessibility?.onAnnouncement && <div data-kanban-announcement role="status" aria-live="polite" aria-atomic="true" className="sr-only">{moveAnnouncement}</div>}
             <div className="relative">
                 <div
                     ref={setBoardRef}
