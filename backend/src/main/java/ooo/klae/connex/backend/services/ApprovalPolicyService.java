@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
 import ooo.klae.connex.backend.exceptions.ApprovalImpactConfirmationRequiredException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.InvalidApprovalCurrencyException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -43,6 +44,7 @@ import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 /**
  * Manages workspace-scoped document approval policies and evaluates them against generated
@@ -341,8 +343,19 @@ public class ApprovalPolicyService {
     /**
      * The first of the given active policies matching the document's frozen snapshot, or
      * {@code null} when none matches and the document may be finalized without approval.
+     *
+     * @throws InvalidApprovalCurrencyException when an active policy for this document type has
+     * an invalid or missing required currency, even if an earlier policy would match
      */
     public ApprovalPolicy firstMatch(List<ApprovalPolicy> policies, DealDocument document, DocumentContent content) {
+        for (ApprovalPolicy policy : policies) {
+            if (policy.isActive()
+                    && (policy.getDocumentType() == null || policy.getDocumentType().equals(document.getType()))
+                    && (policy.getCurrency() == null ? policy.getMinTotal() != null
+                        : !CurrencyCodes.isSupported(policy.getCurrency()))) {
+                throw new InvalidApprovalCurrencyException();
+            }
+        }
         BigDecimal grandTotal = content == null || content.totals() == null ? null : content.totals().grandTotal();
         BigDecimal discountPercent = discountPercent(content);
         return policies.stream()
@@ -398,15 +411,9 @@ public class ApprovalPolicyService {
         return percent.max(BigDecimal.ZERO);
     }
 
-    /**
-     * Normalizes the currency to a trimmed uppercase code so a policy saved as {@code "jpy "} can
-     * never silently fail to match {@code "JPY"} documents — a mismatch would fail open.
-     */
+    /** Canonicalizes supplied currency codes before validation and persistence. */
     private void normalize(ApprovalPolicy policy) {
-        if (policy.getCurrency() != null) {
-            String currency = policy.getCurrency().trim().toUpperCase();
-            policy.setCurrency(currency.isEmpty() ? null : currency);
-        }
+        policy.setCurrency(CurrencyCodes.optional(policy.getCurrency()));
         if (policy.getMode() == null || policy.getMode().isBlank()) {
             policy.setMode("sequential");
         }

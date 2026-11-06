@@ -230,6 +230,7 @@
       "doneSummary": "{created}件インポート・{skipped}件スキップ",
       "failed": "{count}件の行を確認してください",
       "downloadErrors": "エラーをダウンロード"
-    }
+    },
+    "currencyInvalid": "対応していない通貨です。JPYやUSDなどの3文字の通貨コードに修正して、ファイルを再度取り込んでください。"
   }
 }

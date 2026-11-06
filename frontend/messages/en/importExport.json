@@ -230,6 +230,7 @@
       "doneSummary": "{created} imported · {skipped} skipped",
       "failed": "{count, plural, one {# row needs attention} other {# rows need attention}}",
       "downloadErrors": "Download errors"
-    }
+    },
+    "currencyInvalid": "The currency is not supported. Enter a three-letter currency code such as JPY or USD and import the file again."
   }
 }

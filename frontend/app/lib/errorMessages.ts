@@ -48,6 +48,7 @@ const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["DEAL_LINE_VALUE_CONSENT_REQUIRED", "ApiErrors.dealLineValueConsentRequired"],
     ["DEAL_LINE_VALUE_CONSENT_STALE", "ApiErrors.dealLineValueConsentStale"],
     ["STALE_RECORD", "ApiErrors.staleRecord"],
+    ["APPROVAL_POLICY_CURRENCY_INVALID", "ApiErrors.approvalPolicyCurrencyInvalid"],
 ]);
 
 function statusMessageKey(status: number): string {

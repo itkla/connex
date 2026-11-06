@@ -29,6 +29,8 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ApprovalPolicyImpactDto;
+import ooo.klae.connex.backend.dto.ApprovalPolicyDto;
+import ooo.klae.connex.backend.exceptions.InvalidApprovalCurrencyException;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
@@ -100,6 +102,40 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
 
     private DealDocumentDto quote(Deal deal) {
         return documentService.generate(deal.getId(), template("quote").getId());
+    }
+
+    @Test
+    void invalidStoredCurrencyRemainsVisibleAndCanBeExplicitlyCorrected() {
+        ApprovalPolicy saved = policy(null, "JPY", "100", null);
+        Deal deal = jpyDeal();
+        DealDocumentDto document = quote(deal);
+        jdbcTemplate.update("UPDATE approval_policy SET currency = ? WHERE workspace_id = ? AND id = ?",
+            "YEN", saved.getWorkspaceId(), saved.getId());
+        ApprovalPolicy invalid = policyService.getAll().stream()
+            .filter(candidate -> candidate.getId() == saved.getId()).findFirst().orElseThrow();
+        assertFalse(ApprovalPolicyDto.from(invalid).isCurrencyValid());
+        assertEquals("YEN", invalid.getCurrency());
+        assertThrows(InvalidApprovalCurrencyException.class,
+            () -> documentService.updateStatus(deal.getId(), document.id(), "final"));
+        assertThrows(InvalidApprovalCurrencyException.class,
+            () -> approvalService.requestApproval(deal.getId(), document.id(), null));
+        invalid.setCurrency(" jpy ");
+        ApprovalPolicy corrected = policyService.update(saved.getId(), invalid, false, null);
+        assertEquals("JPY", corrected.getCurrency());
+        assertTrue(ApprovalPolicyDto.from(corrected).isCurrencyValid());
+        assertEquals("final", documentService.updateStatus(deal.getId(), document.id(), "final").status());
+    }
+
+    @Test
+    void unsupportedCurrencyIsRefusedBeforePersistence() {
+        assertThrows(BadRequestException.class, () -> policy(null, "yen", "100", null));
+        ApprovalPolicy saved = policy(null, "JPY", "100", null);
+        ApprovalPolicy invalid = copyPolicy(saved);
+        invalid.setCurrency("yen");
+        assertThrows(BadRequestException.class, () -> policyService.impact(saved.getId(), invalid));
+        assertThrows(BadRequestException.class, () -> policyService.update(saved.getId(), invalid, false, null));
+        assertEquals("JPY", policyService.getAll().stream()
+            .filter(candidate -> candidate.getId() == saved.getId()).findFirst().orElseThrow().getCurrency());
     }
 
     @Test

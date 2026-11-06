@@ -750,8 +750,11 @@ class RecordListControllerTest {
             "JPY", "Mars/Olympus", "25:00", null, null, false));
         assertSame(distribution, controller.getStageDistribution("JPY", null, null));
 
-        controller.getRevenueTimeseries("  ", null, null, null, null, true);
-        controller.getStageDistribution("", null, null);
+        controller.getRevenueTimeseries(null, null, null, null, null, true);
+        controller.getStageDistribution(null, null, null);
+        assertThrows(BadRequestException.class,
+            () -> controller.getRevenueTimeseries("  ", null, null, null, null, true));
+        assertThrows(BadRequestException.class, () -> controller.getStageDistribution("", null, null));
 
         verify(dealService).getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam, false);
         verify(dealService).getStageDistribution("JPY", allTeam);
@@ -783,10 +786,13 @@ class RecordListControllerTest {
             "JPY", "30d", null, null, null, null, null, null, null));
         assertSame(pipelineValues, controller.getDealPipelineValue(
             "JPY", "12m", null, null, null, null, null, null));
-        assertSame(aging, controller.getDealAging("  ", null, null));
-        assertSame(top, controller.getTopDeals("", null, null));
-
-        controller.getDealKpis(" ", null, null, null, null, null, "month", "Mars/Olympus", "+09:00");
+        assertSame(aging, controller.getDealAging(null, null, null));
+        assertSame(top, controller.getTopDeals(null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealAging("  ", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getTopDeals("", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            " ", null, null, null, null, null, "month", "Mars/Olympus", "+09:00"));
+        controller.getDealKpis(null, null, null, null, null, null, "month", "Mars/Olympus", "+09:00");
 
         verify(dealService).getDealKpis("JPY", 30, allTeam);
         verify(dealService).getDealPipelineValue("JPY", 365, allTeam);

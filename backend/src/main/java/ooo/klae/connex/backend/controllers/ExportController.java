@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 /**
  * REST controller for CSV export of contacts, companies, deals, and products. Each endpoint returns
@@ -133,7 +134,7 @@ public class ExportController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         return csv("deals.csv", exportService.exportDeals(
-            query, currency,
+            query, CurrencyCodes.optional(currency),
             DealFilterNormalizer.normalizeIds(pipelineId, "pipelineId"),
             DealFilterNormalizer.normalizeIds(stageId, "stageId"),
             DealFilterNormalizer.normalizeIds(companyId, "companyId"),
@@ -154,7 +155,7 @@ public class ExportController {
         MemberScope memberScope = resolveMemberScope(request.getScope(), request.getMemberIds());
         return csv("deals.csv", exportService.exportSegmentDeals(
             request.getDefinition(), query,
-            request.getCurrency() == null || request.getCurrency().isBlank() ? null : request.getCurrency(),
+            CurrencyCodes.optional(request.getCurrency()),
             DealFilterNormalizer.normalizeIds(request.getPipelineId(), "pipelineId"),
             DealFilterNormalizer.normalizeIds(request.getStageId(), "stageId"),
             DealFilterNormalizer.normalizeIds(request.getCompanyId(), "companyId"),

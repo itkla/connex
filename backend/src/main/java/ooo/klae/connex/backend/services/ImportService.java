@@ -76,6 +76,7 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 /**
  * Bulk CSV import for contacts, companies, and deals. The frontend parses the CSV, maps columns to
@@ -1836,6 +1837,14 @@ public class ImportService {
         String email = row.std.get("email");
         if (email != null && !isEmailShaped(email)) {
             fail(row, "Invalid email: " + email);
+        }
+        String currency = row.std.get("currency");
+        if (currency != null) {
+            try {
+                row.std.put("currency", CurrencyCodes.required(currency));
+            } catch (BadRequestException exception) {
+                fail(row, "CURRENCY_INVALID");
+            }
         }
         String date = row.std.get("expectedCloseDate");
         if (date != null) {

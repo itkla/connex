@@ -30,7 +30,10 @@
     "delete": "Delete",
     "deleted": "Policy deleted",
     "deleteFailed": "Couldn't delete the policy",
-    "entityLabel": "policy"
+    "entityLabel": "policy",
+    "invalidCurrencyCondition": "Currency needs correction",
+    "invalidCurrencyActive": "Document approval is blocked. Edit this policy and choose a valid currency.",
+    "invalidCurrencyInactive": "Choose a valid currency before activating this policy."
   },
   "ApprovalPolicyDialog": {
     "newTitle": "New approval policy",
@@ -100,6 +103,8 @@
     "impactItemMeta": "{deal} · v{version} · requested by {requester}",
     "impactMore": "{count, plural, one {and # more} other {and # more}}",
     "impactBack": "Keep editing",
-    "impactConfirm": "Save and end them"
+    "impactConfirm": "Save and end them",
+    "currencyNone": "No currency",
+    "currencyInvalid": "“{currency}” is not a supported currency. Choose the intended currency to save this policy."
   }
 }

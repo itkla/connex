@@ -15,6 +15,7 @@ import {
     DialogClose,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { CURRENCY_CODES } from '@/app/lib/currencies';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -59,6 +60,7 @@ type Props = {
 
 const DOCUMENT_TYPES: DocumentType[] = ['quote', 'proposal', 'order_form', 'contract'];
 const ALL_TYPES = 'all';
+const NO_CURRENCY = 'none';
 
 const isDocumentType = (value: string): value is DocumentType =>
     DOCUMENT_TYPES.some((documentType) => documentType === value);
@@ -173,6 +175,11 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
         setDraft((prev) => ({ ...prev, [key]: value }));
 
+    const savedCurrency = policy?.currency?.trim().toUpperCase();
+    const currencyOptions: readonly string[] = savedCurrency && policy?.currencyValid === true
+        ? [...new Set([...CURRENCY_CODES, savedCurrency])]
+        : CURRENCY_CODES;
+    const invalidCurrency = draft.currency !== '' && !currencyOptions.includes(draft.currency.trim().toUpperCase());
     const minTotalNeedsCurrency = draft.minTotal.trim() !== '' && draft.currency.trim() === '';
     const chainIsValid = draft.steps.every(
         (step) =>
@@ -181,7 +188,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             && dueIntervalIsValid(step.dueIntervalHours)
             && (step.onExpiry === 'expire' || step.dueIntervalHours.trim() !== ''),
     );
-    const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && chainIsValid && !saving;
+    const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && !invalidCurrency && chainIsValid && !saving;
 
     const buildPayload = (): UpdateApprovalPolicyPayload => ({
         name: draft.name.trim(),
@@ -358,15 +365,23 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="policy-currency">{t('currencyLabel')}</Label>
-                            <Input
-                                id="policy-currency"
-                                value={draft.currency}
-                                maxLength={8}
-                                placeholder={t('currencyPlaceholder')}
-                                onChange={(e) => set('currency', e.target.value)}
+                            <Select
+                                value={invalidCurrency ? '' : draft.currency.trim().toUpperCase() || NO_CURRENCY}
+                                onValueChange={(value) => set('currency', value === NO_CURRENCY ? '' : value)}
                                 disabled={saving}
-                                aria-invalid={minTotalNeedsCurrency || undefined}
-                            />
+                            >
+                                <SelectTrigger id="policy-currency" className="w-full"
+                                    aria-invalid={minTotalNeedsCurrency || invalidCurrency || undefined}
+                                    aria-describedby="policy-currency-hint">
+                                    <SelectValue placeholder={draft.currency || t('currencyPlaceholder')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value={NO_CURRENCY}>{t('currencyNone')}</SelectItem>
+                                    {currencyOptions.map((currency) => (
+                                        <SelectItem key={currency} value={currency}>{currency}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -398,10 +413,14 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                             />
                         </div>
                     </div>
-                    {minTotalNeedsCurrency ? (
-                        <p className="text-xs text-destructive">{t('currencyRequired')}</p>
+                    {invalidCurrency ? (
+                        <p id="policy-currency-hint" role="alert" className="text-xs text-destructive">
+                            {t('currencyInvalid', { currency: draft.currency })}
+                        </p>
+                    ) : minTotalNeedsCurrency ? (
+                        <p id="policy-currency-hint" className="text-xs text-destructive">{t('currencyRequired')}</p>
                     ) : (
-                        <p className="text-xs text-muted-foreground">{t('thresholdHint')}</p>
+                        <p id="policy-currency-hint" className="text-xs text-muted-foreground">{t('thresholdHint')}</p>
                     )}
                     <div className="space-y-3 border-t border-border pt-4">
                         <p className="text-sm font-medium">{t('chainTitle')}</p>

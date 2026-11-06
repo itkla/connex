@@ -24,6 +24,8 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
+import ooo.klae.connex.backend.validation.ValidCurrency;
 
 @Data
 @NoArgsConstructor
@@ -57,7 +59,7 @@ public class DealDto {
     private String valueSource;
 
     @NotBlank
-    @Size(max = 8)
+    @ValidCurrency
     private String currency;
 
     @NotNull
@@ -156,7 +158,7 @@ public class DealDto {
         d.setName(name);
         d.setValue(money(value));
         d.setActualValue(actualValue == null ? null : money(actualValue));
-        d.setCurrency(currency);
+        d.setCurrency(CurrencyCodes.optional(currency));
         d.setPipelineId(pipeline);
         d.setStageId(stage);
         d.setCompanyId(company);

@@ -123,6 +123,13 @@ redirecting imported values.
 
 Do not add a dependency-first lock pass; it reverses the interactive mutation order and creates a deadlock cycle.
 
+## Deal currencies
+
+A supplied nonblank currency cell uses the shared `CurrencyCodes` monetary validator in preview
+and commit row validation. Supported ISO 4217 codes become uppercase; unsupported codes are row
+errors before duplicate/dependency writes. Omitted cells keep the existing import merge/default
+semantics. Existing stored currencies are not inferred or repaired.
+
 ## Deal history dates
 
 Deal CSV mapping supports `closedAt` (Closed at) and `createdAt` (Created at), separately from

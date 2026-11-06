@@ -327,6 +327,12 @@ public class GlobalExceptionHandler {
             "code", "STALE_RECORD", "message", ex.getMessage(), "currentVersion", ex.getCurrentVersion()));
     }
 
+    @ExceptionHandler(InvalidApprovalCurrencyException.class)
+    public ResponseEntity<Map<String, String>> invalidApprovalCurrency(InvalidApprovalCurrencyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(codedError(InvalidApprovalCurrencyException.CODE, ex.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<Map<String, String>> conflict(ConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));

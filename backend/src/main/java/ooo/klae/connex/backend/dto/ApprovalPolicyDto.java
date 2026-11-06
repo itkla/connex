@@ -19,6 +19,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
+import ooo.klae.connex.backend.validation.ValidCurrency;
 
 /** Client-facing approval policy. {@code workspaceId} is never accepted from the client. */
 @Data
@@ -37,8 +39,11 @@ public class ApprovalPolicyDto {
         message = "documentType must be quote, proposal, order_form, or contract")
     private String documentType;
 
-    @Size(max = 8)
+    @ValidCurrency
     private String currency;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private boolean currencyValid;
 
     @DecimalMin(value = "0")
     @Digits(integer = 13, fraction = 2)
@@ -79,6 +84,8 @@ public class ApprovalPolicyDto {
         dto.active = p.isActive();
         dto.documentType = p.getDocumentType();
         dto.currency = p.getCurrency();
+        dto.currencyValid = p.getCurrency() == null
+            ? p.getMinTotal() == null : CurrencyCodes.isSupported(p.getCurrency());
         dto.minTotal = p.getMinTotal();
         dto.minDiscountPercent = p.getMinDiscountPercent();
         dto.mode = p.getMode();
@@ -95,7 +102,7 @@ public class ApprovalPolicyDto {
         p.setName(name);
         p.setActive(active == null ? true : active);
         p.setDocumentType(documentType == null || documentType.isBlank() ? null : documentType);
-        p.setCurrency(currency == null || currency.isBlank() ? null : currency);
+        p.setCurrency(CurrencyCodes.optional(currency));
         p.setMinTotal(minTotal);
         p.setMinDiscountPercent(minDiscountPercent);
         p.setMode(mode == null || mode.isBlank() ? "sequential" : mode);

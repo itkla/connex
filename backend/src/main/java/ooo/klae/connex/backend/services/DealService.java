@@ -103,6 +103,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 /**
  * Business logic for logging and retrieving {@code Deal} records.
@@ -1176,6 +1177,7 @@ public class DealService {
             Deal deal,
             RecordCreationAugmentationService.PreparedAugmentation prepared, MutationAdmission admission,
             RecordVisibilityScope scope) {
+        deal.setCurrency(CurrencyCodes.required(deal.getCurrency()));
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         deal.setWorkspaceId(workspaceId);
@@ -1239,6 +1241,7 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
+        deal.setCurrency(CurrencyCodes.required(deal.getCurrency()));
         RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateWithinVisibilityScope(id, deal, resolvedVisibilityScope));

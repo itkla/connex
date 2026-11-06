@@ -13,6 +13,27 @@ Money in Connex is `BigDecimal`, **scale 2, `HALF_UP`**. Every deal has exactly 
 also governs its line items. **There is no FX anywhere**, and aggregates never sum across
 currencies — every revenue figure is currency-partitioned.
 
+### Currency boundaries and approval configuration
+
+Deal creation (including guided creation and supplied CSV currency cells), full deal edits, and
+approval-policy create/update/impact requests share `CurrencyCodes` validation. Supplied codes are trimmed and uppercased with
+`Locale.ROOT`, then checked against the JDK's ISO 4217 monetary currencies. No-currency, testing,
+and nonmonetary codes (for example XXX, XTS and XAU) are refused. A policy without a total threshold
+may omit currency; a total threshold requires one. No existing row is inferred or rewritten.
+
+Every deal list, metrics, analytics, matching-id, and deal CSV export currency filter, including
+segment request bodies, uses the same contract. An absent/null filter retains its existing meaning;
+a supplied blank or malformed currency returns HTTP 400 before querying money.
+
+Approval-policy responses include read-only `currencyValid`. Settings → CRM configuration →
+Approval policies shows saved invalid configuration and opens its editor for an explicit correction
+through the existing policy-impact confirmation flow. Evaluation refuses an invalid active policy
+for the document's type with HTTP 409 `APPROVAL_POLICY_CURRENCY_INVALID`, including when an earlier
+policy would match. It does not silently skip that policy or choose a replacement currency.
+Document reads that evaluate draft approval requirements return the same localized refusal until
+the configuration is corrected. Valid historical case/whitespace variants still match without
+rewriting their stored values. Unrelated document types and inactive policies keep their behavior.
+
 `deal.value_source` declares where `deal.value` comes from:
 
 | `value_source` | `deal.value` is | Manual edits |

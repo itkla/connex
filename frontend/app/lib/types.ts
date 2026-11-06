@@ -2171,6 +2171,7 @@ export type WorkItemActionResponse = {
 
 /** Declares when a generated document requires internal approval before finalization. */
 export type ApprovalPolicy = {
+    currencyValid?: boolean;
     id: number;
     name: string;
     active: boolean;

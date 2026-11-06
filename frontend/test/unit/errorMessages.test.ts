@@ -149,6 +149,13 @@ describe("userMessageFor status mapping", () => {
 });
 
 describe("userMessageFor code mapping", () => {
+    it("explains invalid approval currency and the administrator correction path in both locales", () => {
+        const error = new ApiError(POISONED_MESSAGE, 409, "APPROVAL_POLICY_CURRENCY_INVALID");
+        expect(userMessageFor(error, t)?.description).toContain("Approval policies");
+        expect(userMessageFor(error, ja)?.description).toContain("承認ポリシー");
+        expect(userMessageFor(error, t)?.description).not.toContain(POISONED_MESSAGE);
+    });
+
     it("prefers a registered code over the status rule", () => {
         const error = new ApiError(POISONED_MESSAGE, 409, "IDENTITY_COLLISION_REPORT_TIMEOUT");
 
