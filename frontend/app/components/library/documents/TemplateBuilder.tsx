@@ -12,8 +12,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import DocumentBodyEditor from '@/app/components/library/documents/editor/DocumentBodyEditor';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { createDocumentTemplate, updateDocumentTemplate } from '@/app/lib/api';
 import { DOCUMENT_TYPES } from '@/app/lib/documentTokens';
@@ -92,8 +94,14 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
     const t = useTranslations('DocumentTemplateBuilder');
     const showApiError = useApiErrorToast('DocumentTemplateBuilder');
     const router = useRouter();
-    const [draft, setDraft] = useState<Draft>(() => toDraft(template, t('slashTermsHeading')));
+    const [initialDraft] = useState(() => toDraft(template, t('slashTermsHeading')));
+    const [draft, setDraft] = useState<Draft>(initialDraft);
     const [saving, setSaving] = useState(false);
+    const guard = useUnsavedChangesGuard({
+        isDirty: JSON.stringify(draft) !== JSON.stringify(initialDraft),
+        onClose: () => router.push('/library/documents'),
+        navigation: { push: router.push },
+    });
 
     const patch = (next: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...next }));
 
@@ -122,8 +130,10 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                 await createDocumentTemplate(payload);
             }
             toastSuccess(t('saved'));
-            router.push('/library/documents');
-            router.refresh();
+            guard.allowNavigation(() => {
+                router.push('/library/documents');
+                router.refresh();
+            });
         } catch (err) {
             showApiError(err, 'saveFailed');
         } finally {
@@ -133,9 +143,10 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
 
     return (
         <div className="min-h-full bg-background">
+            <ConfirmDiscardDialog {...guard.confirm} />
             <div className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
                 <div className="flex w-full items-center gap-4 px-4 py-3 sm:px-6">
-                    <Button variant="ghost" size="sm" onClick={() => router.push('/library/documents')}>
+                    <Button variant="ghost" size="sm" aria-label={t('back')} onClick={guard.requestClose} disabled={saving}>
                         <ChevronLeftIcon className="size-4" />
                         <span className="hidden sm:inline">{t('back')}</span>
                     </Button>
@@ -150,7 +161,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                 </div>
             </div>
 
-            <div className="grid w-full gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
+            <fieldset disabled={saving} className="grid min-w-0 w-full gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
                 <div className="lg:sticky lg:top-20 lg:self-start">
                     <SectionHeader title={t('groupIdentity')} />
                     <div className="flex flex-col gap-4 px-1 sm:px-6">
@@ -211,12 +222,12 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                                     <div>{t('sampleGenerated')}</div>
                                 </div>
                             </div>
-                            <DocumentBodyEditor value={draft.body} onChange={(json) => patch({ body: json })} />
+                            <DocumentBodyEditor value={draft.body} onChange={(json) => patch({ body: json })} editable={!saving} />
                         </div>
                         <p className="mt-3 text-center text-xs text-muted-foreground">{t('builderNote')}</p>
                     </div>
                 </div>
-            </div>
+            </fieldset>
         </div>
     );
 }

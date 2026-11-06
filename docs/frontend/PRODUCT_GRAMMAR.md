@@ -212,6 +212,8 @@ The same principle applies generally: extend an existing shared composer/control
 
 Any dialog/drawer that accumulates meaningful input participates in the shared unsaved-changes/discard-confirm pattern. Quick-edit shells inherit this through their existing dirty-state contract. Keep the draft-guard inventory/gate current when adding an eligible surface; do not increase a baseline to hide a missing guard.
 
+Workflow, report, and document-template pages reuse `useUnsavedChangesGuard` and `ConfirmDiscardDialog` for dirty editor exits, including links, global search/actions, browser Back/Forward, and native document-leave warnings. Keep editing preserves content and restores the requesting control's focus. Back returns workflows to `/workflows` and templates to `/library/documents`. Report Cancel returns to `/insights/reports/{id}` when editing, or `/insights/reports` when creating, even on a direct entry with no prior app history. Pending and failed saves stay protected; only a successful save bypasses confirmation. Same-document history traversal uses the browser Navigation API, falling back to indices the app shell adds to existing history state while preserving Next's fields. Neither path inserts history entries.
+
 Use the shared record delete confirmation for ordinary record deletion. Organization-level permanent deletion may use stronger typed confirmation. A surface contributes its object label and consequence details; it does not rewrite the common destructive grammar.
 
 When a row menu opens a delete confirmation, cancellation returns keyboard focus to that row's action button.

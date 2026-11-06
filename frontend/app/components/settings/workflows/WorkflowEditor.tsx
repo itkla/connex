@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { ExclamationTriangleIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import AccessDenied from "@/app/components/AccessDenied";
+import ConfirmDiscardDialog from "@/app/components/ConfirmDiscardDialog";
 import WorkflowCanvasEditor from "@/app/components/settings/workflows/WorkflowCanvasEditor";
 import WorkflowConflictDialog from "@/app/components/settings/workflows/WorkflowConflictDialog";
 import WorkflowInspector from "@/app/components/settings/workflows/WorkflowInspector";
@@ -23,6 +24,7 @@ import { workflowRunReferenceParts } from "@/app/components/settings/workflows/w
 import { canAuthorTriggeredSend } from "@/app/components/settings/workflows/vocabulary";
 import { useGrantedPermissions } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { useUnsavedChangesGuard } from "@/app/hooks/useUnsavedChangesGuard";
 import {
     getCampaignMessages,
     getCampaigns,
@@ -108,6 +110,14 @@ function WorkflowEditorBody({
     const grantedPermissions = useGrantedPermissions();
     const { canRunAsSystem, members } = useWorkflowWorkspaceAccess();
     const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem });
+    const guard = useUnsavedChangesGuard({
+        isDirty: editor.dirty,
+        onClose: () => {
+            editor.cancelCreationContinuation();
+            router.push("/workflows");
+        },
+        navigation: { push: router.push },
+    });
     const loadedWorkflow = editor.workflow;
     const inspectRun = editor.inspectRun;
     const requestedRunKey = searchParams.get("runKey");
@@ -458,6 +468,7 @@ function WorkflowEditorBody({
 
     return (
         <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-background">
+            <ConfirmDiscardDialog {...guard.confirm} />
             <WorkflowLifecycleBar
                 name={editor.history.present.name}
                 revision={editor.workflow?.draftRevision ?? -1}
@@ -474,10 +485,7 @@ function WorkflowEditorBody({
                 canRedo={editor.history.future.length > 0}
                 busyAction={editor.busyAction}
                 readOnly={editor.editingReadOnly}
-                onBack={() => {
-                    editor.cancelCreationContinuation();
-                    router.push("/workflows");
-                }}
+                onBack={guard.requestClose}
                 onNameChange={editor.changeName}
                 onNameCommit={editor.commitTransient}
                 onUndo={editor.undo}

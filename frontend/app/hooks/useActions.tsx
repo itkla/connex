@@ -16,6 +16,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import type { User } from "@/app/lib/types";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { requestGuardedNavigation } from "@/app/hooks/useUnsavedChangesGuard";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import ActionOverlayHost from "@/app/components/actions/ActionOverlayHost";
 
@@ -322,7 +323,10 @@ export function ActionProvider({ user, children }: { user: User | null; children
             setPendingIds(new Set(pendingRef.current));
             try {
                 await action.execute(currentContext, {
-                    router,
+                    router: {
+                        ...router,
+                        push: (href, navigationOptions) => requestGuardedNavigation(() => router.push(href, navigationOptions)),
+                    },
                     openOverlay,
                     closeOverlay,
                     source: options?.source ?? "programmatic",

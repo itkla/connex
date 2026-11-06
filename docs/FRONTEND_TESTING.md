@@ -235,6 +235,8 @@ in for persistence proof.
 
 ## Flake policy
 
+`fullPageEditorGuards.test.tsx` mounts the report and document-template editors with the shared discard guard. It covers meaningful and reverted edits, configuration/body changes, pending/failed/successful saves, confirmed departure during a save, return destinations, focus, link/shell navigation, and history traversal. `full-page-editor-guards.spec.ts` exercises all three builders (including workflows) in EN/JA on desktop and phone, native leave warnings, and real Back/Forward history. `workflow-canvas.spec.ts` also confirms departure while initial creation is pending.
+
 - Specs that register their own accounts must start with empty `storageState` or a fresh context.
   Registering through a project-seeded session replaces that session on the server and signs out
   every test that inherited it. The shared `registerUser` helper refuses an authenticated or

@@ -153,7 +153,7 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Editing and inspecting.** Editing opens a right-hand drawer so the context stays visible. Inspecting/peeking opens a right drawer or an anchored popover, always with a path that expands into the full page. A calendar event click opens an anchored popover — time, attendees, linked record, one action — and "open" expands it into the right drawer. On mobile, these surfaces become bottom sheets. Per-surface adaptations are allowed when content demands them, but they are documented decisions, not drift.
 
-**Abandoning work.** Any dialog or drawer that has accumulated input asks before discarding it — an outside click or Escape never silently destroys work.
+**Abandoning work.** Any dialog, drawer, or full-page editor that has accumulated input asks before discarding it. Outside click, Escape, editor back/Cancel, and navigation never silently destroy work. Keep editing retains the content and returns focus to the control that requested departure. Refresh and tab close use the browser's leave warning.
 
 **Confirming destructive actions.** A small centered dialog, one grammar: title "Delete \<object\>?", body names the specific object and ends "This can't be undone." (JA 「この操作は取り消せません。」), confirm button "Delete" in the destructive style. "Archive" needs no undo warning — it is recoverable and says so. "Delete permanently" is reserved for organization-level permanent deletion, which additionally requires typed confirmation.
 

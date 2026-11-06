@@ -12,6 +12,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import SortableGrid, { type SortableGridMessages } from '@/app/components/layout/SortableGrid';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import ReportWidgetRenderer from '@/app/components/reports/ReportWidgetRenderer';
 import {
     REPORT_CHART_TYPES,
@@ -26,6 +27,7 @@ import {
     sampleReportWidgetData,
 } from '@/app/components/reports/reportConfig';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { createReport, updateReport } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
@@ -99,31 +101,39 @@ export default function ReportBuilderBoard({
     const showApiError = useApiErrorToast('Reports');
     const router = useRouter();
     const reduceMotion = useReducedMotion() ?? false;
-    const initialConfig = initialReport
-        ? cloneReportConfig(initialReport.config)
-        : initialTemplate
-            ? cloneReportConfig(initialTemplate.config)
-            : blankReportConfig();
-    const localizedInitialConfig = initialTemplate && !initialReport
-        ? {
-            ...initialConfig,
-            widgets: initialConfig.widgets.map((widget) => ({
-                ...widget,
-                title: t(`measure.${widget.measure}`),
-            })),
-        }
-        : initialConfig;
-    const [name, setName] = useState(
-        initialReport?.name ?? (initialTemplate ? t(`templates.${initialTemplate.key}.name`) : ''),
-    );
-    const [description, setDescription] = useState(
-        initialReport?.description ?? (initialTemplate ? t(`templates.${initialTemplate.key}.description`) : ''),
-    );
-    const [cadence, setCadence] = useState<ReportCadence>(
-        initialReport?.cadence ?? initialTemplate?.cadence ?? 'monthly',
-    );
-    const [config, setConfig] = useState<ReportConfig>(localizedInitialConfig);
+    const [initialDraft] = useState(() => {
+        const initialConfig = initialReport
+            ? cloneReportConfig(initialReport.config)
+            : initialTemplate
+                ? cloneReportConfig(initialTemplate.config)
+                : blankReportConfig();
+        const localizedInitialConfig = initialTemplate && !initialReport
+            ? {
+                ...initialConfig,
+                widgets: initialConfig.widgets.map((widget) => ({
+                    ...widget,
+                    title: t(`measure.${widget.measure}`),
+                })),
+            }
+            : initialConfig;
+        return {
+            name: initialReport?.name ?? (initialTemplate ? t(`templates.${initialTemplate.key}.name`) : ''),
+            description: initialReport?.description ?? (initialTemplate ? t(`templates.${initialTemplate.key}.description`) : ''),
+            cadence: initialReport?.cadence ?? initialTemplate?.cadence ?? 'monthly',
+            config: localizedInitialConfig,
+        };
+    });
+    const [name, setName] = useState(initialDraft.name);
+    const [description, setDescription] = useState(initialDraft.description);
+    const [cadence, setCadence] = useState<ReportCadence>(initialDraft.cadence);
+    const [config, setConfig] = useState<ReportConfig>(initialDraft.config);
     const [saving, setSaving] = useState(false);
+    const returnHref = initialReport ? `/insights/reports/${initialReport.id}` : '/insights/reports';
+    const guard = useUnsavedChangesGuard({
+        isDirty: JSON.stringify({ name, description, cadence, config }) !== JSON.stringify(initialDraft),
+        onClose: () => router.push(returnHref),
+        navigation: { push: router.push },
+    });
 
     const layoutById = useMemo(
         () => new Map(config.layout.map((item) => [item.widgetId, item])),
@@ -277,8 +287,10 @@ export default function ReportBuilderBoard({
                 ? await updateReport(initialReport.id, payload)
                 : await createReport(payload);
             toastSuccess(t(initialReport ? 'builder.updated' : 'builder.created'));
-            router.push(`/insights/reports/${saved.id}`);
-            router.refresh();
+            guard.allowNavigation(() => {
+                router.push(`/insights/reports/${saved.id}`);
+                router.refresh();
+            });
         } catch (error) {
             showApiError(error, 'builder.saveFailed');
         } finally {
@@ -288,6 +300,7 @@ export default function ReportBuilderBoard({
 
     return (
         <div className="min-h-full bg-background px-2 pb-12 pt-8 2xl:px-6">
+            <ConfirmDiscardDialog {...guard.confirm} />
             <header className="flex flex-wrap items-end justify-between gap-5 border-b border-border pb-6">
                 <div>
                     <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-text">
@@ -299,7 +312,7 @@ export default function ReportBuilderBoard({
                     <p className="mt-2 text-sm text-muted-foreground">{t('builder.subtitle')}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={() => router.back()} disabled={saving}>
+                    <Button variant="outline" onClick={guard.requestClose} disabled={saving}>
                         {t('common.cancel')}
                     </Button>
                     <Button variant="brand" onClick={save} disabled={saving || ownerFiltersUnresolved}>
@@ -308,7 +321,7 @@ export default function ReportBuilderBoard({
                 </div>
             </header>
 
-            <div className="mt-8 grid grid-cols-1 gap-8 xl:grid-cols-[22rem_minmax(0,1fr)]">
+            <fieldset disabled={saving} className="mt-8 grid min-w-0 grid-cols-1 gap-8 xl:grid-cols-[22rem_minmax(0,1fr)]">
                 <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
                     <section className="rounded-2xl border border-border bg-card p-5">
                         <h2 className="text-sm font-semibold text-foreground">{t('builder.detailsTitle')}</h2>
@@ -487,7 +500,7 @@ export default function ReportBuilderBoard({
                         )}
                     />
                 </main>
-            </div>
+            </fieldset>
         </div>
     );
 }
