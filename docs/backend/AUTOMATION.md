@@ -162,14 +162,22 @@ before any delivery row is written. An excluded contact creates neither a send n
 exclusion reason is strict-audited. An unsubscribe or other mandatory-stop signal skips that delivery
 but does not cancel later workflow nodes in this increment.
 
-Triggered sends remain `triggered` after their pending queue drains so later contacts can enroll. Dormant
-triggered sends are excluded from worker workspace/send scans until another pending delivery exists.
+Ordinary triggered sends remain `triggered` after their pending queue drains so later contacts can enroll.
+A content-refused send is terminal: it retains that schema-required stored status but records completion
+and a trusted refusal marker; the API presents `failed` with the localized refusal reason. Its pending
+work is settled atomically, and no new enrollment, claim, release-to-pending or replay may reopen it.
+Already in-flight results remain authoritative, with expired attempts retained for reconciliation.
+Corrected content uses a new revision and send. See [saved campaign content](../DELIVERABILITY.md).
+Dormant and content-refused triggered sends are excluded from normal worker scans; expired in-flight
+attempts remain discoverable for recovery.
 Their recipient total is refreshed from delivery rows. The campaign API returns them with the
 synthetic `snapshotId` and `origin=triggered`; the campaign UI labels them as workflow-managed and exposes no
 queue, pause, or cancel controls. The lifecycle service also rejects those mutations for triggered
 sends.
 
-Concurrent get-or-create calls are serialized by the campaign mutex. The unique triggered-send key and
+Concurrent get-or-create calls are serialized by the campaign mutex. Enrollment then locks and rechecks
+the send before inserting a recipient, so content refusal cannot commit between admission and insertion.
+The unique triggered-send key and
 the delivery's generated active `(workspace_id, send_id, person_id, dedupe_active)` key remain final
 defenses:
 duplicate-key collisions are caught and re-read, while unrelated uniqueness failures still propagate.
@@ -262,6 +270,41 @@ A `document` workflow subject is a `deal_document` id, not its parent deal.
 - Remove the fence only when no supported rollout window can include a pre-document-automation binary.
 
 Future fenced record types use the same centralized gate instead of scattered checks.
+
+## Follow-up recipients and notification sources
+
+Schema-v1 `create_task` and `notify` actions use the existing optional `targetUserId` for a
+specific active member of the same workspace. An absent target retains the run-as attribution member.
+Authoring and execution refuse invalid or unavailable explicit members rather than redirecting work
+to the actor. Task effects retain the exact assignee through a transactional NOWAIT fence before
+delegating to `TaskService` and its locked assignment checks. Membership contention propagates as a
+retryable lock failure, so an earlier action's audit head cannot close a cycle with a direct task
+create holding that assignee. Missing active membership requires intervention;
+notification effects retain attribution and recipient memberships through the write using the existing
+actor/workspace prefix and ordered NOWAIT membership union. Missing or contended membership refuses
+the action instead of completing an invisible notification. Recipient/source access filters remain in place.
+No action field or persisted definition shape is added, so canonical bytes and hashes stay stable.
+Dynamic record-owner, launch-input, and action-output recipient bindings require schema-v2 in #1604;
+schema-v1 authoring refuses those configurations through its strict unknown-field/type validation.
+
+For task actions, an absent `dueInDays` retains the three-day default; zero means today, and explicit
+values must be integers from 0 through 365. Today uses `UserCalendarService`, the same persisted
+execution-profile calendar used by Tasks, with UTC as the existing fallback. Recipe parameters and
+the builder use the same range.
+
+Workflow notifications snapshot the permitted source name into `sourceLabel` and the message body,
+retain the configured title/message, and link contacts, companies, deals, and tasks to their existing
+record destinations. Document triggers use the `deal_document` notification source and the existing
+deal-scoped document print route. Names are resolved through workspace-scoped reads; a missing
+source fails the action instead of producing a dead link. Inbox and realtime reads retain their
+current source-access checks, and opening a notification selects its workspace before navigating.
+
+Notification emails enter `/notifications?open=<notificationId>`. The authenticated page marks and
+resolves that notification through the existing recipient-authorized endpoint, then reuses the same
+workspace-selection navigation as the bell and inbox before opening the returned record URL.
+Workspace and destination are taken from the authorized notification, not link parameters. An invalid
+id, inaccessible notification, or refused workspace selection offers the inbox without navigating to
+an unrelated record. Existing direct record URLs remain the in-app notification destination.
 
 ## Legacy rules are a compatibility projection
 

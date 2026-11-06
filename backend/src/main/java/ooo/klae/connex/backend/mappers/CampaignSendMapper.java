@@ -50,6 +50,9 @@ public interface CampaignSendMapper {
             @Param("workspaceId") int workspaceId,
             @Param("id") int id);
 
+    /** Closes refusal scheduling; triggered storage retains its schema-required status. */
+    int markContentRefused(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
     int refreshCounters(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     List<Integer> queuedSendIds(
