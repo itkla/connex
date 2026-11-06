@@ -88,14 +88,14 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
         ResolvedCreationFieldDto phone = defaultField("phone", "+12025550123");
         when(presetService.persons(RecordCreationEntryPoint.quick_create, 31))
                 .thenReturn(preset(RecordCreationRecordType.person, email, phone));
-        when(duplicatePreflightService.preflightPerson(any()))
-                .thenReturn(new DuplicatePreflightResponse("person", List.of(), false, null));
+        when(duplicatePreflightService.personCandidatesExist(any()))
+                .thenReturn(false);
 
         AiAssistantPreparedWrite prepared = propose(service(), "create_person", PERSON, "company", 31);
 
         ArgumentCaptor<PersonDuplicatePreflightRequest> captured =
                 ArgumentCaptor.forClass(PersonDuplicatePreflightRequest.class);
-        verify(duplicatePreflightService).preflightPerson(captured.capture());
+        verify(duplicatePreflightService).personCandidatesExist(captured.capture());
         assertEquals(List.of("private@example.test"), captured.getValue().emails());
         assertEquals(List.of("+12025550123"), captured.getValue().phones());
         assertFalse(prepared.argumentsJson().contains("private@example.test"));
@@ -106,8 +106,8 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     @Test
     void aTruncatedPersonCheckRefusesBeforeAnyProposalOrCreate() {
         stubPerson();
-        when(duplicatePreflightService.preflightPerson(any()))
-                .thenReturn(new DuplicatePreflightResponse("person", List.of(), true, null));
+        when(duplicatePreflightService.personCandidatesExist(any()))
+                .thenReturn(true);
         AiAssistantWriteToolService service = service();
         assertRefusal("possible_duplicate", () -> propose(service, "create_person", PERSON, "company", 31));
         verifyNoInteractions(creationService);
@@ -117,7 +117,7 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     @Test
     void anUnavailableCheckFailsClosedWithoutCreating() {
         stubPerson();
-        when(duplicatePreflightService.preflightPerson(any()))
+        when(duplicatePreflightService.personCandidatesExist(any()))
                 .thenThrow(new DataAccessResourceFailureException("unavailable"));
         AiAssistantWriteToolService service = service();
         assertRefusal("duplicate_check_unavailable",
@@ -148,7 +148,7 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     @Test
     void aRateLimitedCheckRefusesRecoverablyAndAnUnavailableAnchorIsUnresolved() {
         stubPerson();
-        when(duplicatePreflightService.preflightPerson(any()))
+        when(duplicatePreflightService.personCandidatesExist(any()))
                 .thenThrow(new ooo.klae.connex.backend.exceptions.TooManyRequestsException("limited"));
         AiAssistantWriteToolService service = service();
         assertRefusal("duplicate_check_unavailable",
@@ -291,8 +291,8 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     private void stubPerson() {
         when(presetService.persons(RecordCreationEntryPoint.quick_create, 31))
                 .thenReturn(preset(RecordCreationRecordType.person));
-        when(duplicatePreflightService.preflightPerson(any()))
-                .thenReturn(new DuplicatePreflightResponse("person", List.of(), false, null));
+        when(duplicatePreflightService.personCandidatesExist(any()))
+                .thenReturn(false);
     }
 
     private void stubDeal() {

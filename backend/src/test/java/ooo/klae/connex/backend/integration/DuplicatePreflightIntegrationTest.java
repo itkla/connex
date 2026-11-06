@@ -328,6 +328,82 @@ class DuplicatePreflightIntegrationTest {
                 Matchers.containsString("duplicateReviewToken"))));
     }
 
+    @Test
+    void commonPersonNameCanBeCreatedSeparatelyAfterABoundedReview() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace(newOrganization(), "common-name");
+        User owner = newMember(workspace, "owner");
+        newPerson(workspace, "Jordan Lee");
+        for (int index = 1; index <= 51; index++) {
+            newPerson(workspace, "Jordan Lee Group " + index);
+        }
+        MockHttpSession session = login(owner.getUsername());
+        MvcResult review = mockMvc.perform(post("/api/duplicate-preflight/persons")
+                .with(csrf().asHeader())
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":"Jordan Lee","emails":["different@example.com"],"phones":[]}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.truncated").value(true))
+            .andExpect(jsonPath("$.allowSeparateCreation").value(true))
+            .andExpect(jsonPath("$.candidates.length()").value(1))
+            .andReturn();
+        String token = objectMapper.readTree(review.getResponse().getContentAsString())
+            .path("reviewToken").asString();
+        mockMvc.perform(post("/api/duplicate-preflight/persons")
+                .with(csrf().asHeader())
+                .header("X-Workspace-Id", workspace.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":"Jordan Lee","emails":["different@example.com"],"phones":[],"reviewToken":"%s"}
+                    """.formatted(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.reviewToken").value(token));
+        String create = """
+            {"name":"Jordan Lee","email":"different@example.com","phone":"","title":""}
+            """;
+        mockMvc.perform(post("/api/persons").with(csrf().asHeader())
+                .header("X-Workspace-Id", workspace.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON).content(create))
+            .andExpect(status().isConflict());
+        mockMvc.perform(post("/api/persons").with(csrf().asHeader())
+                .header("X-Workspace-Id", workspace.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(create.strip().replace("}", ",\"duplicateReviewToken\":\"" + token + "\"}")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.name").value("Jordan Lee"));
+    }
+
+    @Test
+    void companyLegalFormReviewNeverExposesUnsharedOrForeignWorkspaceNames() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Organization organization = newOrganization();
+        Workspace current = newWorkspace(organization, "variant-current");
+        Workspace sibling = newWorkspace(organization, "variant-sibling");
+        Workspace foreign = newWorkspace(newOrganization(), "variant-foreign");
+        User owner = newMember(current, "owner");
+        Company owned = newCompany(current, "Sakura Robotics Inc.");
+        Company shared = newCompany(sibling, "Sakura Robotics Co., Ltd.");
+        newCompany(sibling, "Sakura Robotics K.K.");
+        Company crossOrg = newCompany(foreign, "Sakura Robotics GmbH");
+        insertCompanyShare(shared, current, owner);
+        insertCompanyShare(crossOrg, current, owner);
+
+        mockMvc.perform(post("/api/duplicate-preflight/companies").with(csrf().asHeader())
+                .header("X-Workspace-Id", current.getId()).session(login(owner.getUsername()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":"Sakura Robotics","websites":[],"phones":[]}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.candidates[*].recordId", Matchers.containsInAnyOrder(
+                owned.getId(), shared.getId())))
+            .andExpect(jsonPath("$.candidates[*].strength", Matchers.everyItem(Matchers.is("WEAK"))));
+    }
+
     private Organization newOrganization() {
         String suffix = suffix();
         Organization organization = new Organization();
