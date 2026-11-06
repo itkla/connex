@@ -54,6 +54,19 @@ class InviteServiceClaimTest {
     }
 
     @Test
+    void disallowedDomainReturnsSpecificCodeBeforeAnyRecipientLookupOrWrite() {
+        User actor = user("owner@example.com");
+        when(workspaceService.getOrgId(7)).thenReturn(3);
+
+        ForbiddenException refused = assertThrows(ForbiddenException.class,
+            () -> inviteService.createInvite(7, actor, "recipient@example.com", "member"));
+
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refused.getCode());
+        verifyNoInteractions(inviteMapper, userMapper, workspaceMapper, inviteEmailService, auditService);
+        verify(workspaceService, never()).revokePendingInvitationForEmail(anyInt(), anyInt(), any());
+    }
+
+    @Test
     void creatingInvitationNeverResolvesRecipientAccounts() {
         User actor = user("owner@example.com");
         String email = "recipient@example.com";

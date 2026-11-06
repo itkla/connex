@@ -314,7 +314,7 @@
         "deleteFailed": "Couldn't delete the role",
         "loadFailed": "Couldn't load roles",
         "nameRequired": "Enter a role name",
-        "noAccess": "Only workspace owners can manage roles.",
+        "noAccess": "Your role doesn't include managing workspace roles. Ask a workspace owner to grant access.",
         "empty": "No custom roles yet.",
         "permissionCount": "{count} permissions",
         "defaultRolesLabel": "Built-in roles",
@@ -331,15 +331,273 @@
         "selectAll": "Select all",
         "clearAll": "Clear",
         "create": "Create role",
-        "noPermissionsHint": "Select at least the actions this role should allow.",
+        "noPermissionsHint": "No actions selected. Members can still read records available to them through workspace membership.",
         "roleEntityLabel": "role",
         "permissionLabels": {
-            "teamManage": {
-                "group": "Teams",
-                "action": "Manage"
+            "COMPANY_CREATE": {
+                "action": "Create",
+                "description": "Create companies in this workspace."
+            },
+            "COMPANY_UPDATE": {
+                "action": "Edit",
+                "description": "Edit companies you have access to."
+            },
+            "COMPANY_DELETE": {
+                "action": "Archive and restore",
+                "description": "Archive and restore companies you have access to. Archiving keeps their history and can be undone."
+            },
+            "PERSON_CREATE": {
+                "action": "Create",
+                "description": "Create contacts in this workspace."
+            },
+            "PERSON_UPDATE": {
+                "action": "Edit",
+                "description": "Edit contacts you have access to."
+            },
+            "PERSON_DELETE": {
+                "action": "Archive and restore",
+                "description": "Archive and restore contacts you have access to. Archiving keeps their history and can be undone."
+            },
+            "DEAL_CREATE": {
+                "action": "Create",
+                "description": "Create deals in this workspace."
+            },
+            "DEAL_UPDATE": {
+                "action": "Edit",
+                "description": "Edit deals you have access to."
+            },
+            "DEAL_DELETE": {
+                "action": "Delete",
+                "description": "Delete deals you have access to. If a deal has documents beyond draft, deletion also needs a built-in Owner or Admin role with no custom role assigned."
+            },
+            "ACTIVITY_CREATE": {
+                "action": "Create",
+                "description": "Create activities in this workspace."
+            },
+            "ACTIVITY_UPDATE": {
+                "action": "Edit",
+                "description": "Edit activities you have access to. Activities captured from connected accounts remain read-only."
+            },
+            "ACTIVITY_DELETE": {
+                "action": "Delete",
+                "description": "Delete activities you have access to. Activities captured from connected accounts remain read-only."
+            },
+            "NOTE_CREATE": {
+                "action": "Create",
+                "description": "Create notes in this workspace."
+            },
+            "NOTE_UPDATE": {
+                "action": "Edit",
+                "description": "Edit notes you have access to."
+            },
+            "NOTE_DELETE": {
+                "action": "Delete",
+                "description": "Delete notes you have access to."
+            },
+            "TASK_CREATE": {
+                "action": "Create",
+                "description": "Create tasks in this workspace."
+            },
+            "TASK_UPDATE": {
+                "action": "Edit",
+                "description": "Edit tasks you have access to."
+            },
+            "TASK_DELETE": {
+                "action": "Delete",
+                "description": "Delete tasks you have access to."
+            },
+            "REPORT_CREATE": {
+                "action": "Create",
+                "description": "Create reports in this workspace."
+            },
+            "REPORT_UPDATE": {
+                "action": "Edit",
+                "description": "Edit reports you have access to."
+            },
+            "REPORT_DELETE": {
+                "action": "Delete",
+                "description": "Delete your own reports and snapshots. Deleting another member's work or a report containing scheduled snapshots needs a built-in Owner or Admin role with no custom role assigned."
+            },
+            "COMMENT_CREATE": {
+                "action": "Add comments",
+                "description": "Add comments to records you have access to."
+            },
+            "COMMENT_MODERATE": {
+                "action": "Moderate comments",
+                "description": "Remove other authors' comment text from accessible records; permission to add comments is also required. Authors can remove their own comments without moderation access."
+            },
+            "ATTACHMENT_CREATE": {
+                "action": "Upload files",
+                "description": "Upload files to records you have access to."
+            },
+            "ATTACHMENT_DELETE": {
+                "action": "Delete files",
+                "description": "Delete files you have access to. Deleting quarantined files also needs permission to manage quarantined files."
+            },
+            "ATTACHMENT_QUARANTINE_MANAGE": {
+                "action": "Manage quarantined files",
+                "description": "Review and manage quarantined files. This does not grant access to their contents."
+            },
+            "REPORT_READ": {
+                "action": "View reports",
+                "description": "View workspace reports; creating and editing reports need separate permissions."
+            },
+            "GOAL_READ": {
+                "action": "View goals",
+                "description": "View goals and progress."
+            },
+            "GOAL_MANAGE": {
+                "action": "Manage goals",
+                "description": "Create, edit, and delete goals."
+            },
+            "PIPELINE_MANAGE": {
+                "action": "Manage pipelines",
+                "description": "Create, edit, and delete pipelines and their stages."
+            },
+            "TAG_MANAGE": {
+                "action": "Manage tags",
+                "description": "Create, edit, and delete workspace tags."
+            },
+            "PRODUCT_MANAGE": {
+                "action": "Manage products",
+                "description": "Create, edit, and delete products in the workspace catalog."
+            },
+            "DOCUMENT_MANAGE": {
+                "action": "Manage document templates and approval policies",
+                "description": "Create, edit, and delete document templates and configure document approval policies. Editing deal documents needs permission to edit deals; sending and approving need separate permissions."
+            },
+            "DOCUMENT_SEND": {
+                "action": "Send documents",
+                "description": "Send, resend, and void document deliveries."
+            },
+            "DOCUMENT_APPROVE": {
+                "action": "Approve documents",
+                "description": "Approve or reject documents routed for your review. This does not grant approval-policy management."
+            },
+            "CUSTOM_FIELD_MANAGE": {
+                "action": "Manage custom fields",
+                "description": "Create, edit, and delete custom field definitions."
+            },
+            "SHARE_MANAGE": {
+                "action": "Manage sharing",
+                "description": "Manage sharing of this workspace's companies, contacts, and pipelines within the same organization. Sharing requires membership in the destination workspace; privacy protections still apply."
+            },
+            "MEMBER_MANAGE": {
+                "action": "Manage members",
+                "description": "Invite and remove members and assign built-in roles within your authority. Only workspace owners can change ownership; new owners must accept. Assigning custom roles needs permission to manage roles."
+            },
+            "ROLE_MANAGE": {
+                "action": "Manage roles",
+                "description": "Create, edit, and assign custom roles within your own permissions, and delete unused roles. Changing a role held by an owner also requires workspace ownership. Custom roles do not grant ownership."
+            },
+            "AUDIT_READ": {
+                "action": "View workspace audit log",
+                "description": "View workspace audit history. Organization audit access is separate."
+            },
+            "WORKSPACE_SETTINGS": {
+                "action": "Manage workspace settings",
+                "description": "Edit workspace settings. Organization security and single sign-on settings require organization authority. AI settings require organization administrator access."
+            },
+            "API_CREDENTIAL_MANAGE": {
+                "action": "Manage API credentials",
+                "description": "View the workspace's API credential list, issue your own credentials within your permissions, and revoke workspace credentials."
+            },
+            "RULE_MANAGE": {
+                "action": "Manage workflows",
+                "description": "Create, edit, publish, and manage workspace workflows. Each action still requires its own access."
+            },
+            "CAMPAIGN_VIEW": {
+                "action": "View campaigns",
+                "description": "View campaigns and results. Viewing contact audiences also requires permission to manage contact preferences; editing and sending need separate permissions."
+            },
+            "CAMPAIGN_MANAGE": {
+                "action": "Manage campaigns",
+                "description": "Create, edit, and delete campaigns and manage messages and audiences. Contact audiences and draft sends also need permission to manage contact preferences; sending needs separate permission."
+            },
+            "CAMPAIGN_SEND": {
+                "action": "Send campaigns",
+                "description": "Send campaigns to eligible recipients. Contact preferences and privacy protections still apply."
+            },
+            "CONSENT_MANAGE": {
+                "action": "Manage contact preferences",
+                "description": "Manage marketing contact preferences for contacts owned by this workspace and manage its contact exclusions. Privacy protections still apply."
+            },
+            "AI_USE": {
+                "action": "Use AI features",
+                "description": "Use Ask Connex and AI features when enabled with an organization provider. This does not grant access to other members' private chats. AI settings require organization administrator access."
+            },
+            "AI_SESSION_SHARE": {
+                "action": "Share your chats",
+                "description": "Share your chats before they contain an AI answer and invite workspace members. You and participants also need permission to use AI features."
+            },
+            "AI_SESSION_ADMIN": {
+                "action": "View retained chats",
+                "description": "Read chats retained after their creator leaves the workspace. This does not allow changing them or sending messages on the creator's behalf."
+            },
+            "SEQUENCE_VIEW": {
+                "action": "View sequences",
+                "description": "View sequence templates available to you. Editing and publishing need permission to manage sequences."
+            },
+            "SEQUENCE_MANAGE": {
+                "action": "Manage sequences",
+                "description": "Create, edit, archive, and publish sequence templates available to you. This does not grant permission to send campaigns."
+            },
+            "TEAM_MANAGE": {
+                "action": "Manage teams",
+                "description": "Create teams and manage their members and managers. Team membership does not grant workspace permissions."
             }
         },
-        "confinementSubjectRoleEdit": "Save changes to the {name} role"
+        "confinementSubjectRoleEdit": "Save changes to the {name} role",
+        "permissionGroups": {
+            "COMPANY": "Companies",
+            "PERSON": "Contacts",
+            "DEAL": "Deals",
+            "ACTIVITY": "Activities",
+            "NOTE": "Notes",
+            "COMMENT": "Comments",
+            "TASK": "Tasks",
+            "ATTACHMENT": "Files",
+            "REPORT": "Reports",
+            "GOAL": "Goals",
+            "PIPELINE": "Pipelines",
+            "TAG": "Tags",
+            "PRODUCT": "Products",
+            "DOCUMENT": "Documents",
+            "CUSTOM": "Custom fields",
+            "SHARE": "Sharing",
+            "MEMBER": "Members",
+            "ROLE": "Roles",
+            "AUDIT": "Audit log",
+            "WORKSPACE": "Workspace settings",
+            "API": "API credentials",
+            "RULE": "Workflows",
+            "CAMPAIGN": "Campaigns",
+            "CONSENT": "Contact preferences",
+            "AI": "Ask Connex and AI features",
+            "SEQUENCE": "Sequences",
+            "TEAM": "Teams"
+        },
+        "accessDetails": "View allowed and unavailable actions",
+        "accessScopeHint": "Only actions marked Allowed are granted. Record visibility, organization authority, and security checks still apply.",
+        "allowed": "Allowed",
+        "notAllowed": "Not allowed",
+        "unknownPermission": "Additional action",
+        "unknownPermissionDescription": "This action has no description yet. Ask a workspace owner before granting it.",
+        "unknownPermissionGroup": "Additional permissions",
+        "builtInRoles": {
+            "owner": {
+                "name": "Owner",
+                "description": "All workspace permissions, including member and role management. Organization authority is separate; AI settings require organization administrator access."
+            },
+            "admin": {
+                "name": "Admin",
+                "description": "Manage workspace settings, members, and workflows; use AI features. AI settings require organization administrator access. Cannot manage custom roles or grant workspace ownership."
+            },
+            "member": {
+                "name": "Member",
+                "description": "Work with contacts, deals, activities, notes, comments, tasks, files, and reports. Cannot manage workspace settings, members, roles, or workflows, or use AI features."
+            }
+        }
     },
     "WorkflowAuthoring": {
         "noAccess": "You can't manage workflows in this workspace. Ask a workspace admin if you need access.",

@@ -24,6 +24,7 @@ import {
     renamePasskey,
     settlePrivilegedMfaStanding,
 } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import { useConfinementExits, type ConfinementWorkspaceExit } from "@/app/hooks/useConfinementExits";
 import { usePasskeyEnrollment } from "@/app/hooks/usePasskeyEnrollment";
@@ -80,6 +81,7 @@ function PasskeyIcon({ passkey }: { passkey: Passkey }) {
 export default function SecurityPanel() {
     const timeZone = useTimeZone();
     const t = useTranslations("AccountSecurity");
+    const showApiError = useApiErrorToast("AccountSecurity");
     const locale = useLocale();
     const now = useLiveNow();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
@@ -245,7 +247,7 @@ export default function SecurityPanel() {
             if (isWebAuthnCancellation(err)) {
                 toastInfo(t("stepUpCanceled"));
             } else {
-                toastError(t("removeFailed"));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setIsRemoving(false);

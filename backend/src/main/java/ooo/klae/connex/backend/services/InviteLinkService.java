@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.dto.InviteLinkPreviewDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.InviteDomainNotAllowedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteLinkMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -202,7 +203,7 @@ public class InviteLinkService {
         int orgId = workspaceService.getOrgId(workspaceId);
         if (!orgAllowedDomainService.isJoinAllowed(orgId, fresh.getEmail())
                 || !allowedDomainService.isJoinAllowed(workspaceId, fresh.getEmail())) {
-            throw new ForbiddenException("Your email domain isn't permitted to join this workspace");
+            throw new InviteDomainNotAllowedException("Your email domain isn't permitted to join this workspace");
         }
 
         // A domain allowlist is only trustworthy if the joiner's email is verified — otherwise

@@ -61,36 +61,36 @@ function RoleIcon({ locked }: { locked?: boolean }) {
 function PermissionSummary({
     role,
     groups,
-    totalPermissions,
 }: {
     role: CustomRole;
     groups: PermissionGroup[];
-    totalPermissions: number;
 }) {
     const t = useTranslations("WorkspaceRoles");
-    if (role.permissions.length === 0) {
-        return <span className="text-xs text-muted-foreground">{t("noPermissions")}</span>;
-    }
-    if (totalPermissions > 0 && role.permissions.length === totalPermissions) {
-        return <span className="text-xs font-medium text-brand-text">{t("fullAccess")}</span>;
-    }
-    const set = new Set(role.permissions);
-    const touched = groups.filter((g) => g.items.some((i) => set.has(i.permission)));
+    const permissions = new Set(role.permissions);
     return (
-        <div className="flex flex-wrap items-center gap-1.5">
-            {touched.map(({ group, label, items }) => {
-                const on = items.filter((i) => set.has(i.permission)).length;
-                return (
-                    <span
-                        key={group}
-                        className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border"
-                    >
-                        {label}
-                        <span className="text-muted-foreground/60">{on}</span>
-                    </span>
-                );
-            })}
-        </div>
+        <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                {t("accessDetails")}
+            </summary>
+            <p className="mt-2 text-xs text-muted-foreground">{t("accessScopeHint")}</p>
+            <div className="mt-3 space-y-4">
+                {groups.map(({ group, label, items }) => (
+                    <div key={group} className="space-y-1.5">
+                        <p className="font-medium text-foreground">{label}</p>
+                        <ul className="space-y-2">
+                            {items.map(({ permission, action, description }) => (
+                                <li key={permission}>
+                                    <p className="text-foreground">
+                                        {action} · {t(permissions.has(permission) ? "allowed" : "notAllowed")}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">{description}</p>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ))}
+            </div>
+        </details>
     );
 }
 
@@ -134,15 +134,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
     const [removeTarget, setRemoveTarget] = useState<CustomRole | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
 
-    const groups = useMemo(
-        () => groupPermissions(catalog, {
-            TEAM_MANAGE: {
-                group: t("permissionLabels.teamManage.group"),
-                action: t("permissionLabels.teamManage.action"),
-            },
-        }),
-        [catalog, t],
-    );
+    const groups = useMemo(() => groupPermissions(catalog, t), [catalog, t]);
 
     useEffect(() => {
         if (!workspaceId) return;
@@ -235,8 +227,6 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         );
     }
 
-    const totalPermissions = catalog.length;
-
     return (
         <div className="space-y-10">
             <Rise className="space-y-4">
@@ -264,18 +254,15 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                                 <div className="min-w-0 flex-1 space-y-1.5">
                                     <div className="flex items-center gap-2">
                                         <span className="truncate text-sm font-medium capitalize text-foreground">
-                                            {role.name}
+                                            {t(`builtInRoles.${role.name}.name`)}
                                         </span>
                                         <Badge variant="secondary" className="text-muted-foreground">
                                             <LockClosedIcon className="size-3" />
                                             {t("builtInBadge")}
                                         </Badge>
                                     </div>
-                                    <PermissionSummary
-                                        role={role}
-                                        groups={groups}
-                                        totalPermissions={totalPermissions}
-                                    />
+                                    <p className="text-sm text-muted-foreground">{t(`builtInRoles.${role.name}.description`)}</p>
+                                    <PermissionSummary role={role} groups={groups} />
                                 </div>
                             </li>
                         ))}
@@ -311,11 +298,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                                     <span className="block truncate text-sm font-medium text-foreground">
                                         {role.name}
                                     </span>
-                                    <PermissionSummary
-                                        role={role}
-                                        groups={groups}
-                                        totalPermissions={totalPermissions}
-                                    />
+                                    <PermissionSummary role={role} groups={groups} />
                                 </div>
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>

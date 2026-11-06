@@ -76,7 +76,7 @@
         "renamed": "Passkey renamed",
         "renameFailed": "Couldn't rename that passkey. Please try again.",
         "removed": "Passkey removed",
-        "removeFailed": "Couldn't remove that passkey. Please try again.",
+        "removeFailed": "Couldn't remove the passkey",
         "loadFailed": "Couldn't load your passkeys.",
         "retry": "Try again",
         "confirmationTitle": "Confirm by email",

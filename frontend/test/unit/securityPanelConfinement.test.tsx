@@ -8,12 +8,18 @@ import SecurityPanel from "@/app/components/account/SecurityPanel";
 import { ApiError } from "@/app/lib/api";
 import type { Passkey, PasskeyRegistrationRequirements } from "@/app/lib/types";
 import enAccount from "@/messages/en/account.json";
+import jaAccount from "@/messages/ja/account.json";
+import enErrors from "@/messages/en/errors.json";
+import jaErrors from "@/messages/ja/errors.json";
 
 const backend = vi.hoisted(() => ({
     passkeys: [] as Passkey[],
     requirements: null as PasskeyRegistrationRequirements | null,
     refresh: vi.fn(async () => "applied" as const),
     getPasskeys: vi.fn(),
+    deletePasskey: vi.fn(),
+    toastError: vi.fn(),
+    showActions: false,
     beginPasskeyRegistration: vi.fn(async () => ({ challenge: "challenge" })),
     finishPasskeyRegistration: vi.fn(async () => undefined),
     startRegistration: vi.fn(async () => ({ id: "credential" })),
@@ -32,11 +38,17 @@ const backend = vi.hoisted(() => ({
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
     getPasskeys: backend.getPasskeys,
+    deletePasskey: backend.deletePasskey,
     beginPasskeyRegistration: backend.beginPasskeyRegistration,
     finishPasskeyRegistration: backend.finishPasskeyRegistration,
     leaveWorkspace: backend.leaveWorkspace,
     readAuthoritativeWorkspaceSelection: backend.readSelection,
     settlePrivilegedMfaStanding: backend.settle,
+}));
+vi.mock("@/app/lib/toast", () => ({
+    toastError: backend.toastError,
+    toastSuccess: vi.fn(),
+    toastInfo: vi.fn(),
 }));
 vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
     ...await importOriginal<typeof import("@simplewebauthn/browser")>(),
@@ -79,7 +91,10 @@ vi.mock("@/app/components/account/PasskeyApprovalDialog", () => ({
         return null;
     },
 }));
-vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
+vi.mock("@/app/components/records/DeleteRecordDialog", () => ({
+    default: ({ open, confirmDelete }: { open: boolean; confirmDelete: () => Promise<void> }) =>
+        open ? createElement("button", { onClick: confirmDelete }, "Confirm removal") : null,
+}));
 vi.mock("@/components/ui/dialog", async () => {
     const React = await import("react");
     const Passthrough = ({ children }: { children?: ReactNode }) => React.createElement(React.Fragment, null, children);
@@ -99,8 +114,10 @@ vi.mock("@/components/ui/dropdown-menu", async () => {
     const Passthrough = ({ children }: { children?: ReactNode }) => React.createElement(React.Fragment, null, children);
     return {
         DropdownMenu: Passthrough,
-        DropdownMenuContent: () => null,
-        DropdownMenuItem: Passthrough,
+        DropdownMenuContent: ({ children }: { children?: ReactNode }) => backend.showActions
+            ? React.createElement(React.Fragment, null, children) : null,
+        DropdownMenuItem: ({ children, onSelect }: { children?: ReactNode; onSelect?: () => void }) =>
+            React.createElement("button", { onClick: onSelect }, children),
         DropdownMenuTrigger: Passthrough,
     };
 });
@@ -158,6 +175,7 @@ afterEach(async () => {
     backend.approve = null;
     backend.reason = null;
     backend.failed = false;
+    backend.showActions = false;
     vi.clearAllMocks();
 });
 
@@ -398,5 +416,37 @@ describe("the Security page while a privileged account is confined", () => {
         expect(container.textContent).toContain(enAccount.AccountSecurity.approvalTitle);
         expect(container.textContent).not.toContain(enAccount.AccountSecurity.approvalNeededTitle);
         expect(container.textContent).not.toContain(enAccount.AccountSecurity.enrollmentNeededTitle);
+    });
+});
+
+describe.each(["en", "ja"] as const)("passkey removal explanations in %s", (locale) => {
+    it.each([
+        ["LAST_PASSKEY_REQUIRED", "lastPasskeyRequired"],
+        ["LAST_SUFFICIENT_PASSKEY_REQUIRED", "lastSufficientPasskeyRequired"],
+    ] as const)("shows the recovery for %s and retains the passkey", async (code, key) => {
+        const account = locale === "en" ? enAccount : jaAccount;
+        const errors = locale === "en" ? enErrors : jaErrors;
+        backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+        backend.requirements = requirementsFor("SATISFIED");
+        backend.showActions = true;
+        backend.deletePasskey.mockRejectedValue(new ApiError("private backend details", 400, code));
+        await act(async () => root.render(
+            <NextIntlClientProvider locale={locale} messages={{ ...account, ...errors }} timeZone="UTC">
+                <SecurityPanel />
+            </NextIntlClientProvider>,
+        ));
+        const remove = [...container.querySelectorAll("button")]
+            .find((candidate) => candidate.textContent === account.AccountSecurity.remove);
+        if (!remove) throw new Error("Passkey remove action is missing");
+        await act(async () => remove.click());
+        const confirm = [...container.querySelectorAll("button")]
+            .find((candidate) => candidate.textContent === "Confirm removal");
+        if (!confirm) throw new Error("Passkey confirmation is missing");
+        await act(async () => confirm.click());
+        expect(backend.toastError).toHaveBeenCalledWith(account.AccountSecurity.removeFailed, {
+            description: errors.ApiErrors[key],
+        });
+        expect(container.textContent).toContain("Laptop");
+        expect(container.textContent).toContain("Confirm removal");
     });
 });
