@@ -237,6 +237,11 @@
         "colActor": "実行者",
         "colWhen": "日時",
         "action": {
+            "organization": {
+                "audit": {
+                    "export": "組織の監査ログをエクスポートしました"
+                }
+            },
             "appi": {
                 "subject_request": {
                     "create": "プライバシー関連の申請を登録しました",
@@ -282,7 +287,8 @@
                 },
                 "workspace": {
                     "create": "ワークスペースを作成しました",
-                    "export": "ワークスペースのデータを書き出しました"
+                    "export": "ワークスペースのデータを書き出しました",
+                    "export_started": "ワークスペースのデータのエクスポートを開始しました"
                 },
                 "support_bundle": {
                     "completed": "サポート用データを作成しました",

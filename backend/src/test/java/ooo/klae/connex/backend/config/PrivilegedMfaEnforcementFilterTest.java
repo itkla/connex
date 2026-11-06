@@ -536,7 +536,7 @@ class PrivilegedMfaEnforcementFilterTest {
         when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.SATISFIED);
         when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(true);
 
-        execute("GET", "/api/reports/4/snapshots/8/export.csv");
+        execute("POST", "/api/reports/4/snapshots/8/export.csv");
 
         verify(filterChain).doFilter(any(), any());
     }
@@ -560,8 +560,11 @@ class PrivilegedMfaEnforcementFilterTest {
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/orgs/2/audit/export"));
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/campaigns/3/exports"));
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/reports/4/export.csv"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/reports/4/export-completion"));
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp(
                 "GET", "/api/reports/4/snapshots/8/export.csv"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp(
+                "POST", "/api/reports/4/snapshots/8/export.csv"));
     }
 
     @Test
@@ -573,6 +576,8 @@ class PrivilegedMfaEnforcementFilterTest {
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/reports/0x4/export.csv"));
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp(
                 "GET", "/api/reports/+4/snapshots/0x8/export.csv"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp(
+                "POST", "/api/reports/+4/snapshots/0x8/export.csv"));
     }
 
     @Test
@@ -623,7 +628,9 @@ class PrivilegedMfaEnforcementFilterTest {
                 Arguments.of("GET", "/api/orgs/2/audit/export"),
                 Arguments.of("POST", "/api/campaigns/3/exports"),
                 Arguments.of("POST", "/api/reports/4/export.csv"),
-                Arguments.of("GET", "/api/reports/4/snapshots/8/export.csv"));
+                Arguments.of("POST", "/api/reports/4/export-completion"),
+                Arguments.of("GET", "/api/reports/4/snapshots/8/export.csv"),
+                Arguments.of("POST", "/api/reports/4/snapshots/8/export.csv"));
         return surfaces.stream().flatMap(surface -> Stream.of(";x", "%3Bx")
                 .map(suffix -> Arguments.of(surface.get()[0], surface.get()[1] + suffix)));
     }
