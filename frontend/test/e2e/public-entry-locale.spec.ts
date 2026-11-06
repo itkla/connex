@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { csrfBootstrap, registerUser } from "./support/api";
 import { message } from "./support/messages";
 import { useLocale } from "./support/locale";
 
@@ -54,6 +56,39 @@ test.describe("public entry in a Japanese browser", () => {
                 name: message("en", entry.namespace, entry.heading),
                 exact: true,
             })).toBeVisible();
+        }
+    });
+
+    test("a saved English profile wins on unsubscribe and invitation pages without a locale cookie @mobile", async ({ page, context }) => {
+        const unique = randomUUID();
+        await registerUser(context.request, {
+            username: `locale-${unique}`,
+            password: `Locale-${randomUUID()}!`,
+            email: `locale-${unique}@example.test`,
+            displayName: "Locale preference",
+        });
+        const csrf = await csrfBootstrap(context.request);
+        const response = await context.request.patch("/api/users/me/locale", {
+            headers: { [csrf.headerName]: csrf.token },
+            data: { locale: "en" },
+        });
+        expect(response.ok()).toBe(true);
+        await context.clearCookies({ name: "NEXT_LOCALE" });
+
+        for (const entry of [
+            { path: "/unsubscribe", namespace: "unsubscribe", heading: "Unsubscribe.invalidTitle" },
+            { path: "/invite", namespace: "auth", heading: "InviteAccept.invalidTitle" },
+            { path: "/invite-link", namespace: "auth", heading: "InviteLinkAccept.invalidTitle" },
+        ]) {
+            const documentResponse = await page.goto(entry.path);
+
+            expect(documentResponse?.status()).toBe(200);
+            expect(await documentResponse?.text()).toContain('<html lang="en"');
+            await expect(page.getByRole("heading", {
+                name: message("en", entry.namespace, entry.heading),
+                exact: true,
+            })).toBeVisible();
+            expect((await context.cookies()).some(({ name }) => name === "NEXT_LOCALE")).toBe(false);
         }
     });
 });

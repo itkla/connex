@@ -113,16 +113,18 @@ The phone project is deliberately **Chromium, not Mobile Safari**: CI installs a
 ## Running in Japanese
 
 Locale is **not a URL segment**. `i18n/request.ts` honors an explicit next-intl locale first,
-then a supported `NEXT_LOCALE` cookie, then `Accept-Language`, and finally English. Browser
-language matching accepts English/Japanese regional tags, uses positive quality weights in
+then a supported `NEXT_LOCALE` cookie, then the signed-in profile language, then
+`Accept-Language`, and finally English. The profile and time zone share one cached request
+resolver; an absent, unsupported or failed profile preference falls through to browser matching.
+Requests without a session do not fetch a profile. Browser language matching accepts
+English/Japanese regional tags, uses positive quality weights in
 descending order, and preserves header order for ties. Unsupported ranges, wildcard ranges,
 zero-quality ranges and malformed entries are ignored. An absent or unsupported cookie does not
 prevent browser-language matching. Browser inference never writes a preference cookie.
 
-A user's `locale` database column does not by itself drive the first server render: the only
-thing that copies it into the cookie is `PreferenceActionsBridge`, a client effect that
-deliberately does nothing when the context already carries an explicit preference. To pin a
-Japanese run regardless of its browser language, set the cookie itself:
+The saved profile language applies to the first server render, including public routes without
+`PreferenceActionsBridge`. To pin a Japanese run regardless of its saved profile or browser
+language, set the cookie itself:
 
 ```ts
 import { useLocale } from "./support/locale";
@@ -137,9 +139,10 @@ await expect(page.getByRole("heading", { name: message("ja", "auth", "AuthLogin.
 
 `public-entry-locale.spec.ts` instead starts with empty storage and a Japanese browser locale.
 It covers sign-in, registration, recovery, email/passkey confirmation, signed-out invitation
-redirects and unsubscribe entry on desktop and phone, plus explicit-cookie precedence and
-unsupported-browser fallback. `i18nRequest.test.ts` checks the server configuration and retained
-profile time-zone resolution. Document acceptance retains its separate document-locale contract
+redirects and unsubscribe entry on desktop and phone, plus explicit-cookie precedence,
+authenticated English profiles with Japanese browsers, and unsupported-browser fallback.
+`i18nRequest.test.ts` checks locale precedence, profile-read failure and a single shared profile
+read for language and time zone. Document acceptance retains its separate document-locale contract
 in [ESIGNATURE.md](ESIGNATURE.md).
 
 ## Seeded identities (deterministic volume seeder)

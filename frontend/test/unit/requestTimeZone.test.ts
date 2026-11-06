@@ -6,12 +6,12 @@ vi.mock('@/app/lib/api', () => ({
     getCurrentUserResultFromCookie: api.user,
     getMyWorkspacesResultFromCookie: api.workspaces,
 }));
-import { requestTimeZone } from '@/app/lib/requestTimeZone';
+import { requestPreferences, requestTimeZone } from '@/app/lib/requestTimeZone';
 
 beforeEach(() => {
     vi.clearAllMocks();
     api.headers.mockResolvedValue(new Headers({ cookie: 'JSESSIONID=test; connex_workspace=2' }));
-    api.user.mockResolvedValue({ ok: true, data: { timezone: 'Asia/Tokyo' } });
+    api.user.mockResolvedValue({ ok: true, data: { locale: 'en', timezone: 'Asia/Tokyo' } });
     api.workspaces.mockResolvedValue({ ok: true, data: { activeWorkspaceId: 2, workspaces: [
         { id: 1, timezone: 'Pacific/Honolulu' }, { id: 2, timezone: 'America/New_York' },
     ] } });
@@ -41,5 +41,26 @@ describe('request time zone', () => {
         api.user.mockResolvedValue({ ok: true, data: { timezone: '' } });
         api.workspaces.mockResolvedValue({ ok: false });
         expect(await requestTimeZone()).toBe('UTC');
+    });
+    it('shares one profile read for language and time zone', async () => {
+        expect(await requestPreferences()).toEqual({ locale: 'en', timeZone: 'Asia/Tokyo' });
+        expect(api.user).toHaveBeenCalledTimes(1);
+        expect(api.workspaces).not.toHaveBeenCalled();
+    });
+    it('keeps the language preference when the workspace zone is needed', async () => {
+        api.user.mockResolvedValue({ ok: true, data: { locale: 'ja', timezone: 'invalid' } });
+        expect(await requestPreferences()).toEqual({ locale: 'ja', timeZone: 'America/New_York' });
+        expect(api.user).toHaveBeenCalledTimes(1);
+        expect(api.workspaces).toHaveBeenCalledTimes(1);
+    });
+    it('falls back safely when the profile read rejects', async () => {
+        api.user.mockRejectedValue(new TypeError('Profile unavailable'));
+        expect(await requestPreferences()).toEqual({ locale: null, timeZone: 'UTC' });
+        expect(api.workspaces).not.toHaveBeenCalled();
+    });
+    it('keeps the profile language when the workspace read rejects', async () => {
+        api.user.mockResolvedValue({ ok: true, data: { locale: 'en', timezone: '' } });
+        api.workspaces.mockRejectedValue(new TypeError('Workspaces unavailable'));
+        expect(await requestPreferences()).toEqual({ locale: 'en', timeZone: 'UTC' });
     });
 });
