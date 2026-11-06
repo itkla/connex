@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.RecordSearchMapper">
+  <resultMap id="SearchRow" type="ooo.klae.connex.backend.mappers.RecordSearchMapper$Row">
+    <constructor>
+      <idArg column="id" javaType="_int"/>
+      <arg column="workspace_id" javaType="_int"/>
+      <arg column="name" javaType="string" typeHandler="ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler"/>
+      <arg column="phone" javaType="string" typeHandler="ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler"/>
+    </constructor>
+  </resultMap>
+  <sql id="recordTable">
+    <choose>
+      <when test="kind.name() == 'PERSON'">person</when>
+      <otherwise>company</otherwise>
+    </choose>
+  </sql>
+  <sql id="recordFrom">
+    <choose>
+      <when test="kind.name() == 'PERSON'">FROM person r FORCE INDEX (idx_person_workspace)</when>
+      <otherwise>FROM company r FORCE INDEX (idx_company_workspace)</otherwise>
+    </choose>
+  </sql>
+  <sql id="processingAllowed">
+    <if test="kind.name() == 'PERSON'">
+      AND suspended_at IS NULL AND provision_ceased_at IS NULL
+    </if>
+  </sql>
+  <select id="maxId" resultType="java.lang.Integer">
+    SELECT MAX(r.id) <include refid="recordFrom"/>
+    WHERE workspace_id = #{workspaceId}
+  </select>
+  <select id="pageMissingIds" resultType="int">
+    (SELECT r.id
+    <choose>
+      <when test="kind.name() == 'PERSON'">FROM person r FORCE INDEX (idx_person_workspace_search_phone)</when>
+      <otherwise>FROM company r FORCE INDEX (idx_company_workspace_search_phone)</otherwise>
+    </choose>
+    WHERE workspace_id = #{workspaceId} AND search_phone IS NULL
+      AND id &gt; #{afterId} AND id &lt;= #{throughId}
+    ORDER BY id LIMIT #{limit})
+    UNION
+    (SELECT r.id
+    <choose>
+      <when test="kind.name() == 'PERSON'">FROM person r FORCE INDEX (idx_person_workspace_search_missing_name)</when>
+      <otherwise>FROM company r FORCE INDEX (idx_company_workspace_search_missing_name)</otherwise>
+    </choose>
+    WHERE workspace_id = #{workspaceId} AND search_name IS NULL
+      AND id &gt; #{afterId} AND id &lt;= #{throughId}
+    ORDER BY id LIMIT #{limit})
+    ORDER BY id LIMIT #{limit}
+  </select>
+  <sql id="missingRange">
+    WHERE workspace_id = #{workspaceId}
+    <choose>
+      <when test="ids != null and ids.size() &gt; 0 and ids.size() &lt;= 500">
+        AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <otherwise>AND 1 = 0</otherwise>
+    </choose>
+      AND (search_name IS NULL OR search_phone IS NULL)
+    <include refid="processingAllowed"/>
+    ORDER BY id LIMIT 500
+  </sql>
+  <select id="findMissing" resultMap="SearchRow">
+    <choose>
+      <when test="kind.name() == 'PERSON'">
+        SELECT p.id, p.workspace_id, CAST(p.name AS BINARY) AS name, CAST(p.phone AS BINARY) AS phone
+        FROM person p FORCE INDEX (PRIMARY)
+        <include refid="missingRange"/>
+      </when>
+      <otherwise>
+        SELECT c.id, c.workspace_id, CAST(c.name AS BINARY) AS name, CAST(c.phone AS BINARY) AS phone
+        FROM company c FORCE INDEX (PRIMARY)
+        <include refid="missingRange"/>
+      </otherwise>
+    </choose>
+  </select>
+  <update id="reconcile">
+    UPDATE <include refid="recordTable"/>
+    SET search_name = CONVERT(#{nameKey,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        search_phone = CONVERT(#{phoneKey,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        search_key_revision = search_key_revision + 1, updated_at = updated_at
+    WHERE workspace_id = #{workspaceId} AND id = #{row.id} AND workspace_id = #{row.workspaceId}
+      AND BINARY name &lt;=&gt; #{row.name,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler}
+      AND BINARY phone &lt;=&gt; #{row.phone,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler}
+      AND (search_name IS NULL OR search_phone IS NULL)
+    <include refid="processingAllowed"/>
+  </update>
+</mapper>

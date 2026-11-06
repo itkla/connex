@@ -360,6 +360,17 @@
     LIMIT #{limit}
   </select>
 
+  <select id="findLastWorkspaceId" resultType="java.lang.Integer">
+    SELECT MAX(id) FROM workspace
+  </select>
+
+  <select id="findWorkspaceIdsThroughPage" resultType="int">
+    SELECT w.id FROM workspace w JOIN organization o ON o.id = w.org_id
+    WHERE w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
+      AND w.id &gt; #{afterId} AND w.id &lt;= #{throughId}
+    ORDER BY w.id LIMIT #{limit}
+  </select>
+
   <!-- Share hydration snapshot (#811). This replaces the control-plane `workspace` joins the
        tenant-scoped ShareMapper used to carry, so it must reproduce them exactly: those joins had
        no lifecycle predicate, and adding one here would silently stop listing (and stop granting
