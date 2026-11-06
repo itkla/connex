@@ -84,4 +84,4 @@ scopes and adds object obligations. Separate explicit INSTANT column operations 
 operations must fail if unsupported; no retained-content UPDATE backfill, COPY fallback or disabled
 FK validation is authorized. Scope triggers precede replacement of affected legacy work checks.
 The historical privacy component floor is tenant V237; the current release-wide floor is
-tenant V243, as documented in [UPGRADING.md](../UPGRADING.md#deal-line-value-takeover-tenant-v243).
+tenant V245, as documented in [UPGRADING.md](../UPGRADING.md#contact-channel-consent-versions-tenant-v245).

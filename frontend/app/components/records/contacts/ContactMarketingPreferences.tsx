@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { useTranslations } from 'next-intl';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import RestrictionsDialog from './RestrictionsDialog';
 import {
-    contactSuppressions, MARKETING_CHANNELS, marketingAddress, type MarketingChannel,
+    MARKETING_CHANNELS, marketingAddress, type MarketingChannel,
 } from './contactMarketingPreferences';
 import { useContactMarketingPreferences, type MarketingPreferenceAction } from './useContactMarketingPreferences';
 
@@ -25,17 +25,18 @@ export default function ContactMarketingPreferences({ contact, status }: { conta
     const restrictionPermission = usePermissionCheck('PERSON_UPDATE');
     const [privacyOpen, setPrivacyOpen] = useState(false);
     const [channel, setChannel] = useState<MarketingChannel>('email');
+    const fallbackFocus = useRef<HTMLElement>(null);
     if (activeWorkspaceId == null || contact.workspaceId !== activeWorkspaceId) return null;
     const snapshot = JSON.stringify([activeWorkspaceId, contact.id, contact.updatedAt, contact.email, contact.phone, contact.archivedAt, contact.suspendedAt, contact.provisionCeasedAt, status]);
 
     return (
-        <section aria-label={t('title')} className="grid gap-3">
+        <section ref={fallbackFocus} tabIndex={-1} aria-label={t('title')} className="grid gap-3 outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <SectionHeader title={t('title')} />
             <p className="text-sm text-muted-foreground">{t('policy')}</p>
             <p className="text-xs text-muted-foreground">{t('dispatch')}</p>
             {status?.privacyHold ? <p className="text-sm font-medium">{t('privacyBlocked')}</p> : null}
             {consentPermission === 'granted' ? (
-                <PreferenceControls key={snapshot} contact={contact} workspaceId={activeWorkspaceId} channel={channel} onChannelChange={setChannel} />
+                <PreferenceControls key={JSON.stringify([activeWorkspaceId, contact.id])} snapshot={snapshot} contact={contact} workspaceId={activeWorkspaceId} channel={channel} onChannelChange={setChannel} fallbackFocus={fallbackFocus} />
             ) : (
                 <p className="text-sm text-muted-foreground">{t(consentPermission === 'unavailable' ? 'permissionUnavailable' : 'permissionDenied')}</p>
             )}
@@ -49,15 +50,22 @@ export default function ContactMarketingPreferences({ contact, status }: { conta
     );
 }
 
-function PreferenceControls({ contact, workspaceId, channel, onChannelChange }: {
+function PreferenceControls({ contact, workspaceId, snapshot, channel, onChannelChange, fallbackFocus }: {
     contact: Contact;
     workspaceId: number;
+    snapshot: string;
     channel: MarketingChannel;
     onChannelChange: (channel: MarketingChannel) => void;
+    fallbackFocus: RefObject<HTMLElement | null>;
 }) {
     const t = useTranslations('ContactMarketingPreferences');
-    const { data, error, loading, busy, apply, retry } = useContactMarketingPreferences(contact.id, workspaceId);
+    const { data, error, loading, refreshing, busy, conflicted, apply, loadMore, retry } = useContactMarketingPreferences(contact.id, workspaceId, snapshot);
     const [action, setAction] = useState<MarketingPreferenceAction | null>(null);
+    const opener = useRef<HTMLButtonElement | null>(null);
+    const openAction = (next: MarketingPreferenceAction, target: HTMLButtonElement) => {
+        opener.current = target;
+        setAction(next);
+    };
     if (loading) return <div className="grid gap-3" aria-label={t('loading')}><Skeleton className="h-9 w-full" /><Skeleton className="h-24 w-full" /></div>;
     if (error !== null || data === null) return (
         <div role="alert" className="grid gap-2">
@@ -68,7 +76,7 @@ function PreferenceControls({ contact, workspaceId, channel, onChannelChange }: 
 
     const consent = data.consent.find((entry) => entry.channel === channel && entry.purpose === 'marketing');
     const summary = data.status.channels.find((entry) => entry.channel === channel);
-    const entries = contactSuppressions(contact, channel, data.suppressions);
+    const entries = data.suppressions.filter((entry) => entry.channel === channel);
     const address = marketingAddress(contact, channel);
     const blocked = data.status.privacyHold || summary?.optedOut || summary?.doNotContact || summary?.consentRevoked;
     const basis = contact.archivedAt ? 'archivedBlocked' : !summary ? 'statusUnavailable' : blocked ? 'blocked' : !summary.addressable ? 'noAddress' : 'basis';
@@ -83,7 +91,10 @@ function PreferenceControls({ contact, workspaceId, channel, onChannelChange }: 
         }
     };
     const confirm = async () => {
-        if (action && await apply(action)) setAction(null);
+        if (action && await apply(action)) {
+            opener.current = null;
+            setAction(null);
+        }
     };
 
     return (
@@ -98,6 +109,7 @@ function PreferenceControls({ contact, workspaceId, channel, onChannelChange }: 
             </Select>
             {channel === 'line' || channel === 'whatsapp' ? <p className="text-xs text-muted-foreground">{t('notDeliverable')}</p> : null}
             <p role="status" className="text-sm font-medium">{t(basis)}</p>
+            {conflicted ? <p role="alert" className="text-sm">{t('conflict')}</p> : null}
             <div className="grid gap-2 border-t border-border pt-3">
                 <p className="text-sm">{t('recordedConsent', { status: t(`statuses.${consent?.status ?? 'unknown'}`) })}</p>
                 {consent?.source ? <p className="break-words text-xs text-muted-foreground">{t('source', { source: consent.source === 'manual' ? t('manualSource') : consent.source })}</p> : null}
@@ -105,29 +117,34 @@ function PreferenceControls({ contact, workspaceId, channel, onChannelChange }: 
                 <div className="flex flex-wrap gap-2">
                     {(['granted', 'revoked', 'unknown'] as const).map((value) => (
                         <Button key={value} variant="outline" size="toolbar" disabled={busy || value === (consent?.status ?? 'unknown')}
-                            onClick={() => setAction({ kind: 'consent', channel, status: value })}>{t(`actions.${value}`)}</Button>
+                            onClick={(event) => openAction({ kind: 'consent', channel, status: value, expectedVersion: consent?.version ?? 0 }, event.currentTarget)}>{t(`actions.${value}`)}</Button>
                     ))}
                 </div>
             </div>
             <div className="grid gap-2 border-t border-border pt-3">
                 <p className="text-sm font-medium">{t('restrictions')}</p>
-                {entries.length === 0 ? <p className="text-xs text-muted-foreground">{t('noRestrictions')}</p> : (
+                {entries.length === 0 ? <p className="text-xs text-muted-foreground">{t(data.nextAfterId === null ? 'noRestrictions' : 'restrictionsIncomplete')}</p> : (
                     <ul className="grid gap-3">
                         {entries.map((entry) => (
                             <li key={entry.id} className="grid gap-1">
                                 <span className="text-sm">{reason(entry.reason)}</span>
                                 <span className="break-all text-xs text-muted-foreground">{entry.address}</span>
                                 <Button variant="outline" size="toolbar" className="justify-self-start" disabled={busy}
-                                    onClick={() => setAction({ kind: 'remove', entry })}>{t('remove')}</Button>
+                                    onClick={(event) => openAction({ kind: 'remove', entry }, event.currentTarget)}>{t('remove')}</Button>
                             </li>
                         ))}
                     </ul>
                 )}
+                {data.nextAfterId !== null ? <Button variant="outline" size="toolbar" disabled={busy || refreshing} onClick={() => void loadMore()}>{t('moreRestrictions')}</Button> : null}
                 <Button variant="outline" size="toolbar" className="justify-self-start" disabled={busy || !address || summary?.doNotContact === true}
-                    onClick={() => { if (address) setAction({ kind: 'restrict', channel, address }); }}>{t('restrict')}</Button>
+                    onClick={(event) => { if (address) openAction({ kind: 'restrict', channel, address }, event.currentTarget); }}>{t('restrict')}</Button>
             </div>
             <Dialog open={action !== null} onOpenChange={(open) => { if (!open && !busy) setAction(null); }}>
-                <DialogContent>
+                <DialogContent onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    if (opener.current?.isConnected && !opener.current.disabled) opener.current.focus();
+                    else if (fallbackFocus.current?.isConnected) fallbackFocus.current.focus();
+                }}>
                     <DialogHeader>
                         <DialogTitle>{action?.kind === 'consent' ? t(`actions.${action.status}`) : t(action?.kind === 'remove' ? 'remove' : 'restrict')}</DialogTitle>
                         <DialogDescription>{t(action?.kind === 'remove' ? 'removeWarning' : action?.kind === 'consent' ? 'consentWarning' : 'restrictWarning', { name: contact.name })}</DialogDescription>

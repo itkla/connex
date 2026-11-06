@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { activeWorkspaceId, csrfBootstrap, registerUser, seeder } from './support/api';
 import { useLocale } from './support/locale';
 import { message } from './support/messages';
@@ -24,21 +24,65 @@ for (const locale of ['en', 'ja'] as const) {
         const panel = page.getByRole('region', { name: m('title'), exact: true });
         await expect(panel.getByText(m('policy'), { exact: true })).toBeVisible();
         await expect(panel.getByText(m('basis'), { exact: true })).toBeVisible();
+        const optIn = panel.getByRole('button', { name: m('actions.granted'), exact: true });
+        await optIn.focus();
+        await optIn.press('Enter');
+        const cancelConfirmation = page.getByRole('dialog', { name: m('actions.granted'), exact: true });
+        await cancelConfirmation.getByRole('button', { name: m('cancel'), exact: true }).press('Enter');
+        await expect(cancelConfirmation).not.toBeVisible();
+        await expect(optIn).toBeFocused();
 
-        const change = async (action: string, path: string, method: string) => {
-            await panel.getByRole('button', { name: m(action), exact: true }).click();
-            const dialog = page.getByRole('dialog', { name: m(action), exact: true });
+        const confirm = async (dialog: Locator, path: string, method: string) => {
             await expect(dialog).toBeVisible();
-            const response = page.waitForResponse((res) => res.url().endsWith(path) && res.request().method() === method);
-            await dialog.getByRole('button', { name: m('confirm'), exact: true }).click();
-            expect((await response).ok()).toBe(true);
-            await expect(dialog).not.toBeVisible();
+            const [response] = await Promise.all([
+                page.waitForResponse((res) => res.url().endsWith(path) && res.request().method() === method),
+                dialog.getByRole('button', { name: m('confirm'), exact: true }).click(),
+            ]);
+            expect(response.ok()).toBe(true);
+            await expect(page.getByRole('dialog')).not.toBeVisible();
+            await expect(panel.locator('[aria-busy]')).toHaveAttribute('aria-busy', 'false');
+        };
+        const change = async (action: string, path: string, method: string) => {
+            const opener = panel.getByRole('button', { name: m(action), exact: true });
+            await expect(opener).toBeEnabled();
+            await opener.click();
+            await confirm(page.getByRole('dialog', { name: m(action), exact: true }), path, method);
         };
 
-        await change('actions.granted', `/api/persons/${id}/consent`, 'PUT');
+        const detailPath = `/records/contacts/${id}`;
+        const releaseRefresh = Promise.withResolvers<void>();
+        let refreshStarted = false;
+        await page.route(`**${detailPath}*`, async (route) => {
+            if (new URL(route.request().url()).pathname !== detailPath || route.request().headers().rsc !== '1') {
+                await route.continue();
+                return;
+            }
+            refreshStarted = true;
+            await releaseRefresh.promise;
+            await route.continue();
+        });
+        try {
+            await change('restrict', '/api/suppressions', 'POST');
+            await expect(panel.getByText(m('blocked'), { exact: true })).toBeVisible();
+            await expect.poll(() => refreshStarted).toBe(true);
+            await expect(optIn).toBeEnabled();
+            await optIn.click();
+            await expect(cancelConfirmation).toBeVisible();
+            const refreshedStatus = page.waitForResponse((response) => response.url().endsWith(`/api/persons/${id}/marketing-status`) && response.request().method() === 'GET');
+            releaseRefresh.resolve();
+            expect((await refreshedStatus).ok()).toBe(true);
+            await expect(cancelConfirmation).toBeVisible();
+            await confirm(cancelConfirmation, `/api/persons/${id}/consent`, 'PUT');
+        } finally {
+            releaseRefresh.resolve();
+            await page.unrouteAll({ behavior: 'wait' });
+        }
         await expect(panel.getByText(m('recordedConsent').replace('{status}', m('statuses.granted')), { exact: true })).toBeVisible();
-        await change('restrict', '/api/suppressions', 'POST');
+        await expect(panel).toBeFocused();
         await expect(panel.getByText(m('blocked'), { exact: true })).toBeVisible();
+        const scopedRestrictions = await context.request.get(`/api/suppressions/persons/${id}`, { headers });
+        expect(scopedRestrictions.status()).toBe(200);
+        expect(await scopedRestrictions.json()).toEqual({ items: [{ id: expect.any(Number), channel: 'email', address: `contact-${key}@example.invalid`, reason: 'do_not_contact' }] });
         await change('actions.revoked', `/api/persons/${id}/consent`, 'PUT');
         await change('actions.granted', `/api/persons/${id}/consent`, 'PUT');
         await expect(panel.getByText(m('blocked'), { exact: true })).toBeVisible();
@@ -51,6 +95,7 @@ for (const locale of ['en', 'ja'] as const) {
         await removal.getByRole('button', { name: m('confirm'), exact: true }).click();
         expect((await removed).status()).toBe(204);
         await expect(removal).not.toBeVisible();
+        await expect(panel).toBeFocused();
         await expect(panel.getByText(m('blocked'), { exact: true })).toBeVisible();
         const stored = await context.request.get(`/api/persons/${id}/consent`, { headers });
         expect(stored.status()).toBe(200);
@@ -94,10 +139,75 @@ test('contact preference APIs reject other-workspace contacts and restrictions',
         const restriction = await seed.post('/api/suppressions', { scope: 'workspace', channel: 'email', address: `foreign-${otherKey}@example.invalid`, personId: person.id, reason: 'do_not_contact' });
         if (typeof restriction.id !== 'number') throw new Error('The restriction has no id');
         expect((await context.request.get(`/api/persons/${person.id}/consent`, { headers })).status()).toBe(404);
-        expect((await context.request.put(`/api/persons/${person.id}/consent`, { headers, data: { channel: 'email', purpose: 'marketing', status: 'granted', source: 'manual' } })).status()).toBe(404);
+        expect((await context.request.put(`/api/persons/${person.id}/consent`, { headers, data: { channel: 'email', purpose: 'marketing', status: 'granted', source: 'manual', expectedVersion: 0 } })).status()).toBe(404);
+        expect((await context.request.get(`/api/suppressions/persons/${person.id}`, { headers })).status()).toBe(404);
         expect((await context.request.post('/api/suppressions', { headers, data: { scope: 'workspace', channel: 'email', address: `foreign-${otherKey}@example.invalid`, personId: person.id, reason: 'do_not_contact' } })).status()).toBe(404);
         expect((await context.request.delete(`/api/suppressions/${restriction.id}`, { headers })).status()).toBe(404);
     } finally {
         await other.close();
+    }
+});
+
+test('stale confirmations refresh consent and preserve a concurrent privacy hold @mobile', async ({ page, context }) => {
+    const key = randomUUID();
+    await registerUser(context.request, { username: `stale_${key.replaceAll('-', '')}`, password: `Consent!${key}A1`, email: `stale-${key}@example.invalid` });
+    const workspaceId = await activeWorkspaceId(context.request);
+    const csrf = await csrfBootstrap(context.request);
+    const headers = { 'X-Workspace-Id': String(workspaceId) };
+    const created = await seeder(context.request, workspaceId, csrf).post('/api/persons', { name: `Stale marketing contact ${key}`, email: `stale-contact-${key}@example.invalid` });
+    if (typeof created.id !== 'number') throw new Error('The contact has no id');
+    const id = created.id;
+    const m = (name: string) => message('en', 'contacts', `ContactMarketingPreferences.${name}`);
+    const restriction = (name: string) => message('en', 'contacts', `ContactRestrictions.${name}`);
+    await useLocale(context, 'en');
+    await page.goto(`/records/contacts/${id}`);
+    const panel = page.getByRole('region', { name: m('title'), exact: true });
+    await panel.getByRole('button', { name: m('actions.granted'), exact: true }).click();
+    const staleConsent = page.getByRole('dialog', { name: m('actions.granted'), exact: true });
+    await expect(staleConsent.getByText(m('clearOptOutWarning'), { exact: true })).toHaveCount(0);
+    const otherTab = await context.newPage();
+    try {
+        await otherTab.goto(`/records/contacts/${id}`);
+        const otherPanel = otherTab.getByRole('region', { name: m('title'), exact: true });
+        await otherPanel.getByRole('button', { name: m('actions.revoked'), exact: true }).click();
+        const revoked = otherTab.waitForResponse((response) => response.url().endsWith(`/api/persons/${id}/consent`) && response.request().method() === 'PUT');
+        await otherTab.getByRole('dialog', { name: m('actions.revoked'), exact: true }).getByRole('button', { name: m('confirm'), exact: true }).click();
+        expect((await revoked).status()).toBe(200);
+        const conflict = page.waitForResponse((response) => response.url().endsWith(`/api/persons/${id}/consent`) && response.request().method() === 'PUT');
+        await staleConsent.getByRole('button', { name: m('confirm'), exact: true }).click();
+        const refused = await conflict;
+        expect(refused.status()).toBe(409);
+        expect(await refused.json()).toMatchObject({ code: 'STALE_RECORD', currentVersion: expect.any(Number) });
+        await expect(staleConsent).not.toBeVisible();
+        await expect(panel.getByText(m('conflict'), { exact: true })).toBeVisible();
+        await expect(panel.getByText(m('recordedConsent').replace('{status}', m('statuses.revoked')), { exact: true })).toBeVisible();
+        const freshOptIn = panel.getByRole('button', { name: m('actions.granted'), exact: true });
+        await freshOptIn.focus();
+        await freshOptIn.press('Enter');
+        await expect(staleConsent.getByText(m('clearOptOutWarning'), { exact: true })).toBeVisible();
+        await staleConsent.getByRole('button', { name: m('cancel'), exact: true }).press('Enter');
+        await expect(freshOptIn).toBeFocused();
+
+        await panel.getByRole('button', { name: m('privacyAction'), exact: true }).click();
+        const stalePrivacy = page.getByRole('dialog', { name: restriction('title'), exact: true });
+        await expect(stalePrivacy.getByRole('switch', { name: restriction('suspendLabel'), exact: true })).not.toBeChecked();
+        await otherPanel.getByRole('button', { name: m('privacyAction'), exact: true }).click();
+        const otherPrivacy = otherTab.getByRole('dialog', { name: restriction('title'), exact: true });
+        await otherPrivacy.getByRole('switch', { name: restriction('suspendLabel'), exact: true }).click();
+        const held = otherTab.waitForResponse((response) => response.url().endsWith(`/api/persons/${id}/restrictions`) && response.request().method() === 'PUT');
+        await otherPrivacy.getByRole('button', { name: restriction('save'), exact: true }).click();
+        expect((await held).status()).toBe(200);
+        await expect(stalePrivacy.getByRole('switch', { name: restriction('suspendLabel'), exact: true })).not.toBeChecked();
+        await stalePrivacy.getByRole('switch', { name: restriction('provisionLabel'), exact: true }).click();
+        const patched = page.waitForResponse((response) => response.url().endsWith(`/api/persons/${id}/restrictions`) && response.request().method() === 'PUT');
+        await stalePrivacy.getByRole('button', { name: restriction('save'), exact: true }).click();
+        const saved = await patched;
+        expect(saved.status()).toBe(200);
+        expect(saved.request().postDataJSON()).toEqual({ provisionCeased: true });
+        const stored = await context.request.get(`/api/persons/${id}`, { headers });
+        expect(stored.status()).toBe(200);
+        expect(await stored.json()).toMatchObject({ suspendedAt: expect.any(String), provisionCeasedAt: expect.any(String) });
+    } finally {
+        await otherTab.close();
     }
 });

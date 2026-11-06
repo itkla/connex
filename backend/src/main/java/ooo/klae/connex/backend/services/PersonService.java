@@ -880,13 +880,13 @@ public class PersonService {
     }
 
     /**
-     * Sets or clears the contact's processing and third-party-provision restrictions. Ceasing
+     * Patches supplied processing and third-party-provision flags under the owned-contact lock. Ceasing
      * third-party provision also revokes every standing cross-workspace share of the contact —
      * the restriction must stop provision already in flight, not just new grants.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
-    public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
+    public Person updateProcessingRestrictions(int id, Boolean requestedSuspended, Boolean requestedProvisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
@@ -896,6 +896,8 @@ public class PersonService {
         if (before == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        boolean suspended = requestedSuspended != null ? requestedSuspended : before.getSuspendedAt() != null;
+        boolean provisionCeased = requestedProvisionCeased != null ? requestedProvisionCeased : before.getProvisionCeasedAt() != null;
         List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
             ? restrictionWorkspaceIds(orgId, workspaceId)
             : List.of();

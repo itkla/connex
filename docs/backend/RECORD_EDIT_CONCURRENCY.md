@@ -92,6 +92,28 @@ already reselect the contact after their writes. Lifecycle transitions reselect 
 clock writes, so a returned Person always carries the final version. The lifecycle state DTO also carries that
 post-write version.
 
+## Marketing consent and privacy patches (tenant V245)
+
+Contact-channel consent has an independent database-owned `version`, initialized to one by V245.
+`trg_contact_consent_version` advances it on every UPDATE, including no-op updates and trusted
+unsubscribe/provider revocations. Its second-precision `updated_at` remains a freshness timestamp;
+it cannot distinguish competing changes within one second. No client clock or timestamp conversion
+participates in the fence.
+
+HTTP consent PUT requires a non-negative `expectedVersion`. Zero explicitly means the member
+reviewed an absent row; unique subject-key insertion admits one winner. Existing-row updates match
+workspace, person, channel, purpose, and version in the UPDATE itself. Refusals return the existing
+`STALE_RECORD` 409 shape without appending history or audit. The UI rereads, closes the outdated
+confirmation, and requires a new explicit action; a fresh revoked state shows the opt-out-clearing
+warning. Internal unsubscribe and provider revocations retain their unconditional trusted service
+path and advance the same counter. They never depend on a browser snapshot.
+
+Privacy restriction requests are patches: only explicitly supplied Boolean flags change. Omitted
+or null flags retain their values from the current owned contact under the existing organization
+duplicate mutex and person lock. The effective merged flags drive sharing revocation, captured-data
+withdrawal, identity visibility and AI invalidation. A stale sharing-only update therefore cannot
+clear a concurrently added processing hold. The frontend submits only flags changed by the member.
+
 The historical `fk_person_company` is ON DELETE SET NULL, whose automatic action bypasses UPDATE
 triggers. `trg_company_delete_person_edit_version` explicitly detaches those exact indexed company
 references before the existing FK action. The V241 company→deal trigger remains intact and runs

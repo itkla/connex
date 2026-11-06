@@ -12,13 +12,16 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.SuppressionEntryDto;
 import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
+import ooo.klae.connex.backend.dto.ContactSuppressionPageDto;
 import ooo.klae.connex.backend.services.SuppressionService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -35,6 +38,14 @@ public class SuppressionController {
     @RequirePermission(Permission.CONSENT_MANAGE)
     public List<SuppressionEntryDto> list() {
         return suppressionService.list();
+    }
+
+    /** Returns a bounded, minimized page of restrictions matching one owned contact. */
+    @GetMapping("/persons/{personId}")
+    @RequirePermission(Permission.CONSENT_MANAGE)
+    public ContactSuppressionPageDto listForPerson(@Positive @PathVariable int personId,
+            @PositiveOrZero @RequestParam(defaultValue = "0") int afterId) {
+        return suppressionService.listForPerson(personId, afterId);
     }
 
     @PostMapping

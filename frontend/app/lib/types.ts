@@ -2813,6 +2813,7 @@ export type ContactChannelConsent = {
     evidenceRef: string | null;
     capturedAt: string | null;
     updatedAt: string;
+    version: number;
 };
 
 export type ContactChannelConsentPayload = {
@@ -2822,6 +2823,20 @@ export type ContactChannelConsentPayload = {
     source: string;
     evidenceRef?: string | null;
     capturedAt?: string | null;
+    expectedVersion: number;
+};
+
+/** Minimal contact-scoped restriction details; excludes unrelated addresses and operator metadata. */
+export type ContactSuppression = {
+    id: number;
+    channel: string;
+    address: string;
+    reason: string;
+};
+
+export type ContactSuppressionPage = {
+    items: ContactSuppression[];
+    nextAfterId?: number | null;
 };
 
 export type SuppressionEntry = {

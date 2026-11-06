@@ -7,13 +7,14 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
-The active rollback floor for this release is tenant V243, including with AI and missions disabled.
+The active rollback floor for this release is tenant V245, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V243. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240 → tenant V241 → tenant V242 → tenant V243
+permit rollback after V245. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240 → tenant V241 → tenant V242 → tenant V243 → reserved tenant V244 → tenant V245
 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
 [the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
 [the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
-[the deal-value cutover](#deal-line-value-takeover-tenant-v243).
+[the deal-value cutover](#deal-line-value-takeover-tenant-v243), and
+[the consent-version cutover](#contact-channel-consent-versions-tenant-v245).
 
 ## Campaign engagement response compatibility (#2257)
 
@@ -79,6 +80,24 @@ V232-compatible binaries continue writing null-set calls. The existing
 still applies, including when missions are disabled. Production set activation and set-specific
 privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
 [storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
+
+## Contact-channel consent versions (tenant V245)
+
+V245 adds a non-null consent counter at one with `ALGORITHM=INSTANT, LOCK=DEFAULT`, then creates
+`trg_contact_consent_version`. Every UPDATE, including trusted unsubscribe/provider revocation,
+advances it. There is no historical consent rewrite or new index. Reserve version zero in the API
+for explicit absence. Apply the reserved V244 migration before V245; the global lineage remains
+consecutive. Deploy the backend before the frontend that sends required expected consent versions.
+
+The ALTER and CREATE TRIGGER take metadata locks. Deploy outside long consent transactions and
+resolve blockers without relaxing the algorithm/lock guards. DDL commits independently: after an
+interruption, inspect the column, trigger definition and Flyway history, reconcile the exact reviewed
+prefix through the existing Flyway recovery procedure, and validate before serving conditional
+consent writes. Do not reset counters or recreate active triggers under traffic. Earlier binaries
+remain schema-compatible and their writes advance the trigger, but do not enforce the new HTTP
+consent precondition. The serving rollback floor is V245: older binaries can overwrite a newer
+revocation from a stale manual confirmation. Drain older serving backends before admitting these
+conditional writes; recover forward with a compatible binary and retain the additive schema.
 
 ## Conditional contact edits (tenant V242)
 
@@ -1190,7 +1209,7 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-V235 established the continuation compatibility minimum; V243 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors.
+V235 established the continuation compatibility minimum; V245 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors.
 
 ## V236/V237: retained Ask Connex privacy cutover
 
@@ -1205,7 +1224,7 @@ applying `control/V236__ai_assistant_privacy_coordination.sql` and
 serving JVM. Proposal-set production remains disabled.
 
 V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
-republish invalidated content despite accepting the additive schema. V243 is the active rollback
+republish invalidated content despite accepting the additive schema. V245 is the active rollback
 floor for this release, including when AI and missions are disabled. Recovery below the active
 floor requires a separately reviewed procedure; normal recovery is a forward fix.
 
@@ -1257,11 +1276,11 @@ guards or permit COPY fallback. Online algorithms still require metadata-lock ac
 
 DDL auto-commits. If migration fails, retain the drain, inspect applied statements and Flyway
 history, and recover forward. V238 established the singleton-proposal compatibility minimum;
-the higher release-wide rollback floor is now `tenant/V243__deal_prior_manual_value.sql`, including
+the higher release-wide rollback floor is now `tenant/V245__contact_consent_version.sql`, including
 when missions are disabled. Pre-V238 binaries still cannot safely purge/export source-linked
 proposals or preserve frozen-review invariants. Returning below that V238 component minimum
 requires a separately reviewed drain, settlement, complete enrolled privacy purge and unconditional
-residual verification. Those procedures do not waive the V240 task-writer component minimum or the higher V243 release-wide floor.
+residual verification. Those procedures do not waive the V240 task-writer component minimum or the higher V245 release-wide floor.
 
 Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
 fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
@@ -1276,7 +1295,7 @@ their existing weight.
 
 Drain pre-V240 serving binaries and task writers before this cutover. Once the V240 backend may
 have run, the task-writer component minimum is `tenant/V240__task_completion_warmth.sql`;
-the current overall release floor is V243. Older task update,
+the current overall release floor is V245. Older task update,
 board-move and completion writers do not maintain `completed_at`: a task completed at T1, reopened
 and completed at T2 under an older binary can retain T1. A later compatible binary would then score
 that stale instant. Rollback candidates must retain completion stamping and clearing on reopen;
@@ -1287,7 +1306,7 @@ This historical component cutover raised the previous V238 floor and keeps the V
 constraints in force. Binaries that contain V238 or V239 but lack V240 are refused, even if they
 satisfy the older component floors. Recover forward with a compatible binary. A scoring-policy
 change remains possible in a forward release that preserves the V240 task-writer component
-minimum and the current V243 release-wide floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change.
+minimum and the current V245 release-wide floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change.
 
 ## Deal line value takeover (tenant V243)
 
@@ -1299,7 +1318,7 @@ Existing overwritten amounts remain unknown. New confirmed takeovers store the m
 and removing the final line automatically restores it. Old clients receive HTTP 409 when they
 omit confirmation for a nonzero manual amount. The line preview mode does not write any data.
 
-The serving rollback floor is V243: earlier binaries still start but bypass consent and restoration.
+The V243 component minimum preserves takeover confirmation and restoration; the release-wide floor is now V245.
 Rollback must use a compatible serving binary; retain the additive column and roll forward.
 INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
 inspect the column and Flyway history before following the deployment recovery procedure.

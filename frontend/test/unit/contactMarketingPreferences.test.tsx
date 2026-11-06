@@ -5,15 +5,15 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import ContactMarketingPreferences from '@/app/components/records/contacts/ContactMarketingPreferences';
-import { contactSuppressions, marketingAddress } from '@/app/components/records/contacts/contactMarketingPreferences';
+import { marketingAddress } from '@/app/components/records/contacts/contactMarketingPreferences';
 import { ApiError } from '@/app/lib/api';
-import type { Contact, ContactMarketingStatus, SuppressionEntry } from '@/app/lib/types';
+import type { Contact, ContactMarketingStatus, ContactSuppression } from '@/app/lib/types';
 import en from '@/messages/en/contacts.json';
 import ja from '@/messages/ja/contacts.json';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const state = vi.hoisted(() => ({ workspaceId: 17, renderedId: 17, permissions: new Set<string>(), unavailable: false }));
-const api = vi.hoisted(() => ({ consent: vi.fn(), status: vi.fn(), suppressions: vi.fn(), set: vi.fn(), add: vi.fn(), remove: vi.fn(), success: vi.fn(), error: vi.fn(), refresh: vi.fn() }));
+const api = vi.hoisted(() => ({ consent: vi.fn(), status: vi.fn(), suppressions: vi.fn(), workspaceSuppressions: vi.fn(), set: vi.fn(), add: vi.fn(), remove: vi.fn(), restrict: vi.fn(), success: vi.fn(), error: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: api.refresh }) }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: state.workspaceId }) }));
 vi.mock('@/app/hooks/usePermissions', () => ({
@@ -28,8 +28,9 @@ vi.mock('@/app/lib/renderedWorkspace', () => ({
 }));
 vi.mock('@/app/lib/api', async () => ({
     ...await vi.importActual<typeof import('@/app/lib/api')>('@/app/lib/api'),
-    getPersonConsent: api.consent, getPersonMarketingStatus: api.status, getSuppressions: api.suppressions,
+    getPersonConsent: api.consent, getPersonMarketingStatus: api.status, getPersonSuppressions: api.suppressions, getSuppressions: api.workspaceSuppressions,
     setPersonConsent: api.set, createSuppression: api.add, deleteSuppression: api.remove,
+    updateContactRestrictions: api.restrict,
 }));
 vi.mock('@/components/ui/dialog', () => {
     const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
@@ -41,7 +42,7 @@ vi.mock('@/components/ui/dialog', () => {
 
 const contact: Contact = { id: 7, workspaceId: 17, name: 'Contact', email: ' Contact@Example.Invalid ', phone: '+81 90-1234-5678', title: '', imageUrl: '', createdAt: '', updatedAt: '' };
 const status: ContactMarketingStatus = { personId: 7, privacyHold: false, channels: [{ channel: 'email', addressable: true, optedOut: false, consentRevoked: false, doNotContact: false }] };
-const restriction: SuppressionEntry = { id: 20, scope: 'workspace', channel: 'email', address: 'old@example.invalid', personId: 7, reason: 'do_not_contact', note: null, createdById: null, createdAt: '' };
+const restriction: ContactSuppression = { id: 20, channel: 'email', address: 'old@example.invalid', reason: 'do_not_contact' };
 const t = en.ContactMarketingPreferences;
 let container: HTMLDivElement;
 let root: Root;
@@ -55,7 +56,7 @@ beforeEach(() => {
     state.unavailable = false;
     api.consent.mockResolvedValue([]);
     api.status.mockResolvedValue(status);
-    api.suppressions.mockResolvedValue([]);
+    api.suppressions.mockResolvedValue({ items: [] });
     api.set.mockResolvedValue({});
     api.add.mockResolvedValue({});
     api.remove.mockResolvedValue(undefined);
@@ -79,6 +80,66 @@ async function click(label: string) { await act(async () => button(label).click(
 async function confirm(label: string) { await click(label); await click(t.confirm); }
 
 describe('contact marketing preferences', () => {
+    it('does not use the old restriction cursor while a contact snapshot is refreshing', async () => {
+        api.suppressions.mockResolvedValueOnce({ items: [restriction], nextAfterId: 249 });
+        await render();
+        const freshPage = Promise.withResolvers<{ items: ContactSuppression[]; nextAfterId?: number }>();
+        api.suppressions.mockReturnValueOnce(freshPage.promise);
+        await render({ ...contact, email: 'changed@example.invalid' });
+        expect(button(t.moreRestrictions).disabled).toBe(true);
+        await click(t.moreRestrictions);
+        expect(api.suppressions).toHaveBeenCalledTimes(2);
+        await act(async () => freshPage.resolve({ items: [], nextAfterId: 50 }));
+        expect(button(t.moreRestrictions).disabled).toBe(false);
+        api.suppressions.mockResolvedValueOnce({ items: [] });
+        await click(t.moreRestrictions);
+        expect(api.suppressions).toHaveBeenLastCalledWith(7, 50, { headers: { 'X-Workspace-Id': '17' } });
+    });
+
+    it.each([null, 403])('ignores an obsolete restriction page after a contact snapshot refresh (status=%s)', async (statusCode) => {
+        api.suppressions.mockResolvedValueOnce({ items: [restriction], nextAfterId: 20 });
+        await render();
+        const oldPage = Promise.withResolvers<{ items: ContactSuppression[]; nextAfterId?: number }>();
+        api.suppressions.mockReturnValueOnce(oldPage.promise);
+        await click(t.moreRestrictions);
+        const freshEntry = { ...restriction, id: 21, address: 'changed@example.invalid' };
+        api.suppressions.mockResolvedValueOnce({ items: [freshEntry] });
+        await render({ ...contact, email: freshEntry.address });
+        expect(container.textContent).toContain(freshEntry.address);
+        await act(async () => {
+            if (statusCode === null) oldPage.resolve({ items: [{ ...restriction, id: 22 }], nextAfterId: 22 });
+            else oldPage.reject(new ApiError('Refused', statusCode));
+        });
+        expect(container.textContent).toContain(freshEntry.address);
+        expect(container.textContent).not.toContain(restriction.address);
+        expect(container.querySelectorAll('li')).toHaveLength(1);
+        expect(container.textContent).not.toContain(t.moreRestrictions);
+        expect(button(t.actions.granted).disabled).toBe(false);
+        expect(api.error).not.toHaveBeenCalled();
+    });
+
+    it('does not report no restrictions while another channel occupies the loaded page', async () => {
+        api.suppressions.mockResolvedValueOnce({ items: [{ ...restriction, channel: 'sms' }], nextAfterId: 20 });
+        await render();
+        expect(container.textContent).toContain(t.restrictionsIncomplete);
+        expect(container.textContent).not.toContain(t.noRestrictions);
+        api.suppressions.mockResolvedValueOnce({ items: [restriction] });
+        await click(t.moreRestrictions);
+        expect(container.textContent).toContain(restriction.address);
+        expect(container.textContent).not.toContain(t.restrictionsIncomplete);
+    });
+
+    it.each([401, 403])('discards privileged rows and controls after a paging %s refusal', async (statusCode) => {
+        api.suppressions.mockResolvedValueOnce({ items: [restriction], nextAfterId: 20 });
+        await render();
+        expect(container.textContent).toContain(restriction.address);
+        api.suppressions.mockRejectedValueOnce(new ApiError('Refused', statusCode));
+        await click(t.moreRestrictions);
+        expect(container.textContent).not.toContain(restriction.address);
+        expect(container.textContent).not.toContain(t.actions.granted);
+        expect(container.textContent).toContain(statusCode === 403 ? t.permissionDenied : t.loadFailed);
+    });
+
     it('is wired into contact details and states the actual opt-out basis in both languages', async () => {
         expect(readFileSync('app/(app)/records/contacts/[id]/page.tsx', 'utf8')).toContain('<ContactMarketingPreferences contact={contact} status={marketingStatus} />');
         for (const locale of ['en', 'ja'] as const) {
@@ -90,6 +151,8 @@ describe('contact marketing preferences', () => {
             expect(container.textContent).toContain(copy.basis);
         }
         expect(api.consent).toHaveBeenCalledWith(7, expect.objectContaining({ headers: { 'X-Workspace-Id': '17' } }));
+        expect(api.suppressions).toHaveBeenCalledWith(7, 0, expect.objectContaining({ headers: { 'X-Workspace-Id': '17' } }));
+        expect(api.workspaceSuppressions).not.toHaveBeenCalled();
     });
 
     it('withholds privileged reads and controls without CONSENT_MANAGE while privacy uses PERSON_UPDATE', async () => {
@@ -119,23 +182,23 @@ describe('contact marketing preferences', () => {
     });
 
     it('records opt-in separately and keeps a server-reported restriction absolute', async () => {
-        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'revoked' }]);
-        api.suppressions.mockResolvedValue([restriction]);
+        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'revoked', version: 2 }]);
+        api.suppressions.mockResolvedValue({ items: [restriction] });
         api.status.mockResolvedValue({ ...status, channels: [{ ...status.channels[0], optedOut: true, doNotContact: true }] });
         await render();
         await click(t.actions.granted);
         expect(container.textContent).toContain(t.clearOptOutWarning);
         expect(api.set).not.toHaveBeenCalled();
-        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'granted' }]);
+        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'granted', version: 3 }]);
         await click(t.confirm);
-        expect(api.set).toHaveBeenCalledExactlyOnceWith(7, { channel: 'email', purpose: 'marketing', status: 'granted', source: 'manual', evidenceRef: null, capturedAt: null });
+        expect(api.set).toHaveBeenCalledExactlyOnceWith(7, { channel: 'email', purpose: 'marketing', status: 'granted', source: 'manual', evidenceRef: null, capturedAt: null, expectedVersion: 2 });
         expect(api.remove).not.toHaveBeenCalled();
         expect(container.textContent).toContain(t.blocked);
         expect(container.textContent).toContain(t.statuses.granted);
     });
 
     it.each(['revoked', 'unknown'] as const)('records an explicit %s marketing state without touching another purpose', async (value) => {
-        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'granted' }, { channel: 'sms', purpose: 'service', status: 'granted' }]);
+        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'granted', version: 3 }, { channel: 'sms', purpose: 'service', status: 'granted', version: 3 }]);
         await render();
         await confirm(t.actions[value]);
         expect(api.set).toHaveBeenCalledWith(7, expect.objectContaining({ purpose: 'marketing', channel: 'email', status: value }));
@@ -152,7 +215,7 @@ describe('contact marketing preferences', () => {
     });
 
     it('removes only the explicitly selected matching entry and explains its shared-address effect', async () => {
-        api.suppressions.mockResolvedValue([restriction, { ...restriction, id: 21, personId: 8, address: 'other@example.invalid' }]);
+        api.suppressions.mockResolvedValue({ items: [restriction] });
         await render();
         await click(t.remove);
         expect(container.querySelector('[role="dialog"]')?.textContent).toContain(t.removeWarning.replace('{name}', contact.name));
@@ -200,6 +263,60 @@ describe('contact marketing preferences', () => {
         expect(container.textContent).not.toContain(t.actions.granted);
     });
 
+    it('re-reads a conflicting consent without replaying the write and requires a fresh opt-out-clearing confirmation', async () => {
+        await render();
+        await click(t.actions.granted);
+        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'revoked', version: 4 }]);
+        api.set.mockRejectedValueOnce(new ApiError('Changed', 409, 'STALE_RECORD'));
+        await click(t.confirm);
+        expect(api.set).toHaveBeenCalledExactlyOnceWith(7, expect.objectContaining({ status: 'granted', expectedVersion: 0 }));
+        expect(container.querySelector('[role="dialog"]')).toBeNull();
+        expect(container.textContent).toContain(t.conflict);
+        expect(container.textContent).toContain(t.statuses.revoked);
+        expect(api.success).not.toHaveBeenCalled();
+        await click(t.actions.granted);
+        expect(container.textContent).toContain(t.clearOptOutWarning);
+        expect(api.set).toHaveBeenCalledTimes(1);
+        api.consent.mockResolvedValue([{ channel: 'email', purpose: 'marketing', status: 'granted', version: 5 }]);
+        await click(t.confirm);
+        expect(api.set).toHaveBeenNthCalledWith(2, 7, expect.objectContaining({ status: 'granted', expectedVersion: 4 }));
+        expect(api.success).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets the rejected-save busy state so a retry and a second confirmed save can complete', async () => {
+        api.set.mockRejectedValueOnce(new Error('Unavailable'));
+        await render();
+        await confirm(t.actions.granted);
+        expect(container.textContent).toContain(t.loadFailed);
+        expect(api.success).not.toHaveBeenCalled();
+        await click(t.retry);
+        await click(t.actions.granted);
+        expect(button(t.confirm).disabled).toBe(false);
+        expect(container.textContent).not.toContain(t.saving);
+        await click(t.confirm);
+        expect(api.set).toHaveBeenCalledTimes(2);
+        expect(api.success).toHaveBeenCalledTimes(1);
+    });
+
+    it('loads subsequent bounded contact pages and preserves the current rows after a rejected page request', async () => {
+        api.suppressions.mockResolvedValueOnce({ items: [restriction], nextAfterId: 20 });
+        await render();
+        const rejectedPage = Promise.withResolvers<never>();
+        api.suppressions.mockReturnValueOnce(rejectedPage.promise);
+        await click(t.moreRestrictions);
+        expect(button(t.moreRestrictions).disabled).toBe(true);
+        await act(async () => rejectedPage.reject(new Error('Unavailable')));
+        expect(button(t.moreRestrictions).disabled).toBe(false);
+        expect(container.textContent).toContain(restriction.address);
+        api.suppressions.mockResolvedValueOnce({ items: [restriction, { ...restriction, id: 21, address: 'next@example.invalid' }] });
+        await click(t.moreRestrictions);
+        expect(api.suppressions).toHaveBeenLastCalledWith(7, 20, { headers: { 'X-Workspace-Id': '17' } });
+        expect(container.textContent).toContain('next@example.invalid');
+        expect(container.querySelectorAll('li')).toHaveLength(2);
+        expect(container.textContent).not.toContain(t.moreRestrictions);
+        expect(api.workspaceSuppressions).not.toHaveBeenCalled();
+    });
+
     it('rechecks eligibility after a server refresh changes privacy or the contact address', async () => {
         await render();
         expect(container.textContent).toContain(t.basis);
@@ -231,13 +348,23 @@ describe('contact marketing preferences', () => {
         expect(container.textContent).toContain(t.archivedBlocked);
         expect(container.textContent).not.toContain(t.basis);
     });
+
+    it.each([false, true])('submits only the privacy flag explicitly changed from suspended=%s', async (initialSuspended) => {
+        state.permissions.add('PERSON_UPDATE');
+        const record = initialSuspended ? { ...contact, suspendedAt: '2026-11-05T00:00:00Z' } : contact;
+        api.restrict.mockRejectedValueOnce(new Error('Unavailable'));
+        await render(record);
+        await click(t.privacyAction);
+        const changed = container.querySelector(initialSuspended ? '#restrict-suspend' : '#restrict-provision');
+        if (!(changed instanceof HTMLButtonElement)) throw new Error('The privacy switch is missing');
+        await act(async () => changed.click());
+        await click(en.ContactRestrictions.save);
+        expect(api.restrict).toHaveBeenCalledExactlyOnceWith(7, initialSuspended ? { suspended: false } : { provisionCeased: true });
+    });
 });
 
-describe('restriction matching for the existing delivery address contract', () => {
-    it('keeps person-linked old addresses and current address-only restrictions, without mixing channels or contacts', () => {
-        const addressOnly = { ...restriction, id: 22, personId: null, address: 'contact@example.invalid' };
-        expect(contactSuppressions(contact, 'email', [restriction, addressOnly,
-            { ...restriction, id: 23, personId: 9 }, { ...restriction, id: 24, channel: 'sms' }]).map((entry) => entry.id)).toEqual([20, 22]);
+describe('restriction creation uses the existing delivery address contract', () => {
+    it('uses canonical phone addresses and does not invent addresses for unsupported channels', () => {
         expect(marketingAddress(contact, 'sms')).toBe('+819012345678');
         expect(marketingAddress({ ...contact, phone: '123' }, 'sms')).toBeNull();
         expect(marketingAddress(contact, 'line')).toBeNull();

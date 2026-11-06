@@ -106,6 +106,9 @@ public interface PersonMapper {
             @Param("workspaceId") int workspaceId,
             @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     Person getOwnedPersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Reads only owned contact address fields for the minimized restriction listing. */
+    Person getOwnedPersonAddresses(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** Locks an owned, unarchived contact for linked writes that do not mutate the contact. */
     Person getOwnedPersonByIdForShare(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** The owned contact only when it is archived; the restore path's pre-image read. */

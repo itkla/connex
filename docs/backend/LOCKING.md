@@ -2586,3 +2586,14 @@ trigger follows V241's deal-detach trigger and detaches indexed person reference
 NULL; person ownership cleanup remains explicit (the V90 owner column has no FK).
 No new application lock hierarchy or isolation change is introduced. See
 [Conditional record edits](RECORD_EDIT_CONCURRENCY.md) for the transport, writer inventory and tests.
+
+Consent HTTP mutations use READ_COMMITTED and the existing consent subject row before their atomic
+version-qualified UPDATE. A missing subject is claimed through its unique-key INSERT; a competing
+insert returns the same recoverable stale-record conflict. History and audit follow only an accepted
+write in that transaction. Conflict metadata uses an uncached ordinary read, avoiding an exclusive
+lock upgrade from the shared duplicate-key lock retained by losing INSERTs; see
+[MySQL duplicate-key locking](https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html).
+Trusted unsubscribe/provider writers retain their upsert acquisition order
+and advance the database-owned V245 counter too. Privacy flag patches retain the existing
+organization duplicate mutex → owned person lock → authority revalidation order, merging omitted
+flags from that locked row before calculating any restriction side effects.
