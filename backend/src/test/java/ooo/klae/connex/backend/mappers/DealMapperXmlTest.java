@@ -36,7 +36,8 @@ class DealMapperXmlTest {
         "countDealsFiltered",
         "getDealsFiltered",
         "dealMetricsFiltered",
-        "getFilteredDealIds"
+        "getFilteredDealIds",
+        "getRiskFilterCandidateIds"
     );
     private static final List<String> ANALYTICS_SCOPED_STATEMENTS = List.of(
         "dealKpiWindow",
@@ -69,6 +70,34 @@ class DealMapperXmlTest {
         String singleMemberSql = sql(configuration, "getDealsPageFiltered",
             MemberScope.fromRequest("members", List.of(3), 7));
         assertTrue(singleMemberSql.matches(".*d\\.owner_id IN \\(\\s*\\?\\s*\\).*"));
+    }
+
+    @Test
+    void riskCandidatePagesBindBoundsAndKeepNoRiskCandidatesWhenRequested() throws Exception {
+        var statement = configuration().getMappedStatement(DealMapper.class.getName() + ".getRiskFilterCandidateIds");
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 11);
+        parameters.put("orgWorkspaceIdsJson", "[11,12]");
+        parameters.put("noCompany", false);
+        parameters.put("eligibleOnly", true);
+        parameters.put("memberScope", MemberScope.allTeam());
+        parameters.put("sort", "name");
+        parameters.put("dir", "desc");
+        parameters.put("limit", 250);
+        parameters.put("offset", 1000);
+        var bounded = statement.getBoundSql(parameters);
+        String eligible = bounded.getSql().replaceAll("\\s+", " ").trim();
+        assertTrue(eligible.contains("d.workspace_id = ?"));
+        assertTrue(eligible.contains("AND d.closed_at IS NULL AND d.risk_excluded = FALSE"));
+        assertTrue(eligible.contains("ORDER BY d.name DESC"));
+        assertTrue(eligible.contains("d.id ASC"));
+        assertTrue(eligible.endsWith("LIMIT ? OFFSET ?"));
+        assertTrue(bounded.getParameterMappings().stream().map(mapping -> mapping.getProperty()).toList()
+            .containsAll(List.of("workspaceId", "limit", "offset")));
+        parameters.put("eligibleOnly", false);
+        String includingNone = statement.getBoundSql(parameters).getSql().replaceAll("\\s+", " ");
+        assertFalse(includingNone.contains("d.closed_at IS NULL"));
+        assertFalse(includingNone.contains("d.risk_excluded = FALSE"));
     }
 
     @Test

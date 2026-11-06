@@ -72,6 +72,25 @@ public interface DealMapper {
         @Param("limit") int limit,
         @Param("offset") int offset
     );
+    /** One bounded, ordered candidate page using the visible list predicates before risk assessment. */
+    List<Integer> getRiskFilterCandidateIds(
+        @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("segmentIdsJson") String segmentIdsJson,
+        @Param("query") String query,
+        @Param("sort") String sort,
+        @Param("dir") String dir,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("personIds") List<Integer> personIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("eligibleOnly") boolean eligibleOnly,
+        @Param("memberScope") MemberScope memberScope,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
     long countDealsFiltered(
         @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("segmentIdsJson") String segmentIdsJson,

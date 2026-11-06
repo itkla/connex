@@ -241,6 +241,24 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void neverContactedStakeholderIsNotColdInSingleBatchOrNotificationReads() {
+        Deal deal = openDeal();
+        touch(deal, "2126-06-20 10:00:00");
+        Person contact = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), contact.getId(), "Champion");
+        RelationshipTemperatureDto noHistory = new RelationshipTemperatureDto(
+            contact.getId(), 0, "cold", "steady", null, null, 0, null, null, "test-model", CLOCK.instant());
+        warmthList(noHistory);
+
+        assertThat(service.assessDeal(workspace.getId(), deal.getId()).getLevel()).isEqualTo("none");
+        assertThat(service.assessDeals(workspace.getId(), List.of(deal.getId()))).isEmpty();
+        assertThat(service.assessWorkspaceNotificationStates(workspace.getId(), Map.of(contact.getId(), noHistory), Map.of()))
+            .filteredOn(state -> state.assessment().getDealId() == deal.getId())
+            .hasSize(1)
+            .allSatisfy(state -> assertThat(state.assessment().getFactors()).isEmpty());
+    }
+
+    @Test
     void warmStakeholderDoesNotFlag() {
         Deal deal = openDeal();
         closeDateOf(deal, "2126-12-31");
@@ -490,7 +508,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void futureStakeholderTouchLeavesColdRiskWhileExactBoundaryTouchClearsIt() {
+    void futureOnlyStakeholderHasNoHistoryAndExactBoundaryTouchStartsHistory() {
         Deal deal = openDeal();
         closeDateOf(deal, "2126-12-31");
         touch(deal, "2126-06-20 10:00:00");
@@ -510,7 +528,9 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
         assertThat(futureOnly.getBand()).isEqualTo("cold");
         assertThat(futureOnly.getTouchCount()).isZero();
-        assertThat(factor(futureRisk, "stakeholder_cold")).isNotNull();
+        assertThat(futureOnly.getDaysSinceTouch()).isNull();
+        assertThat(factor(futureRisk, "stakeholder_cold")).isNull();
+        assertThat(futureRisk.getLevel()).isEqualTo("none");
 
         touch(stakeholder, "2126-06-23 15:30:00");
 

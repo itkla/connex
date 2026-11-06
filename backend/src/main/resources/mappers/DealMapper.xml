@@ -384,6 +384,26 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
+  <select id="getRiskFilterCandidateIds" resultType="int">
+    <bind name="riskIds" value="null"/>
+    SELECT d.id
+    FROM deal d
+    <include refid="segmentIdsJoin"/>
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+    <if test="eligibleOnly">
+      AND d.closed_at IS NULL AND d.risk_excluded = FALSE
+    </if>
+    <choose>
+      <when test="sort == 'id'">ORDER BY d.id</when>
+      <otherwise><include refid="dealPageOrderBy"/></otherwise>
+    </choose>
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
   <select id="getDealsFiltered" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d

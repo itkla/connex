@@ -81,8 +81,9 @@ class DealVisibilityScopeTest {
 
     @Test
     void riskCandidatesAssessmentPageAndCountShareTheCapturedScope() {
-        when(mapper.getFilteredDealIds(eq(7), eq("[7,8,9]"), any(), any(), any(), any(), any(), any(), any(),
-            eq(false), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(41));
+        when(mapper.getRiskFilterCandidateIds(eq(7), eq("[7,8,9]"), any(), any(), any(), any(), any(),
+            any(), any(), any(), any(), eq(false), any(), eq(false), any(),
+            org.mockito.ArgumentMatchers.anyInt(), eq(0))).thenReturn(List.of(41));
 
         service.queryDealsPage(null, null, null, null, null, null, null, null, false,
             null, List.of("none"), null, 10, 0);
@@ -90,8 +91,8 @@ class DealVisibilityScopeTest {
         verify(sharing, times(1)).getForWorkspace(7);
         verify(risks).assessDeals(eq(7), eq(List.of(41)), any(),
             eq(new RecordVisibilityScopeControlAccess.RecordVisibilityScope(90, List.of(7, 8, 9))));
-        verify(mapper).countDealsFiltered(7, "[7,8,9]", null, null, null, null, null, null, null,
-            false, null, List.of(41), null);
+        verify(mapper).getDealsPageFiltered(7, "[7,8,9]", null, null, null, null, null, null, null, null, null,
+            false, null, List.of(41), null, 10, 0);
     }
 
     @Test

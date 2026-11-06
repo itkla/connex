@@ -552,6 +552,19 @@ Reopening clears the completion instant; completing again records a new instant.
 completion from `updated_at`, so scores that depended on older tasks can fall. No scoring backfill job
 is needed. The scoring change can be reverted; notes retain their existing weight.
 
+Deal risk distinguishes missing history from decay: a contact with no eligible past touch has
+`daysSinceTouch = null` and contributes no cold-stakeholder factor, regardless of the empty score's
+band. Future-only activities remain no history. A genuine cold or cooling relationship retains its
+existing role-based severity. This does not change the warmth model or weights.
+
+Deals list risk filters scan the full filtered candidate set in ordered pages of at most 250 IDs,
+using the same captured visibility scope, member scope, segment and native filters as the list.
+Each batch reuses the existing risk assessor; only the requested result page is retained, while
+matching counts cover every batch. Currency metrics and exports use the same batch evaluator.
+Risk-only filters exclude closed and opted-out candidates in SQL; filters including `none` retain
+them. The 1,000-record select-all action limit remains in place and applies to actual matches.
+Dashboard and Analytics retain their separately disclosed interactive candidate ceilings.
+
 The first successful warmth notification sweep after the model change quietly baselines all current
 relationship cooling, introduction and deal-risk expectations, independently of recipient preferences.
 It commits the workspace model marker together with those baselines. A failed score-dependent pass
