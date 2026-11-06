@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { fireEvent, render, screen, waitFor, cleanup, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, cleanup, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import jaMessages from '@/messages/ja/deals.json';
 import enCommon from '@/messages/en/common.json';
@@ -83,11 +83,13 @@ describe('deal board outcome safeguards', () => {
             await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Outcome: Open'));
         });
     }
-    it('cancels a terminal move without sending any mutation', async () => {
+    it('leaves cancellation feedback to the shared board without sending any mutation', async () => {
         mount();
         fireEvent.click(await screen.findByText('Move to 20'));
-        fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
-        await waitFor(() => expect(screen.getByRole('status').textContent).toContain('still in Proposal'));
+        const cancel = await screen.findByRole('button', { name: 'Cancel' });
+        await act(async () => fireEvent.click(cancel));
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(screen.getByRole('status').textContent).toBe('');
         expect(mocks.move).not.toHaveBeenCalled();
         expect(mocks.reopen).not.toHaveBeenCalled();
     });

@@ -33,9 +33,9 @@ vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => mocks.e
 vi.mock('@/app/lib/api', () => ({ moveTask: mocks.move }));
 
 const task: Task = { id: 1, description: 'Example', status: 'todo', position: 4, completed: false, assignedToId: 1, createdAt: '', updatedAt: '' };
-const drag = (): DragEndEvent => ({
+const drag = (column = 'in_progress'): DragEndEvent => ({
     active: { id: 1, data: { current: {} }, rect: { current: { initial: null, translated: null } } },
-    over: { id: 'col:in_progress', data: { current: {} }, disabled: false, rect: { top: 0, left: 0, right: 10, bottom: 10, width: 10, height: 10 } },
+    over: { id: `col:${column}`, data: { current: {} }, disabled: false, rect: { top: 0, left: 0, right: 10, bottom: 10, width: 10, height: 10 } },
     activatorEvent: new KeyboardEvent('keydown'), collisions: null, delta: { x: 0, y: 0 },
 });
 function mount(locale: 'en' | 'ja') {
@@ -43,8 +43,8 @@ function mount(locale: 'en' | 'ja') {
         <TasksKanban tasks={[task]} personById={new Map()} dealById={new Map()} userById={new Map()} onMoved={mocks.moved} onOpen={vi.fn()} reduce />
     </NextIntlClientProvider>);
 }
-async function drop() {
-    const event = drag();
+async function drop(column = 'in_progress') {
+    const event = drag(column);
     await act(async () => mocks.props?.onDragStart?.(event));
     await act(async () => mocks.props?.onDragOver?.(event));
     await act(async () => mocks.props?.onDragEnd?.(event));
@@ -70,6 +70,20 @@ for (const locale of ['en', 'ja'] as const) {
         expect(document.querySelector('[data-kanban-drag-handle="1"]')?.closest('section')?.textContent).toContain(catalog.statusTodo);
         expect(mocks.error).toHaveBeenCalledWith(error, 'moveFailed');
         expect(mocks.moved).not.toHaveBeenCalled();
+    });
+    it(`${locale}: restores the last saved task position after a successive move fails before refresh`, async () => {
+        mocks.move.mockResolvedValueOnce({ ...task, status: 'in_progress', position: 0 });
+        mount(locale);
+        await drop();
+        await waitFor(() => expect(mocks.moved).toHaveBeenCalledOnce());
+        const error = new Error('second move refused');
+        mocks.move.mockRejectedValueOnce(error);
+        await drop('done');
+        const restored = catalog.a11yRestored.replace('{name}', 'Example').replace('{column}', catalog.statusInProgress).replace('{position}', '1');
+        await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent === restored)).toBe(true));
+        expect(document.querySelector('[data-kanban-drag-handle="1"]')?.closest('section')?.textContent).toContain(catalog.statusInProgress);
+        expect(mocks.error).toHaveBeenCalledWith(error, 'moveFailed');
+        expect(mocks.moved).toHaveBeenCalledOnce();
     });
     it(`${locale}: announces the saved status and server position after task persistence resolves`, async () => {
         let save: ((task: Task) => void) | undefined;

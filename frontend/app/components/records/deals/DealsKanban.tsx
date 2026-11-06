@@ -358,10 +358,7 @@ export default function DealsKanban({
                     confirmMoveRef.current = resolve;
                     setPendingMove({ name: deal.name, column: stage.name, outcome, valueDisclosure });
                 });
-                if (!confirmed) {
-                    setMoveMessage(t('moveCancelled', { name: deal.name, column: stageById.get(deal.stage ?? -1)?.name ?? '', position: deal.position + 1, outcome: t(`outcome.${dealOutcome(deal.won)}`) }));
-                    return false;
-                }
+                if (!confirmed) return false;
             }
             return renderedWorkspaceId() === originWorkspaceId;
         },

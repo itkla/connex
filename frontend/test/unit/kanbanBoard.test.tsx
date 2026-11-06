@@ -69,6 +69,7 @@ it(`rolls back a cancelled terminal move and restores focus after a ${input} dra
     expect(screen.getByRole('listitem').closest('section')?.textContent).toContain('Original');
     expect(screen.getByRole('button', { name: 'Move Example' }).hasAttribute('disabled')).toBe(true);
     await act(async () => decide?.(false));
+    expect(screen.getAllByRole('status').filter((status) => status.textContent).map((status) => status.textContent)).toEqual(['Restored old, position 1']);
     expect(save).not.toHaveBeenCalled();
     const card = screen.getByRole('listitem');
     expect(card.closest('section')?.textContent).toContain('Original');

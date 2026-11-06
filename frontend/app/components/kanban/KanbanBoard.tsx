@@ -69,6 +69,8 @@ export interface KanbanMoveResult {
     columnId: string;
     /** Visible index after saving, or -1 when the saved item no longer matches the board. */
     index: number;
+    /** Saved zero-based position for announcements until the incoming item refreshes. */
+    position?: number;
 }
 
 type ColumnItems = Record<string, number[]>;
@@ -122,6 +124,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const snapshotRef = useRef<ColumnItems>(incoming);
     const snapshotColumnByItemIdRef = useRef<Map<number, string>>(new Map());
     const snapshotIncomingKeyRef = useRef(incomingKey);
+    const confirmedPositionByIdRef = useRef(new Map<number, { item: T; columnId: string; position: number }>());
     const [activeId, setActiveId] = useState<number | null>(null);
     const [saving, setSaving] = useState(false);
     const boardRef = useRef<HTMLDivElement>(null);
@@ -141,6 +144,9 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const latestIncomingRef = useRef({ columns: incoming, key: incomingKey, itemsById });
     useLayoutEffect(() => {
         latestIncomingRef.current = { columns: incoming, key: incomingKey, itemsById };
+        for (const [id, confirmed] of confirmedPositionByIdRef.current) {
+            if (confirmed.item !== itemsById.get(id)) confirmedPositionByIdRef.current.delete(id);
+        }
     }, [incoming, incomingKey, itemsById]);
 
     const sensors = useSensors(
@@ -236,7 +242,11 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             setSyncedKey(latest.key);
             const column = indexColumns(restored).get(activeId);
             const item = latest.itemsById.get(activeId);
-            if (column) setMoveAnnouncement(accessibility?.moveRestored?.(activeId, column, item ? getPosition(item) : restored[column].indexOf(activeId)) ?? '');
+            const confirmed = confirmedPositionByIdRef.current.get(activeId);
+            const position = confirmed && confirmed.item === item && confirmed.columnId === column
+                ? confirmed.position
+                : item ? getPosition(item) : column ? restored[column].indexOf(activeId) : -1;
+            if (column) setMoveAnnouncement(accessibility?.moveRestored?.(activeId, column, position) ?? '');
         };
         if (originCol === toCol && originIndex === finalIndex) {
             restorePlacement();
@@ -260,6 +270,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             else {
                 const latest = latestIncomingRef.current;
                 const placement = saved && typeof saved === 'object' ? saved : { columnId: toCol, index: finalIndex };
+                const item = latest.itemsById.get(activeId);
+                if (saved && typeof saved === 'object' && saved.position !== undefined && item !== undefined) {
+                    confirmedPositionByIdRef.current.set(activeId, { item, columnId: saved.columnId, position: saved.position });
+                }
                 setSyncedKey(latest.key);
                 setColumnItems((current) => placeItem(latest.key === snapshotIncomingKeyRef.current ? current : latest.columns, activeId, placement));
             }

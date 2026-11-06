@@ -148,7 +148,7 @@ export default function TasksKanban({
                     position: saved.position + 1,
                 }));
                 onMoved();
-                return { columnId: saved.status, index: saved.position };
+                return { columnId: saved.status, index: saved.position, position: saved.position };
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;
