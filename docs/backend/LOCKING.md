@@ -1804,6 +1804,13 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
 10. Lock canonical identity groups in deterministic kind/value order.
 11. Requery/revalidate current identities while locks are held.
 
+Bounded-person preflight issues its actor/workspace-scoped proof while holding the organization
+duplicate mutex. Its visibility-scoped broad-name count/highest-ID query takes no additional
+row locks. Final creation retains the same hierarchy, rechecks the displayed/aggregate result,
+then locks and deletes the exact proof row in the existing duplicate-review proof store before
+creation proceeds. Proof consumption and record creation commit or roll back together. Assistant
+preparation stays on the read-only `personCandidatesExist` path without the mutex or issuance.
+
 Duplicate-review dismissal and reopen are terminal decision writes within this hierarchy. They lock
 and revalidate both the actor's `REPORT_READ` gate and type-specific update permission before entering
 the organization mutex, then lock exactly one current `duplicate_review_decision` row. They take no
