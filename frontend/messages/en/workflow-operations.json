@@ -81,7 +81,7 @@
       "title": "What ran",
       "description": "Each row is what one step actually did, recorded as it happened — never guessed afterwards.",
       "legacyTitle": "Summary only",
-      "legacyBody": "This run was carried over from an earlier automation, so only its summary was kept. Connex won't guess which steps it took.",
+      "legacyBody": "Step details were not recorded for this run. Review its summary and the workflow settings to investigate.",
       "outcome": "Took the {outcome} branch",
       "attempts": "{count, plural, one {# attempt} other {# attempts}}"
     },
@@ -151,14 +151,16 @@
       "disableHelp": "Turning this off stops new runs; runs already going will finish. Archiving is separate."
     },
     "reason": {
-      "actor_unavailable": "The member this workflow runs as is no longer available.",
-      "actor_inactive": "The member this workflow runs as is no longer active.",
+      "actor_unavailable": "A member needed by this workflow is no longer available.",
+      "actor_inactive": "A member needed by this workflow is no longer active.",
       "permission_denied": "The member this workflow runs as lost a permission this step needed.",
       "action_permission_missing": "The member this workflow runs as can't do what this step needs.",
       "reference_unavailable": "Something this step points to — a tag, a stage, or a member — is gone.",
       "record_unavailable": "The record this run was for is gone, or you can no longer see it.",
       "retry_exhausted": "Connex retried this as many times as it's allowed to.",
       "retry_not_safe": "This step can't be safely retried on its own.",
+      "configuration_invalid": "This step’s settings are no longer valid.",
+      "state_conflict": "The record’s current state prevented this step from finishing.",
       "execution_failed": "The step couldn't finish.",
       "unknown": "This version of Connex can't explain what went wrong. Reload the page, and tell support if it keeps happening."
     },
@@ -255,8 +257,8 @@
       "scope_not_supported": "This workflow can't run on the records you selected.",
       "nested_command_scope": "Pick the records again from a list.",
       "action_permission_missing": "The member this workflow runs as can't do what one of its steps needs.",
-      "actor_unavailable": "The member this workflow runs as is no longer available.",
-      "actor_inactive": "The member this workflow runs as is no longer active.",
+      "actor_unavailable": "A member needed by this workflow is no longer available.",
+      "actor_inactive": "A member needed by this workflow is no longer active.",
       "configuration_missing": "This workflow is missing a setting it needs.",
       "definition_invalid": "The published version of this workflow has a problem. Open it and fix the issues before running it."
     },

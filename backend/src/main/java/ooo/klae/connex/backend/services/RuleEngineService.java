@@ -274,12 +274,11 @@ public class RuleEngineService {
             finishExecution(
                 claim.execution(),
                 "failed",
-                "record_unavailable",
-                "The trigger record is unavailable.");
+                "record_unavailable");
             return;
         }
         if (!conditionMatches(rule, dispatch.workspaceId(), dispatch.recordId())) {
-            finishExecution(claim.execution(), "skipped", null, null);
+            finishExecution(claim.execution(), "skipped", null);
             return;
         }
         fireClaimed(
@@ -424,8 +423,7 @@ public class RuleEngineService {
             finishExecution(
                 execution,
                 "failed",
-                "actor_unavailable",
-                "The configured automation actor is unavailable.");
+                "actor_unavailable");
             return;
         }
         List<RuleAction> actions = List.of(read(rule.getActionsJson(), RuleAction[].class));
@@ -438,11 +436,12 @@ public class RuleEngineService {
             claim.dedupeKey(),
             lockedPrincipal == null ? null : lockedPrincipal.actorUserId(),
             lockedPrincipal == null ? Set.of() : lockedPrincipal.lockedPermissions());
-        List<String> failures = new ArrayList<>();
+        List<RuleExecutionEvidence.ActionFailure> failures = new ArrayList<>();
         try {
             automationExecutor.runAs(workspaceId, principal.user(), principal.role(),
                 AutomationScope.Origin.rule(rule.getId(), execution.getId(), rule.getExecutionMode()), () -> {
-                for (RuleAction action : actions) {
+                for (int index = 0; index < actions.size(); index++) {
+                    RuleAction action = actions.get(index);
                     try {
                         actionIsolation.run(() -> actionExecutor.execute(action, ctx));
                     } catch (TenantScopeSnapshotException exception) {
@@ -458,15 +457,18 @@ public class RuleEngineService {
                             "Rule action failed ruleId={} actionType={} exceptionClass={}",
                             rule.getId(), action.getType(),
                             actionError.getClass().getSimpleName());
-                        failures.add(action.getType() + ": action failed");
+                        failures.add(RuleExecutionEvidence.classify(index + 1, action.getType(), actionError));
                     }
                 }
                 return null;
             });
-            finishExecution(execution, failures.isEmpty() ? "matched" : "partial", null,
-                failures.isEmpty() ? null : String.join("; ", failures));
+            RuleExecutionEvidence evidence = RuleExecutionEvidence.read(objectMapper, execution.getDetail());
+            execution.setDetail(objectMapper.writeValueAsString(new RuleExecutionEvidence(
+                evidence.workflowVersionId(), failures.isEmpty() ? null : failures.getFirst())));
+            finishExecution(execution, failures.isEmpty() ? "matched"
+                : failures.size() == actions.size() ? "failed" : "partial", null);
         } catch (TenantScopeSnapshotException exception) {
-            finishExecution(execution, "failed", "execution_failed", "Rule execution failed.");
+            finishExecution(execution, "failed", "execution_failed");
             throw exception;
         } catch (RuleActionRetryRequiredException retry) {
             throw retry;
@@ -475,26 +477,36 @@ public class RuleEngineService {
                 "Rule execution failed ruleId={} recordType={} recordId={} exceptionClass={}",
                 rule.getId(), recordType, entityId, e.getClass().getSimpleName());
             finishExecution(
-                execution, "failed", "execution_failed", "Rule execution failed.");
+                execution, "failed", "execution_failed");
         }
     }
 
     private void finishExecution(
             RuleExecution execution,
             String status,
-            String code,
-            String message) {
+            String code) {
         try {
             ruleMapper.updateExecution(
                 execution.getWorkspaceId(),
                 execution.getId(),
                 status,
-                writeDetail(code, message));
+                executionDetail(execution, code));
         } catch (Exception e) {
             log.warn(
                 "Rule execution finalization failed executionId={} exceptionClass={}",
                 execution.getId(), e.getClass().getSimpleName());
         }
+    }
+
+    private String executionDetail(RuleExecution execution, String code) {
+        RuleExecutionEvidence evidence = RuleExecutionEvidence.read(objectMapper, execution.getDetail());
+        if (code == null) {
+            return evidence.workflowVersionId() == null && evidence.failure() == null
+                ? null : objectMapper.writeValueAsString(evidence);
+        }
+        return objectMapper.writeValueAsString(Map.of(
+            "workflowVersionId", evidence.workflowVersionId() == null ? 0L : evidence.workflowVersionId(),
+            "code", RuleExecutionEvidence.safeCode(code) ? code : "execution_failed"));
     }
 
     private Principal resolvePrincipal(Rule rule, int workspaceId) {

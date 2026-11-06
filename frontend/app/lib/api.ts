@@ -30,17 +30,11 @@ import type {
 } from '@simplewebauthn/browser';
 
 import * as Types from '@/app/lib/types';
-import { localeFromCookieHeader } from '@/i18n/config';
+import type { Locale } from '@/i18n/config';
+import { apiRequestLocale as requestLocale, browserApiLocale } from '@/app/lib/apiLocale';
 export { subscribeToLaunch, type LaunchSignupResult } from "@/app/lib/launchSignup";
 
 // Types
-
-function requestLocale(init: RequestInit): string {
-    const cookieHeader = typeof document === "undefined"
-        ? new Headers(init.headers).get("cookie")
-        : document.cookie;
-    return localeFromCookieHeader(cookieHeader);
-}
 
 // The active workspace, read from the non-HttpOnly connex_workspace cookie and sent as a
 // header on every client request. SSR callers forward the cookie itself (see safeReadWithCookie).
@@ -271,7 +265,10 @@ function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
 
 async function readCsrfToken(): Promise<CsrfBootstrap | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include", cache: "no-store" });
+        const res = await fetch(`${API_BASE}/api/auth/csrf`, {
+            credentials: "include", cache: "no-store",
+            headers: { "Accept-Language": browserApiLocale() },
+        });
         if (!res.ok) return null;
         const text = await res.text();
         if (!text) return null;
@@ -367,7 +364,7 @@ export function fetchProtectedMediaResponse(
     return fetch(`${API_BASE}${path}`, {
         credentials: "same-origin",
         cache: "no-store",
-        headers: { "X-Workspace-Id": String(workspaceId) },
+        headers: { "X-Workspace-Id": String(workspaceId), "Accept-Language": browserApiLocale() },
         mode: "same-origin",
         redirect: "error",
         signal,
@@ -434,7 +431,7 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
         }
     }
     csrfTokenCache = currentCsrf;
-    const locale = localeFromCookieHeader(document.cookie);
+    const locale = browserApiLocale();
     return {
         request: [
             clientRequestIdentityEpoch,
@@ -486,6 +483,7 @@ export async function clientRecoveryContext(
     if (workspaceId == null || typeof window === "undefined" || !window.crypto.subtle) return null;
     const headers = new Headers(init.headers);
     headers.set("X-Workspace-Id", workspaceId);
+    if (!headers.has("Accept-Language")) headers.set("Accept-Language", browserApiLocale());
     let body: unknown;
     try {
         body = await withBusinessCardRequestTimeout(
@@ -1037,12 +1035,13 @@ async function requestJson<T>(
     if (suppression !== null) {
         throw privilegedMfaConfinementError(suppression);
     }
-    const locale = requestLocale(init);
     const mutating = isMutating(init.method);
     const workspaceId = workspaceHeader === "omit" ? null : requestWorkspaceId(path, mutating);
     const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
     const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
+    const pendingLocale = requestLocale(init);
+    const locale = typeof pendingLocale === "string" ? pendingLocale : await pendingLocale;
 
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
@@ -1173,10 +1172,11 @@ async function requestMultipart<T>(
     if (suppression !== null) {
         throw privilegedMfaConfinementError(suppression);
     }
-    const locale = requestLocale(init);
     const workspaceId = requestWorkspaceId(path, true);
     const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
+    const pendingLocale = requestLocale(init);
+    const locale = typeof pendingLocale === "string" ? pendingLocale : await pendingLocale;
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
             "Accept-Language": locale,
@@ -1970,7 +1970,7 @@ async function linkFlowJson<T>(
     const send = async (forceRefresh: boolean) => {
         const headers = new Headers({
             Accept: "application/json",
-            "Accept-Language": requestLocale(init),
+            "Accept-Language": await requestLocale(init),
             ...(method === "POST" ? await csrfHeader(forceRefresh) : {}),
         });
         new Headers(init.headers).forEach((value, key) => headers.set(key, value));
@@ -2318,10 +2318,12 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
  * an unavailable authentication check. The backend reports expired sessions with HTTP 401; every
  * other failed response remains unavailable rather than becoming a logged-out decision.
  * @param cookie the incoming request's cookie header, or null
+ * @param bootstrapLocale preliminary language while this profile read establishes the request locale
  * @returns a resolved user or null authentication decision, or an unavailable result
  */
 export async function getCurrentUserResultFromCookie(
     cookie: string | null,
+    bootstrapLocale?: Locale,
 ): Promise<CookieResult<Types.User | null>> {
     if (!cookie) {
         return { ok: true, data: null };
@@ -2329,7 +2331,7 @@ export async function getCurrentUserResultFromCookie(
 
     try {
         const user = await me({
-            headers: { cookie },
+            headers: { cookie, ...(bootstrapLocale ? { "Accept-Language": bootstrapLocale } : {}) },
             cache: "no-store",
         });
         return { ok: true, data: user };
@@ -2393,6 +2395,7 @@ async function exchangeOneTimeLink(path: string, token: string): Promise<void> {
         redirect: "manual",
         headers: {
             "Content-Type": "application/json",
+            "Accept-Language": await requestLocale({}),
             ...await csrfHeader(forceRefresh),
         },
         body: JSON.stringify({ token }),
@@ -3344,7 +3347,7 @@ export function commitInteractionHistoryImport(
  * operation that must remain bound to its invocation scope.
  */
 export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
-    const locale = localeFromCookieHeader(document.cookie);
+    const locale = browserApiLocale();
     const mutating = isMutating(init.method);
     const workspaceId = requestWorkspaceId(path, mutating);
     const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
@@ -5725,11 +5728,18 @@ function workspaceSnapshotForForwardedCookie(
  * Reads the server-rendered workspace snapshot and publishes an accessible forwarded cookie as
  * active because it defines this request's tenant. The endpoint's active ID remains the fallback
  * for a missing or revoked cookie, preserving the backend's stale-pin healing path (#1109).
+ * @param cookie the incoming request's cookie header, or null
+ * @param bootstrapLocale language established before workspace-based preference resolution completes
  */
 export async function getMyWorkspacesResultFromCookie(
     cookie: string | null,
+    bootstrapLocale?: Locale,
 ): Promise<CookieResult<Types.MyWorkspaces>> {
-    const result = await resultWithCookie<Types.MyWorkspaces>((init) => getMyWorkspaces(init), cookie);
+    const result = await resultWithCookie<Types.MyWorkspaces>((init) => {
+        const headers = new Headers(init.headers);
+        if (bootstrapLocale) headers.set("Accept-Language", bootstrapLocale);
+        return getMyWorkspaces({ ...init, headers });
+    }, cookie);
     if (!result.ok || cookie === null) return result;
     return { ok: true, data: workspaceSnapshotForForwardedCookie(result.data, cookie) };
 }
@@ -6753,9 +6763,10 @@ export async function uploadAiChatAttachment(
     init: RequestInit = {},
 ): Promise<Types.AiChatAttachment> {
     const path = `/api/ai/assistant/sessions/${sessionId}/attachments`;
-    const locale = requestLocale(init);
     const workspaceId = requestWorkspaceId(path, true);
     const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
+    const pendingLocale = requestLocale(init);
+    const locale = typeof pendingLocale === "string" ? pendingLocale : await pendingLocale;
     const send = async (forceRefresh: boolean): Promise<Response> => {
         const csrf = await csrfHeader(forceRefresh);
         const headers = new Headers({
@@ -7348,7 +7359,7 @@ async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
     const mutating = isMutating(init.method);
     const pinnedInit = mutating ? pinWriteNow(path, init) : init;
     return withReportRequestIdentity(async (requestInit) => {
-        const locale = localeFromCookieHeader(document.cookie);
+        const locale = browserApiLocale();
         const workspaceId = requestWorkspaceId(path, mutating);
         const pinnedWorkspace = outgoingWorkspaceId(requestInit, workspaceId);
         const send = (csrf: Record<string, string>) => {
