@@ -443,7 +443,8 @@ public class CampaignSendService {
         return new CampaignSendDto(
                 send.getId(), send.getCampaignId(), send.getSnapshotId(), send.getOrigin(), send.getMessageId(),
                 send.getMessageVersion(), send.getChannel(), send.getPurpose(), send.getProviderId(),
-                send.getStatus(), send.getScheduledAt(), send.getStartedAt(), send.getCompletedAt(),
+                send.isContentRefused() && send.getCompletedAt() != null ? "failed" : send.getStatus(),
+                send.getScheduledAt(), send.getStartedAt(), send.getCompletedAt(),
                 send.getTotalRecipients(), send.getDispatchedCount(), send.getSkippedCount(),
                 send.getFailedCount(), send.getCreatedById(), send.getCreatedAt(), send.getUpdatedAt(),
                 send.isContentRefused());

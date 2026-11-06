@@ -99,7 +99,7 @@ class CampaignDispatchServiceTest {
         CampaignSend send = triggeredSend();
         send.setContentRefused(true);
         when(sends.getSend(7, 11)).thenReturn(send);
-        assertFalse(service(sends, deliveries, providers, gate).processSend(7, 11));
+        assertTrue(service(sends, deliveries, providers, gate).processSend(7, 11));
         verifyNoInteractions(providers);
         verify(deliveries, never()).pendingDeliveryIdsPage(anyInt(), anyInt(), anyInt());
     }
@@ -358,6 +358,8 @@ class CampaignDispatchServiceTest {
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
         when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
                 .thenReturn(claimTarget(current));
+        when(deliveryMapper.recoverExpiredTriggeredClaim(7, expired.getId(), current.attemptTargetFingerprint()))
+                .thenReturn(1);
         CampaignDispatchService service = service(
                 sendMapper, deliveryMapper, providerConfigService, gate);
 

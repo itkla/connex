@@ -83,6 +83,13 @@
           AND d.status IN ('pending', 'dispatching'))
   </update>
 
+  <update id="markContentRefused">
+    UPDATE campaign_send
+    SET status = CASE WHEN origin = 'audience' THEN 'failed' ELSE status END,
+        completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status IN ('queued', 'running', 'triggered')
+  </update>
+
   <update id="refreshCounters">
     UPDATE campaign_send s
     SET s.total_recipients = (
@@ -104,7 +111,7 @@
     SELECT id FROM campaign_send
     WHERE workspace_id = #{workspaceId}
       AND (status IN ('queued', 'running')
-        OR (#{triggeredSendEnabled} AND status = 'triggered' AND EXISTS (
+        OR (#{triggeredSendEnabled} AND status = 'triggered' AND completed_at IS NULL AND EXISTS (
           SELECT 1 FROM campaign_delivery d
           WHERE d.workspace_id = campaign_send.workspace_id
             AND d.send_id = campaign_send.id
@@ -158,7 +165,7 @@
         SELECT 1 FROM campaign_delivery d
         WHERE d.workspace_id = campaign_send.workspace_id
           AND d.send_id = campaign_send.id
-          AND ((#{triggeredSendEnabled} AND d.status = 'pending')
+          AND ((#{triggeredSendEnabled} AND campaign_send.completed_at IS NULL AND d.status = 'pending')
             OR (d.status = 'dispatching'
               AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)))))
     UNION

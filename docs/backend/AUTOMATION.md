@@ -162,14 +162,22 @@ before any delivery row is written. An excluded contact creates neither a send n
 exclusion reason is strict-audited. An unsubscribe or other mandatory-stop signal skips that delivery
 but does not cancel later workflow nodes in this increment.
 
-Triggered sends remain `triggered` after their pending queue drains so later contacts can enroll. Dormant
-triggered sends are excluded from worker workspace/send scans until another pending delivery exists.
+Ordinary triggered sends remain `triggered` after their pending queue drains so later contacts can enroll.
+A content-refused send is terminal: it retains that schema-required stored status but records completion
+and a trusted refusal marker; the API presents `failed` with the localized refusal reason. Its pending
+work is settled atomically, and no new enrollment, claim, release-to-pending or replay may reopen it.
+Already in-flight results remain authoritative, with expired attempts retained for reconciliation.
+Corrected content uses a new revision and send. See [saved campaign content](../DELIVERABILITY.md).
+Dormant and content-refused triggered sends are excluded from normal worker scans; expired in-flight
+attempts remain discoverable for recovery.
 Their recipient total is refreshed from delivery rows. The campaign API returns them with the
 synthetic `snapshotId` and `origin=triggered`; the campaign UI labels them as workflow-managed and exposes no
 queue, pause, or cancel controls. The lifecycle service also rejects those mutations for triggered
 sends.
 
-Concurrent get-or-create calls are serialized by the campaign mutex. The unique triggered-send key and
+Concurrent get-or-create calls are serialized by the campaign mutex. Enrollment then locks and rechecks
+the send before inserting a recipient, so content refusal cannot commit between admission and insertion.
+The unique triggered-send key and
 the delivery's generated active `(workspace_id, send_id, person_id, dedupe_active)` key remain final
 defenses:
 duplicate-key collisions are caught and re-read, while unrelated uniqueness failures still propagate.

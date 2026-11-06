@@ -690,7 +690,7 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     @Test
-    void legacyQueueRefusalIsVisibleAndPreservesEveryDeliveryFact() {
+    void legacyQueueRefusalTerminatesSchedulingAndPreservesExistingAttempts() {
         String prefix = "legacy-dispatch-" + unique();
         Company company = newCompany();
         Person pending = person(company, prefix + "-in-pending", prefix + "-pending@example.invalid");
@@ -721,19 +721,25 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
                         + "WHERE workspace_id = ? AND message_id = ? AND version = ?",
                 source, workspace.getId(), send.messageId(), send.messageVersion());
         var before = jdbcTemplate.queryForList(
-                "SELECT * FROM campaign_delivery WHERE workspace_id = ? AND send_id = ? ORDER BY id",
+                "SELECT * FROM campaign_delivery WHERE workspace_id = ? AND send_id = ? AND status <> 'pending' ORDER BY id",
                 workspace.getId(), send.id());
 
         assertFalse(campaignDispatchService.processSend(workspace.getId(), send.id()));
-        assertFalse(campaignDispatchService.processSend(workspace.getId(), send.id()));
+        assertTrue(campaignDispatchService.processSend(workspace.getId(), send.id()));
         contentRefusalService.record(workspace.getId(), send.id());
 
         assertEquals(before, jdbcTemplate.queryForList(
-                "SELECT * FROM campaign_delivery WHERE workspace_id = ? AND send_id = ? ORDER BY id",
-                workspace.getId(), send.id()));
+                "SELECT * FROM campaign_delivery WHERE workspace_id = ? AND send_id = ? AND id <> ? ORDER BY id",
+                workspace.getId(), send.id(), pendingId));
+        assertEquals("skipped", campaignDeliveryMapper.getDelivery(workspace.getId(), pendingId).getStatus());
+        assertEquals("not_dispatchable", campaignDeliveryMapper.getDelivery(workspace.getId(), pendingId).getSkipReason());
+        assertEquals(0, campaignDeliveryMapper.getDelivery(workspace.getId(), pendingId).getAttemptCount());
+        assertFalse(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(send.id()));
         CampaignSendDto refused = campaignSendService.getSend(send.campaignId(), send.id());
         assertTrue(refused.contentRefused());
-        assertEquals("running", refused.status());
+        assertEquals("failed", refused.status());
+        assertNotNull(refused.completedAt());
+        assertEquals(1, refused.skippedCount());
         assertEquals(0, fakeDispatcher.count());
         assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM campaign_delivery_event "
                         + "WHERE workspace_id = ? AND provider_id IS NULL AND provider_event_id = ? "
@@ -785,6 +791,28 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
                         + "WHERE workspace_id = ? AND provider_id IS NULL AND provider_event_id = ?",
                 Integer.class, workspace.getId(), "connex-content-refusal:" + send.id()));
         assertTrue(campaignSendService.getSend(send.campaignId(), send.id()).contentRefused());
+    }
+
+    @Test
+    void existingRefusalMarkerIsSettledAndACorrectedRevisionCanQueue() {
+        String prefix = "old-refusal-" + unique();
+        person(newCompany(), prefix + "-in", prefix + "@example.invalid");
+        CampaignSendDto send = readySend(prefix);
+        campaignSendService.queueSend(send.campaignId(), send.id());
+        assertEquals(1, campaignDeliveryMapper.insertContentRefusal(workspace.getId(), send.id()));
+        assertTrue(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(send.id()));
+
+        assertTrue(campaignDispatchService.processSend(workspace.getId(), send.id()));
+
+        assertEquals("failed", campaignSendService.getSend(send.campaignId(), send.id()).status());
+        assertEquals(0, campaignDeliveryMapper.countPending(workspace.getId(), send.id()));
+        assertFalse(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(send.id()));
+        campaignSendService.addRevision(send.campaignId(), send.messageId(), new CampaignMessageRevisionRequest(
+                "en", "Corrected", "<p>Corrected <a href='{{unsubscribe_url}}'>Stop</a></p>", null));
+        CampaignSendDto corrected = campaignSendService.createSend(send.campaignId(),
+                new CampaignSendRequest(1, send.messageId(), 2, null, null));
+        assertEquals("queued", campaignSendService.queueSend(send.campaignId(), corrected.id()).status());
+        assertTrue(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(corrected.id()));
     }
 
     private Person channelPerson(DeliveryChannel channel, String prefix) {

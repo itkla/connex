@@ -252,7 +252,9 @@ public class CampaignTriggeredSendService {
                 workspaceId, actorId, campaign, message, revision);
         CampaignSend send = resolveSend(
                 workspaceId, actorId, campaign, message, revision, snapshot, discoveredSend);
-        if (!"triggered".equals(send.getStatus())) {
+        send = campaignSendMapper.getSendForUpdate(workspaceId, send.getId());
+        if (send == null || !"triggered".equals(send.getStatus()) || send.isContentRefused()
+                || send.getCompletedAt() != null) {
             throw new BadRequestException("The triggered campaign send is not accepting enrollments");
         }
         CampaignDelivery existing = campaignDeliveryMapper.getBySendAndPerson(

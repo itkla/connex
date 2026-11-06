@@ -1622,18 +1622,28 @@ fence is captured at startup, rollback must follow the quiescence procedure in
 `docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
 
 Campaign content refusal is recorded before provider resolution and before any delivery claim.
-`CampaignContentRefusalService` takes only the owning send row mutex in a short `READ_COMMITTED`
-transaction, rechecks queued/running/triggered state, then inserts one marker against a still-pending
-delivery after a fresh send-scoped marker read. Reading after the mutex at READ COMMITTED prevents an
-older snapshot from missing a marker committed by the previous recorder. The order is send → child
-delivery/event, consistent with enrollment and reconciliation; no workspace/person lock, provider
-I/O, delivery state transition, lease change, or history rewrite occurs in this transaction.
+`CampaignContentRefusalService` takes the owning send mutex in a short `READ_COMMITTED` transaction,
+rechecks active/uncompleted state, appends a refusal marker against pending work, settles pending rows,
+refreshes counters, then marks completion. A previous marker-only refusal takes the same settlement
+path. The order is send → child delivery/event; no provider I/O occurs. A fresh marker read after the
+mutex prevents duplicate insertion. All writes roll back together. If no pending marker anchor
+remains, the recorder leaves completed/in-flight evidence alone.
+
+Pending-to-terminal writes use `status='pending'` compare-and-set fencing against claims. Never-
+submitted pending rows become `skipped/not_dispatchable`; possible prior submission becomes `failed`
+with reconciliation required, preserving existing attempt diagnostics and reservations. Refusal does
+not change a completed or dispatching row. Audience sends use terminal `failed`; V201 requires
+triggered storage status `triggered`, so completion time plus the refusal marker is its terminal fence
+and the API projects `failed`. Normal scheduler selection and triggered claims require no completion.
+Enrollment locks and rechecks the send after its existing campaign root and before recipient insertion.
+A late claim release or replay recovery cannot reopen a completed send. Existing in-flight completion
+writes remain valid; expiry discovery remains active, and a replay refused by the completion fence
+falls through to the existing ambiguous-outcome CAS and counter refresh.
+
 The marker uses event_type `failed`, fixed detail `CAMPAIGN_UNSUPPORTED_TOKEN`, a null provider_id,
 and reserved provider_event_id `connex-content-refusal:<sendId>`. This is the one internal-marker
 exception to leaving both provider correlation fields null. Provider diagnostics alone cannot set
-`contentRefused`, and its lookup seeks the full workspace/null-provider/send-specific event key.
-The ordinary send lifecycle and every recipient outcome remain unchanged; dispatch reports a
-fault and the campaign surface explains the refusal, including that existing in-flight work may finish.
+`contentRefused`, and lookup seeks the full workspace/null-provider/send-specific event key.
 
 Audience delivery dispatch claims with a `pending` → `dispatching` compare-and-set that also writes
 the attempt's own lease end time, `audience_lease_until` (#1773), and stores no lease owner or

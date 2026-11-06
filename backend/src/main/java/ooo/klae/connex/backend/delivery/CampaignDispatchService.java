@@ -76,6 +76,8 @@ public class CampaignDispatchService {
     private static final String ABANDONED_PERSONLESS_AUDIENCE_ATTEMPT =
             "AMBIGUOUS: Audience dispatch with no recipient person outlived its lease";
     private static final String NOT_DISPATCHABLE_SKIP_REASON = "not_dispatchable";
+    private static final String EXPIRED_CLOSED_CLAIM =
+            "AMBIGUOUS: Expired claim belongs to a send that no longer accepts retries";
 
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignDeliveryMapper campaignDeliveryMapper;
@@ -189,7 +191,8 @@ public class CampaignDispatchService {
             return true;
         }
         if (send.isContentRefused()) {
-            return false;
+            contentRefusalService.record(workspaceId, sendId);
+            return true;
         }
         if ("running".equals(send.getStatus()) && "audience".equals(send.getOrigin())
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
@@ -659,13 +662,16 @@ public class CampaignDispatchService {
                 log.warn("Expired campaign delivery {} has no replay-safe transport capability",
                         claim.getId());
             }
-            if (replaySafe) {
-                campaignDeliveryMapper.recoverExpiredTriggeredClaim(
-                        workspaceId, claim.getId(), claim.getAttemptTargetFingerprint());
-            } else if (campaignDeliveryMapper.markExpiredTriggeredClaimAmbiguous(
+            if (replaySafe && campaignDeliveryMapper.recoverExpiredTriggeredClaim(
+                    workspaceId, claim.getId(), claim.getAttemptTargetFingerprint()) == 1) {
+                continue;
+            }
+            String reason = replaySafe ? EXPIRED_CLOSED_CLAIM
+                    : targetChanged ? EXPIRED_CHANGED_TARGET_CLAIM : EXPIRED_NON_IDEMPOTENT_CLAIM;
+            if (campaignDeliveryMapper.markExpiredTriggeredClaimAmbiguous(
                     workspaceId,
                     claim.getId(),
-                    targetChanged ? EXPIRED_CHANGED_TARGET_CLAIM : EXPIRED_NON_IDEMPOTENT_CLAIM,
+                    reason,
                     targetChanged
                             ? CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()
                             : CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
@@ -674,12 +680,11 @@ public class CampaignDispatchService {
                             workspaceId,
                             claim.getId(),
                             "failed",
-                            targetChanged
-                                    ? EXPIRED_CHANGED_TARGET_CLAIM
-                                    : EXPIRED_NON_IDEMPOTENT_CLAIM);
+                            reason);
                 } catch (RuntimeException exception) {
                     log.warn("Campaign delivery {} recovery event could not be appended", claim.getId());
                 }
+                campaignSendMapper.refreshCounters(workspaceId, claim.getSendId());
             }
         }
     }
@@ -912,9 +917,9 @@ public class CampaignDispatchService {
     }
 
     private static boolean dispatchable(CampaignSend send) {
-        return "queued".equals(send.getStatus())
+        return send.getCompletedAt() == null && ("queued".equals(send.getStatus())
                 || "running".equals(send.getStatus())
-                || triggered(send);
+                || triggered(send));
     }
 
     private static boolean triggered(CampaignSend send) {

@@ -774,16 +774,29 @@ guidance, and causes the dispatch job to report failure with a fixed, content-fr
 Correct the revision and prepare a new send;
 this refusal never retries invalid content. Completed sends are not reopened or reclassified.
 
-The refusal appends one internal `failed` event against a pending delivery. It changes no delivery
-status, attempt count, provider correlation, reservation, lease, reconciliation state, counter, or
-previous event. Pending deliveries remain pending and are not claimed; already in-flight attempts
-may still complete. The event is a send-level refusal, not evidence of provider rejection or a failed
-recipient attempt. Normal send lifecycle and recipient delivery facts remain visible alongside it.
-Recording takes the send row mutex in a short `READ_COMMITTED` transaction, rechecks active status,
-and inserts at most one marker. Its reserved `provider_event_id` is `connex-content-refusal:<sendId>`
-with `provider_id=NULL`; this internal-marker exception distinguishes it from provider-controlled
-failure detail and allows an indexed lookup. Ordinary internal delivery events retain null provider
-correlation fields. Workspace predicates and the owning delivery join protect marker attribution.
+Refusal has terminal scheduling semantics. Under the send row mutex, one transaction appends the
+internal refusal marker against a pending delivery, settles pending work, refreshes counters, and
+records completion. Audience sends become `failed`. The schema requires triggered sends to retain
+stored status `triggered`; their completion time and refusal marker close scheduling and enrollment,
+and the send API presents terminal status `failed`. The existing localized “Content refused” reason
+remains visible. Subsequent sweeps do not rediscover the send as normal dispatch work. An older
+marker-only refusal is discovered once more and settled by the same idempotent transaction.
+
+Clean pending deliveries become `skipped/not_dispatchable` without incrementing attempts. A pending
+row carrying prior possible-submission history becomes `failed` with reconciliation required instead;
+its diagnostics, provider correlation, fingerprint, attempt count, and reservation remain intact.
+Completed and in-flight rows and all prior events are unchanged by refusal. Already in-flight attempts
+may complete normally. Their expiry recovery is still discoverable, but a closed send cannot requeue
+them: an expired attempt becomes ambiguous and requires reconciliation. A late pre-egress release
+also cannot restore pending work after closure. Corrected content uses a new revision and send.
+
+Recording uses a short `READ_COMMITTED` transaction, rechecks active status, and serializes duplicate
+recorders. The marker uses reserved `provider_event_id` `connex-content-refusal:<sendId>` with
+`provider_id=NULL`; this internal-marker exception distinguishes it from provider-controlled failure
+detail and allows indexed lookup. Ordinary internal events retain null provider correlation fields.
+Workspace predicates and the owning delivery join protect marker attribution. If another claim has
+already taken the last pending delivery, refusal does not append a marker to completed/in-flight
+history; ordinary claim completion and recovery remain responsible for those attempts.
 
 This guard protects pending claims by this release's workers. Quiesce older workers before relying
 on it; a pre-fix worker does not understand the refusal marker, including after a rollback. Attempts
@@ -791,8 +804,18 @@ already claimed remain governed by their original lease and outcome handling.
 
 Ordinary closing CSS braces remain literal content, so nested email stylesheet rules remain usable.
 HTML validation uses the pinned jsoup HTML5 parser on an analysis-only copy: entity-decoded text
-nodes are joined across tags, and decoded attribute values are checked too. Exact literal supported
-markers are masked before parsing; encoded or tag-split spellings are refused even for
+is joined across inline elements, while `<br>`, block boundaries, and literal newlines break adjacency.
+Decoded attribute values are checked too. Outlook conditional comments, including downlevel-revealed
+variants, have their embedded HTML parsed through the same decoder. Both inclusion and omission of
+conditional branches are considered when checking adjacent braces; ordinary comments remain inert.
+The traversal uses an explicit stack, including conditional fragments, and limits total parsed
+characters to eight times the original source length to bound malformed nested-comment work.
+Stylesheets and styled/hidden elements are handled conservatively: inferred boundaries are not
+trusted and affected subtrees may be omitted when checking adjacency. Inactive/fallback containers and
+non-visible metadata use the same treatment; structural block classification alone does not imply a
+visible line break. Literal newlines in visible
+text remain boundaries. This may refuse ambiguous styled content; use literal line breaks for code.
+No CSS is executed or externally loaded. Exact literal supported markers are masked before parsing; encoded or tag-split spellings are refused even for
 `unsubscribe_url`, since dispatch cannot substitute those spellings. HTML is decoded once, so escaped
 literal entity text is not double-decoded. Original saved HTML, subject, and plain-text source remain
 unchanged. Subject/plain-text validation remains literal. Admission refusals return HTTP 400 with

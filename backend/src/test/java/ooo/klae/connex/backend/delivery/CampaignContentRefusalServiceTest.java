@@ -24,11 +24,15 @@ class CampaignContentRefusalServiceTest {
         CampaignSend send = new CampaignSend();
         send.setStatus("queued");
         when(sends.getSendForUpdate(7, 11)).thenReturn(send);
+        when(deliveries.insertContentRefusal(7, 11)).thenReturn(1);
         new CampaignContentRefusalService(sends, deliveries).record(7, 11);
         InOrder order = inOrder(sends, deliveries);
         order.verify(sends).getSendForUpdate(7, 11);
         order.verify(deliveries).hasContentRefusal(7, 11);
         order.verify(deliveries).insertContentRefusal(7, 11);
+        order.verify(deliveries).settleContentRefusedPending(7, 11);
+        order.verify(sends).refreshCounters(7, 11);
+        order.verify(sends).markContentRefused(7, 11);
         order.verifyNoMoreInteractions();
     }
 
@@ -50,10 +54,24 @@ class CampaignContentRefusalServiceTest {
         when(deliveries.hasContentRefusal(7, 11)).thenReturn(true);
         new CampaignContentRefusalService(sends, deliveries).record(7, 11);
         verify(deliveries, never()).insertContentRefusal(7, 11);
+        verify(deliveries).settleContentRefusedPending(7, 11);
+        verify(sends).markContentRefused(7, 11);
+    }
+
+    @Test
+    void aClaimThatAlreadyWonCannotBeReclassifiedWithoutAPendingMarkerAnchor() {
+        CampaignSendMapper sends = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveries = mock(CampaignDeliveryMapper.class);
+        CampaignSend send = new CampaignSend();
+        send.setStatus("running");
+        when(sends.getSendForUpdate(7, 11)).thenReturn(send);
+        new CampaignContentRefusalService(sends, deliveries).record(7, 11);
+        verify(deliveries, never()).settleContentRefusedPending(7, 11);
+        verify(sends, never()).markContentRefused(7, 11);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"cancelled", "completed", "draft", "paused"})
+    @ValueSource(strings = {"cancelled", "completed", "failed", "draft", "paused"})
     void closedOrPausedSendCannotBeRefusedByAStaleWorker(String status) {
         CampaignSendMapper sends = mock(CampaignSendMapper.class);
         CampaignDeliveryMapper deliveries = mock(CampaignDeliveryMapper.class);
