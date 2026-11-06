@@ -1,10 +1,15 @@
 package ooo.klae.connex.backend.services;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.HexFormat;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -12,8 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
+import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 
-/** Issues and atomically consumes tenant-scoped deal duplicate review proofs. */
+/** Issues and atomically consumes tenant-scoped duplicate review proofs in the existing proof store. */
 @Service
 @RequiredArgsConstructor
 public class DealDuplicateReviewProofService {
@@ -23,13 +29,41 @@ public class DealDuplicateReviewProofService {
     private final DealDuplicateReviewProofMapper mapper;
     private final WorkspaceService workspaceService;
     private final DuplicatePreflightProperties properties;
+    private final AuditIntegrityProperties integrityProperties;
     private final SecureRandom secureRandom = new SecureRandom();
 
     /** Persists a new opaque proof bound to the current workspace, actor, workflow, and result. */
     @Transactional(propagation = Propagation.MANDATORY)
     public String issue(String workflowFingerprint, String resultFingerprint) {
         Principal principal = principal();
-        String rawToken = newToken();
+        return persist(newToken(), principal, workflowFingerprint, resultFingerprint);
+    }
+
+    /** Issues a keyed bounded-person proof using the existing actor/workspace-scoped one-use store. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public String issueBoundedPerson(String workflowFingerprint, String resultFingerprint) {
+        Principal principal = principal();
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(integrityProperties.hmacSecretBytes(), "HmacSHA256"));
+            mac.update("connex.bounded-person-review-proof.v1\0".getBytes(StandardCharsets.UTF_8));
+            mac.update(ByteBuffer.allocate(Integer.BYTES * 2)
+                .putInt(principal.workspaceId()).putInt(principal.actorId()).array());
+            mac.update(fingerprintBytes(workflowFingerprint, "workflow fingerprint"));
+            mac.update(fingerprintBytes(resultFingerprint, "result fingerprint"));
+            String rawToken = HexFormat.of().formatHex(mac.doFinal(
+                HexFormat.of().parseHex(newToken())));
+            return persist(rawToken, principal, workflowFingerprint, resultFingerprint);
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("HMAC-SHA256 is required for bounded person review", exception);
+        }
+    }
+
+    private String persist(
+            String rawToken,
+            Principal principal,
+            String workflowFingerprint,
+            String resultFingerprint) {
         mapper.deleteExpired(
             principal.workspaceId(),
             EXPIRED_PROOF_CLEANUP_LIMIT);

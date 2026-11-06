@@ -40,6 +40,12 @@ type CompletedCheck = {
 
 const DEBOUNCE_MS = 400;
 
+/** Allows explicit person creation from a bounded name-only review when the server permits it. */
+export function canAcknowledgeDuplicatePreflight(response: DuplicatePreflightResponse): boolean {
+    return !response.truncated
+        || response.recordType === 'person' && response.allowSeparateCreation === true;
+}
+
 function candidateList(value?: string): string[] {
     const trimmed = value?.trim();
     return trimmed ? [trimmed] : [];
@@ -80,6 +86,7 @@ export function duplicatePreflightResponseSignature(
     return JSON.stringify([
         response.reviewToken,
         response.truncated,
+        response.allowSeparateCreation === true,
         response.candidates.map((candidate) => [
             candidate.recordType,
             candidate.recordId,
@@ -144,6 +151,7 @@ export function useDuplicatePreflight(
                     name: values.name,
                     emails: candidateList(values.email),
                     phones: candidateList(values.phone),
+                    reviewToken: dealReviewToken,
                 }, init);
             } else if (kind === 'company') {
                 response = await preflightCompanyDuplicates({
@@ -213,7 +221,7 @@ export function useDuplicatePreflight(
     const blocked = status === 'checking'
         || status === 'error'
         || status === 'ready' && (
-            response?.truncated === true
+            response !== null && !canAcknowledgeDuplicatePreflight(response)
             || hasCandidates && !acknowledged
         );
     const setAcknowledged = useCallback((checked: boolean) => {
@@ -232,10 +240,10 @@ export function useDuplicatePreflight(
             };
         }
         const checked = await runCheck(
-            kind === 'deal' ? response?.reviewToken : undefined,
+            kind === 'deal' || kind === 'person' ? response?.reviewToken : undefined,
             init,
         );
-        if (!checked || checked.truncated) {
+        if (!checked || !canAcknowledgeDuplicatePreflight(checked)) {
             return {
                 allowed: false,
                 duplicateReviewToken: null,
@@ -246,7 +254,7 @@ export function useDuplicatePreflight(
             };
         }
         const reviewSignature = duplicatePreflightResponseSignature(checked);
-        if (checked.candidates.length === 0) {
+        if (checked.candidates.length === 0 && !checked.truncated) {
             return {
                 allowed: true,
                 duplicateReviewToken: kind === 'deal' ? checked.reviewToken : null,
