@@ -10,6 +10,7 @@ import {
     ClipboardDocumentListIcon,
     FunnelIcon,
     MagnifyingGlassIcon,
+    ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
 import {
     PlusIcon,
@@ -31,7 +32,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/app/components/EmptyState";
-import { getAuditLogs } from "@/app/lib/api";
+import { exportAuditRowsCsv, getAuditLogs, getOrgAudit } from "@/app/lib/api";
+import { AUDIT_EXPORT_SELECTION_LIMIT } from "@/app/lib/auditExport";
+import { workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
@@ -91,6 +96,7 @@ const VERB_META: Record<string, VerbMeta> = {
     rewrap_failed: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencryptedFailed" },
     call: { tone: "default", icon: BoltIcon, verbKey: "verbCalled" },
     operation: { tone: "default", icon: BoltIcon, verbKey: "verbActedOn" },
+    export: { tone: "view", icon: ArrowDownTrayIcon, verbKey: "verbExported" },
 };
 
 const PROVIDER_LABEL_KEYS: Record<string, string> = {
@@ -102,6 +108,13 @@ const PROVIDER_LABEL_KEYS: Record<string, string> = {
 };
 
 const TARGET_LABEL_KEYS: Record<string, string> = {
+    "export.person": "targetExportContacts",
+    "export.company": "targetExportCompanies",
+    "export.deal": "targetExportDeals",
+    "export.product": "targetExportProducts",
+    "export.audit": "targetExportAudit",
+    "export.report": "targetExportReports",
+    "export.workspace": "exportScopeWorkspace",
     "workspace.smtp.password": "targetSmtpPassword",
     "workspace.delivery.provider_credential": "targetDeliveryCredential",
     "workspace.delivery.webhook_secret": "targetDeliveryWebhookSecret",
@@ -113,6 +126,42 @@ const TARGET_LABEL_KEYS: Record<string, string> = {
     "user.provider.microsoft_token": "targetMicrosoftConnection",
     secret_store: "targetStoredCredential",
     ai_call: "targetAiProvider",
+};
+
+const FILTER_VERB_LABEL_KEYS: Record<string, string> = {
+    add: "verbAdded",
+    remove: "verbRemoved",
+    rename: "verbRenamed",
+    set: "verbChanged",
+    save: "verbSaved",
+    provision: "verbProvisioned",
+    sso_provision: "verbJoinedViaSso",
+    federated_link: "verbSignedInViaSso",
+    founding_owner: "verbFoundingOwner",
+    zdr_attest: "verbConfirmedRetention",
+    completed: "verbCompleted",
+    export_started: "verbExportStarted",
+    download: "verbDownloaded",
+    disclosure: "verbDisclosed",
+    issued: "verbIssued",
+    revoked: "verbRevoked",
+    revoke: "verbRevoked",
+    redeemed: "verbRedeemed",
+    link: "verbLinked",
+    leave: "verbLeft",
+    teardown: "verbDeleted",
+};
+
+const ENTITY_LABEL_KEYS: Record<string, string> = {
+    organization: "exportScopeOrganization",
+    workspace: "exportScopeWorkspace",
+    user: "entityMember",
+    audit_log: "heading",
+    report: "targetExportReports",
+    person: "targetExportContacts",
+    company: "targetExportCompanies",
+    deal: "targetExportDeals",
+    product: "targetExportProducts",
 };
 
 const PLAIN_VERBS = new Set<string>(["login", "logout", "updateAvatar"]);
@@ -206,12 +255,22 @@ export default function AuditLogBrowser({
     initialEntries,
     pageSize,
     presentation = "page",
+    orgId,
+    heading,
+    description,
+    actionLabel,
 }: {
     initialEntries: AuditLogEntry[];
     pageSize: number;
     presentation?: AuditLogPresentation;
+    orgId?: number;
+    heading?: string;
+    description?: string;
+    actionLabel?: (action: string) => string;
 }) {
     const t = useTranslations("AdminAuditLog");
+    const showApiError = useApiErrorToast("AdminAuditLog");
+    const { activeWorkspace } = useWorkspace();
     const locale = useLocale();
     const timeZone = useTimeZone() ?? 'UTC';
     const reduce = useReducedMotion() ?? false;
@@ -220,13 +279,17 @@ export default function AuditLogBrowser({
     const [hasMore, setHasMore] = useState<boolean>(initialEntries.length >= pageSize);
     const [loadingMore, setLoadingMore] = useState(false);
     const [loadError, setLoadError] = useState(false);
+    const [exporting, setExporting] = useState(false);
 
     async function loadMore() {
         if (loadingMore || !hasMore) return;
         setLoadingMore(true);
         setLoadError(false);
         try {
-            const batch = await getAuditLogs({ limit: pageSize, offset: entries.length });
+            const params = { limit: pageSize, offset: entries.length };
+            const batch = orgId === undefined
+                ? await getAuditLogs(params, workspacePinnedRequest(activeWorkspace?.id ?? null))
+                : await getOrgAudit(orgId, params);
             setEntries((prev) => {
                 const seen = new Set(prev.map((e) => e.id));
                 const merged = [...prev];
@@ -265,8 +328,8 @@ export default function AuditLogBrowser({
     const systemLabel = t("actorSystem");
 
     const actorKeyOf = useMemo(
-        () => (e: AuditLogEntry) => e.actorLabel ?? systemLabel,
-        [systemLabel],
+        () => (e: AuditLogEntry) => (orgId === undefined ? e.actorLabel : e.currentActorLabel ?? e.actorLabel) ?? systemLabel,
+        [orgId, systemLabel],
     );
 
     const verbTotal = useMemo(() => {
@@ -299,8 +362,10 @@ export default function AuditLogBrowser({
     );
 
     const entityOptions = useMemo(
-        () => [...entityTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({ value, total })),
-        [entityTotal],
+        () => [...entityTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({
+            value, total, label: entityLabel(value, t),
+        })),
+        [entityTotal, t],
     );
 
     const actorOptions = useMemo(
@@ -313,7 +378,8 @@ export default function AuditLogBrowser({
             function matchesFn(e: AuditLogEntry, except: FacetExcept): boolean {
                 if (except !== "query") {
                     const q = filters.query.trim().toLowerCase();
-                    if (q && !SEARCH_KEYS.some((k) => String(e[k] ?? "").toLowerCase().includes(q))) return false;
+                    if (q && !SEARCH_KEYS.some((k) => String(e[k] ?? "").toLowerCase().includes(q))
+                        && !(orgId !== undefined && e.currentActorLabel?.toLowerCase().includes(q))) return false;
                 }
                 if (except !== "verbs") {
                     if (filters.verbs.size && !filters.verbs.has(verbOf(e.action))) return false;
@@ -337,7 +403,7 @@ export default function AuditLogBrowser({
                 }
                 return true;
             },
-        [filters, now, actorKeyOf, timeZone],
+        [filters, now, actorKeyOf, timeZone, orgId],
     );
 
     const filtered = useMemo(
@@ -401,6 +467,22 @@ export default function AuditLogBrowser({
         arr.sort((a, b) => (sort === "newest" ? b.key - a.key : a.key - b.key));
         return arr;
     }, [filtered, sort, timeZone]);
+
+    const exportIds = groups.flatMap((group) => group.items.map((entry) => entry.id))
+        .slice(0, AUDIT_EXPORT_SELECTION_LIMIT);
+
+    async function exportRows() {
+        if (exporting || exportIds.length === 0) return;
+        setExporting(true);
+        try {
+            await exportAuditRowsCsv(exportIds, orgId,
+                workspacePinnedRequest(activeWorkspace?.id ?? null));
+        } catch (error) {
+            showApiError(error, "exportFailed");
+        } finally {
+            setExporting(false);
+        }
+    }
 
     const feed = useMemo<FeedEntry[]>(() => {
         const out: FeedEntry[] = [];
@@ -522,7 +604,7 @@ export default function AuditLogBrowser({
             chips.push({ id: `v-${v}`, label: opt ? opt.label : v, onRemove: () => toggleSet("verbs", v) });
         }
         for (const e of filters.entities) {
-            chips.push({ id: `e-${e}`, label: e, onRemove: () => toggleSet("entities", e) });
+            chips.push({ id: `e-${e}`, label: entityLabel(e, t), onRemove: () => toggleSet("entities", e) });
         }
         if (filters.outcome !== "all") {
             const label = filters.outcome === "failed" ? t("outcomeFailed") : t("outcomeSuccess");
@@ -557,18 +639,32 @@ export default function AuditLogBrowser({
                 <Rise delay={0}>
                     {presentation === "section" ? (
                         <SettingsSection
-                            title={t("heading")}
-                            description={t("subtitle")}
+                            title={heading ?? t("heading")}
+                            description={description ?? t("subtitle")}
                             action={statCluster}
                         />
                     ) : (
                         <PageHeader
-                            title={t("heading")}
-                            description={t("subtitle")}
+                            title={heading ?? t("heading")}
+                            description={description ?? t("subtitle")}
                             actions={statCluster}
                         />
                     )}
                 </Rise>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p id={orgId === undefined ? "workspace-audit-export-scope" : "organization-audit-export-scope"}
+                        className="max-w-xl text-xs text-muted-foreground">
+                        {t("exportScope", { count: exportIds.length, limit: AUDIT_EXPORT_SELECTION_LIMIT })}
+                    </p>
+                    <Button variant="outline" onClick={exportRows}
+                        disabled={exporting || exportIds.length === 0}
+                        aria-busy={exporting}
+                        aria-describedby={orgId === undefined ? "workspace-audit-export-scope" : "organization-audit-export-scope"}>
+                        {exporting ? <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" /> : <ArrowDownTrayIcon className="size-4" />}
+                        {exporting ? t("exporting") : t("exportCsv")}
+                    </Button>
+                </div>
 
                 {entries.length > 0 && (
                     <Rise delay={0.06}>
@@ -707,6 +803,7 @@ export default function AuditLogBrowser({
                                         <AuditRow
                                             key={entry.id}
                                             entry={entry.entry}
+                                            actionLabel={actionLabel}
                                             isLastInGroup={entry.isLastInGroup}
                                             connectUp={entry.connectUp}
                                             connectDown={entry.connectDown}
@@ -796,7 +893,13 @@ function countBy(
 }
 
 function verbLabel(verb: string, t: ReturnType<typeof useTranslations>): string {
-    return VERB_META[verb] ? t(VERB_META[verb].verbKey) : verb;
+    const key = VERB_META[verb]?.verbKey ?? FILTER_VERB_LABEL_KEYS[verb];
+    return typeof key === "string" ? t(key) : verb;
+}
+
+function entityLabel(entity: string, t: ReturnType<typeof useTranslations>): string {
+    const key = ENTITY_LABEL_KEYS[entity];
+    return typeof key === "string" ? t(key) : entity;
 }
 
 function dayLabel(
@@ -934,6 +1037,15 @@ function targetText(label: string | null | undefined, t: Translator): string | n
 function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
     if (row.value == null) return t("valueUnknown");
     if (typeof row.value === "boolean") return t(row.value ? "valueYes" : "valueNo");
+    if (row.key === "format") {
+        if (row.value === "csv") return t("exportFormatCsv");
+        if (row.value === "png") return t("exportFormatPng");
+        if (row.value === "zip") return t("exportFormatZip");
+    }
+    if (row.key === "scope") {
+        if (row.value === "workspace") return t("exportScopeWorkspace");
+        if (row.value === "organization") return t("exportScopeOrganization");
+    }
     if (row.key === "result") {
         if (row.value === "success") return t("outcomeSuccess");
         if (row.value === "failure") return t("outcomeFailed");
@@ -992,6 +1104,7 @@ function DayMarker({
 
 function AuditRow({
     entry,
+    actionLabel,
     isLastInGroup,
     connectUp,
     connectDown,
@@ -1003,6 +1116,7 @@ function AuditRow({
     reduce,
 }: {
     entry: AuditLogEntry;
+    actionLabel?: (action: string) => string;
     isLastInGroup: boolean;
     connectUp: boolean;
     connectDown: boolean;
@@ -1027,13 +1141,15 @@ function AuditRow({
         : entry.createdAt;
     const timeLabel = now == null ? formatShortDate(entry.createdAt, locale, timeZone) : formatRelativeTime(entry.createdAt, locale, now, timeZone);
 
-    const actorName = entry.actorLabel ?? t("actorSystem");
-    const verbText = meta ? t(meta.verbKey) : verb;
+    const actorName = (actionLabel ? entry.currentActorLabel ?? entry.actorLabel : entry.actorLabel) ?? t("actorSystem");
+    const verbText = actionLabel ? actionLabel(entry.action) : meta ? t(meta.verbKey) : verb;
     const actorTag = (chunks: React.ReactNode) => <span className="font-semibold text-foreground">{chunks}</span>;
     const targetTag = (chunks: React.ReactNode) => <span className="font-medium text-foreground">{chunks}</span>;
     const targetLabel = targetText(auditTargetLabel(entry), t);
     const summary = auditSummary(entry);
-    const actionLine = targetLabel && !PLAIN_VERBS.has(verb)
+    const actionLine = actionLabel
+        ? <>{actorTag(actorName)} · {verbText}</>
+        : targetLabel && !PLAIN_VERBS.has(verb)
         ? t.rich("actionEntity", {
               actorName,
               targetName: targetLabel,

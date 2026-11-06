@@ -64,6 +64,9 @@ class WorkflowRecipeExecutionIntegrationTest extends AbstractServiceTest {
     void installedRecipeCreatesRunAndExpectedRecordEffects(String recipeKey) {
         String taskTitle = "Recipe task " + unique();
         Map<String, JsonNode> parameters = parameters(taskTitle);
+        var recipient = newUser();
+        parameters.put("targetUserId", objectMapper.valueToTree(recipient.getId()));
+        parameters.put("dueInDays", objectMapper.valueToTree(0));
         WorkflowDto installed = install(recipeKey, parameters);
         assertFalse(installed.enabled());
         assertFalse(runtimeProperties.enabled());
@@ -100,7 +103,8 @@ class WorkflowRecipeExecutionIntegrationTest extends AbstractServiceTest {
         var automatedTask = tasks.stream().filter(task -> taskTitle.equals(task.getDescription()))
             .findFirst().orElseThrow();
         assertNotNull(automatedTask.getAssignedTo());
-        assertEquals(currentUser.getId(), automatedTask.getAssignedTo().getId());
+        assertEquals(recipient.getId(), automatedTask.getAssignedTo().getId());
+        assertEquals(java.time.LocalDate.now().toString(), automatedTask.getDueDate());
         if ("deal".equals(recordType)) {
             assertEquals(1, activityMapper.getActivitiesByDealId(workspace.getId(), recordId).stream()
                 .filter(activity -> "Recipe handoff".equals(activity.getNotes())).count());

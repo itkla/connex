@@ -4,6 +4,7 @@ import { expect, test, type Page, type Response } from "@playwright/test";
 import { activeWorkspaceId, csrfBootstrap, registerUser } from "./support/api";
 import { runFixture } from "./support/fixtures";
 import { message } from "./support/messages";
+import { acceptEmailInvitation } from "./support/invitations";
 
 function savesContent(response: Response, content: string): boolean {
     if (!["POST", "PUT"].includes(response.request().method())) return false;
@@ -200,13 +201,7 @@ test("a saved member mention creates a note.mention notification", async ({ brow
             data: { email, role: "member" },
         });
         expect(invitation.status(), await invitation.text()).toBe(200);
-        const invited: unknown = await invitation.json();
-        if (typeof invited !== "object" || invited === null || !("id" in invited) || typeof invited.id !== "number") throw new Error("Missing member id");
-        const memberCsrf = await csrfBootstrap(member.request);
-        const acceptance = await member.request.post(`/api/workspaces/${workspaceId}/accept`, {
-            headers: { [memberCsrf.headerName]: memberCsrf.token },
-        });
-        expect(acceptance.status(), await acceptance.text()).toBe(200);
+        const recipientId = await acceptEmailInvitation(member.request, await invitation.json());
         const created = await request.post("/api/notes", {
             headers: { "X-Workspace-Id": String(workspaceId), [csrf.headerName]: csrf.token },
             data: { content: "Original", visibility: "workspace" },
@@ -215,7 +210,7 @@ test("a saved member mention creates a note.mention notification", async ({ brow
         const original: unknown = await created.json();
         if (typeof original !== "object" || original === null || !("id" in original) || typeof original.id !== "number") throw new Error("Missing note id");
         await page.goto(`/activity/notes/${original.id}`);
-        const expected = `Owner: [${label}](user:${invited.id}) please review`;
+        const expected = `Owner: [${label}](user:${recipientId}) please review`;
         const save = page.waitForResponse((response) => response.url().endsWith(`/api/notes/${original.id}`)
             && response.request().method() === "PUT" && savesContent(response, expected));
         const editor = await selectMention(page, label);

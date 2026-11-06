@@ -98,7 +98,21 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     private ImportResult reviewAndCommitPersons(ImportRequest request) {
-        return commitReviewedPersons(request, importService.previewPersons(request));
+        ImportPreviewResult preview = importService.previewPersons(request);
+        if (selectUniqueCompanyDependencies(request, preview)) preview = importService.previewPersons(request);
+        return commitReviewedPersons(request, preview);
+    }
+
+    private boolean selectUniqueCompanyDependencies(ImportRequest request, ImportPreviewResult preview) {
+        Map<Integer, Integer> choices = new java.util.HashMap<>(request.getCompanyLinks() == null ? Map.of() : request.getCompanyLinks());
+        for (var row : preview.getRows()) {
+            if (row.getCompanyDependency() == null || row.getCompanyDependency().truncated()) continue;
+            var candidates = preview.getCompanyCandidates().getOrDefault(row.getCompanyDependency().key(), List.of());
+            if (candidates.size() == 1) choices.putIfAbsent(row.getRowIndex(), candidates.getFirst().recordId());
+        }
+        if (choices.isEmpty() || choices.equals(request.getCompanyLinks())) return false;
+        request.setCompanyLinks(choices);
+        return true;
     }
 
     private ImportResult commitReviewedPersons(ImportRequest request, ImportPreviewResult preview) {
@@ -117,6 +131,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
     private ImportResult reviewAndCommitDeals(ImportRequest request) {
         ImportPreviewResult preview = importService.previewDeals(request);
+        if (selectUniqueCompanyDependencies(request, preview)) preview = importService.previewDeals(request);
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
         return importService.commitDeals(request);
     }
@@ -158,10 +173,14 @@ class ImportServiceTest extends AbstractServiceTest {
 
         ImportPreviewResult preview = importService.previewPersons(request);
 
-        assertEquals(1, preview.getRows().getFirst().getCandidates().size());
+        assertEquals(1, preview.getCompanyCandidates().get(preview.getRows().getFirst().getCompanyDependency().key()).size());
         assertEquals(
             "company",
-            preview.getRows().getFirst().getCandidates().getFirst().recordType());
+            preview.getCompanyCandidates().get(preview.getRows().getFirst().getCompanyDependency().key()).getFirst().recordType());
+        assertEquals(1, preview.getInvalid());
+        request.setCompanyLinks(Map.of(0, existing.getId()));
+        preview = importService.previewPersons(request);
+        assertEquals(0, preview.getInvalid());
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
         ImportResult result = importService.commitPersons(request);
         Integer linkedCompanyId = jdbcTemplate.queryForObject(
@@ -199,7 +218,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "fill_empty"));
 
         assertEquals("invalid", preview.getRows().getFirst().getStatus());
-        assertEquals(2, preview.getRows().getFirst().getCandidates().size());
+        assertEquals(2, preview.getCompanyCandidates().get(preview.getRows().getFirst().getCompanyDependency().key()).size());
         assertTrue(preview.getRows().getFirst().getErrors().getFirst()
             .contains("Multiple visible companies"));
     }
@@ -220,9 +239,9 @@ class ImportServiceTest extends AbstractServiceTest {
         ImportPreviewResult preview = importService.previewPersons(request);
 
         assertEquals("invalid", preview.getRows().getFirst().getStatus());
-        assertEquals(existing.getId(), preview.getRows().getFirst().getCandidates().getFirst().recordId());
+        assertEquals(existing.getId(), preview.getCompanyCandidates().get(preview.getRows().getFirst().getCompanyDependency().key()).getFirst().recordId());
         assertEquals(DuplicateMatchStrength.WEAK,
-            preview.getRows().getFirst().getCandidates().getFirst().strength());
+            preview.getCompanyCandidates().get(preview.getRows().getFirst().getCompanyDependency().key()).getFirst().strength());
         assertTrue(preview.getRows().getFirst().getErrors().contains(
             "Company name variant requires an explicit company selection"));
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
@@ -931,6 +950,7 @@ class ImportServiceTest extends AbstractServiceTest {
                     "Custom", "unioned")),
             "fill_empty");
 
+        request.setCompanyLinks(Map.of(0, company.getId()));
         ImportPreviewResult preview = importService.previewPersons(request);
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
         ImportResult result = importService.commitPersons(request);
@@ -1027,6 +1047,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "fill_empty",
             Map.of(0, created.getId(), 1, created.getId()));
 
+        fillEmpty.setCompanyLinks(Map.of(0, firstCompany.getId()));
         ImportPreviewResult fillPreview =
             importService.previewPersons(fillEmpty);
         fillEmpty.setDuplicateReviewProof(
@@ -1065,6 +1086,7 @@ class ImportServiceTest extends AbstractServiceTest {
             fillEmpty.getRows(),
             "overwrite",
             Map.of(0, created.getId(), 1, created.getId()));
+        overwrite.setCompanyLinks(Map.of(1, secondCompany.getId()));
         ImportPreviewResult overwritePreview =
             importService.previewPersons(overwrite);
         overwrite.setDuplicateReviewProof(
@@ -1129,6 +1151,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 "Custom", "1.23456")),
             "overwrite");
 
+        request.setCompanyLinks(Map.of(0, company.getId()));
         ImportResult first = reviewAndCommitPersons(request);
         Person imported = personMapper.getPersonById(
             workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
@@ -1609,6 +1632,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 "Custom", "vanished value")),
             "overwrite",
             Map.of(0, company.getId()));
+        personRequest.setCompanyLinks(Map.of(0, replacementCompany.getId()));
         Map<String, Object> personBefore = personSnapshot(workspace.getId(), person.getId());
         Map<String, Object> companyBefore = companySnapshot(workspace.getId(), company.getId());
         int personTagCount = rowCount("SELECT COUNT(*) FROM person_tag WHERE person_id = ?", person.getId());
@@ -1948,6 +1972,7 @@ class ImportServiceTest extends AbstractServiceTest {
                     "Custom", "second")),
             "overwrite");
 
+        request.setCompanyLinks(Map.of(0, company.getId(), 1, company.getId()));
         ImportPreviewResult preview = importService.previewDeals(request);
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
         ImportResult result = importService.commitDeals(request);
@@ -2901,6 +2926,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 Map.entry("Tags", tag.getName()),
                 Map.entry("Budget", "2"))),
             "fill_empty");
+        request.setCompanyLinks(Map.of(0, company.getId()));
         ImportPreviewResult preview = importService.previewPersons(request);
         ImportResult result = commitReviewedPersons(request, preview);
 
@@ -2933,7 +2959,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 new ColumnMapping("Second", null, true, "text", "Same field")),
             List.of(Map.of("Name", "Duplicate field contact", "First", "one", "Second", "two")), "fill_empty")));
 
-        assertTrue(exception.getMessage().contains("would create the same custom field"));
+        assertEquals("IMPORT_MAPPING_DUPLICATE", exception.getCode());
         assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", "same_field"));
     }
 

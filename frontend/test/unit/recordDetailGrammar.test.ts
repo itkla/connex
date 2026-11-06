@@ -218,7 +218,7 @@ describe('record detail grammar', () => {
         const files = source.indexOf('section="files"');
         const history = source.indexOf('section="history"');
         const risk = source.indexOf('<DealRiskPanel');
-        const people = source.indexOf("t('peopleOnThisDeal')");
+        const people = source.indexOf("<DealStakeholders");
         const brief = source.indexOf('<DealBriefSection');
         const evaluation = source.indexOf('<EngineEvaluationPanel');
         const sparkline = source.indexOf('<DealEngagementSection');

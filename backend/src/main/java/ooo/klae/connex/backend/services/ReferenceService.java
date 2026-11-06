@@ -179,6 +179,12 @@ public class ReferenceService {
         return entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId);
     }
 
+    /** Projects stored references for reader responses without disclosing pending memberships. */
+    public List<EntityReference> referencesForReader(int workspaceId, String sourceType, int sourceId) {
+        return redactInvisibleTargets(workspaceId, List.of(new ReaderVisibleContent(
+            null, referencesFor(workspaceId, sourceType, sourceId)))).getFirst().references();
+    }
+
     /**
      * Removes every reference belonging to a source entity. Callers invoke this
      * when the source is deleted — {@code entity_reference} is polymorphic and so
@@ -227,16 +233,25 @@ public class ReferenceService {
             return notes;
         }
         return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
-            workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes));
+            workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes, false));
     }
 
-    private List<Note> hydrateWithinVisibilityScope(int workspaceId, List<Note> notes) {
+    /** Preserves authored pending-member labels for internal masking, never for reader projection. */
+    public List<Note> hydrateForMasking(int workspaceId, List<Note> notes) {
+        if (notes == null || notes.isEmpty()) {
+            return notes;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes, true));
+    }
+
+    private List<Note> hydrateWithinVisibilityScope(int workspaceId, List<Note> notes, boolean forMasking) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_NOTE, notes.stream().map(Note::getId).toList());
         for (Note note : notes) {
             note.setReferences(bySource.getOrDefault(note.getId(), List.of()));
         }
-        redactInvisibleReferences(workspaceId, notes);
+        redactInvisibleReferences(workspaceId, notes, forMasking);
         return notes;
     }
 
@@ -276,17 +291,26 @@ public class ReferenceService {
             return tasks;
         }
         return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
-            workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks));
+            workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks, false));
     }
 
-    private List<Task> hydrateTasksWithinVisibilityScope(int workspaceId, List<Task> tasks) {
+    /** Preserves authored pending-member labels for internal masking, never for reader projection. */
+    public List<Task> hydrateTasksForMasking(int workspaceId, List<Task> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return tasks;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks, true));
+    }
+
+    private List<Task> hydrateTasksWithinVisibilityScope(int workspaceId, List<Task> tasks, boolean forMasking) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_TASK, tasks.stream().map(Task::getId).toList());
         for (Task task : tasks) {
             task.setReferences(bySource.getOrDefault(task.getId(), List.of()));
         }
         redactInvisibleTargets(workspaceId, tasks,
-            Task::getReferences, Task::setReferences, Task::getDescription, Task::setDescription);
+            Task::getReferences, Task::setReferences, Task::getDescription, Task::setDescription, forMasking);
         return tasks;
     }
 
@@ -337,17 +361,27 @@ public class ReferenceService {
             return activities;
         }
         return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
-            workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities));
+            workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities, false));
     }
 
-    private List<Activity> hydrateActivitiesWithinVisibilityScope(int workspaceId, List<Activity> activities) {
+    /** Preserves authored pending-member labels for internal masking, never for reader projection. */
+    public List<Activity> hydrateActivitiesForMasking(int workspaceId, List<Activity> activities) {
+        if (activities == null || activities.isEmpty()) {
+            return activities;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities, true));
+    }
+
+    private List<Activity> hydrateActivitiesWithinVisibilityScope(
+            int workspaceId, List<Activity> activities, boolean forMasking) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_ACTIVITY, activities.stream().map(Activity::getId).toList());
         for (Activity activity : activities) {
             activity.setReferences(bySource.getOrDefault(activity.getId(), List.of()));
         }
         redactInvisibleTargets(workspaceId, activities,
-            Activity::getReferences, Activity::setReferences, Activity::getNotes, Activity::setNotes);
+            Activity::getReferences, Activity::setReferences, Activity::getNotes, Activity::setNotes, forMasking);
         return activities;
     }
 
@@ -386,6 +420,11 @@ public class ReferenceService {
      */
     public List<ReaderVisibleContent> redactInvisibleTargets(
             int workspaceId, List<ReaderVisibleContent> items) {
+        return redactInvisibleTargets(workspaceId, items, false);
+    }
+
+    private List<ReaderVisibleContent> redactInvisibleTargets(
+            int workspaceId, List<ReaderVisibleContent> items, boolean forMasking) {
         if (items == null || items.isEmpty()) {
             return List.of();
         }
@@ -408,14 +447,14 @@ public class ReferenceService {
             return List.copyOf(items);
         }
         return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(workspaceId,
-            () -> redactInvisibleTargetsWithinVisibilityScope(workspaceId, items, targets, readings));
+            () -> redactInvisibleTargetsWithinVisibilityScope(workspaceId, items, targets, readings, forMasking));
     }
 
     private List<ReaderVisibleContent> redactInvisibleTargetsWithinVisibilityScope(
             int workspaceId, List<ReaderVisibleContent> items, Set<ReferenceTarget> targets,
-            List<ReferenceContentReader.Reading> readings) {
+            List<ReferenceContentReader.Reading> readings, boolean forMasking) {
         int currentUserId = workspaceService.getCurrentUserId();
-        Set<ReferenceTarget> visible = visibleTargets(workspaceId, targets, currentUserId);
+        Set<ReferenceTarget> visible = visibleTargets(workspaceId, targets, currentUserId, forMasking);
         List<ReaderVisibleContent> redacted = new ArrayList<>();
         for (int index = 0; index < items.size(); index++) {
             ReaderVisibleContent item = items.get(index);
@@ -448,7 +487,7 @@ public class ReferenceService {
             if (personWorkspaceIdsJson == null && Set.of(TYPE_PERSON, TYPE_COMPANY).contains(type)) {
                 personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
             }
-            if (!isVisible(workspaceId, type, refId, currentUserId, personWorkspaceIdsJson)) {
+            if (!isResolvable(workspaceId, type, refId, currentUserId, personWorkspaceIdsJson)) {
                 continue;
             }
             String key = type + ":" + refId;
@@ -460,7 +499,7 @@ public class ReferenceService {
         return new ArrayList<>(unique.values());
     }
 
-    private boolean isVisible(int workspaceId, String type, int refId, int currentUserId, String personWorkspaceIdsJson) {
+    private boolean isResolvable(int workspaceId, String type, int refId, int currentUserId, String personWorkspaceIdsJson) {
         return switch (type) {
             case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
             case TYPE_PERSON -> personMapper.exists(workspaceId, personWorkspaceIdsJson, refId);
@@ -475,16 +514,26 @@ public class ReferenceService {
         };
     }
 
-    /** Resolves distinct active or pending member ids in bounded, workspace-scoped batches. */
+    /** Resolves distinct active member ids in bounded, workspace-scoped batches. */
     public Set<Integer> visibleMemberIds(int workspaceId, Collection<Integer> memberIds) {
+        return memberIdsIn(workspaceId, memberIds, false);
+    }
+
+    /** Resolves scoped membership ids solely for authored masking labels, without profile lookup. */
+    public Set<Integer> memberIdsForMasking(int workspaceId, Collection<Integer> memberIds) {
+        return memberIdsIn(workspaceId, memberIds, true);
+    }
+
+    private Set<Integer> memberIdsIn(int workspaceId, Collection<Integer> memberIds, boolean forMasking) {
         if (memberIds == null || memberIds.isEmpty()) {
             return Set.of();
         }
         List<Integer> ids = memberIds.stream().filter(id -> id != null && id > 0).distinct().toList();
         Set<Integer> visible = new HashSet<>();
         for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
-            visible.addAll(workspaceMapper.getMemberIdsIncludingPending(
-                    workspaceId, ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()))));
+            List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
+            visible.addAll(forMasking ? workspaceMapper.getMemberIdsIncludingPending(workspaceId, batch)
+                : workspaceMapper.getActiveMemberIdsIn(workspaceId, batch));
         }
         return Set.copyOf(visible);
     }
@@ -508,7 +557,7 @@ public class ReferenceService {
 
     private String requireVisibleTargetWithinVisibilityScope(int workspaceId, String canonicalType, int refId, int currentUserId) {
         ReferenceTarget target = new ReferenceTarget(canonicalType, refId);
-        if (!visibleTargets(workspaceId, Set.of(target), currentUserId).contains(target)) {
+        if (!visibleTargets(workspaceId, Set.of(target), currentUserId, false).contains(target)) {
             throw new ResourceNotFoundException("Reference target not found");
         }
         return canonicalType;
@@ -517,9 +566,9 @@ public class ReferenceService {
     /**
      * Removes reference targets and content tokens that the current reader cannot see.
      */
-    private void redactInvisibleReferences(int workspaceId, List<Note> notes) {
+    private void redactInvisibleReferences(int workspaceId, List<Note> notes, boolean forMasking) {
         redactInvisibleTargets(workspaceId, notes,
-            Note::getReferences, Note::setReferences, Note::getContent, Note::setContent);
+            Note::getReferences, Note::setReferences, Note::getContent, Note::setContent, forMasking);
     }
 
     /**
@@ -540,10 +589,11 @@ public class ReferenceService {
             Function<T, List<EntityReference>> getReferences,
             BiConsumer<T, List<EntityReference>> setReferences,
             Function<T, String> getContent,
-            BiConsumer<T, String> setContent) {
+            BiConsumer<T, String> setContent,
+            boolean forMasking) {
         List<ReaderVisibleContent> redacted = redactInvisibleTargets(workspaceId, items.stream()
             .map(item -> new ReaderVisibleContent(getContent.apply(item), getReferences.apply(item)))
-            .toList());
+            .toList(), forMasking);
         for (int index = 0; index < items.size(); index++) {
             T item = items.get(index);
             ReaderVisibleContent visible = redacted.get(index);
@@ -632,7 +682,7 @@ public class ReferenceService {
     }
 
     private Set<ReferenceTarget> visibleTargets(
-            int workspaceId, Set<ReferenceTarget> targets, int currentUserId) {
+            int workspaceId, Set<ReferenceTarget> targets, int currentUserId, boolean forMasking) {
         if (targets.isEmpty()) {
             return Set.of();
         }
@@ -649,7 +699,7 @@ public class ReferenceService {
         idsByType.forEach((type, ids) -> {
             for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
                 List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
-                for (int id : visibleIds(workspaceId, type, batch, currentUserId, personWorkspaceIdsJson)) {
+                for (int id : visibleIds(workspaceId, type, batch, currentUserId, personWorkspaceIdsJson, forMasking)) {
                     visible.add(new ReferenceTarget(type, id));
                 }
             }
@@ -658,9 +708,11 @@ public class ReferenceService {
     }
 
     private List<Integer> visibleIds(
-            int workspaceId, String type, List<Integer> ids, int currentUserId, String personWorkspaceIdsJson) {
+            int workspaceId, String type, List<Integer> ids, int currentUserId, String personWorkspaceIdsJson,
+            boolean forMasking) {
         return switch (type) {
-            case TYPE_USER -> workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids);
+            case TYPE_USER -> forMasking ? workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids)
+                : workspaceMapper.getActiveMemberIdsIn(workspaceId, ids);
             case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);
             case TYPE_DEAL -> dealMapper.getVisibleIdsIn(workspaceId, ids);
             case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);

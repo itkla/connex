@@ -6,6 +6,7 @@
         "panelTitle": "Risk signals",
         "unavailable": "Risk evidence is temporarily unavailable.",
         "clear": "No risk signals on this deal right now.",
+        "noHistoryStakeholders": "Some contacts have no history yet. Log a first interaction to get started.",
         "assessedAt": "Assessed {date}",
         "factorCloseOverdue": "Expected close date passed {days, plural, one {# day} other {# days}} ago",
         "factorClosingSoonQuiet": "Closing in {days, plural, one {# day} other {# days}} with no recent activity",
@@ -128,7 +129,9 @@
         "delete": "Delete",
         "openDealPage": "Open deal page",
         "statusOpen": "open",
-        "statusClosed": "closed"
+        "statusClosed": "closed",
+        "statusWon": "Won",
+        "statusLost": "Lost"
     },
     "DealsLifecycleProgress": {
         "todayDay": "Today · day {daysOpen} of {totalDays}",
@@ -185,7 +188,29 @@
         "a11yLifted": "Picked up deal {name}.",
         "a11yOver": "Deal {name} is over the {column} column.",
         "a11yDropped": "Deal {name} was dropped into the {column} column.",
-        "a11yCancelled": "Moving deal {name} was cancelled."
+        "a11yCancelled": "Moving deal {name} was cancelled.",
+        "moveCard": "Move deal {name}",
+        "outcome": {
+            "open": "Open",
+            "won": "Won",
+            "lost": "Lost"
+        },
+        "confirmTitle": "Move to {column}?",
+        "confirmDescription": "Moving {name} to {column} marks it {outcome} and closes it. Moving it back later keeps this outcome until you choose Reopen.",
+        "cancelMove": "Cancel",
+        "confirmMove": "Move and close",
+        "moved": "{name} is in {column}, position {position}. Outcome: {outcome}.",
+        "movedRetained": "{name} moved to {column}, position {position}, and is still {outcome}. Moving stages does not reopen a deal.",
+        "moveCancelled": "Move cancelled. {name} is still in {column}, position {position}. Outcome: {outcome}.",
+        "reopen": "Reopen",
+        "reopenHint": "To open this deal again, choose Reopen.",
+        "reopenFailed": "Couldn't reopen the deal",
+        "a11yConfirmMove": "Move requested for {name} to {column}. Outcome would be {outcome}. Confirm or cancel in the dialog.",
+        "a11yMoveRequested": "Move requested for {name} to {column}. Outcome remains {outcome}.",
+        "a11yRestored": "Move not confirmed. Showing deal {name} in {column}, position {position}.",
+        "confirmValueLost": "Realized revenue will be reset to {amount}; the amount shown now is {current}. Any earlier win amount is cleared. Winning again will calculate a new amount from the values saved at that time.",
+        "confirmValueFrozen": "The realized revenue shown now is {amount}. While the deal remains won, its win amount stays frozen rather than being recalculated. If its outcome or amount changes before saving, the server uses the updated state; the final amount cannot be confirmed here.",
+        "confirmValueFreshWin": "The deal value shown now is {current}. Winning records the current line-item total, or the current deal value if there are no line items, in {currency}. The exact amount cannot be confirmed here before saving. The server calculates it when the move is saved and freezes it as realized revenue; later value changes do not recalculate it."
     },
     "DealsBrowser": {
         "columnClosedAt": "Closed at",
@@ -610,5 +635,28 @@
             "won": "Outcome",
             "riskExcluded": "Deal risk evaluation"
         }
+    },
+    "DealStakeholders": {
+        "title": "Stakeholders",
+        "add": "Add contact",
+        "empty": "No stakeholders yet. Add the contacts involved in this deal.",
+        "editRole": "Edit role",
+        "editRoleFor": "Edit role for {name}",
+        "remove": "Remove",
+        "removeFor": "Remove {name} from this deal",
+        "description": "Choose a contact and describe their role in this deal.",
+        "contact": "Contact",
+        "chooseContact": "Search contacts",
+        "role": "Role (optional)",
+        "rolePlaceholder": "For example, Champion or Buyer",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saved": "Stakeholder saved",
+        "removed": "Stakeholder removed",
+        "saveFailed": "Couldn't save the stakeholder",
+        "removeFailed": "Couldn't remove the stakeholder",
+        "searchFailed": "Couldn’t load contacts. Search again to retry.",
+        "warmthUnavailable": "Warmth unavailable",
+        "contactRequired": "Choose a contact to add."
     }
 }

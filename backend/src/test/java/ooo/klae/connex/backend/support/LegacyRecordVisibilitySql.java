@@ -2046,6 +2046,74 @@ public final class LegacyRecordVisibilitySql {
             </if>
           </sql>
 
+          <sql id="searchSource">
+            <choose>
+              <when test="query != null">
+                <bind name="searchCandidatePhone" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
+                <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+                <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
+                FROM (
+                  <choose>
+                    <when test="searchCandidatePhone != null">
+                      SELECT search_phone_owned.id
+                      FROM company search_phone_owned FORCE INDEX (idx_company_workspace_search_phone)
+                      WHERE search_phone_owned.workspace_id = #{workspaceId}
+                        AND search_phone_owned.search_phone = #{searchCandidatePhone}
+                      UNION
+                    SELECT c.id
+                    FROM company c FORCE INDEX (idx_company_workspace)
+                    WHERE c.workspace_id = #{workspaceId}
+                      AND (c.search_phone IS NULL OR c.search_phone &lt;&gt; #{searchCandidatePhone})
+                      AND (c.name LIKE #{query} OR c.search_name LIKE #{searchNameQuery}
+                        <include refid="missingNamePredicate"/>
+                        <include refid="missingPhonePredicate"/>
+                        OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
+                        OR c.phone LIKE #{query})
+                    </when>
+                    <otherwise>
+                      SELECT search_owned.id
+                      FROM company search_owned FORCE INDEX (idx_company_workspace)
+                      WHERE search_owned.workspace_id = #{workspaceId}
+                    </otherwise>
+                  </choose>
+                  UNION
+                  SELECT search_shared.company_id AS id
+                  FROM company_share search_shared FORCE INDEX (idx_company_share_workspace)
+                  STRAIGHT_JOIN company search_share_owner FORCE INDEX (PRIMARY)
+                    ON search_share_owner.id = search_shared.company_id
+                  STRAIGHT_JOIN workspace vws ON vws.id = search_shared.workspace_id
+                  JOIN workspace ows ON ows.id = search_share_owner.workspace_id AND ows.org_id = vws.org_id
+                  WHERE search_shared.workspace_id = #{workspaceId}
+                ) search_scope
+                STRAIGHT_JOIN company c FORCE INDEX (PRIMARY) ON c.id = search_scope.id
+              </when>
+              <otherwise>FROM company c</otherwise>
+            </choose>
+          </sql>
+
+          <sql id="searchKeys">
+            <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+            <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
+            OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+            <include refid="missingNamePredicate"/>
+            <bind name="searchPhoneExact" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
+            <include refid="searchPhonePredicate"/>
+            <include refid="missingPhonePredicate"/>
+          </sql>
+
+          <sql id="searchPhonePredicate">
+            <choose>
+              <when test="searchPhoneExact != null">
+                OR c.search_phone = #{searchPhoneExact,jdbcType=VARCHAR}
+                OR c.phone LIKE #{query}
+              </when>
+              <otherwise>
+                OR c.search_phone LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                OR c.phone LIKE #{query}
+              </otherwise>
+            </choose>
+          </sql>
+
           <sql id="pageWhere">
             <where>
               <choose>
@@ -2055,7 +2123,8 @@ public final class LegacyRecordVisibilitySql {
               <include refid="warmthWhere"/>
               <if test="query != null">
                 AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
-                  OR c.phone LIKE #{query} OR c.address LIKE #{query})
+                  OR c.address LIKE #{query}
+                  <include refid="searchKeys"/>)
               </if>
               <if test="(industry != null and industry.size() > 0) or noIndustry">
                 AND (
@@ -2115,7 +2184,8 @@ public final class LegacyRecordVisibilitySql {
               <include refid="warmthWhere"/>
               <if test="query != null">
                 AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
-                  OR c.phone LIKE #{query} OR c.address LIKE #{query})
+                  OR c.address LIKE #{query}
+                  <include refid="searchKeys"/>)
               </if>
               <if test="(industry != null and industry.size() > 0) or noIndustry">
                 AND (
@@ -2133,7 +2203,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getCompaniesPage" resultType="Company">
             SELECT <include refid="qualifiedCompanyColumns"/>
-            FROM company c
+            <include refid="searchSource"/>
             <include refid="warmthJoin"/>
             <include refid="pageWhere"/>
             <include refid="memberScopePredicate"/>
@@ -2143,7 +2213,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="countCompanies" resultType="long">
             SELECT COUNT(*)
-            FROM company c
+            <include refid="searchSource"/>
             <include refid="warmthFilterJoin"/>
             <include refid="pageWhere"/>
             <include refid="memberScopePredicate"/>
@@ -2286,7 +2356,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getSegmentCompaniesPage" resultType="Company">
             SELECT <include refid="qualifiedCompanyColumns"/>
-            FROM company c
+            <include refid="searchSource"/>
             JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
               ON segment_ids.id = c.id
             <include refid="warmthJoin"/>
@@ -2298,7 +2368,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="countSegmentCompanies" resultType="long">
             SELECT COUNT(*)
-            FROM company c
+            <include refid="searchSource"/>
             JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
               ON segment_ids.id = c.id
             <include refid="warmthFilterJoin"/>
@@ -2308,7 +2378,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getSegmentCompanyIdsFiltered" resultType="int">
             SELECT c.id
-            FROM company c
+            <include refid="searchSource"/>
             JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
               ON segment_ids.id = c.id
             <include refid="warmthFilterJoin"/>
@@ -2320,7 +2390,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getCompanyIdsFiltered" resultType="int">
             SELECT c.id
-            FROM company c
+            <include refid="searchSource"/>
             <include refid="warmthFilterJoin"/>
             <include refid="pageWhere"/>
             <include refid="memberScopePredicate"/>
@@ -2330,7 +2400,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getCompaniesFiltered" resultType="Company">
             SELECT <include refid="qualifiedCompanyColumns"/>
-            FROM company c
+            <include refid="searchSource"/>
             <include refid="warmthFilterJoin"/>
             <include refid="pageWhere"/>
             <include refid="memberScopePredicate"/>
@@ -2388,8 +2458,8 @@ public final class LegacyRecordVisibilitySql {
                       JOIN workspace vws ON vws.id = cs.workspace_id
                       JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
                       WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
-              AND ct.tag_id = #{tagId}
               AND c.archived_at IS NULL
+              AND ct.tag_id = #{tagId}
             ORDER BY c.name, c.id
           </select>
 
@@ -2462,9 +2532,10 @@ public final class LegacyRecordVisibilitySql {
           </select>
 
           <select id="search" resultType="Company">
-            SELECT <include refid="qualifiedCompanyColumns"/> FROM company c
+            SELECT <include refid="qualifiedCompanyColumns"/> <include refid="searchSource"/>
             WHERE <include refid="visible"/>
-              AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
+              AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
+                  <include refid="searchKeys"/>)
             ORDER BY c.name, c.id
             LIMIT 10
           </select>
@@ -2574,6 +2645,41 @@ public final class LegacyRecordVisibilitySql {
             </foreach>
             WHERE c.workspace_id = #{workspaceId} AND c.id = #{companyId} AND t.workspace_id = #{workspaceId}
           </insert>
+
+          <sql id="missingNamePredicate">
+            <if test="searchNameQuery != null">
+              OR (c.search_name IS NULL AND
+                REGEXP_REPLACE(c.name, '[[:space:]゙゚ﾞﾟ]', '') COLLATE utf8mb4_0900_ai_ci
+                  LIKE NULLIF(REGEXP_REPLACE(#{searchNameQuery,jdbcType=VARCHAR}, '[゙゚ﾞﾟ]', ''), '%%'))
+            </if>
+          </sql>
+
+          <sql id="missingPhoneDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '^([+＋][0-9０-９]{1,3})[（(][0０][）)]', '$1'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingPhonePredicate">
+            <if test="searchPhoneQuery != null">
+              OR (c.search_phone IS NULL AND
+                ((CASE
+                  WHEN REGEXP_REPLACE(c.phone, '[[:space:]]', '') COLLATE utf8mb4_0900_ai_ci LIKE '+%'
+                    AND <include refid="missingPhoneDigits"/> COLLATE utf8mb4_0900_ai_ci LIKE '810%'
+                    AND CHAR_LENGTH(<include refid="missingPhoneDigits"/>) IN (12, 13)
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 4))
+                  WHEN REGEXP_LIKE(<include refid="missingPhoneDigits"/>, '^[0０][1-9１-９][0-9０-９]{8,9}$')
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 2))
+                  ELSE <include refid="missingPhoneDigits"/>
+                END) COLLATE utf8mb4_0900_ai_ci LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                  OR <include refid="missingPhoneRawDigits"/> COLLATE utf8mb4_0900_ai_ci
+                    LIKE #{searchPhoneQuery,jdbcType=VARCHAR}))
+            </if>
+          </sql>
+          <sql id="missingPhoneRawDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '[^0-9０-９]', '')
+          </sql>
+
         </mapper>
         """;
     private static final String DEAL = """
@@ -3648,16 +3754,113 @@ public final class LegacyRecordVisibilitySql {
             </if>
           </sql>
 
+          <sql id="searchSource">
+            <choose>
+              <when test="query != null">
+                <bind name="searchCandidatePhone" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
+                <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+                <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
+                FROM (
+                  <choose>
+                    <when test="searchCandidatePhone != null">
+                      SELECT search_phone_owned.id
+                      FROM person search_phone_owned FORCE INDEX (idx_person_workspace_search_phone)
+                      WHERE search_phone_owned.workspace_id = #{workspaceId}
+                        AND search_phone_owned.search_phone = #{searchCandidatePhone}
+                      UNION
+                    SELECT p.id
+                    FROM person p FORCE INDEX (idx_person_workspace)
+                    <include refid="companyJoin"/>
+                    WHERE p.workspace_id = #{workspaceId}
+                      AND (p.search_phone IS NULL OR p.search_phone &lt;&gt; #{searchCandidatePhone})
+                      AND (p.name LIKE #{query} OR p.search_name LIKE #{searchNameQuery}
+                        <include refid="missingNamePredicate"/>
+                        <include refid="missingPhonePredicate"/>
+                        OR p.email LIKE #{query} OR p.title LIKE #{query}
+                        OR p.phone LIKE #{query}
+                        OR c.name LIKE #{query} OR c.search_name LIKE #{searchNameQuery}
+                        <include refid="missingCompanyNamePredicate"/>
+                        <include refid="missingCompanyPhonePredicate"/>
+                        OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
+                        OR c.search_phone = #{searchCandidatePhone}
+                        OR c.phone LIKE #{query})
+                    </when>
+                    <otherwise>
+                      SELECT search_owned.id
+                      FROM person search_owned FORCE INDEX (idx_person_workspace)
+                      WHERE search_owned.workspace_id = #{workspaceId}
+                    </otherwise>
+                  </choose>
+                  UNION
+                  SELECT search_shared.person_id AS id
+                  FROM person_share search_shared FORCE INDEX (idx_person_share_workspace)
+                  STRAIGHT_JOIN person search_share_owner FORCE INDEX (PRIMARY)
+                    ON search_share_owner.id = search_shared.person_id
+                  STRAIGHT_JOIN workspace vws ON vws.id = search_shared.workspace_id
+                  JOIN workspace ows ON ows.id = search_share_owner.workspace_id AND ows.org_id = vws.org_id
+                  WHERE search_shared.workspace_id = #{workspaceId}
+                ) search_scope
+                STRAIGHT_JOIN person p FORCE INDEX (PRIMARY) ON p.id = search_scope.id
+              </when>
+              <otherwise>FROM person p</otherwise>
+            </choose>
+          </sql>
+
+          <sql id="searchKeys">
+            <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+            <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
+            OR p.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+            <include refid="missingNamePredicate"/>
+            <bind name="searchPhoneExact" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
+            <include refid="searchPhonePredicate"/>
+            <include refid="missingPhonePredicate"/>
+          </sql>
+
+          <sql id="searchPhonePredicate">
+            <choose>
+              <when test="searchPhoneExact != null">
+                OR p.search_phone = #{searchPhoneExact,jdbcType=VARCHAR}
+                OR p.phone LIKE #{query}
+              </when>
+              <otherwise>
+                OR p.search_phone LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                OR p.phone LIKE #{query}
+              </otherwise>
+            </choose>
+          </sql>
+
+          <sql id="searchCompanyPhonePredicate">
+            <choose>
+              <when test="searchPhoneExact != null">
+                OR c.search_phone = #{searchPhoneExact,jdbcType=VARCHAR}
+                OR c.phone LIKE #{query}
+              </when>
+              <otherwise>
+                OR c.search_phone LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                OR c.phone LIKE #{query}
+              </otherwise>
+            </choose>
+            <include refid="missingCompanyPhonePredicate"/>
+          </sql>
+
           <sql id="pageWhere">
             <where>
               <choose>
                 <when test="archived">AND p.workspace_id = #{workspaceId} AND p.archived_at IS NOT NULL</when>
                 <otherwise>AND <include refid="visible"/></otherwise>
               </choose>
+              <if test="tagIds != null and tagIds.size() > 0">
+                AND EXISTS (SELECT 1 FROM person_tag pt
+                  JOIN tag t ON t.id = pt.tag_id AND t.workspace_id = #{workspaceId}
+                  WHERE pt.person_id = p.id AND pt.tag_id IN
+                  <foreach item="tagId" collection="tagIds" open="(" separator="," close=")">#{tagId}</foreach>)
+              </if>
               <include refid="warmthWhere"/>
               <if test="query != null">
-                AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
-                  OR p.title LIKE #{query} OR c.name LIKE #{query})
+                AND (p.name LIKE #{query} OR p.email LIKE #{query}
+                  OR p.title LIKE #{query} OR c.name LIKE #{query}
+                  <include refid="searchKeys"/> OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+                  <include refid="missingCompanyNamePredicate"/>)
               </if>
               <if test="(companies != null and companies.size() > 0) or noCompany">
                 AND (
@@ -3764,7 +3967,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getPersonsPage" resultMap="PersonResult">
             SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
-            FROM person p
+            <include refid="searchSource"/>
             <include refid="companyJoin"/>
             <include refid="warmthJoin"/>
             <include refid="pageWhere"/>
@@ -3775,7 +3978,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getPersonIdsFiltered" resultType="int">
             SELECT p.id
-            FROM person p
+            <include refid="searchSource"/>
             <include refid="companyJoin"/>
             <include refid="warmthFilterJoin"/>
             <include refid="pageWhere"/>
@@ -3786,7 +3989,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="countPersons" resultType="long">
             SELECT COUNT(*)
-            FROM person p
+            <include refid="searchSource"/>
             <include refid="companyJoin"/>
             <include refid="warmthFilterJoin"/>
             <include refid="pageWhere"/>
@@ -3795,7 +3998,7 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="getPersonsFiltered" resultMap="PersonResult">
             SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
-            FROM person p
+            <include refid="searchSource"/>
             <include refid="companyJoin"/>
             <include refid="warmthFilterJoin"/>
             <include refid="pageWhere"/>
@@ -3846,14 +4049,87 @@ public final class LegacyRecordVisibilitySql {
 
           <select id="search" resultMap="PersonResult">
             SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
-            FROM person p
+            <include refid="searchSource"/>
             <include refid="companyJoin"/>
             WHERE <include refid="visible"/>
-              AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query} OR p.title LIKE #{query}
-              OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
+              AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.title LIKE #{query}
+              OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
+              <include refid="searchKeys"/> OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+                  <include refid="missingCompanyNamePredicate"/>
+              <include refid="searchCompanyPhonePredicate"/>)
             ORDER BY p.name
             LIMIT 10
           </select>
+
+          <sql id="missingNamePredicate">
+            <if test="searchNameQuery != null">
+              OR (p.search_name IS NULL AND
+                REGEXP_REPLACE(p.name, '[[:space:]゙゚ﾞﾟ]', '') COLLATE utf8mb4_0900_ai_ci
+                  LIKE NULLIF(REGEXP_REPLACE(#{searchNameQuery,jdbcType=VARCHAR}, '[゙゚ﾞﾟ]', ''), '%%'))
+            </if>
+          </sql>
+
+          <sql id="missingPhoneDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(p.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '^([+＋][0-9０-９]{1,3})[（(][0０][）)]', '$1'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingPhonePredicate">
+            <if test="searchPhoneQuery != null">
+              OR (p.search_phone IS NULL AND
+                ((CASE
+                  WHEN REGEXP_REPLACE(p.phone, '[[:space:]]', '') COLLATE utf8mb4_0900_ai_ci LIKE '+%'
+                    AND <include refid="missingPhoneDigits"/> COLLATE utf8mb4_0900_ai_ci LIKE '810%'
+                    AND CHAR_LENGTH(<include refid="missingPhoneDigits"/>) IN (12, 13)
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 4))
+                  WHEN REGEXP_LIKE(<include refid="missingPhoneDigits"/>, '^[0０][1-9１-９][0-9０-９]{8,9}$')
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 2))
+                  ELSE <include refid="missingPhoneDigits"/>
+                END) COLLATE utf8mb4_0900_ai_ci LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                  OR <include refid="missingPhoneRawDigits"/> COLLATE utf8mb4_0900_ai_ci
+                    LIKE #{searchPhoneQuery,jdbcType=VARCHAR}))
+            </if>
+          </sql>
+
+          <sql id="missingCompanyNamePredicate">
+            <if test="searchNameQuery != null">
+              OR (c.search_name IS NULL AND
+                REGEXP_REPLACE(c.name, '[[:space:]゙゚ﾞﾟ]', '') COLLATE utf8mb4_0900_ai_ci
+                  LIKE NULLIF(REGEXP_REPLACE(#{searchNameQuery,jdbcType=VARCHAR}, '[゙゚ﾞﾟ]', ''), '%%'))
+            </if>
+          </sql>
+
+          <sql id="missingCompanyPhoneDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '^([+＋][0-9０-９]{1,3})[（(][0０][）)]', '$1'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingCompanyPhonePredicate">
+            <if test="searchPhoneQuery != null">
+              OR (c.search_phone IS NULL AND
+                ((CASE
+                  WHEN REGEXP_REPLACE(c.phone, '[[:space:]]', '') COLLATE utf8mb4_0900_ai_ci LIKE '+%'
+                    AND <include refid="missingCompanyPhoneDigits"/> COLLATE utf8mb4_0900_ai_ci LIKE '810%'
+                    AND CHAR_LENGTH(<include refid="missingCompanyPhoneDigits"/>) IN (12, 13)
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingCompanyPhoneDigits"/>, 4))
+                  WHEN REGEXP_LIKE(<include refid="missingCompanyPhoneDigits"/>, '^[0０][1-9１-９][0-9０-９]{8,9}$')
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingCompanyPhoneDigits"/>, 2))
+                  ELSE <include refid="missingCompanyPhoneDigits"/>
+                END) COLLATE utf8mb4_0900_ai_ci LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                  OR <include refid="missingCompanyPhoneRawDigits"/> COLLATE utf8mb4_0900_ai_ci
+                    LIKE #{searchPhoneQuery,jdbcType=VARCHAR}))
+            </if>
+          </sql>
+          <sql id="missingPhoneRawDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(p.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingCompanyPhoneRawDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '[^0-9０-９]', '')
+          </sql>
+
         </mapper>
         """;
     private static final String PERSON_TAGS = """

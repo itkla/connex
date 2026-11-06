@@ -39,9 +39,9 @@ describe("parseListInt", () => {
 describe("URL writers (multi-writer coexistence contract)", () => {
     const replaceState = vi.fn();
 
-    function stubLocation(search: string, state: unknown = null, hash = ""): void {
+    function stubLocation(pathname: string, search: string, state: unknown = null, hash = ""): void {
         vi.stubGlobal("window", {
-            location: { search, hash },
+            location: { pathname, search, hash },
             history: { replaceState, state },
         });
     }
@@ -59,7 +59,7 @@ describe("URL writers (multi-writer coexistence contract)", () => {
 
         for (const [name, write] of writers) {
             replaceState.mockClear();
-            stubLocation("?view=table", null, "#directory");
+            stubLocation("/settings/workspace/people", "?view=table", null, "#directory");
             write();
             expect(replaceState, `${name} wrote nothing to assert on`).toHaveBeenCalledTimes(1);
             expect(
@@ -101,7 +101,7 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("writes no fragment when the reader carries none", () => {
-        stubLocation("?view=table");
+        stubLocation("/records/contacts", "?view=table");
         writeListQueryToUrl("/records/contacts", "acme");
 
         expect(String(replaceState.mock.calls[0][2])).toBe("/records/contacts?view=table&q=acme");
@@ -118,7 +118,7 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("preserves params owned by other writers when writing list state", () => {
-        stubLocation("?view=table&peek=person%3A7&sv=1%3A2");
+        stubLocation("/records/contacts", "?view=table&peek=person%3A7&sv=1%3A2");
         writeListStateToUrl("/records/contacts", { q: "acme", sort: "name", dir: "asc", page: 2, size: 25 }, 25);
         expect(replaceState).toHaveBeenCalledTimes(1);
         const url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
@@ -132,13 +132,13 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("drops default values from the URL", () => {
-        stubLocation("?q=old&sort=name&dir=desc&page=3&size=50");
+        stubLocation("/records/contacts", "?q=old&sort=name&dir=desc&page=3&size=50");
         writeListStateToUrl("/records/contacts", { q: "", sort: null, dir: "asc", page: 1, size: 25 }, 25);
         expect(replaceState).toHaveBeenCalledWith(null, "", "/records/contacts");
     });
 
     it("omits dir=asc and only writes dir when a sort is active", () => {
-        stubLocation("");
+        stubLocation("/records/contacts", "");
         writeListStateToUrl("/records/contacts", { sort: "name", dir: "asc", page: 1, size: 25 }, 25);
         const url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
         expect(url.searchParams.get("sort")).toBe("name");
@@ -146,7 +146,7 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("leaves q untouched when the state omits it", () => {
-        stubLocation("?q=owned-elsewhere");
+        stubLocation("/records/deals", "?q=owned-elsewhere");
         writeListStateToUrl("/records/deals", { sort: "value", dir: "desc", page: 1, size: 25 }, 25);
         const url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
         expect(url.searchParams.get("q")).toBe("owned-elsewhere");
@@ -154,13 +154,13 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("no-ops when the query string already matches", () => {
-        stubLocation("?sort=name");
+        stubLocation("/records/contacts", "?sort=name");
         writeListStateToUrl("/records/contacts", { sort: "name", dir: "asc", page: 1, size: 25 }, 25);
         expect(replaceState).not.toHaveBeenCalled();
     });
 
     it("writeListQueryToUrl only touches q", () => {
-        stubLocation("?sort=name&peek=person%3A3");
+        stubLocation("/records/contacts", "?sort=name&peek=person%3A3");
         writeListQueryToUrl("/records/contacts", "acme");
         const url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
         expect(url.searchParams.get("q")).toBe("acme");
@@ -169,7 +169,7 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("writeOwnedParamsToUrl sets, deletes, and preserves foreign keys", () => {
-        stubLocation("?q=foo&status=open&task=3");
+        stubLocation("/activity/tasks", "?q=foo&status=open&task=3");
         writeOwnedParamsToUrl("/activity/tasks", { task: "7", kind: undefined });
         const url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
         expect(url.searchParams.get("task")).toBe("7");
@@ -179,25 +179,25 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("writeOwnedParamsToUrl no-ops when the query string already matches", () => {
-        stubLocation("?q=foo&task=7");
+        stubLocation("/activity/tasks", "?q=foo&task=7");
         writeOwnedParamsToUrl("/activity/tasks", { task: "7" });
         expect(replaceState).not.toHaveBeenCalled();
     });
 
     it("writeOwnedParamsToUrl drops the path query when it owns the last key", () => {
-        stubLocation("?task=7");
+        stubLocation("/activity/tasks", "?task=7");
         writeOwnedParamsToUrl("/activity/tasks", { task: undefined });
         expect(replaceState).toHaveBeenCalledWith(null, "", "/activity/tasks");
     });
 
     it("writeOwnedParamsToUrl preserves the record-return marker in history state", () => {
-        stubLocation("?q=foo", { connexRecordReturn: "5f0c" });
+        stubLocation("/activity/all", "?q=foo", { connexRecordReturn: "5f0c" });
         writeOwnedParamsToUrl("/activity/all", { activity: "9" });
         expect(replaceState.mock.calls[0][0]).toEqual({ connexRecordReturn: "5f0c" });
     });
 
     it("writeOwnedParamsToUrl hands Next's installed patch a state it does not short-circuit on", () => {
-        stubLocation("?q=foo", {
+        stubLocation("/activity/all", "?q=foo", {
             __NA: true,
             __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" },
             connexRecordReturn: "5f0c",
@@ -227,7 +227,7 @@ describe("URL writers (multi-writer coexistence contract)", () => {
             }
         }
         const history = new NativeHistory();
-        vi.stubGlobal("window", { location: { search: "?q=foo", hash: "" }, history });
+        vi.stubGlobal("window", { location: { pathname: "/activity/all", search: "?q=foo", hash: "" }, history });
 
         expect(Object.hasOwn(history, "replaceState")).toBe(false);
         writeOwnedParamsToUrl("/activity/all", { activity: "9" });
@@ -255,14 +255,14 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     });
 
     it("writeSavedViewToUrl sets and clears only sv", () => {
-        stubLocation("?q=acme");
+        stubLocation("/records/contacts", "?q=acme");
         writeSavedViewToUrl("/records/contacts", "5:9");
         let url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
         expect(url.searchParams.get("sv")).toBe("5:9");
         expect(url.searchParams.get("q")).toBe("acme");
 
         replaceState.mockClear();
-        stubLocation("?q=acme&sv=5%3A9");
+        stubLocation("/records/contacts", "?q=acme&sv=5%3A9");
         writeSavedViewToUrl("/records/contacts", null);
         url = new URL(`http://x${replaceState.mock.calls[0][2]}`);
         expect(url.searchParams.has("sv")).toBe(false);
@@ -284,10 +284,11 @@ describe("parseDeepLinkId", () => {
 });
 
 describe("shared-link survival across a browser session", () => {
-    function mountUrl(initial: string, fragment = ""): { search: () => string; hash: () => string } {
+    function mountUrl(pathname: string, initial: string, fragment = ""): { search: () => string; hash: () => string } {
         const state = { search: initial, hash: fragment };
         vi.stubGlobal("window", {
             location: {
+                pathname,
                 get search() {
                     return state.search;
                 },
@@ -310,7 +311,7 @@ describe("shared-link survival across a browser session", () => {
     afterEach(() => vi.unstubAllGlobals());
 
     it("keeps every foreign key through mount, filter change, task open, and task close", () => {
-        const url = mountUrl("?q=foo&status=open&sv=3");
+        const url = mountUrl("/activity/tasks", "?q=foo&status=open&sv=3");
         const foreignKeysIntact = () => {
             const params = new URLSearchParams(url.search());
             expect(params.get("q")).toBe("foo");
@@ -335,7 +336,7 @@ describe("shared-link survival across a browser session", () => {
     });
 
     it("lets a files filter write leave pagination and foreign keys intact", () => {
-        const url = mountUrl("?page=3&size=50&sv=2%3A9");
+        const url = mountUrl("/library/files", "?page=3&size=50&sv=2%3A9");
 
         writeOwnedParamsToUrl("/library/files", {
             q: "invoice",
@@ -361,7 +362,7 @@ describe("shared-link survival across a browser session", () => {
     });
 
     it("lets the files writer sync page and size without disturbing its own sort value space", () => {
-        const url = mountUrl("?sort=largest&kind=pdf&sv=2%3A9");
+        const url = mountUrl("/library/files", "?sort=largest&kind=pdf&sv=2%3A9");
 
         writeOwnedParamsToUrl("/library/files", {
             q: undefined,
@@ -404,7 +405,7 @@ describe("shared-link survival across a browser session", () => {
     });
 
     it("keeps files pagination when a deep-linked file opens and closes", () => {
-        const url = mountUrl("?page=2&size=50&sort=name");
+        const url = mountUrl("/library/files", "?page=2&size=50&sort=name");
 
         writeOwnedParamsToUrl("/library/files", { file: "42" });
         expect(new URLSearchParams(url.search()).get("page")).toBe("2");
@@ -420,7 +421,7 @@ describe("shared-link survival across a browser session", () => {
     });
 
     it("clears only the analytics writer's own keys when they return to defaults", () => {
-        const url = mountUrl("?range=30d&granularity=week&currency=JPY&owner=me&peek=deal%3A4");
+        const url = mountUrl("/insights/analytics", "?range=30d&granularity=week&currency=JPY&owner=me&peek=deal%3A4");
 
         writeOwnedParamsToUrl("/insights/analytics", {
             range: undefined,

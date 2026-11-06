@@ -74,13 +74,22 @@ public class ExportService {
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             WarmthFilter warmth) {
+        return exportPersons(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, warmth, null);
+    }
+
+    /** Exports the browser's tag-filtered active set under the existing export restrictions. */
+    public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            WarmthFilter warmth, List<Integer> tagIds) {
         requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<Person> people = personMapper.getPersonsFiltered(
             workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, false, warmth);
+            firstResponseStates, noFirstResponse, false, warmth, tagIds);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());
@@ -116,7 +125,11 @@ public class ExportService {
             row.add(disqualificationLabel(p.getDisqualifiedReason(), reasonLabels, locale));
             writeRow(sb, row);
         }
-        return sb.toString();
+        String csv = sb.toString();
+        auditService.recordDataExportCompleted("person", people.size(), memberScope,
+            hasFilters(query, companies, titles, noCompany, lifecycleStages, noLifecycle,
+                leadSources, noLeadSource, firstResponseStates, noFirstResponse, warmth), false);
+        return csv;
     }
 
     /**
@@ -126,11 +139,14 @@ public class ExportService {
             MemberScope memberScope, WarmthFilter warmth) {
         requireExportStepUp();
         RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        ExportedCsv exported = recordVisibilityScopeControlAccess.withWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> exportCompaniesWithinVisibilityScope(query, industry, noIndustry, ids, memberScope, warmth, resolvedVisibilityScope));
+        auditService.recordDataExportCompleted("company", exported.rowCount(), memberScope,
+            hasFilters(query, industry, noIndustry, ids, warmth), false);
+        return exported.csv();
     }
 
-    private String exportCompaniesWithinVisibilityScope(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
+    private ExportedCsv exportCompaniesWithinVisibilityScope(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
             MemberScope memberScope, WarmthFilter warmth, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Company> companies = companyMapper.getCompaniesFiltered(
@@ -154,7 +170,7 @@ public class ExportService {
             row.add(joinTags(tags.get(c.getId())));
             writeRow(sb, row);
         }
-        return sb.toString();
+        return new ExportedCsv(sb.toString(), companies.size());
     }
 
     /**
@@ -186,7 +202,10 @@ public class ExportService {
                 product.getEffectiveStart() == null ? "" : product.getEffectiveStart().toString(),
                 product.getEffectiveEnd() == null ? "" : product.getEffectiveEnd().toString()));
         }
-        return sb.toString();
+        String csv = sb.toString();
+        auditService.recordDataExportCompleted("product", products.size(), null,
+            hasFilters(query) || !facets.equals(ProductFacetFilter.none()), false);
+        return csv;
     }
 
     /**
@@ -197,18 +216,21 @@ public class ExportService {
             List<String> statuses, List<String> risks,
             MemberScope memberScope) {
         requireExportStepUp();
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+        ExportedCsv exported = recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> exportDealsWithinDealVisibility(query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope));
+        auditService.recordDataExportCompleted("deal", exported.rowCount(), memberScope,
+            hasFilters(query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks), false);
+        return exported.csv();
     }
 
-    private String exportDealsWithinDealVisibility(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
+    private ExportedCsv exportDealsWithinDealVisibility(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
             List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
             List<String> statuses, List<String> risks,
             MemberScope memberScope) {
         List<Deal> deals = dealService.queryDealsForExport(
             query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
-        return renderDeals(deals);
+        return new ExportedCsv(renderDeals(deals), deals.size());
     }
 
     /** CSV of deals matching both a Smart Segment and the complete native list filter. */
@@ -217,18 +239,35 @@ public class ExportService {
             List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
         requireExportStepUp();
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+        ExportedCsv exported = recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> exportSegmentDealsWithinDealVisibility(definition, query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope));
+        auditService.recordDataExportCompleted("deal", exported.rowCount(), memberScope, true, true);
+        return exported.csv();
     }
 
-    private String exportSegmentDealsWithinDealVisibility(SegmentDefinition definition, String query, String currency,
+    private ExportedCsv exportSegmentDealsWithinDealVisibility(SegmentDefinition definition, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
             List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
         List<Deal> deals = dealService.querySegmentDealsForExport(
             definition, query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
-        return renderDeals(deals);
+        return new ExportedCsv(renderDeals(deals), deals.size());
+    }
+
+    private record ExportedCsv(String csv, int rowCount) {
+    }
+
+    private static boolean hasFilters(Object... values) {
+        for (Object value : values) {
+            if (value instanceof String text && !text.isBlank()
+                    || value instanceof List<?> list && !list.isEmpty()
+                    || Boolean.TRUE.equals(value)
+                    || value instanceof WarmthFilter warmth && warmth.restrictsRows()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void requireExportStepUp() {

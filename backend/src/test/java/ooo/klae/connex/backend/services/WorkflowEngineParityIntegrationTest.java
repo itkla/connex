@@ -270,6 +270,8 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
     void p5PersonSubjectFiresAndSuspendedPersonFailsClosed() {
         Person legacyActive = createPerson(createCompany());
         Person canonicalActive = createPerson(createCompany());
+        canonicalActive.setName(legacyActive.getName());
+        assertEquals(1, personMapper.update(canonicalActive));
         Person legacySuspended = createPerson(createCompany());
         Person canonicalSuspended = createPerson(createCompany());
         personMapper.updateProcessingRestrictions(
@@ -309,7 +311,14 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             entityTrigger("person.updated", "p5-stop-right", OCCURRED_AT));
 
         assertParity(legacyLive, canonicalLive);
+        assertEquals(legacyActive.getName(), legacyLive.notifications().getFirst().sourceLabel());
+        assertEquals(legacyActive.getName() + "\nParity notification body",
+            legacyLive.notifications().getFirst().body());
         assertEffectsParity(legacyStopped, canonicalStopped);
+        assertTrue(legacyStopped.notifications().isEmpty());
+        assertTrue(canonicalStopped.notifications().isEmpty());
+        assertEquals(0, legacyStopped.actionInvocationCount());
+        assertEquals(0, canonicalStopped.actionInvocationCount());
         assertEquals(List.of("failed"), legacyStopped.runOutcome().statuses());
         assertEquals(List.of("intervention_required"), canonicalStopped.runOutcome().statuses());
         assertEquals("record_unavailable", canonicalFailureCode(rule, canonicalSuspended.getId()));
@@ -541,13 +550,20 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
     void p9NotifyActionHasParity() {
         Company legacy = createCompany();
         Company canonical = createCompany();
-        assertActionParity(
+        canonical.setName(legacy.getName());
+        assertEquals(1, companyMapper.update(canonical));
+        PairedSnapshots snapshots = pairedSnapshots(
             entityRule(
                 "company", "company.updated", List.of(notifyAction("Notify parity")), null,
                 null, null, "user"),
             subject("company", legacy.getId()),
             subject("company", canonical.getId()),
             "company.updated");
+        assertParity(snapshots.legacy(), snapshots.canonical());
+        assertEquals(1, snapshots.legacy().actionInvocationCount());
+        assertEquals(legacy.getName(), snapshots.legacy().notifications().getFirst().sourceLabel());
+        assertEquals(legacy.getName() + "\nParity notification body",
+            snapshots.legacy().notifications().getFirst().body());
     }
 
     @Test
@@ -1258,7 +1274,7 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             .toList();
         List<EffectSnapshot.NotificationEffect> notificationEffects = jdbcTemplate.query(
             "SELECT recipient_id, type, category, severity, title, body, actor_label,"
-                + " source_type, source_id FROM notification"
+                + " source_type, source_id, source_label, action_url FROM notification"
                 + " WHERE workspace_id = ? AND source_type = ? AND source_id = ?"
                 + " ORDER BY title, body, id",
             (result, row) -> new EffectSnapshot.NotificationEffect(
@@ -1270,7 +1286,9 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 result.getString("body"),
                 result.getString("actor_label"),
                 result.getString("source_type"),
-                normalizedId(result.getObject("source_id", Integer.class), subject.recordId())),
+                normalizedId(result.getObject("source_id", Integer.class), subject.recordId()),
+                result.getString("source_label"),
+                normalizedNotificationUrl(result.getString("action_url"), subject)),
             workspace.getId(),
             subject.recordType(),
             subject.recordId());
@@ -1403,6 +1421,19 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
 
     private static Integer normalizedId(Integer actualId, int subjectId) {
         return actualId != null && actualId == subjectId ? NORMALIZED_SUBJECT_ID : actualId;
+    }
+
+    /** Checks the actual source destination before normalizing only the paired fixture identity. */
+    private static String normalizedNotificationUrl(String actualUrl, Subject subject) {
+        String prefix = switch (subject.recordType()) {
+            case "company" -> "/records/companies/";
+            case "person" -> "/records/contacts/";
+            case "deal" -> "/records/deals/";
+            case "task" -> "/activity/tasks?task=";
+            default -> throw new AssertionError("Unsupported parity notification subject " + subject.recordType());
+        };
+        assertEquals(prefix + subject.recordId(), actualUrl, "notification opens its source record");
+        return prefix + NORMALIZED_SUBJECT_ID;
     }
 
     private int actionInvocationCount(String recordType, int recordId) {

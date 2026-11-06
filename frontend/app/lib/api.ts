@@ -5,6 +5,7 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import { auditExportSelection, AUDIT_EXPORT_SELECTION_LIMIT } from "@/app/lib/auditExport";
 import {
     adoptBrowserAccount,
     invalidateAccountStorage,
@@ -3384,7 +3385,7 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
 
 export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
-        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany, tagIds: params.tagIds,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
@@ -3573,7 +3574,7 @@ export function bulkChangeDealStage(ids: number[], stageId: number, init: Reques
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
-        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany, tagIds: params.tagIds,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
@@ -4588,16 +4589,16 @@ export function closeDeal(id: number, payload: { won: boolean; reason?: string |
 }
 
 /** Reopens a closed deal: clears the outcome/close date and moves it off any terminal stage. */
-export function reopenDeal(id: number) {
-    return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {});
+export function reopenDeal(id: number, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {}, init);
 }
 
 /**
  * Moves a deal to a target stage and 0-based position on the Kanban board. The server renumbers
  * the affected stage column(s) so positions stay contiguous.
  */
-export function moveDeal(id: number, stageId: number, position: number) {
-    return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position });
+export function moveDeal(id: number, stageId: number, position: number, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position }, init);
 }
 
 /**
@@ -5163,6 +5164,11 @@ export function getPeopleForTag(id: number, init: RequestInit = {}) {
 export function getCompaniesForTag(id: number, init: RequestInit = {}) {
     return getJson<Types.Company[]>(`/api/tags/${id}/companies`, init);
 }
+
+/** Lists the visible deals carrying this workspace's tag. */
+export function getDealsForTag(id: number, init: RequestInit = {}) {
+    return getJson<Types.Deal[]>(`/api/tags/${id}/deals`, init);
+}
 /*
 * == Global search
 */
@@ -5428,6 +5434,14 @@ export function deleteAttachment(id: number, init: RequestInit = {}) {
 
 export function getAuditLogs(params: Types.AuditLogParams = {}, init: RequestInit = {}) {
     return getJson<Types.AuditLogEntry[]>(`/api/audit${buildQuery(params)}`, init);
+}
+
+/** Downloads only the selected loaded rows, under the existing audit authority and passkey gate. */
+export function exportAuditRowsCsv(ids: readonly number[], orgId?: number, init: RequestInit = {}) {
+    const selection = auditExportSelection(ids);
+    const path = orgId === undefined ? "/api/audit/export" : `/api/orgs/${orgId}/audit/export`;
+    return downloadCsv(`${path}${buildQuery({ ids: selection, limit: AUDIT_EXPORT_SELECTION_LIMIT, offset: 0 })}`,
+        orgId === undefined ? "audit-log.csv" : "org-audit-log.csv", init);
 }
 
 /*
@@ -5933,7 +5947,7 @@ export function getActiveWorkspaceMembers(init: RequestInit = {}): Promise<Types
 }
 
 export function addWorkspaceMember(workspaceId: number, email: string, role: Types.WorkspaceRole) {
-    return postJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members`, { email, role });
+    return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/members`, { email, role });
 }
 
 /**
@@ -7406,8 +7420,26 @@ export async function exportReportCsv(
 }
 
 export async function exportReportSnapshotCsv(id: number, snapshotId: number): Promise<void> {
-    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, {});
+    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, { method: "POST" });
     downloadBlob(blob, `report-${id}-snapshot-${snapshotId}.csv`);
+}
+
+/** Assembles a PNG, records authorized release, then downloads it under the original request identity. */
+export async function exportReportPng(
+    id: number,
+    prepare: () => Promise<Blob>,
+    filename = `report-${id}.png`,
+): Promise<void> {
+    const path = `/api/reports/${id}/export-completion`;
+    const pinned = pinWriteNow(path);
+    const blob = await withReportRequestIdentity(async (init) => {
+        const image = await prepare();
+        init.signal?.throwIfAborted();
+        await postJson<void>(path, { format: "png" }, init);
+        init.signal?.throwIfAborted();
+        return image;
+    }, pinned);
+    downloadBlob(blob, filename);
 }
 
 /*
@@ -7450,7 +7482,7 @@ export function createWorkspaceInvite(workspaceId: number, email: string, role: 
     return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/invites`, { email, role });
 }
 
-export function revokeWorkspaceInvite(workspaceId: number, inviteId: number) {
+export function revokeWorkspaceInvite(workspaceId: number, inviteId: string) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/invites/${inviteId}`);
 }
 

@@ -51,6 +51,13 @@ class MigrationLineageArchTest {
     private static final Set<Path> MIGRATION_METADATA_PATHS = Set.of(
         Path.of("control/.gitkeep"),
         Path.of("tenant/.gitkeep"));
+    private static final Pattern SOURCE_TABLE_REFERENCE = Pattern.compile(
+        "(?:FROM|JOIN)\\s+[`\"]?([a-z_]\\w*)[`\"]?(?:\\s*\\.\\s*[`\"]?([a-z_]\\w*)[`\"]?)?",
+        Pattern.CASE_INSENSITIVE);
+    private static final Set<String> SCHEMA_METADATA_TABLES = Set.of("COLUMNS", "STATISTICS", "TRIGGERS");
+    private static final Pattern SQL_STRING_LITERAL = Pattern.compile("'(?:(?:'')|(?:\\\\.)|[^'\\\\])*'");
+    private static final Pattern METADATA_SCOPE_ESCAPE = Pattern.compile(
+        ",|\\b(?:OR|XOR|UNION|FROM|JOIN)\\b|\\|\\|", Pattern.CASE_INSENSITIVE);
     private static final List<Pattern> TABLE_REFERENCES = List.of(
         Pattern.compile(
             "(?:CREATE|ALTER|DROP|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
@@ -64,9 +71,7 @@ class MigrationLineageArchTest {
         Pattern.compile(
             "(?:^|;)\\s*(?:INSERT\\s+INTO|REPLACE\\s+INTO|UPDATE(?:\\s+IGNORE)?|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
             Pattern.CASE_INSENSITIVE | Pattern.MULTILINE),
-        Pattern.compile(
-            "(?:FROM|JOIN)\\s+[`\"]?([a-z_]\\w*)",
-            Pattern.CASE_INSENSITIVE),
+        SOURCE_TABLE_REFERENCE,
         Pattern.compile(
             "REFERENCES\\s+[`\"]?(\\w+)",
             Pattern.CASE_INSENSITIVE));
@@ -195,6 +200,64 @@ class MigrationLineageArchTest {
     }
 
     @Test
+    void currentCatalogMetadataSourcesAreReadsInEitherLineage(@TempDir Path root) throws IOException {
+        for (String lineage : List.of("tenant", "control")) {
+            Path migration = root.resolve(lineage + "/R__metadata.sql");
+            Files.createDirectories(migration.getParent());
+            for (String table : SCHEMA_METADATA_TABLES) {
+                String schemaColumn = table.equals("TRIGGERS") ? "TRIGGER_SCHEMA" : "TABLE_SCHEMA";
+                String objectColumn = table.equals("TRIGGERS") ? "TRIGGER_NAME" : "TABLE_NAME";
+                Files.writeString(migration, "SELECT COUNT(*) FROM `information_schema`.`" + table
+                    + "` WHERE " + schemaColumn + " = DATABASE() AND " + objectColumn + " = 'person';");
+                assertLineagePurity(MigrationInventory.read(root), lineage,
+                    lineage.equals("tenant") ? TablePlaneRegistry.ORG_DATA_TABLES : TablePlaneRegistry.CONTROL_PLANE_TABLES);
+            }
+        }
+    }
+
+    @Test
+    void metadataReadsCannotHideCrossPlaneOrCrossCatalogSources(@TempDir Path root) throws IOException {
+        Path migration = root.resolve("tenant/R__metadata_escape.sql");
+        Files.createDirectories(migration.getParent());
+        for (String sql : List.of(
+                "SELECT * FROM information_schema.COLUMNS, app_user WHERE TABLE_SCHEMA = DATABASE();",
+                "SELECT * FROM information_schema.COLUMNS JOIN app_user ON TRUE WHERE TABLE_SCHEMA = DATABASE();",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'person'; SELECT * FROM app_user;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'person' OR TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'person' XOR TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'person' || TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ';' OR TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = \";\" OR TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = `;` OR TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'person' #;\n OR TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '--' OR TRUE;",
+                "SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'other_catalog' AND TABLE_NAME = 'person';",
+                "SELECT * FROM information_schema.COLUMNS;",
+                "SELECT * FROM information_schema.UNKNOWN_TABLE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'person';",
+                "SELECT * FROM foreign_catalog.person;",
+                "SELECT * FROM foreign_catalog.DUAL;")) {
+            Files.writeString(migration, sql);
+            assertThrows(AssertionError.class, () -> assertLineagePurity(MigrationInventory.read(root),
+                "tenant", TablePlaneRegistry.ORG_DATA_TABLES), sql);
+        }
+    }
+
+    @Test
+    void metadataWritesAreNeverPlaneExempt(@TempDir Path root) throws IOException {
+        Path migration = root.resolve("tenant/R__metadata_write.sql");
+        Files.createDirectories(migration.getParent());
+        for (String sql : List.of(
+                "UPDATE information_schema.COLUMNS SET TABLE_NAME = 'person';",
+                "DELETE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'person';",
+                "INSERT INTO information_schema.COLUMNS (TABLE_NAME) VALUES ('person');",
+                "ALTER TABLE information_schema.COLUMNS ADD escaped INT;")) {
+            Files.writeString(migration, sql);
+            assertThrows(AssertionError.class, () -> assertLineagePurity(MigrationInventory.read(root),
+                "tenant", TablePlaneRegistry.ORG_DATA_TABLES), sql);
+        }
+    }
+
+    @Test
     void unapprovedDirectoriesCannotMasqueradeAsHistoricalRoot(@TempDir Path root) throws IOException {
         Path escape = root.resolve("unapproved/nested/V1__escape.sql");
         Files.createDirectories(escape.getParent());
@@ -234,6 +297,13 @@ class MigrationLineageArchTest {
             for (Pattern pattern : TABLE_REFERENCES) {
                 Matcher matcher = pattern.matcher(sql);
                 while (matcher.find()) {
+                    if (pattern == SOURCE_TABLE_REFERENCE && matcher.group(2) != null) {
+                        if (!currentCatalogMetadataRead(sql, matcher)) {
+                            violations.add(migrations.root().relativize(file) + " touches "
+                                + matcher.group(1) + "." + matcher.group(2));
+                        }
+                        continue;
+                    }
                     for (int group = 1; group <= matcher.groupCount(); group++) {
                         String table = matcher.group(group);
                         if (table == null || SQL_NOISE.contains(table.toUpperCase(Locale.ROOT))) {
@@ -250,6 +320,26 @@ class MigrationLineageArchTest {
             "Migrations in db/migration/" + lineage + " may only touch " + lineage + "-plane tables "
                 + "(TablePlaneRegistry); move the statement to the other lineage or revisit the table's "
                 + "placement on #440: " + violations);
+    }
+
+    private static boolean currentCatalogMetadataRead(String sql, Matcher source) {
+        String table = source.group(2).toUpperCase(Locale.ROOT);
+        if (!source.group(1).equalsIgnoreCase("information_schema") || !SCHEMA_METADATA_TABLES.contains(table)) {
+            return false;
+        }
+        String remaining = SQL_STRING_LITERAL.matcher(sql.substring(source.end()))
+            .replaceAll(literal -> " ".repeat(literal.group().length()));
+        int end = remaining.indexOf(';');
+        String predicate = end < 0 ? remaining : remaining.substring(0, end);
+        String rawPredicate = sql.substring(source.end(), source.end() + predicate.length());
+        if (predicate.indexOf('\'') >= 0 || rawPredicate.indexOf('"') >= 0 || rawPredicate.indexOf('`') >= 0
+                || rawPredicate.indexOf('#') >= 0 || rawPredicate.indexOf('\\') >= 0) {
+            return false;
+        }
+        String schemaColumn = table.equals("TRIGGERS") ? "TRIGGER_SCHEMA" : "TABLE_SCHEMA";
+        return Pattern.compile("\\s+WHERE\\s+" + schemaColumn
+            + "\\s*=\\s*DATABASE\\s*\\(\\s*\\)\\s+AND\\s+", Pattern.CASE_INSENSITIVE)
+            .matcher(predicate).lookingAt() && !METADATA_SCOPE_ESCAPE.matcher(predicate).find();
     }
 
     private record MigrationInventory(Path root, List<Path> resources) {

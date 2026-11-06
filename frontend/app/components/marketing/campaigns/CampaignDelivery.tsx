@@ -25,6 +25,8 @@ import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetr
 import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
 import SendStatusBadge from "@/app/components/marketing/campaigns/SendStatusBadge";
 import NewMessageDialog from "@/app/components/marketing/campaigns/NewMessageDialog";
+import CampaignRevisionSheet from "@/app/components/marketing/campaigns/CampaignRevisionSheet";
+import ConfirmDiscardDialog from "@/app/components/ConfirmDiscardDialog";
 import { cn } from "@/lib/utils";
 import {
     ApiError,
@@ -41,6 +43,7 @@ import {
     type CampaignMessage,
     type CampaignMessageLocale,
     type CampaignMessagePayload,
+    type CampaignMessageRevision,
     type CampaignSend,
 } from "@/app/lib/types";
 import { canCreateSend, type CampaignAccess } from "@/app/lib/campaignAccess";
@@ -112,6 +115,8 @@ export default function CampaignDelivery({
     );
     const [revision, setRevision] = useState<RevisionDraft>(EMPTY_REVISION_DRAFT);
     const [isSavingRevision, setIsSavingRevision] = useState(false);
+    const [inspectedRevision, setInspectedRevision] = useState<CampaignMessageRevision | null>(null);
+    const [pendingRevisionDraft, setPendingRevisionDraft] = useState<RevisionDraft | null>(null);
 
     const [sendSnapshot, setSendSnapshot] = useState<string>("");
     const [sendMessageId, setSendMessageId] = useState<string>("");
@@ -213,13 +218,29 @@ export default function CampaignDelivery({
             setMessages((prev) =>
                 prev.map((message) => (message.id === updated.id ? updated : message)),
             );
-            setRevision((prev) => ({ ...EMPTY_REVISION_DRAFT, locale: prev.locale }));
             toastSuccess(t("revisionSaved"));
         } catch (err) {
             showMessageApiError(err, "revisionSaveFailed");
         } finally {
             setIsSavingRevision(false);
         }
+    };
+
+    const startFromRevision = (saved: CampaignMessageRevision) => {
+        if (saved.locale !== "en" && saved.locale !== "ja") return;
+        const draft: RevisionDraft = {
+            locale: saved.locale,
+            subject: saved.subject ?? "",
+            bodyHtml: saved.bodyHtml ?? "",
+            bodyText: saved.bodyText ?? "",
+        };
+        const hasContent = revision.subject !== "" || revision.bodyHtml !== "" || revision.bodyText !== "";
+        if (hasContent && JSON.stringify(draft) !== JSON.stringify(revision)) {
+            setPendingRevisionDraft(draft);
+            return;
+        }
+        setRevision(draft);
+        setInspectedRevision(null);
     };
 
     const changeSendMessage = (value: string) => {
@@ -421,12 +442,10 @@ export default function CampaignDelivery({
                                                 <Label htmlFor="revision-locale">{t("locale")}</Label>
                                                 <Select
                                                     value={revision.locale}
-                                                    onValueChange={(value) =>
-                                                        setRevision((prev) => ({
-                                                            ...prev,
-                                                            locale: value as CampaignMessageLocale,
-                                                        }))
-                                                    }
+                                                    onValueChange={(value) => {
+                                                        if (value !== "en" && value !== "ja") return;
+                                                        setRevision((prev) => ({ ...prev, locale: value }));
+                                                    }}
                                                 >
                                                     <SelectTrigger id="revision-locale" className="w-full">
                                                         <SelectValue />
@@ -474,9 +493,6 @@ export default function CampaignDelivery({
                                                     className="min-h-40 resize-y font-mono"
                                                     placeholder={t("bodyHtmlPlaceholder")}
                                                 />
-                                                <p className="text-xs text-muted-foreground">
-                                                    {t("unsubscribeHint")}
-                                                </p>
                                             </div>
                                         )}
                                         <div className="grid gap-1.5">
@@ -503,6 +519,7 @@ export default function CampaignDelivery({
                                                 <p className="text-xs text-muted-foreground">{t("smsHint")}</p>
                                             )}
                                         </div>
+                                        <p className="text-xs text-muted-foreground">{t("supportedTokens")}</p>
                                         <div className="flex justify-end">
                                             <Button
                                                 variant="brand"
@@ -540,7 +557,7 @@ export default function CampaignDelivery({
                                             {selectedMessage.revisions.map((rev) => (
                                                 <li
                                                     key={rev.version}
-                                                    className="flex items-center justify-between gap-3 py-2.5"
+                                                    className="flex flex-wrap items-center justify-between gap-3 py-2.5"
                                                 >
                                                     <div className="flex min-w-0 items-center gap-3">
                                                         <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground ring-1 ring-inset ring-border">
@@ -556,6 +573,11 @@ export default function CampaignDelivery({
                                                     <span className="shrink-0 text-xs text-muted-foreground">
                                                         {formatDate(rev.createdAt, locale, timeZone)}
                                                     </span>
+                                                    <Button variant="outline" size="inline"
+                                                        aria-label={t("inspectRevision", { version: rev.version })}
+                                                        onClick={() => setInspectedRevision(rev)}>
+                                                        {t("inspect")}
+                                                    </Button>
                                                 </li>
                                             ))}
                                         </ul>
@@ -755,6 +777,9 @@ export default function CampaignDelivery({
                                         <div className="flex flex-wrap items-center justify-between gap-3">
                                             <div className="flex min-w-0 flex-wrap items-center gap-3">
                                                 <SendStatusBadge status={send.status} />
+                                                {send.contentRefused && (
+                                                    <Badge variant="destructive">{st("contentRefusedStatus")}</Badge>
+                                                )}
                                                 {!isAudienceSend && (
                                                     <Badge variant="outline">{st("workflowOrigin")}</Badge>
                                                 )}
@@ -770,6 +795,9 @@ export default function CampaignDelivery({
                                             </span>
                                         </div>
 
+                                        {send.contentRefused && (
+                                            <p role="status" className="text-sm text-destructive">{st("contentRefused")}</p>
+                                        )}
                                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
                                             <CampaignCounter
                                                 label={st("total")}
@@ -837,6 +865,21 @@ export default function CampaignDelivery({
             </Panel>
             </DetailSectionState>
 
+            {inspectedRevision && !messagesUnavailable && <CampaignRevisionSheet
+                revision={inspectedRevision}
+                isSms={isSmsMessage}
+                onClose={() => setInspectedRevision(null)}
+                onUse={canManage && !isSavingRevision ? startFromRevision : undefined}
+            />}
+            {pendingRevisionDraft && !messagesUnavailable && <ConfirmDiscardDialog
+                open={pendingRevisionDraft !== null}
+                onKeepEditing={() => setPendingRevisionDraft(null)}
+                onDiscard={() => {
+                    if (pendingRevisionDraft) setRevision(pendingRevisionDraft);
+                    setPendingRevisionDraft(null);
+                    setInspectedRevision(null);
+                }}
+            />}
             <NewMessageDialog
                 open={dialogOpen}
                 onOpenChange={setDialogOpen}

@@ -6,6 +6,7 @@
         "panelTitle": "リスクの兆候",
         "unavailable": "リスクの根拠を一時的に取得できません。",
         "clear": "この案件に現在のリスクの兆候はありません。",
+        "noHistoryStakeholders": "やり取りの履歴がまだない連絡先がいます。最初のやり取りを記録してみましょう。",
         "assessedAt": "評価日時: {date}",
         "factorCloseOverdue": "予定成約日を{days}日超過しています",
         "factorClosingSoonQuiet": "あと{days}日で成約予定ですが、最近の活動がありません",
@@ -128,7 +129,9 @@
         "delete": "削除",
         "openDealPage": "案件ページを開く",
         "statusOpen": "オープン",
-        "statusClosed": "決着"
+        "statusClosed": "決着",
+        "statusWon": "受注",
+        "statusLost": "失注"
     },
     "DealsLifecycleProgress": {
         "todayDay": "本日 · {totalDays} 日中 {daysOpen} 日目",
@@ -185,7 +188,29 @@
         "a11yLifted": "案件「{name}」を持ち上げました。",
         "a11yOver": "案件「{name}」が「{column}」列の上にあります。",
         "a11yDropped": "案件「{name}」を「{column}」列にドロップしました。",
-        "a11yCancelled": "案件「{name}」の移動をキャンセルしました。"
+        "a11yCancelled": "案件「{name}」の移動をキャンセルしました。",
+        "moveCard": "案件「{name}」を移動",
+        "outcome": {
+            "open": "進行中",
+            "won": "受注",
+            "lost": "失注"
+        },
+        "confirmTitle": "「{column}」に移動しますか？",
+        "confirmDescription": "「{name}」を「{column}」に移動すると、結果が「{outcome}」となり、案件が完了します。後で元のステージに戻しても、「再開」を選ぶまでこの結果は変わりません。",
+        "cancelMove": "キャンセル",
+        "confirmMove": "移動して完了",
+        "moved": "「{name}」のステージは「{column}」、位置は{position}番目、結果は「{outcome}」です。",
+        "movedRetained": "「{name}」を「{column}」の{position}番目に移動しました。結果は引き続き「{outcome}」です。ステージを移動しても案件は再開されません。",
+        "moveCancelled": "移動をキャンセルしました。「{name}」のステージは「{column}」、位置は{position}番目、結果は「{outcome}」のままです。",
+        "reopen": "再開",
+        "reopenHint": "案件を進行中に戻すには「再開」を選んでください。",
+        "reopenFailed": "案件を再開できませんでした",
+        "a11yConfirmMove": "「{name}」を「{column}」に移動しようとしています。結果は「{outcome}」になります。ダイアログで確定またはキャンセルしてください。",
+        "a11yMoveRequested": "「{name}」を「{column}」に移動しようとしています。結果は「{outcome}」のままです。",
+        "a11yRestored": "移動を確認できませんでした。案件「{name}」を「{column}」の{position}番目に表示しています。",
+        "confirmValueLost": "実績売上は{amount}にリセットされます。現在の表示額は{current}です。以前の受注時の金額は消去されます。再び受注にすると、その時点で保存されている金額から新たに計算されます。",
+        "confirmValueFrozen": "現在表示されている実績売上は{amount}です。受注状態が続いている場合は、受注時の金額が維持され、再計算されません。保存前に結果や金額が変更された場合は、その最新の状態に基づいて処理されるため、この画面では確定額を確認できません。",
+        "confirmValueFreshWin": "現在表示されている案件金額は{current}です。受注にすると、保存時点の明細合計（明細がない場合は案件金額）が{currency}の実績売上として記録されます。確定額は保存前のこの画面では確認できません。移動の保存時に計算・確定され、その後に案件や明細の金額を変更しても実績売上は再計算されません。"
     },
     "DealsBrowser": {
         "columnClosedAt": "決着日",
@@ -610,5 +635,28 @@
             "won": "結果",
             "riskExcluded": "案件リスク評価"
         }
+    },
+    "DealStakeholders": {
+        "title": "関係者",
+        "add": "連絡先を追加",
+        "empty": "関係者がまだ登録されていません。この案件に関わる連絡先を追加できます。",
+        "editRole": "役割を編集",
+        "editRoleFor": "{name}の役割を編集",
+        "remove": "解除",
+        "removeFor": "この案件から{name}を解除",
+        "description": "連絡先を選び、この案件での役割を入力してください。",
+        "contact": "連絡先",
+        "chooseContact": "連絡先を検索",
+        "role": "役割（任意）",
+        "rolePlaceholder": "例：推進者、購買担当者",
+        "save": "保存",
+        "cancel": "キャンセル",
+        "saved": "関係者を保存しました",
+        "removed": "関係者を解除しました",
+        "saveFailed": "関係者を保存できませんでした",
+        "removeFailed": "関係者を解除できませんでした",
+        "searchFailed": "連絡先を読み込めませんでした。もう一度検索してください。",
+        "warmthUnavailable": "温度感を取得できません",
+        "contactRequired": "追加する連絡先を選択してください。"
     }
 }

@@ -1516,8 +1516,8 @@ public class WorkspaceService {
      * Whether the user holds any membership row in the workspace — {@code active}
      * or {@code pending}. Unlike {@link #isMember}, this does not gate on
      * acceptance, so it must never be used for auth/RBAC; it exists for surfaces
-     * that address invited-but-not-yet-joined members, such as @-mention
-     * references and their notifications.
+     * that deliver already-authored notifications to invited-but-not-yet-joined members.
+     * It must not authorize profile disclosure or new member references.
      *
      * @param workspaceId the workspace to check within
      * @param userId the user to check
@@ -2151,7 +2151,7 @@ public class WorkspaceService {
 
     private MemberDto getLockedRoleMutationTarget(int workspaceId, int targetUserId) {
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
-        if (target == null) {
+        if (target == null || !"active".equals(target.getStatus())) {
             throw new ResourceNotFoundException("User is not a member of this workspace");
         }
         return target;
@@ -2170,6 +2170,54 @@ public class WorkspaceService {
             (scopedWorkspaceId, scopedOrgId) -> {
                 removeMemberInTransaction(
                     scopedWorkspaceId, scopedOrgId, actorId, targetUserId);
+                return true;
+            });
+    }
+
+    /** Supersedes only an existing invitation in this workspace, without resolving accounts. */
+    void revokePendingInvitationForEmail(int workspaceId, int actorId, String email) {
+        String reference = workspaceMapper.findPendingInvitationReferenceByEmail(workspaceId, email);
+        if (reference != null) {
+            revokePendingInvitation(workspaceId, actorId, reference);
+        }
+    }
+
+    /**
+     * Revokes a historical pending invitation by its opaque generation handle. The pending state
+     * and generation are rechecked after the normal removal locks, so acceptance or re-invitation
+     * cannot turn a stale revocation into removal of an active or replacement membership.
+     */
+    public void revokePendingInvitation(int workspaceId, int actorId, String reference) {
+        membershipRemovalTransaction.execute(
+            workspaceId,
+            actorId,
+            () -> authorizeMemberRemovalBeforeRouting(workspaceId, actorId),
+            (scopedWorkspaceId, scopedOrgId) -> {
+                sessionSecurityService.requireRecentAuthentication(actorId);
+                Integer targetUserId = workspaceMapper.findPendingInvitationUserId(workspaceId, reference);
+                if (targetUserId == null) {
+                    throw new ResourceNotFoundException("Invite not found");
+                }
+                LockedRoleMutation locks = lockRoleMutation(
+                    workspaceId, actorId, targetUserId, Permission.MEMBER_MANAGE,
+                    null, null, targetUserId);
+                if (!"pending".equals(locks.targetMembership().getStatus())
+                        || !Objects.equals(targetUserId,
+                            workspaceMapper.findPendingInvitationUserId(workspaceId, reference))) {
+                    throw new ResourceNotFoundException("Invite not found");
+                }
+                if ("owner".equals(locks.targetMembership().getRole())) {
+                    requireLockedRole(locks.actorMembership(), Role.OWNER);
+                }
+                var references = userOffboardingService.captureDepartureReferences(workspaceId, targetUserId);
+                userOffboardingService.assertCanDepart(workspaceId, targetUserId);
+                userOffboardingService.detachMemberContent(workspaceId, targetUserId);
+                workspaceMapper.removeMember(workspaceId, targetUserId);
+                notificationStateVersionService.markChanged(targetUserId);
+                auditService.recordScoped(
+                    "workspace.invite.revoke", "workspace", workspaceId, workspaceId, scopedOrgId,
+                    null, "Revoked invitation", null);
+                userOffboardingService.cleanupDepartureReferences(references);
                 return true;
             });
     }
@@ -2237,8 +2285,8 @@ public class WorkspaceService {
         workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
         notificationStateVersionService.markChanged(target.getId());
         notifyJoinRequest(workspaceId, target.getId(), actor);
-        auditService.record("workspace.member.invite", "workspace", workspaceId, target.getDisplayName(),
-                "Invited " + target.getDisplayName() + " to join", null);
+        auditService.record("workspace.member.invite", "workspace", workspaceId, null,
+                "Created pending invitation", null);
         return workspaceMapper.getMember(workspaceId, target.getId());
     }
 
