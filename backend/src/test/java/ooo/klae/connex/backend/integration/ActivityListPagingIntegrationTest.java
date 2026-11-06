@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -8,9 +10,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import jakarta.servlet.Filter;
@@ -28,12 +33,15 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.PersonReferenceDto;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -56,6 +64,7 @@ class ActivityListPagingIntegrationTest {
     @Autowired private ooo.klae.connex.backend.mappers.DealMapper dealMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private ObjectMapper json;
     @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
     private MockMvc mvc;
     private Workspace workspace;
@@ -307,16 +316,26 @@ class ActivityListPagingIntegrationTest {
             jdbc.update("INSERT INTO person_share(person_id, workspace_id, granted_by) VALUES (?, ?, ?)",
                 contact.getId(), workspace.getId(), actor.getId());
         }
-        jdbc.update("UPDATE person SET archived_at = CURRENT_TIMESTAMP WHERE id = ?", archived.getId());
+        assertEquals(1, jdbc.update("UPDATE person SET archived_at = CURRENT_TIMESTAMP WHERE id = ?", archived.getId()));
+        Integer viewerOrgId = jdbc.queryForObject("SELECT org_id FROM workspace WHERE id = ?", Integer.class, workspace.getId());
+        Integer alienOrgId = jdbc.queryForObject("SELECT org_id FROM workspace WHERE id = ?", Integer.class, alienWorkspace.getId());
+        assertEquals(workspace.getOrgId(), viewerOrgId);
+        assertEquals(alienOrg.getId(), alienOrgId);
+        assertNotEquals(viewerOrgId, alienOrgId);
+        assertNotNull(jdbc.queryForObject("SELECT archived_at FROM person WHERE id = ?", LocalDateTime.class, archived.getId()));
+        assertEquals(company.getId(), jdbc.queryForObject("SELECT company_id FROM person WHERE id = ?", Integer.class, person.getId()));
         sqlSession.clearCache();
 
-        mvc.perform(get("/api/persons/references").session(login()).header("X-Workspace-Id", workspace.getId())
+        var response = mvc.perform(get("/api/persons/references").session(login()).header("X-Workspace-Id", workspace.getId())
                 .param("ids", List.of(person, hidden, shared, archived, alien).stream()
                     .map(contact -> String.valueOf(contact.getId())).toArray(String[]::new)))
             .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2))
-            .andExpect(jsonPath("$[?(@.id == " + person.getId() + ")].companyId").value(List.of(company.getId())))
-            .andExpect(jsonPath("$[?(@.id == " + shared.getId() + ")].id").value(List.of(shared.getId())))
-            .andExpect(jsonPath("$[?(@.id == " + shared.getId() + ")].companyId").isEmpty());
+            .andReturn().getResponse();
+        List<PersonReferenceDto> references = json.readValue(response.getContentAsString(), new TypeReference<>() {});
+        var referencesById = references.stream().collect(Collectors.toMap(PersonReferenceDto::id, reference -> reference));
+        assertEquals(Set.of(person.getId(), shared.getId()), referencesById.keySet());
+        assertEquals(new PersonReferenceDto(person.getId(), person.getName(), company.getId()), referencesById.get(person.getId()));
+        assertEquals(new PersonReferenceDto(shared.getId(), shared.getName(), null), referencesById.get(shared.getId()));
         mvc.perform(get("/api/persons/references").session(login()).header("X-Workspace-Id", sibling.getId())
                 .param("ids", String.valueOf(person.getId())))
             .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
