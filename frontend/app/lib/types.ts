@@ -1629,9 +1629,10 @@ export type DealStageHistory = {
     achievedAt: string;
 };
 
+/** Pipeline creation draft; stage client ids are editor keys omitted from requests. */
 export type CreatePipelinePayload = {
     name?: string;
-    stages?: { name: string; success?: boolean; failure?: boolean }[];
+    stages?: { name: string; success?: boolean; failure?: boolean; clientId?: string }[];
 };
 
 export type CreateStagePayload = {

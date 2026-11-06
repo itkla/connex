@@ -1,6 +1,6 @@
 'use client';
 
-import { Dispatch, FormEvent, SetStateAction, WheelEvent, useEffect, useRef } from 'react';
+import { Dispatch, FormEvent, SetStateAction, WheelEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
@@ -26,6 +26,8 @@ import { type Company, type CreateDealPayload, type Pipeline, type Stage } from 
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import DealPipelineSetup from '@/app/components/records/deals/DealPipelineSetup';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError } from '@/app/lib/toast';
 import {
     TagIcon,
@@ -71,6 +73,7 @@ type Props = {
     setPayload: Dispatch<SetStateAction<CreateDealPayload>>;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
+    onPipelineCreated?: (pipeline: Pipeline, stages: Stage[]) => void;
     isCreating: boolean;
     isSuccess?: boolean;
     /** Whether the payload has diverged from its seeded baseline; drives the accidental-discard guard. */
@@ -88,6 +91,7 @@ export default function NewDealDialog({
     setPayload,
     pipelines,
     stagesByPipeline,
+    onPipelineCreated,
     isCreating,
     isSuccess = false,
     isDirty = false,
@@ -116,6 +120,7 @@ export default function NewDealDialog({
                         setPayload={setPayload}
                         pipelines={pipelines}
                         stagesByPipeline={stagesByPipeline}
+                        onPipelineCreated={onPipelineCreated}
                         isCreating={isCreating}
                         isSuccess={isSuccess}
                         selectedCompany={selectedCompany}
@@ -160,6 +165,7 @@ type NewDealFormProps = {
     setPayload: Dispatch<SetStateAction<CreateDealPayload>>;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
+    onPipelineCreated?: (pipeline: Pipeline, stages: Stage[]) => void;
     isCreating: boolean;
     isSuccess?: boolean;
     /** Selected company record supplied by a parent that already resolved it. */
@@ -179,6 +185,7 @@ type NewDealFieldsProps = {
     clearError: (key: string) => void;
     companySearch: ReturnType<typeof useCompanySearch>;
     duplicatePreflight: ReturnType<typeof useDuplicatePreflight>;
+    pipelineSetup: ReactNode;
 };
 
 function NewDealFields({
@@ -190,6 +197,7 @@ function NewDealFields({
     clearError,
     companySearch,
     duplicatePreflight,
+    pipelineSetup,
 }: NewDealFieldsProps) {
     const t = useTranslations('DealsNewDialog');
     const selectedPipeline = pipelines.find((pipeline) => pipeline.id === payload.pipeline) ?? null;
@@ -369,6 +377,8 @@ function NewDealFields({
                 </div>
             </div>
 
+            {pipelineSetup}
+
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                 <Label htmlFor="deal-company">{t('company')}</Label>
                 <Combobox
@@ -437,6 +447,7 @@ export function NewDealForm({
     setPayload,
     pipelines,
     stagesByPipeline,
+    onPipelineCreated,
     isCreating,
     isSuccess = false,
     selectedCompany,
@@ -447,6 +458,13 @@ export function NewDealForm({
     const t = useTranslations('DealsNewDialog');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const submissionPendingRef = useRef(false);
+    const { activeWorkspaceId } = useWorkspace();
+    const [createdPipeline, setCreatedPipeline] = useState<{ workspaceId: number | null; pipeline: Pipeline; stages: Stage[] } | null>(null);
+    if (createdPipeline && createdPipeline.workspaceId !== activeWorkspaceId) setCreatedPipeline(null);
+    const availablePipelines = createdPipeline && !pipelines.some((pipeline) => pipeline.id === createdPipeline.pipeline.id)
+        ? [...pipelines, createdPipeline.pipeline] : pipelines;
+    const availableStages = createdPipeline
+        ? { ...stagesByPipeline, [createdPipeline.pipeline.id]: createdPipeline.stages } : stagesByPipeline;
     const companySearch = useCompanySearch(
         active,
         [payload.company],
@@ -523,12 +541,23 @@ export function NewDealForm({
                     <NewDealFields
                         payload={payload}
                         setPayload={setPayload}
-                        pipelines={pipelines}
-                        stagesByPipeline={stagesByPipeline}
+                        pipelines={availablePipelines}
+                        stagesByPipeline={availableStages}
                         fieldErrors={fieldErrors}
                         clearError={clearError}
                         companySearch={companySearch}
                         duplicatePreflight={duplicatePreflight}
+                        pipelineSetup={
+                            <DealPipelineSetup key={activeWorkspaceId} needed={availablePipelines.length === 0} requestInit={requestInit} onCreated={(pipeline, stages) => {
+                                setCreatedPipeline({ workspaceId: activeWorkspaceId, pipeline, stages });
+                                onPipelineCreated?.(pipeline, stages);
+                                const firstOpenStage = [...stages].sort((a, b) => a.position - b.position)
+                                    .find((stage) => !stage.success && !stage.failure);
+                                setPayload((previous) => ({ ...previous, pipeline: pipeline.id, stage: firstOpenStage?.id ?? 0 }));
+                                clearError('pipeline');
+                                clearError('stage');
+                            }} />
+                        }
                     />
 
                     <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '340ms' }}>
@@ -536,7 +565,7 @@ export function NewDealForm({
                         <Button
                             type="submit"
                             variant="brand"
-                            disabled={isCreating || isSuccess || duplicatePreflight.blocked}
+                            disabled={isCreating || isSuccess || duplicatePreflight.blocked || availablePipelines.length === 0}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}

@@ -1,5 +1,7 @@
 'use client';
 
+import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
+
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -114,9 +116,13 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     const showApiError = useApiErrorToast('Actions');
     const restoring = initialDraft !== undefined && initialDraftGeneration !== undefined;
 
-    const [loaded, setLoaded] = useState(false);
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-    const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
+    const [loadedScope, setLoadedScope] = useState<object | null>(null);
+    const { scope: pipelineScope, pipelines, stagesByPipeline, setPipelines, setStagesByPipeline } = usePipelineChoices();
+    const loaded = loadedScope === pipelineScope;
+    const handlePipelineCreated = useCallback((pipeline: Pipeline, stages: Stage[]) => {
+        setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+        setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+    }, [setPipelines, setStagesByPipeline]);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
     const stagesByPipelineRef = useRef<Record<number, Stage[]>>({});
     useEffect(() => {
@@ -142,8 +148,9 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     useEffect(() => {
         if (!open || loaded) return;
         let cancelled = false;
+        const origin = workspacePinnedRequest(activeWorkspaceId, requestInit);
         void (async () => {
-            const nextPipelines = await getPipelines(requestInit).catch((error: unknown): Pipeline[] => {
+            const nextPipelines = await getPipelines(origin).catch((error: unknown): Pipeline[] => {
                 if (restoring) throw error;
                 return [];
             });
@@ -153,7 +160,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                 nextPipelines.map(
                     async (p) => [
                         p.id,
-                        await getStagesByPipelineId(p.id, requestInit).catch((error: unknown): Stage[] => {
+                        await getStagesByPipelineId(p.id, origin).catch((error: unknown): Stage[] => {
                             if (requestInit?.signal?.aborted) throw error;
                             return [];
                         }),
@@ -174,7 +181,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                 const stage = stageExists ? initialDraft.stage : null;
                 const companies = initialDraft.company === null
                     ? []
-                    : await getCompaniesByIds([initialDraft.company], requestInit);
+                    : await getCompaniesByIds([initialDraft.company], origin);
                 if (cancelled || requestInit?.signal?.aborted) return;
                 const restoredCompany = companies.find((company) => company.id === initialDraft.company) ?? null;
                 const companyExists = initialDraft.company === null || restoredCompany !== null;
@@ -186,11 +193,11 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                 if (!pipelineExists || !stageExists || !companyExists) {
                     toastWarn(t('feedback.restoredDealReferenceUnavailable'));
                 }
-                setLoaded(true);
+                setLoadedScope(pipelineScope);
                 setRestorationReady(true);
                 return;
             }
-            setLoaded(true);
+            setLoadedScope(pipelineScope);
             const pipelineId = defaults?.pipelineId;
             if (pipelineId && nextStages[pipelineId]?.length) {
                 setPayload((prev) =>
@@ -205,7 +212,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
         return () => {
             cancelled = true;
         };
-    }, [open, loaded, defaults?.pipelineId, initialDraft, onOpenChange, requestInit, restoring, t]);
+    }, [pipelineScope, activeWorkspaceId, setPipelines, setStagesByPipeline, open, loaded, defaults?.pipelineId, initialDraft, onOpenChange, requestInit, restoring, t]);
 
     useEffect(() => {
         if (!open || restoring) return;
@@ -221,7 +228,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
             setSucceeded(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [open, defaults?.companyId, defaults?.pipelineId, restoring]);
+    }, [activeWorkspaceId, open, defaults?.companyId, defaults?.pipelineId, restoring]);
 
     const seedPipelineId = defaults?.pipelineId ?? 0;
     const seededBaseline: CreateDealPayload = {
@@ -330,6 +337,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                 setPayload={setPayload}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onPipelineCreated={handlePipelineCreated}
                 isCreating={creating}
                 isSuccess={succeeded}
                 selectedCompany={selectedCompany}
@@ -347,6 +355,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
             setPayload={setPayload}
             pipelines={pipelines}
             stagesByPipeline={stagesByPipeline}
+            onPipelineCreated={handlePipelineCreated}
             isCreating={creating}
             isSuccess={succeeded}
             isDirty={isDirty}
