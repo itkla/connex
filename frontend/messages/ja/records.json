@@ -1,4 +1,13 @@
 {
+  "DealCurrencyScope": {
+    "title": "表示通貨",
+    "dashboardBasis": "金額の集計・グラフは{currency}の案件のみが対象です",
+    "dealsBasis": "{currency}の案件と集計値を表示しています",
+    "widgetBasis": "{currency}の案件のみ",
+    "dashboardExcluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は金額の集計・グラフの対象外です。通貨を切り替えると確認できます。}}",
+    "excluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は表示・集計の対象外です。通貨を切り替えると確認できます。}}",
+    "viewDeals": "{currency}の案件を表示"
+  },
   "RecordListState": {
     "title": "一覧を読み込めませんでした",
     "body": "保存済みのデータは変更されていません。もう一度お試しください。",

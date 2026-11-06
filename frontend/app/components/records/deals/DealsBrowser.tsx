@@ -51,7 +51,7 @@ import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { usePermission } from '@/app/hooks/usePermissions';
-import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
+import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl, writeOwnedParamsToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
@@ -62,6 +62,7 @@ import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import DealsQueryUrlSync from '@/app/components/records/deals/DealsQueryUrlSync';
+import DealCurrencyScope from './DealCurrencyScope';
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import DealEditConflictDialog from './DealEditConflictDialog';
 import { reconcileSavedDealDraft, submitDealDraftUpdates, submitInlineDealValue, toDealDraft as toDraft } from './dealEditConflict';
@@ -182,6 +183,8 @@ const DEAL_SORT_TOKENS: Record<string, string> = {
     status: 'status',
     updatedAt: 'updated_at',
 };
+
+const DEAL_CURRENCY_URL_KEYS = ['currency'] as const;
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
 const EMPTY_DEAL_DRAFT: CreateDealPayload = {
@@ -503,13 +506,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         }
         return best;
     }, [dealMetrics]);
-    const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
-    const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
-        ? selectedCurrency
-        : dominantCurrency;
+    const activeCurrency = searchParams.get('currency') || dominantCurrency;
     const displayCurrency = activeCurrency ?? 'USD';
-    const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
-    const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
+    const [revenueResult, setRevenueResult] = useState<{ currency: string; data: DealRevenueSeries } | null>(null);
+    const [stageResult, setStageResult] = useState<{ currency: string; data: DealStageDistribution[] } | null>(null);
+    const revenueSeries = revenueResult?.currency === activeCurrency ? revenueResult.data : { closed: [], projected: [] };
+    const stageDistribution = stageResult?.currency === activeCurrency ? stageResult.data : [];
     useEffect(() => {
         let cancelled = false;
         if (!activeCurrency) {
@@ -518,11 +520,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             };
         }
         getDealRevenueTimeseries(activeCurrency, timezone)
-            .then((series) => { if (!cancelled) setRevenueSeries(series); })
-            .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
+            .then((series) => { if (!cancelled) setRevenueResult({ currency: activeCurrency, data: series }); })
+            .catch(() => { if (!cancelled) setRevenueResult(null); });
         getDealStageDistribution(activeCurrency)
-            .then((distribution) => { if (!cancelled) setStageDistribution(distribution); })
-            .catch(() => { if (!cancelled) setStageDistribution([]); });
+            .then((distribution) => { if (!cancelled) setStageResult({ currency: activeCurrency, data: distribution }); })
+            .catch(() => { if (!cancelled) setStageResult(null); });
         return () => { cancelled = true; };
     }, [activeCurrency, dataRevision, timezone]);
 
@@ -552,6 +554,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         storageKey: 'deals:view',
         searchFields,
         restoreUrlQuery: true,
+        ownedUrlKeys: DEAL_CURRENCY_URL_KEYS,
     });
     const returnSelection = useRecordReturnSelection(
         'deals',
@@ -796,11 +799,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [allMatchingActive, clearSelection, sortKey, sortDir]);
     const changeCurrency = useCallback((currency: string) => {
         clearSelection();
-        setRevenueSeries({ closed: [], projected: [] });
-        setStageDistribution([]);
-        setSelectedCurrency(currency);
+        setRevenueResult(null);
+        setStageResult(null);
+        writeOwnedParamsToUrl(pathname, { currency, page: undefined });
         dispatchViewState({ type: 'resetPage' });
-    }, [clearSelection]);
+    }, [clearSelection, pathname]);
     const changeDefinition = useCallback((nextDefinition: SegmentDefinition) => {
         clearSelection();
         dispatchViewState({ type: 'definitionChanged', definition: nextDefinition });
@@ -808,8 +811,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const refreshRecords = useCallback(() => {
         clearSelection();
         setDealMetrics(EMPTY_DEAL_METRICS);
-        setRevenueSeries({ closed: [], projected: [] });
-        setStageDistribution([]);
+        setRevenueResult(null);
+        setStageResult(null);
         refreshData();
     }, [clearSelection, refreshData]);
 
@@ -1440,30 +1443,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         title={t('title')}
                         actions={
                             <>
-                                {currencyCounts.size > 1 && (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <button
-                                                type="button"
-                                                aria-label={t('currency')}
-                                                className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/80"
-                                            >
-                                                {displayCurrency}
-                                                <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-                                            </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            {Array.from(currencyCounts.entries())
-                                                .sort((a, b) => b[1] - a[1])
-                                                .map(([c, n]) => (
-                                                    <DropdownMenuItem key={c} onSelect={() => changeCurrency(c)}>
-                                                        <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
-                                                        <span className="ml-auto text-xs text-muted-foreground">{t('currencyCount', { count: n })}</span>
-                                                    </DropdownMenuItem>
-                                                ))}
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                )}
                                 <RecordsActions
                                     entity="deals"
                                     onNew={() => setNewDialogOpen(true)}
@@ -1477,12 +1456,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     />
                 </Rise>
 
+                <DealCurrencyScope counts={currencyCounts} currency={displayCurrency} onChange={changeCurrency} />
+
                 <Rise delay={0.06}>
                     <section>
                         <SectionHeader title={t('sectionPerformance')} />
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={displayCurrency} timezone={timezone} />} />
-                            <SummaryTile label={t('stageRatio')} value={<StageRatio distribution={stageDistribution} currency={displayCurrency} />} />
+                            <SummaryTile className="sm:col-span-2" label={`${t('revenueTrend')} · ${displayCurrency}`} value={<DealsRevenueChart series={revenueSeries} currency={displayCurrency} timezone={timezone} />} />
+                            <SummaryTile label={`${t('stageRatio')} · ${displayCurrency}`} value={<StageRatio distribution={stageDistribution} currency={displayCurrency} />} />
                         </div>
                     </section>
                 </Rise>
@@ -1492,7 +1473,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         <SectionHeader title={t('sectionSummary')} />
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                             <SummaryTile
-                                label={t('openPipeline')}
+                                label={`${t('openPipeline')} · ${displayCurrency}`}
                                 tooltip={t('openPipelineTooltip')}
                                 value={formatCompactCurrency(summary.openValue, displayCurrency, locale)}
                             />
@@ -1502,12 +1483,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 value={String(summary.openCount)}
                             />
                             <SummaryTile
-                                label={t('closedForecast')}
+                                label={`${t('closedForecast')} · ${displayCurrency}`}
                                 tooltip={t('closedForecastTooltip')}
                                 value={formatCompactCurrency(summary.closedForecastValue, displayCurrency, locale)}
                             />
                             <SummaryTile
-                                label={t('closedRevenue')}
+                                label={`${t('closedRevenue')} · ${displayCurrency}`}
                                 tooltip={t('closedRevenueTooltip')}
                                 value={formatCompactCurrency(summary.closedActualValue, displayCurrency, locale)}
                             />

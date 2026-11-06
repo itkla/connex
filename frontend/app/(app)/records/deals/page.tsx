@@ -48,7 +48,9 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
     const workspaceSnapshot = await getMyWorkspacesFromCookie(cookie);
     const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
-    const status = statusParam((await searchParams).status);
+    const params = await searchParams;
+    const status = statusParam(params.status);
+    const selectedCurrency = typeof params.currency === 'string' ? params.currency : undefined;
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const [metrics, facets, savedViewsResult, defaultView]: [DealMetrics, DealFacets, CookieResult<SavedView[]>, SavedView | null] = await Promise.all([
         getDealMetricsFromCookie(cookie, { status }),
@@ -57,7 +59,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
         getDefaultSavedViewFromCookie("deal", cookie),
     ]);
     const savedViews = savedViewsResult.ok ? savedViewsResult.data : [];
-    const dealsPage: Page<Deal> = await getDealsPage({ page: 1, size: 25, status, currency: dominantCurrency(metrics) }, init);
+    const dealsPage: Page<Deal> = await getDealsPage({ page: 1, size: 25, status, currency: selectedCurrency || dominantCurrency(metrics) }, init);
 
     return (
         <DealsBrowser

@@ -188,6 +188,7 @@
     "summaryUnavailable": "本日の予定を読み込めませんでした。"
   },
   "DashboardPipelineChart": {
+    "currencyScope": "{currency}の案件のみ",
     "pipelineLabel": "パイプライン",
     "activePipeline": "アクティブなパイプライン",
     "summary": "オープン {openCount} 件 · 今後 {months} か月で {scheduled} 件予定",
