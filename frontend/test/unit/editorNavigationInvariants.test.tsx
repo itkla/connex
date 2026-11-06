@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useEffect, useState, type PropsWithChildren } from 'react';
+import { memo, useEffect, useLayoutEffect, useState, type PropsWithChildren } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ContentShell from '@/app/components/ContentShell';
@@ -9,6 +9,7 @@ import { requestGuardedNavigation, useUnsavedChangesGuard } from '@/app/hooks/us
 import common from '@/messages/en/common.json';
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+const dirtyCommit = vi.hoisted(() => vi.fn<() => void>());
 vi.mock('next/navigation', () => ({ usePathname: () => window.location.pathname, useRouter: () => router }));
 vi.mock('@/app/components/GlobalSearch', () => ({ default: () => null }));
 vi.mock('@/app/components/NavBreadcrumb', () => ({ default: () => null }));
@@ -33,12 +34,15 @@ function DraftEditor({ href }: { href: string }) {
         onClose: () => router.push('/list'),
         navigation: { push: router.push, replace: router.replace, renderedHref: href },
     });
+    useLayoutEffect(() => { if (draft) dirtyCommit(); }, [draft]);
     return <>
         <label>Draft<input value={draft} onChange={(event) => setDraft(event.target.value)} /></label>
         <button onClick={guard.requestClose}>Cancel editor</button>
         <ConfirmDiscardDialog {...guard.confirm} />
     </>;
 }
+
+const RetainedDraftEditor = memo(DraftEditor);
 
 /** Models the installed Next router's null-state refusal; only explicit router calls can repair it. */
 function NextRouterHarness() {
@@ -61,7 +65,7 @@ function NextRouterHarness() {
         return () => window.removeEventListener('popstate', onPop);
     }, []);
     const url = new URL(href);
-    return url.pathname === '/editor' ? <DraftEditor href={url.pathname + url.search} /> : <h1>Destination page</h1>;
+    return url.pathname === '/editor' ? <RetainedDraftEditor href={url.pathname + url.search} /> : <h1>Destination page</h1>;
 }
 
 function mount(path = '/editor?source=original') {
@@ -86,6 +90,7 @@ async function discard() {
 }
 
 beforeEach(() => {
+    dirtyCommit.mockReset();
     router.push.mockReset();
     router.replace.mockReset();
     vi.stubGlobal('navigation', undefined);
@@ -95,7 +100,74 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('editor navigation invariants', () => {
-    it('keeps Forward edits at the restored entry and guards a fresh Forward after Keep editing', async () => {
+    it.each(['popstate', 'shell', 'beforeunload'])('protects committed edits before passive effects at the %s boundary', async (boundary) => {
+        mount('/editor');
+        let unload: Event | undefined;
+        dirtyCommit.mockImplementationOnce(() => {
+            if (boundary === 'popstate') {
+                window.history.replaceState(nextState, '', '/list');
+                window.dispatchEvent(new PopStateEvent('popstate', { state: nextState }));
+            } else if (boundary === 'shell') {
+                requestGuardedNavigation(() => router.push('/list'));
+            } else {
+                unload = new Event('beforeunload', { cancelable: true });
+                window.dispatchEvent(unload);
+            }
+        });
+        dirty();
+        expect(window.location.pathname).toBe('/editor');
+        if (boundary === 'beforeunload') {
+            expect(unload?.defaultPrevented).toBe(true);
+        } else {
+            await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
+            fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+        }
+        expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveProperty('value', 'Retained editor content');
+        expectProtected();
+    });
+
+    it.each([false, true])('preserves the known Forward destination and its filters after Keep editing (fragment: %s)', async (fragment) => {
+        const destination = '/records/deals?pipeline=7&status=open';
+        vi.stubGlobal('navigation', {
+            get currentEntry() {
+                return window.location.pathname === '/editor'
+                    ? window.location.hash
+                        ? { key: 'editor-fragment-entry', index: 1 }
+                        : { key: 'editor-entry', index: 0 }
+                    : { key: 'filtered-deals-entry', index: fragment ? 2 : 1 };
+            },
+        });
+        mount('/editor');
+        if (fragment) {
+            fireEvent.click(screen.getByRole('link', { name: common.CommonContentShell.skipToContent }));
+            await waitFor(() => expect(window.location.hash).toBe('#app-main'));
+        }
+        act(() => router.push(destination));
+        window.history.go(fragment ? -2 : -1);
+        await screen.findByRole('textbox', { name: 'Draft' });
+        dirty();
+        if (fragment) {
+            router.replace.mockClear();
+            window.history.forward();
+            await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/editor#app-main'));
+        }
+        const length = window.history.length;
+        window.history.forward();
+        await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
+        fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+        expect(window.location.pathname).toBe('/editor');
+        expect(window.location.hash).toBe(fragment ? '#app-main' : '');
+        expect(window.history.length).toBe(length);
+        expectProtected();
+        window.history.forward();
+        await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
+        await discard();
+        await screen.findByRole('heading', { name: 'Destination page' });
+        expect(window.location.pathname + window.location.search).toBe(destination);
+    });
+
+    it('keeps edits with the unknown-distance fallback and guards a fresh Forward after Keep editing', async () => {
         mount('/editor');
         act(() => router.push('/destination'));
         window.history.back();

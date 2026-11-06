@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import type { WorkflowRunDetail } from '@/app/lib/types';
 import { useLocale } from './support/locale';
@@ -9,6 +9,39 @@ const editors = [
     { key: 'template', path: '/library/documents/new', destination: '/library/documents', namespace: 'document-templates', name: 'DocumentTemplateBuilder.name', back: 'DocumentTemplateBuilder.back' },
     { key: 'workflow', path: '/workflows/new', destination: '/workflows', namespace: 'workspace', name: 'WorkspaceWorkflows.nameLabel', back: 'WorkspaceWorkflows.backToList' },
 ] as const;
+
+/** Records native event delivery and capture interception in CI traces without patching history. */
+async function observeHistory(page: Page) {
+    await page.addInitScript(() => {
+        const bubbleReached = new WeakMap<Event, boolean>();
+        let sequence = 0;
+        window.addEventListener('popstate', (event) => {
+            const destination = window.location.pathname + window.location.search + window.location.hash;
+            const state: unknown = event.state;
+            const eventNumber = ++sequence;
+            console.info('[editor-history]', JSON.stringify({
+                phase: 'received', sequence: eventNumber, destination, trusted: event.isTrusted,
+                stateKind: state === null ? 'null' : typeof state,
+                nativeIndex: window.navigation?.currentEntry?.index ?? null,
+            }));
+            bubbleReached.set(event, false);
+            setTimeout(() => {
+                const editor = [...document.querySelectorAll('#report-name')]
+                    .find((element) => element instanceof HTMLElement && element.getClientRects().length > 0);
+                console.info('[editor-history]', JSON.stringify({
+                    phase: 'after-dispatch', sequence: eventNumber,
+                    destination,
+                    afterDispatch: window.location.pathname + window.location.search + window.location.hash,
+                    bubbleReached: bubbleReached.get(event),
+                    nextState: state !== null && typeof state === 'object' && '__NA' in state && state.__NA === true,
+                    editorVisible: editor instanceof HTMLElement && editor.getClientRects().length > 0,
+                    draftPresent: editor instanceof HTMLInputElement && editor.value.length > 0,
+                }));
+            });
+        }, true);
+        window.addEventListener('popstate', (event) => { bubbleReached.set(event, true); });
+    });
+}
 
 for (const locale of ['en', 'ja'] as const) {
     test(`an untouched template returns to Documents without a discard prompt in ${locale} @mobile`, async ({ page }) => {
@@ -83,6 +116,7 @@ test('a cross-document docs history jump confirms leave and renders the destinat
 });
 
 test('a native skip-link entry followed by go(-2) keeps the list URL and rendered route synchronized', async ({ page }) => {
+    await observeHistory(page);
     await page.addInitScript(() => Object.defineProperty(window, 'navigation', { configurable: true, value: undefined }));
     await page.goto('/insights/reports');
     await page.locator('a[href="/insights/reports/new"]').first().click();
@@ -155,6 +189,32 @@ test('report Cancel from a direct link returns to reports without browser histor
     await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+test('Keep editing preserves a known Forward destination and its deal search', async ({ page }) => {
+    await page.goto('/insights/reports');
+    await page.locator('a[href="/insights/reports/new"]').first().click();
+    await page.locator('a[href="/records/deals"]:visible').first().click();
+    await expect(page).toHaveURL('/records/deals');
+    const search = page.getByPlaceholder(message('en', 'deals', 'DealsBrowser.searchPlaceholder'), { exact: true });
+    await search.fill('History destination');
+    await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('History destination');
+    const destination = page.url();
+    expect(await page.evaluate(() => window.navigation?.currentEntry?.index)).toBeGreaterThanOrEqual(1);
+    await page.goBack();
+    const name = page.getByRole('textbox', { name: 'Name', exact: true });
+    await name.fill('Preserved Forward draft');
+    await page.evaluate(() => window.history.forward());
+    const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Keep editing', exact: true }).click();
+    await expect(name).toHaveValue('Preserved Forward draft');
+    await expect(page).toHaveURL('/insights/reports/new');
+    await page.evaluate(() => window.history.forward());
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await expect(page).toHaveURL(destination);
+    await expect(search).toHaveValue('History destination');
+});
+
 test('Discard after removing a workflow inspection query protects the retained draft again', async ({ page }) => {
     const savedName = `Inspection guard ${randomUUID()}`;
     await page.goto('/workflows/new');
@@ -200,6 +260,7 @@ test('Discard after removing a workflow inspection query protects the retained d
 
 for (const navigationApi of [true, false]) {
 test(`sidebar and browser Back/Forward retain a report until discard is confirmed (Navigation API: ${navigationApi})`, async ({ page }) => {
+    await observeHistory(page);
     if (!navigationApi) {
         await page.addInitScript(() => Object.defineProperty(window, 'navigation', { configurable: true, value: undefined }));
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useId, useMemo, useState } from 'react';
+import { type ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
@@ -29,6 +29,7 @@ import {
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { createReport, updateReport } from '@/app/lib/api';
+import { renderedWorkspaceId, renderedWorkspaceNavigationVersion } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     Pipeline,
@@ -130,6 +131,10 @@ export default function ReportBuilderBoard({
     const [cadence, setCadence] = useState<ReportCadence>(initialDraft.cadence);
     const [config, setConfig] = useState<ReportConfig>(initialDraft.config);
     const [savedDraft, setSavedDraft] = useState(initialDraft);
+    const draftIdentity = useRef({ id: initialReport?.id });
+    useLayoutEffect(() => {
+        if (draftIdentity.current.id !== initialReport?.id) draftIdentity.current = { id: initialReport?.id };
+    }, [initialReport?.id]);
     const [saving, setSaving] = useState(false);
     const returnHref = initialReport ? `/insights/reports/${initialReport.id}` : '/insights/reports';
     const guard = useUnsavedChangesGuard({
@@ -285,14 +290,19 @@ export default function ReportBuilderBoard({
             config,
         };
         const submittedDraft = { name, description, cadence, config };
+        const submittedIdentity = draftIdentity.current;
+        const submittedWorkspace = renderedWorkspaceId();
+        const submittedWorkspaceVersion = renderedWorkspaceNavigationVersion();
         setSaving(true);
         try {
             const saved = initialReport
                 ? await updateReport(initialReport.id, payload)
                 : await createReport(payload);
+            if (draftIdentity.current !== submittedIdentity || renderedWorkspaceId() !== submittedWorkspace) return;
+            setSavedDraft(submittedDraft);
             toastSuccess(t(initialReport ? 'builder.updated' : 'builder.created'));
+            if (renderedWorkspaceNavigationVersion() !== submittedWorkspaceVersion) return;
             guard.allowNavigation(() => {
-                setSavedDraft(submittedDraft);
                 router.push(`/insights/reports/${saved.id}`);
                 router.refresh();
             });

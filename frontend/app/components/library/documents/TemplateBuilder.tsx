@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeftIcon } from '@heroicons/react/24/outline';
@@ -18,6 +18,7 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { createDocumentTemplate, updateDocumentTemplate } from '@/app/lib/api';
+import { renderedWorkspaceId, renderedWorkspaceNavigationVersion } from '@/app/lib/renderedWorkspace';
 import { DOCUMENT_TYPES } from '@/app/lib/documentTokens';
 import type { CreateDocumentTemplatePayload, DocumentBodyNode, DocumentTemplate, DocumentType } from '@/app/lib/types';
 
@@ -100,6 +101,10 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
     const [initialDraft] = useState(() => toDraft(template, t('slashTermsHeading')));
     const [draft, setDraft] = useState<Draft>(initialDraft);
     const [savedDraft, setSavedDraft] = useState(initialDraft);
+    const draftIdentity = useRef({ id: template?.id });
+    useLayoutEffect(() => {
+        if (draftIdentity.current.id !== template?.id) draftIdentity.current = { id: template?.id };
+    }, [template?.id]);
     const [saving, setSaving] = useState(false);
     const guard = useUnsavedChangesGuard({
         isDirty: JSON.stringify(draft) !== JSON.stringify(savedDraft),
@@ -115,6 +120,9 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
             toastError(t('nameRequired'));
             return;
         }
+        const submittedIdentity = draftIdentity.current;
+        const submittedWorkspace = renderedWorkspaceId();
+        const submittedWorkspaceVersion = renderedWorkspaceNavigationVersion();
         setSaving(true);
         try {
             const payload: CreateDocumentTemplatePayload = {
@@ -133,9 +141,11 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
             } else {
                 await createDocumentTemplate(payload);
             }
+            if (draftIdentity.current !== submittedIdentity || renderedWorkspaceId() !== submittedWorkspace) return;
+            setSavedDraft(draft);
             toastSuccess(t('saved'));
+            if (renderedWorkspaceNavigationVersion() !== submittedWorkspaceVersion) return;
             guard.allowNavigation(() => {
-                setSavedDraft(draft);
                 router.push('/library/documents');
                 router.refresh();
             });

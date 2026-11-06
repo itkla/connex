@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 type NavigationAction = () => void | Promise<void>;
 type PendingNavigation = { navigate: NavigationAction; onCancel?: () => void };
@@ -8,6 +8,13 @@ type NavigationGuard = {
     request: (navigate: NavigationAction, onCancel?: () => void) => void;
 };
 const navigationGuards = new Set<NavigationGuard>();
+type HistoryPosition = { key: string; index: number };
+
+function currentHistoryPosition(): HistoryPosition | null {
+    const entry = window.navigation?.currentEntry;
+    return entry?.key && Number.isSafeInteger(entry.index) && entry.index >= 0
+        ? { key: entry.key, index: entry.index } : null;
+}
 
 /**
  * Routes a shell operation through the editor's discard choice before its side effects run.
@@ -69,7 +76,10 @@ type Guard = {
  * listener catches refresh / tab-close / external navigation. Once the user confirms, {@link onClose}
  * runs. Full-page editors opt into `navigation` to guard links, shell navigation and same-document
  * Back/Forward by restoring the editor's history entry before asking and explicitly routing the
- * accepted destination. No history indices or additional entries are used. Dirty checks remain active
+ * accepted destination. Native entry indices restore a known cursor without replacing its destination;
+ * unknown distances restore the URL in the reached slot. No indices are added to history state.
+ * Boundary subscriptions update in layout effects so committed edits are protected before passive
+ * effects or the next native browser event. Dirty checks remain active
  * for the entire mounted lifetime. `allowNavigation` is versioned so a late save cannot redirect after
  * a newer departure; successful saves must update their saved draft baseline. Restoration uses the
  * native history prototype so Next does not interpret restoring the address bar as a new route.
@@ -79,7 +89,9 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
     const [navigationVersion, setNavigationVersion] = useState(0);
     const pendingNavigation = useRef<PendingNavigation | null>(null);
     const currentNavigationVersion = useRef(0);
-    const editorEntry = useRef<{ url: string; state: unknown } | null>(null);
+    const editorEntry = useRef<{ url: string; state: unknown; position: HistoryPosition | null } | null>(null);
+    const restoringTraversal = useRef<{ sourceKey: string; navigate: NavigationAction } | null>(null);
+    const acceptedTraversal = useRef<string | null>(null);
     const mounted = useRef(false);
     const readsDirtyState = typeof isDirty === 'function';
     const active = enabled && (readsDirtyState || isDirty);
@@ -100,10 +112,11 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
         editorEntry.current = {
             url: rendered.href + (matches ? visible.hash : previousMatches ? previousUrl.hash : ''),
             state: matches ? state ?? previous?.state ?? null : previous?.state ?? null,
+            position: matches ? currentHistoryPosition() : previous?.position ?? null,
         };
     });
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         mounted.current = true;
         return () => {
             mounted.current = false;
@@ -112,7 +125,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
         };
     }, []);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!active) return;
         const onBeforeUnload = (event: BeforeUnloadEvent) => {
             if (!hasUnsavedChanges()) return;
@@ -158,7 +171,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
         else onClose();
     }, [allowNavigation, hasUnsavedChanges, onClose, push]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!push) return;
         const navigationGuard = { request: requestNavigation };
         navigationGuards.add(navigationGuard);
@@ -180,11 +193,38 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
             const destination = new URL(window.location.href);
             const source = new URL(entry.url);
             const href = destination.pathname + destination.search + destination.hash;
+            const position = currentHistoryPosition();
             event.stopImmediatePropagation();
-            if (destination.pathname === source.pathname && destination.search === source.search) {
-                editorEntry.current = { ...entry, url: destination.href };
+            const restoring = restoringTraversal.current;
+            restoringTraversal.current = null;
+            if (restoring && position?.key === restoring.sourceKey) {
+                requestNavigation(restoring.navigate);
+                return;
+            }
+            const accepted = acceptedTraversal.current;
+            acceptedTraversal.current = null;
+            if (accepted && position?.key === accepted) {
                 replace(href);
                 return;
+            }
+            if (destination.pathname === source.pathname && destination.search === source.search) {
+                editorEntry.current = { ...entry, url: destination.href, position };
+                replace(href);
+                return;
+            }
+            if (entry.position && position && entry.position.key !== position.key) {
+                const delta = position.index - entry.position.index;
+                if (delta !== 0) {
+                    restoringTraversal.current = {
+                        sourceKey: entry.position.key,
+                        navigate: () => {
+                            acceptedTraversal.current = position.key;
+                            window.history.go(delta);
+                        },
+                    };
+                    window.history.go(-delta);
+                    return;
+                }
             }
             window.History.prototype.replaceState.call(window.history, entry.state, '', entry.url);
             requestNavigation(() => replace(href));

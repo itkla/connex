@@ -9,7 +9,7 @@ import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
 import { blankReportConfig } from '@/app/components/reports/reportConfig';
 import { requestGuardedNavigation, useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { useWorkspace, WorkspaceProvider } from '@/app/hooks/useWorkspace';
-import { renderedWorkspaceId } from '@/app/lib/renderedWorkspace';
+import { bindRenderedWorkspace, releaseRenderedWorkspace, renderedWorkspaceId } from '@/app/lib/renderedWorkspace';
 import type { DocumentTemplate, ReportDefinition, Workspace } from '@/app/lib/types';
 import common from '@/messages/en/common.json';
 import documents from '@/messages/en/document-templates.json';
@@ -68,11 +68,11 @@ beforeEach(() => {
         media, matches: false, addEventListener() {}, removeEventListener() {},
     }) });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/'); });
 
 function mount(kind: 'report' | 'template', existing = false, locale: 'en' | 'ja' = 'en') {
     const messages = locale === 'en' ? { ...common, ...documents, ...reports } : { ...jaCommon, ...jaDocuments, ...jaReports };
-    render(<NextIntlClientProvider locale={locale} messages={messages} timeZone="UTC">
+    return render(<NextIntlClientProvider locale={locale} messages={messages} timeZone="UTC">
         <Link href="/records/deals">Deals</Link>
         {kind === 'report'
             ? <ReportBuilderBoard initialReport={existing ? report : undefined} pipelines={[]} owners={[]} ownersFailed={false} tags={[]} canReadGoals />
@@ -218,6 +218,71 @@ describe('full-page editor navigation', () => {
         expect(unloadPrevented()).toBe(true);
     });
 
+    it.each(['report', 'template'] as const)('cleans a saved %s after accepted query-only history without redirecting', async (kind) => {
+        const pending = Promise.withResolvers<ReportDefinition | DocumentTemplate>();
+        mocks.updateReport.mockReturnValue(pending.promise);
+        mocks.updateTemplate.mockReturnValue(pending.promise);
+        const path = kind === 'report' ? '/insights/reports/42/edit' : '/library/documents/17';
+        window.history.replaceState({ __NA: true }, '', `${path}?mode=first`);
+        mount(kind, true);
+        const input = screen.getByLabelText('Name');
+        fireEvent.change(input, { target: { value: 'Submitted' } });
+        fireEvent.click(screen.getByRole('button', { name: kind === 'report' ? reports.Reports.builder.save : documents.DocumentTemplateBuilder.save }));
+        mocks.replace.mockImplementationOnce((href: string) => window.history.replaceState({ __NA: true }, '', href));
+        window.history.replaceState(null, '', `${path}?mode=second`);
+        act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: null })); });
+        fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
+        expect(window.location.search).toBe('?mode=second');
+        expect(unloadPrevented()).toBe(true);
+        await act(async () => pending.resolve(kind === 'report' ? report : template));
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(mocks.refresh).not.toHaveBeenCalled();
+        expect(unloadPrevented()).toBe(false);
+        fireEvent.click(screen.getByRole('button', { name: kind === 'report' ? 'Cancel' : 'Documents' }));
+        expect(screen.queryByRole('dialog')).toBeNull();
+        fireEvent.change(input, { target: { value: 'New unsaved content' } });
+        expect(unloadPrevented()).toBe(true);
+    });
+
+    it.each(['report', 'template'] as const)('does not apply a %s save baseline to another workspace', async (kind) => {
+        const owner = {};
+        bindRenderedWorkspace(owner, 1);
+        try {
+            const pending = Promise.withResolvers<ReportDefinition | DocumentTemplate>();
+            mocks.updateReport.mockReturnValue(pending.promise);
+            mocks.updateTemplate.mockReturnValue(pending.promise);
+            mount(kind, true);
+            fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Submitted' } });
+            fireEvent.click(screen.getByRole('button', { name: kind === 'report' ? reports.Reports.builder.save : documents.DocumentTemplateBuilder.save }));
+            bindRenderedWorkspace(owner, 2);
+            await act(async () => pending.resolve(kind === 'report' ? report : template));
+            expect(mocks.push).not.toHaveBeenCalled();
+            expect(unloadPrevented()).toBe(true);
+        } finally {
+            releaseRenderedWorkspace(owner);
+        }
+    });
+
+    it.each(['report', 'template'] as const)('does not apply a %s save baseline after the draft identity changes', async (kind) => {
+        const pending = Promise.withResolvers<ReportDefinition | DocumentTemplate>();
+        mocks.updateReport.mockReturnValue(pending.promise);
+        mocks.updateTemplate.mockReturnValue(pending.promise);
+        const view = mount(kind, true);
+        const input = screen.getByLabelText('Name');
+        fireEvent.change(input, { target: { value: 'Submitted' } });
+        fireEvent.click(screen.getByRole('button', { name: kind === 'report' ? reports.Reports.builder.save : documents.DocumentTemplateBuilder.save }));
+        view.rerender(<NextIntlClientProvider locale="en" messages={{ ...common, ...documents, ...reports }} timeZone="UTC">
+            <Link href="/records/deals">Deals</Link>
+            {kind === 'report'
+                ? <ReportBuilderBoard initialReport={{ ...report, id: 43 }} pipelines={[]} owners={[]} ownersFailed={false} tags={[]} canReadGoals />
+                : <TemplateBuilder template={{ ...template, id: 18 }} />}
+        </NextIntlClientProvider>);
+        expect(input).toHaveProperty('isConnected', true);
+        await act(async () => pending.resolve(kind === 'report' ? report : template));
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(unloadPrevented()).toBe(true);
+    });
+
     it.each(['report', 'template'] as const)('keeps a pending %s save guarded and does not redirect after a confirmed departure', async (kind) => {
         let finish: (value: ReportDefinition | DocumentTemplate) => void = () => { throw new Error('Save has not started'); };
         const pending = new Promise<ReportDefinition | DocumentTemplate>((resolve) => { finish = resolve; });
@@ -233,6 +298,8 @@ describe('full-page editor navigation', () => {
         fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
         await act(async () => finish(kind === 'report' ? report : template));
         expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/records/deals');
+        expect(unloadPrevented()).toBe(false);
+        fireEvent.change(input, { target: { value: 'Edited after the response' } });
         expect(unloadPrevented()).toBe(true);
     });
 
