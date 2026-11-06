@@ -2,9 +2,6 @@ package ooo.klae.connex.backend.controllers;
 
 import java.util.List;
 
-import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.Size;
-
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -42,8 +39,11 @@ public class GeneratedDocumentController {
 
     /** Resolves at most fifty document ids without distinguishing unavailable targets. */
     @GetMapping("/targets")
-    public List<GeneratedDocumentTargetDto> getTargets(
-            @RequestParam @Size(min = 1, max = 50) List<@Positive Integer> ids) {
+    public List<GeneratedDocumentTargetDto> getTargets(@RequestParam List<Integer> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > 50
+                || ids.stream().anyMatch(id -> id == null || id < 1)) {
+            throw new BadRequestException("Between one and fifty positive document ids are required");
+        }
         return documentService.getTargets(ids);
     }
 

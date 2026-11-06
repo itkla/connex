@@ -313,7 +313,9 @@ once, and run at most four requests concurrently. Each result appears independen
 workspaces aborts pending reads and discards the cache. Documents use
 `GET /api/documents/targets?ids=…`, accepting one to fifty positive ids (the cap applies before
 deduplication) and returning only `{id, dealId, title}`. The service reuses the per-deal document
-read's parent-deal gate in the resolved workspace; deleted, unreadable-parent and other-workspace
+read's parent-deal gate in the resolved workspace. Empty, non-positive and over-cap numeric batches
+return HTTP 400 with the existing `BAD_REQUEST` code/message envelope before service invocation;
+the service repeats the validation for non-HTTP callers. Deleted, unreadable-parent and other-workspace
 documents are all absent from the response. It returns no document body, deal name, or diagnostic.
 Read authorization remains active workspace membership, as for the existing per-deal document
 GETs; `DEAL_UPDATE` continues to gate document mutations. The mapper statement is covered by the

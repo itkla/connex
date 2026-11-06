@@ -106,8 +106,9 @@ async function resolveTargets(requests: TargetRequest[], init: RequestInit): Pro
     if (first == null) return resolved;
     if (first.recordType === "document") {
         const documents = await getGeneratedDocumentTargets(requests.map((request) => request.id), init);
+        const documentsById = new Map(documents.map((document) => [document.id, document]));
         for (const request of requests) {
-            const document = documents.find((item) => item.id === request.id);
+            const document = documentsById.get(request.id);
             if (document?.title?.trim() && Number.isSafeInteger(document.dealId) && document.dealId > 0) {
                 resolved.set(request.key, { name: document.title, href: dealDocumentsHref(document.dealId) });
             }

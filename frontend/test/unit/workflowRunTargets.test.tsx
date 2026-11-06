@@ -62,20 +62,23 @@ function deferredCompany() {
 describe("workflow run target resolution", () => {
     it("resolves document titles and parent-deal links only for returned ids", async () => {
         vi.mocked(getGeneratedDocumentTargets).mockResolvedValue([
-            { id: 61, dealId: 41, title: "Visible quote" },
+            { id: 63, dealId: 43, title: "Another visible quote" },
             { id: 99, dealId: 42, title: "Unrequested quote" },
+            { id: 61, dealId: 41, title: "Visible quote" },
         ]);
-        await render([run(61, "document"), run(62, "document"), run(63, "document")]);
+        await render([run(61, "document"), run(62, "document"), run(63, "document"), run(64, "document")]);
         expect(document.querySelector('[data-target="document:61"]')?.textContent).toBe("Visible quote");
         expect(document.querySelector('[data-target="document:61"]')?.getAttribute("data-href")).toBe("/records/deals/41#deal-documents");
-        for (const id of [62, 63]) {
+        expect(document.querySelector('[data-target="document:63"]')?.textContent).toBe("Another visible quote");
+        expect(document.querySelector('[data-target="document:63"]')?.getAttribute("data-href")).toBe("/records/deals/43#deal-documents");
+        for (const id of [62, 64]) {
             const target = document.querySelector(`[data-target="document:${id}"]`);
             expect(target?.textContent).toBe("");
             expect(target?.hasAttribute("data-href")).toBe(false);
             expect(target?.getAttribute("data-pending")).toBe("false");
         }
         expect(document.body.textContent).not.toContain("Unrequested quote");
-        expect(getGeneratedDocumentTargets).toHaveBeenCalledWith([61, 62, 63], expect.objectContaining({
+        expect(getGeneratedDocumentTargets).toHaveBeenCalledWith([61, 62, 63, 64], expect.objectContaining({
             headers: { "X-Workspace-Id": "7" }, signal: expect.any(AbortSignal),
         }));
     });
