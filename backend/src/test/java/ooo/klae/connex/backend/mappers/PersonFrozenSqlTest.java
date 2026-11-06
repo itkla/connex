@@ -57,6 +57,7 @@ class PersonFrozenSqlTest {
         Map<String, Object> result = PersonVisibilityParity.parameters();
         if (filtered) {
             result.put("query", "%employer%");
+            result.put("tagIds", List.of(1, 2));
             result.put("companies", List.of("Employer"));
             result.put("titles", List.of("Director"));
             result.put("noCompany", true);

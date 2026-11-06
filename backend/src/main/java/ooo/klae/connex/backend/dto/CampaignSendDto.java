@@ -24,6 +24,7 @@ import java.time.LocalDateTime;
  * @param createdById the creator id
  * @param createdAt the creation timestamp
  * @param updatedAt the update timestamp
+ * @param contentRefused whether dispatch refused this send's saved personalization content
  */
 public record CampaignSendDto(
         int id,
@@ -45,5 +46,6 @@ public record CampaignSendDto(
         int failedCount,
         Integer createdById,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt) {
+        LocalDateTime updatedAt,
+        boolean contentRefused) {
 }

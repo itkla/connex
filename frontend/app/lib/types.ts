@@ -23,6 +23,7 @@ export type PageParams = {
 };
 
 export type ContactsPageParams = PageParams & MemberScopeParams & {
+    tagIds?: number[];
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
@@ -2600,6 +2601,7 @@ export type CampaignSend = {
     createdById: number | null;
     createdAt: string;
     updatedAt: string;
+    contentRefused?: boolean;
 };
 
 /**

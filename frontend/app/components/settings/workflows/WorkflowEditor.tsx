@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ExclamationTriangleIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
+import { segmentDefinitionLabel } from "@/app/lib/segmentLabels";
 import AccessDenied from "@/app/components/AccessDenied";
 import ConfirmDiscardDialog from "@/app/components/ConfirmDiscardDialog";
 import WorkflowCanvasEditor from "@/app/components/settings/workflows/WorkflowCanvasEditor";
@@ -113,6 +114,7 @@ function WorkflowEditorBody({
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
+    const tSegments = useTranslations("SmartSegments");
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
@@ -347,8 +349,8 @@ function WorkflowEditorBody({
                         })
                         : t("summary.anyChange");
             case "CONDITION": {
-                const count = node.config.conditions.length + (node.config.groups?.length ?? 0);
-                return count > 0 ? t("conditionSummarySet", { count }) : t("conditionSummaryEmpty");
+                return segmentDefinitionLabel(node.config, editor.document.recordType ?? "deal", tSegments, fields, options)
+                    || t("conditionSummaryEmpty");
             }
             case "ACTION":
                 return node.config.title?.trim()
@@ -365,7 +367,7 @@ function WorkflowEditorBody({
             case "END":
                 return t("summary.end");
         }
-    }, [editor.document.recordType, nodeById, t, tr]);
+    }, [editor.document.recordType, fields, options, nodeById, t, tr, tSegments]);
     const branchLabel = useCallback((outcome: WorkflowEdgeOutcome) => t(`branch.${outcome}`), [t]);
     const diagnosticMessage = useCallback((diagnostic: {
         code: WorkflowDiagnosticCode;

@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
 import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.exceptions.UnsupportedCampaignTokenException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
@@ -75,6 +76,8 @@ public class CampaignDispatchService {
     private static final String ABANDONED_PERSONLESS_AUDIENCE_ATTEMPT =
             "AMBIGUOUS: Audience dispatch with no recipient person outlived its lease";
     private static final String NOT_DISPATCHABLE_SKIP_REASON = "not_dispatchable";
+    private static final String EXPIRED_CLOSED_CLAIM =
+            "AMBIGUOUS: Expired claim belongs to a send that no longer accepts retries";
 
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignDeliveryMapper campaignDeliveryMapper;
@@ -91,6 +94,7 @@ public class CampaignDispatchService {
     private final CampaignUnsubscribeTokenRegistrationService unsubscribeTokenRegistrationService;
     private final AutomationExecutor automationExecutor;
     private final SystemActor systemActor;
+    private final CampaignContentRefusalService contentRefusalService;
     private LongSupplier nanoTimeSource = System::nanoTime;
 
     /**
@@ -186,6 +190,10 @@ public class CampaignDispatchService {
         if (triggered(send) && !triggeredSendGate.enabled()) {
             return true;
         }
+        if (send.isContentRefused()) {
+            contentRefusalService.record(workspaceId, sendId);
+            return true;
+        }
         if ("running".equals(send.getStatus()) && "audience".equals(send.getOrigin())
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             settle(workspaceId, sendId);
@@ -194,6 +202,20 @@ public class CampaignDispatchService {
         DeliveryChannel channel;
         ResolvedDeliveryProvider target;
         MessageDispatcher dispatcher;
+        CampaignMessageRevision revision =
+                campaignMessageMapper.getRevision(workspaceId, send.getMessageId(), send.getMessageVersion());
+        if (revision == null) {
+            log.warn("Campaign send {} references a missing message revision", sendId);
+            return false;
+        }
+        try {
+            CampaignMessageTokens.validate(revision);
+        } catch (UnsupportedCampaignTokenException exception) {
+            contentRefusalService.record(workspaceId, sendId);
+            log.warn("Campaign send {} in workspace {} has unsupported personalization; no pending delivery was claimed",
+                    sendId, workspaceId);
+            return false;
+        }
         try {
             channel = DeliveryChannel.fromToken(send.getChannel());
             target = automationExecutor.runAs(workspaceId, systemActor.user(), "system",
@@ -202,12 +224,6 @@ public class CampaignDispatchService {
             dispatcher = deliveryProviderRouter.dispatcherFor(target.providerId());
         } catch (RuntimeException exception) {
             log.warn("Campaign send {} has no usable provider: {}", sendId, bounded(exception.getMessage()));
-            return false;
-        }
-        CampaignMessageRevision revision =
-                campaignMessageMapper.getRevision(workspaceId, send.getMessageId(), send.getMessageVersion());
-        if (revision == null) {
-            log.warn("Campaign send {} references a missing message revision", sendId);
             return false;
         }
         campaignSendMapper.assignProvider(workspaceId, sendId, target.providerId());
@@ -646,13 +662,16 @@ public class CampaignDispatchService {
                 log.warn("Expired campaign delivery {} has no replay-safe transport capability",
                         claim.getId());
             }
-            if (replaySafe) {
-                campaignDeliveryMapper.recoverExpiredTriggeredClaim(
-                        workspaceId, claim.getId(), claim.getAttemptTargetFingerprint());
-            } else if (campaignDeliveryMapper.markExpiredTriggeredClaimAmbiguous(
+            if (replaySafe && campaignDeliveryMapper.recoverExpiredTriggeredClaim(
+                    workspaceId, claim.getId(), claim.getAttemptTargetFingerprint()) == 1) {
+                continue;
+            }
+            String reason = replaySafe ? EXPIRED_CLOSED_CLAIM
+                    : targetChanged ? EXPIRED_CHANGED_TARGET_CLAIM : EXPIRED_NON_IDEMPOTENT_CLAIM;
+            if (campaignDeliveryMapper.markExpiredTriggeredClaimAmbiguous(
                     workspaceId,
                     claim.getId(),
-                    targetChanged ? EXPIRED_CHANGED_TARGET_CLAIM : EXPIRED_NON_IDEMPOTENT_CLAIM,
+                    reason,
                     targetChanged
                             ? CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()
                             : CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
@@ -661,12 +680,11 @@ public class CampaignDispatchService {
                             workspaceId,
                             claim.getId(),
                             "failed",
-                            targetChanged
-                                    ? EXPIRED_CHANGED_TARGET_CLAIM
-                                    : EXPIRED_NON_IDEMPOTENT_CLAIM);
+                            reason);
                 } catch (RuntimeException exception) {
                     log.warn("Campaign delivery {} recovery event could not be appended", claim.getId());
                 }
+                campaignSendMapper.refreshCounters(workspaceId, claim.getSendId());
             }
         }
     }
@@ -899,9 +917,9 @@ public class CampaignDispatchService {
     }
 
     private static boolean dispatchable(CampaignSend send) {
-        return "queued".equals(send.getStatus())
+        return send.getCompletedAt() == null && ("queued".equals(send.getStatus())
                 || "running".equals(send.getStatus())
-                || triggered(send);
+                || triggered(send));
     }
 
     private static boolean triggered(CampaignSend send) {

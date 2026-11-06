@@ -74,13 +74,22 @@ public class ExportService {
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             WarmthFilter warmth) {
+        return exportPersons(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, warmth, null);
+    }
+
+    /** Exports the browser's tag-filtered active set under the existing export restrictions. */
+    public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            WarmthFilter warmth, List<Integer> tagIds) {
         requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<Person> people = personMapper.getPersonsFiltered(
             workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, false, warmth);
+            firstResponseStates, noFirstResponse, false, warmth, tagIds);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());

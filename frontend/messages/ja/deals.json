@@ -6,6 +6,7 @@
         "panelTitle": "リスクの兆候",
         "unavailable": "リスクの根拠を一時的に取得できません。",
         "clear": "この案件に現在のリスクの兆候はありません。",
+        "noHistoryStakeholders": "やり取りの履歴がまだない連絡先がいます。最初のやり取りを記録してみましょう。",
         "assessedAt": "評価日時: {date}",
         "factorCloseOverdue": "予定成約日を{days}日超過しています",
         "factorClosingSoonQuiet": "あと{days}日で成約予定ですが、最近の活動がありません",
@@ -634,5 +635,28 @@
             "won": "結果",
             "riskExcluded": "案件リスク評価"
         }
+    },
+    "DealStakeholders": {
+        "title": "関係者",
+        "add": "連絡先を追加",
+        "empty": "関係者がまだ登録されていません。この案件に関わる連絡先を追加できます。",
+        "editRole": "役割を編集",
+        "editRoleFor": "{name}の役割を編集",
+        "remove": "解除",
+        "removeFor": "この案件から{name}を解除",
+        "description": "連絡先を選び、この案件での役割を入力してください。",
+        "contact": "連絡先",
+        "chooseContact": "連絡先を検索",
+        "role": "役割（任意）",
+        "rolePlaceholder": "例：推進者、購買担当者",
+        "save": "保存",
+        "cancel": "キャンセル",
+        "saved": "関係者を保存しました",
+        "removed": "関係者を解除しました",
+        "saveFailed": "関係者を保存できませんでした",
+        "removeFailed": "関係者を解除できませんでした",
+        "searchFailed": "連絡先を読み込めませんでした。もう一度検索してください。",
+        "warmthUnavailable": "温度感を取得できません",
+        "contactRequired": "追加する連絡先を選択してください。"
     }
 }

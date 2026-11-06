@@ -133,7 +133,9 @@
         "toastFailedRestore": "選択した連絡先を復元できませんでした",
         "entityLabelPlural": "連絡先",
         "toastFailedLoadContact": "連絡先を読み込めませんでした",
-        "inlineSavePending": "連絡先の保存が完了するまでお待ちください。"
+        "inlineSavePending": "連絡先の保存が完了するまでお待ちください。",
+        "filterTag": "タグ",
+        "tagUnavailable": "参照できないタグ"
     },
     "ContactsCard": {
         "copyEmail": "メールをコピー",

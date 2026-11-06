@@ -547,6 +547,25 @@ Reopening clears the completion instant; completing again records a new instant.
 completion from `updated_at`, so scores that depended on older tasks can fall. No scoring backfill job
 is needed. The scoring change can be reverted; notes retain their existing weight.
 
+Deal risk distinguishes missing history from decay: a contact with no eligible past touch has
+`daysSinceTouch = null` and contributes no cold-stakeholder factor, regardless of the empty score's
+band. Future-only activities remain no history. A genuine cold or cooling relationship retains its
+existing role-based severity. This does not change the warmth model or weights.
+
+Deals list risk filters capture a workspace-scoped maximum deal ID, then seek through the cohort
+with `id > lastId AND id <= upperId ORDER BY id LIMIT 250`. The candidate query forces the existing
+`uq_deal_workspace_id` range and deal-first join order, avoiding offset rescans and per-batch
+filesorts. Every batch retains the same captured visibility scope, member scope, segment and native
+filters. Renames do not change traversal order, and inserts above the watermark wait until the next
+request. This bounds cohort identity; it does not freeze every mutable risk input in an MVCC snapshot.
+Each batch reuses the existing risk assessor. The list retains at most 1,000 actual matches, loads
+that bounded cohort with current display-safe collation keys, and sorts/pages it in memory using the
+requested list order and ID ties. More than 1,000 actual matches requires narrowing the filter;
+broad candidate sets alone do not trigger that refusal. Metrics and exports use the same keyset
+scan. Risk-only filters exclude closed and opted-out candidates in SQL; filters including `none`
+retain them. The 1,000-record select-all action limit remains in place. Dashboard and Analytics retain
+their separately disclosed interactive candidate ceilings.
+
 The first successful warmth notification sweep after the model change quietly baselines all current
 relationship cooling, introduction and deal-risk expectations, independently of recipient preferences.
 It commits the workspace model marker together with those baselines. A failed score-dependent pass
