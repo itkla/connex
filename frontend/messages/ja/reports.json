@@ -218,7 +218,7 @@
       "exporting": "エクスポート中…",
       "csv": "CSV",
       "png": "PNG",
-      "pngFailed": "このブラウザではPNGを生成できませんでした。",
+      "pngFailed": "レポートをPNG形式でエクスポートできませんでした",
       "pdf": "印刷 / PDF",
       "rangePairRequired": "開始日と終了日の両方を選択してください。",
       "attainmentRangeRequired": "目標達成率の期間は暦月または暦四半期の初日から開始し、その期間内に終了する必要があります。",
