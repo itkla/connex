@@ -43,16 +43,22 @@ class WarmthMapperXmlTest {
             "reference", LocalDateTime.of(2026, 6, 30, 0, 0),
             "model", RelationshipWarmthModel.current().sqlParameters(),
             "coolingOnly", true, "limit", 6);
-        String sql = sql(configuration, MyWorkReadMapper.class, "relationshipIds", parameters);
-        assertTrue(sql.contains("CASE LOWER(a.type)"));
-        assertTrue(sql.contains("p.owner_id = ?"));
-        assertTrue(sql.contains("p.archived_at IS NULL"));
-        assertTrue(sql.contains("p.suspended_at IS NULL"));
-        assertTrue(sql.contains("p.provision_ceased_at IS NULL"));
-        assertTrue(sql.contains("FROM person_share ps"));
-        assertTrue(sql.contains("JSON_TABLE"));
-        assertTrue(sql.contains("org_workspace.id = p.workspace_id"));
-        assertEquals(10, timeout(configuration, MyWorkReadMapper.class, "relationshipIds"));
+        for (String statement : List.of("relationshipCounts", "relationshipIds")) {
+            String sql = sql(configuration, MyWorkReadMapper.class, statement, parameters);
+            assertTrue(sql.contains("CASE LOWER(a.type)"));
+            assertTrue(sql.contains("p.owner_id = ?"));
+            assertTrue(sql.contains("p.archived_at IS NULL"));
+            assertTrue(sql.contains("p.suspended_at IS NULL"));
+            assertTrue(sql.contains("p.provision_ceased_at IS NULL"));
+            assertTrue(sql.contains("FROM person_share ps"));
+            assertTrue(sql.contains("org_workspace.id = p.workspace_id"));
+            assertTrue(sql.contains("viewing_workspace.id = ?"));
+            var bound = configuration.getMappedStatement(MyWorkReadMapper.class.getName() + "." + statement)
+                .getBoundSql(parameters);
+            assertEquals(List.of("orgWorkspaceIdsJson", "workspaceId"), bound.getParameterMappings().stream()
+                .limit(2).map(mapping -> mapping.getProperty()).toList());
+            assertEquals(10, timeout(configuration, MyWorkReadMapper.class, statement));
+        }
     }
 
     @Test

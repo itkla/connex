@@ -37,7 +37,10 @@
   <sql id="personalScores">
     WITH personal AS (
       SELECT p.id FROM person p
-      WHERE <include refid="ooo.klae.connex.backend.mappers.PersonMapper.visibleAny"/>
+      WHERE EXISTS (
+        SELECT 1 FROM JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) viewing_workspace
+        WHERE viewing_workspace.id = #{workspaceId})
+        AND <include refid="ooo.klae.connex.backend.mappers.PersonMapper.visibleAny"/>
         AND p.owner_id = #{userId}
         AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
     ), scores AS (
