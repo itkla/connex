@@ -242,11 +242,9 @@ class RecordSearchReconcilerIntegrationTest {
     }
 
     @Test
-    void completedRowsStillConsumeTheBoundedPageAndRestrictedRowsAreNotRebuilt() {
+    void missingKeysArePrioritizedAheadOfCompletedRowsAndRestrictedRowsAreNotRebuilt() {
         insertPeople(501, null);
         jdbc.update("UPDATE " + first + ".person SET search_name = '山田太郎', search_phone = '' WHERE id <= 500");
-        reconciler.sweep();
-        assertNull(key(first, 501));
         reconciler.sweep();
         assertEquals("山田太郎", key(first, 501));
         jdbc.update("UPDATE " + first + ".person SET search_name = NULL, suspended_at = CURRENT_TIMESTAMP(6) WHERE id = 1");

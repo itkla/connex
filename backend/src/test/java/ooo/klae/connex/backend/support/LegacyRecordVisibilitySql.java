@@ -2050,7 +2050,8 @@ public final class LegacyRecordVisibilitySql {
             <choose>
               <when test="query != null">
                 <bind name="searchCandidatePhone" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
-                <bind name="searchCandidateName" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+                <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+                <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
                 FROM (
                   <choose>
                     <when test="searchCandidatePhone != null">
@@ -2063,7 +2064,9 @@ public final class LegacyRecordVisibilitySql {
                     FROM company c FORCE INDEX (idx_company_workspace)
                     WHERE c.workspace_id = #{workspaceId}
                       AND (c.search_phone IS NULL OR c.search_phone &lt;&gt; #{searchCandidatePhone})
-                      AND (c.name LIKE #{query} OR c.search_name LIKE #{searchCandidateName}
+                      AND (c.name LIKE #{query} OR c.search_name LIKE #{searchNameQuery}
+                        <include refid="missingNamePredicate"/>
+                        <include refid="missingPhonePredicate"/>
                         OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
                         OR c.phone LIKE #{query})
                     </when>
@@ -2092,8 +2095,10 @@ public final class LegacyRecordVisibilitySql {
             <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
             <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
             OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+            <include refid="missingNamePredicate"/>
             <bind name="searchPhoneExact" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
             <include refid="searchPhonePredicate"/>
+            <include refid="missingPhonePredicate"/>
           </sql>
 
           <sql id="searchPhonePredicate">
@@ -2640,6 +2645,41 @@ public final class LegacyRecordVisibilitySql {
             </foreach>
             WHERE c.workspace_id = #{workspaceId} AND c.id = #{companyId} AND t.workspace_id = #{workspaceId}
           </insert>
+
+          <sql id="missingNamePredicate">
+            <if test="searchNameQuery != null">
+              OR (c.search_name IS NULL AND
+                REGEXP_REPLACE(c.name, '[[:space:]゙゚ﾞﾟ]', '') COLLATE utf8mb4_0900_ai_ci
+                  LIKE NULLIF(REGEXP_REPLACE(#{searchNameQuery,jdbcType=VARCHAR}, '[゙゚ﾞﾟ]', ''), '%%'))
+            </if>
+          </sql>
+
+          <sql id="missingPhoneDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '^([+＋][0-9０-９]{1,3})[（(][0０][）)]', '$1'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingPhonePredicate">
+            <if test="searchPhoneQuery != null">
+              OR (c.search_phone IS NULL AND
+                ((CASE
+                  WHEN REGEXP_REPLACE(c.phone, '[[:space:]]', '') COLLATE utf8mb4_0900_ai_ci LIKE '+%'
+                    AND <include refid="missingPhoneDigits"/> COLLATE utf8mb4_0900_ai_ci LIKE '810%'
+                    AND CHAR_LENGTH(<include refid="missingPhoneDigits"/>) IN (12, 13)
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 4))
+                  WHEN REGEXP_LIKE(<include refid="missingPhoneDigits"/>, '^[0０][1-9１-９][0-9０-９]{8,9}$')
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 2))
+                  ELSE <include refid="missingPhoneDigits"/>
+                END) COLLATE utf8mb4_0900_ai_ci LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                  OR <include refid="missingPhoneRawDigits"/> COLLATE utf8mb4_0900_ai_ci
+                    LIKE #{searchPhoneQuery,jdbcType=VARCHAR}))
+            </if>
+          </sql>
+          <sql id="missingPhoneRawDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '[^0-9０-９]', '')
+          </sql>
+
         </mapper>
         """;
     private static final String DEAL = """
@@ -3718,7 +3758,8 @@ public final class LegacyRecordVisibilitySql {
             <choose>
               <when test="query != null">
                 <bind name="searchCandidatePhone" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
-                <bind name="searchCandidateName" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+                <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+                <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
                 FROM (
                   <choose>
                     <when test="searchCandidatePhone != null">
@@ -3732,10 +3773,14 @@ public final class LegacyRecordVisibilitySql {
                     <include refid="companyJoin"/>
                     WHERE p.workspace_id = #{workspaceId}
                       AND (p.search_phone IS NULL OR p.search_phone &lt;&gt; #{searchCandidatePhone})
-                      AND (p.name LIKE #{query} OR p.search_name LIKE #{searchCandidateName}
+                      AND (p.name LIKE #{query} OR p.search_name LIKE #{searchNameQuery}
+                        <include refid="missingNamePredicate"/>
+                        <include refid="missingPhonePredicate"/>
                         OR p.email LIKE #{query} OR p.title LIKE #{query}
                         OR p.phone LIKE #{query}
-                        OR c.name LIKE #{query} OR c.search_name LIKE #{searchCandidateName}
+                        OR c.name LIKE #{query} OR c.search_name LIKE #{searchNameQuery}
+                        <include refid="missingCompanyNamePredicate"/>
+                        <include refid="missingCompanyPhonePredicate"/>
                         OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
                         OR c.search_phone = #{searchCandidatePhone}
                         OR c.phone LIKE #{query})
@@ -3765,8 +3810,10 @@ public final class LegacyRecordVisibilitySql {
             <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
             <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
             OR p.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+            <include refid="missingNamePredicate"/>
             <bind name="searchPhoneExact" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
             <include refid="searchPhonePredicate"/>
+            <include refid="missingPhonePredicate"/>
           </sql>
 
           <sql id="searchPhonePredicate">
@@ -3793,6 +3840,7 @@ public final class LegacyRecordVisibilitySql {
                 OR c.phone LIKE #{query}
               </otherwise>
             </choose>
+            <include refid="missingCompanyPhonePredicate"/>
           </sql>
 
           <sql id="pageWhere">
@@ -3805,7 +3853,8 @@ public final class LegacyRecordVisibilitySql {
               <if test="query != null">
                 AND (p.name LIKE #{query} OR p.email LIKE #{query}
                   OR p.title LIKE #{query} OR c.name LIKE #{query}
-                  <include refid="searchKeys"/> OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR})
+                  <include refid="searchKeys"/> OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+                  <include refid="missingCompanyNamePredicate"/>)
               </if>
               <if test="(companies != null and companies.size() > 0) or noCompany">
                 AND (
@@ -4000,10 +4049,81 @@ public final class LegacyRecordVisibilitySql {
               AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.title LIKE #{query}
               OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
               <include refid="searchKeys"/> OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
+                  <include refid="missingCompanyNamePredicate"/>
               <include refid="searchCompanyPhonePredicate"/>)
             ORDER BY p.name
             LIMIT 10
           </select>
+
+          <sql id="missingNamePredicate">
+            <if test="searchNameQuery != null">
+              OR (p.search_name IS NULL AND
+                REGEXP_REPLACE(p.name, '[[:space:]゙゚ﾞﾟ]', '') COLLATE utf8mb4_0900_ai_ci
+                  LIKE NULLIF(REGEXP_REPLACE(#{searchNameQuery,jdbcType=VARCHAR}, '[゙゚ﾞﾟ]', ''), '%%'))
+            </if>
+          </sql>
+
+          <sql id="missingPhoneDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(p.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '^([+＋][0-9０-９]{1,3})[（(][0０][）)]', '$1'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingPhonePredicate">
+            <if test="searchPhoneQuery != null">
+              OR (p.search_phone IS NULL AND
+                ((CASE
+                  WHEN REGEXP_REPLACE(p.phone, '[[:space:]]', '') COLLATE utf8mb4_0900_ai_ci LIKE '+%'
+                    AND <include refid="missingPhoneDigits"/> COLLATE utf8mb4_0900_ai_ci LIKE '810%'
+                    AND CHAR_LENGTH(<include refid="missingPhoneDigits"/>) IN (12, 13)
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 4))
+                  WHEN REGEXP_LIKE(<include refid="missingPhoneDigits"/>, '^[0０][1-9１-９][0-9０-９]{8,9}$')
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingPhoneDigits"/>, 2))
+                  ELSE <include refid="missingPhoneDigits"/>
+                END) COLLATE utf8mb4_0900_ai_ci LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                  OR <include refid="missingPhoneRawDigits"/> COLLATE utf8mb4_0900_ai_ci
+                    LIKE #{searchPhoneQuery,jdbcType=VARCHAR}))
+            </if>
+          </sql>
+
+          <sql id="missingCompanyNamePredicate">
+            <if test="searchNameQuery != null">
+              OR (c.search_name IS NULL AND
+                REGEXP_REPLACE(c.name, '[[:space:]゙゚ﾞﾟ]', '') COLLATE utf8mb4_0900_ai_ci
+                  LIKE NULLIF(REGEXP_REPLACE(#{searchNameQuery,jdbcType=VARCHAR}, '[゙゚ﾞﾟ]', ''), '%%'))
+            </if>
+          </sql>
+
+          <sql id="missingCompanyPhoneDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '^([+＋][0-9０-９]{1,3})[（(][0０][）)]', '$1'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingCompanyPhonePredicate">
+            <if test="searchPhoneQuery != null">
+              OR (c.search_phone IS NULL AND
+                ((CASE
+                  WHEN REGEXP_REPLACE(c.phone, '[[:space:]]', '') COLLATE utf8mb4_0900_ai_ci LIKE '+%'
+                    AND <include refid="missingCompanyPhoneDigits"/> COLLATE utf8mb4_0900_ai_ci LIKE '810%'
+                    AND CHAR_LENGTH(<include refid="missingCompanyPhoneDigits"/>) IN (12, 13)
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingCompanyPhoneDigits"/>, 4))
+                  WHEN REGEXP_LIKE(<include refid="missingCompanyPhoneDigits"/>, '^[0０][1-9１-９][0-9０-９]{8,9}$')
+                    THEN CONCAT('81', SUBSTRING(<include refid="missingCompanyPhoneDigits"/>, 2))
+                  ELSE <include refid="missingCompanyPhoneDigits"/>
+                END) COLLATE utf8mb4_0900_ai_ci LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+                  OR <include refid="missingCompanyPhoneRawDigits"/> COLLATE utf8mb4_0900_ai_ci
+                    LIKE #{searchPhoneQuery,jdbcType=VARCHAR}))
+            </if>
+          </sql>
+          <sql id="missingPhoneRawDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(p.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '[^0-9０-９]', '')
+          </sql>
+
+          <sql id="missingCompanyPhoneRawDigits">
+            REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(c.phone, '[[:space:]]', ''),
+              '([;；][eｅ][xｘ][tｔ][=＝]|[eｅ][xｘ][tｔ][.．]?|[xｘ]|[#＃]|内線)[0-9０-９]+$', '', 1, 0, 'i'), '[^0-9０-９]', '')
+          </sql>
+
         </mapper>
         """;
     private static final String PERSON_TAGS = """

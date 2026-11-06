@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -24,6 +26,7 @@ import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.SearchNormalizer;
 import ooo.klae.connex.backend.mappers.RecordSearchMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RecordSearchMapper.Kind;
 
 @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -33,6 +36,7 @@ class SearchNormalizationTest extends AbstractServiceTest {
     @Autowired private CompanyService companyService;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private RecordSearchMapper recordSearchMapper;
+    @Autowired private OrganizationMapper organizationMapper;
 
     @Test
     void listAndGlobalSearchFoldStoredAndQueriedJapaneseNames() {
@@ -123,10 +127,18 @@ class SearchNormalizationTest extends AbstractServiceTest {
 
     @Test
     void normalizedPredicatesCannotMatchOtherTenantRows() {
+        Organization foreignOrganization = new Organization();
+        foreignOrganization.setName("Foreign search organization");
+        foreignOrganization.setSlug("search-org-" + unique());
+        organizationMapper.insert(foreignOrganization);
         Workspace foreign = new Workspace();
         foreign.setName("Other search workspace");
         foreign.setSlug("search-" + unique());
+        foreign.setOrgId(foreignOrganization.getId());
         workspaceMapper.insert(foreign);
+        assertNotEquals(workspace.getId(), foreign.getId());
+        assertNotEquals(workspaceMapper.getOrgId(workspace.getId()), workspaceMapper.getOrgId(foreign.getId()));
+        assertEquals(Integer.valueOf(foreignOrganization.getId()), workspaceMapper.getOrgId(foreign.getId()));
         TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, foreign.getId());
         Person hidden = person("Foreign 山田 太郎", "090-9684-6208");
         Company hiddenCompany = company("Foreign ｱﾏｿﾞﾝ ABC", "090-1111-2222");
@@ -135,15 +147,53 @@ class SearchNormalizationTest extends AbstractServiceTest {
         jdbc.update("INSERT INTO person_share (person_id, workspace_id) VALUES (?, ?)", hidden.getId(), workspace.getId());
         jdbc.update("INSERT INTO company_share (company_id, workspace_id) VALUES (?, ?)", hiddenCompany.getId(), workspace.getId());
         for (String query : List.of("Foreign山田太郎", "09096846208", "96846208")) {
-            assertTrue(people(query).items().isEmpty());
+            var page = people(query);
+            assertTrue(page.items().isEmpty(), () -> "Unexpected person scopes: " + page.items().stream()
+                .map(row -> scopeDescription(row.getId(), row.getWorkspaceId())).toList());
             assertEquals(0, people(query).total());
             assertTrue(searchService.search(query, Set.of("people")).getPeople().isEmpty());
         }
         for (String query : List.of("ForeignあまぞんABC", "09011112222", "11112222")) {
-            assertTrue(companies(query).items().isEmpty());
+            var page = companies(query);
+            assertTrue(page.items().isEmpty(), () -> "Unexpected company scopes: " + page.items().stream()
+                .map(row -> scopeDescription(row.getId(), row.getWorkspaceId())).toList());
             assertEquals(0, companies(query).total());
             assertTrue(searchService.search(query, Set.of("companies")).getCompanies().isEmpty());
         }
+    }
+
+    @Test
+    void normalizedSearchIncludesExplicitSameOrganizationShares() {
+        Workspace sibling = new Workspace();
+        sibling.setName("Shared search workspace");
+        sibling.setSlug("search-shared-" + unique());
+        Integer organizationId = workspaceMapper.getOrgId(workspace.getId());
+        assertNotNull(organizationId);
+        sibling.setOrgId(organizationId);
+        workspaceMapper.insert(sibling);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, sibling.getId());
+        assertNotEquals(workspace.getId(), sibling.getId());
+        assertEquals(organizationId, workspaceMapper.getOrgId(sibling.getId()));
+        Person shared = person("Shared 山田 太郎", "090-9684-6208");
+        Company sharedCompany = company("Shared ｱﾏｿﾞﾝ ABC", "090-1111-2222");
+        jdbc.update("UPDATE person SET workspace_id = ? WHERE id = ?", sibling.getId(), shared.getId());
+        jdbc.update("UPDATE company SET workspace_id = ? WHERE id = ?", sibling.getId(), sharedCompany.getId());
+        jdbc.update("INSERT INTO person_share (person_id, workspace_id) VALUES (?, ?)", shared.getId(), workspace.getId());
+        jdbc.update("INSERT INTO company_share (company_id, workspace_id) VALUES (?, ?)", sharedCompany.getId(), workspace.getId());
+        for (String query : List.of("Shared山田太郎", "09096846208", "96846208")) {
+            assertPersonMatch(query, shared.getId());
+            assertEquals(sibling.getId(), people(query).items().stream()
+                .filter(row -> row.getId() == shared.getId()).findFirst().orElseThrow().getWorkspaceId());
+        }
+        for (String query : List.of("SharedあまぞんABC", "09011112222", "11112222")) {
+            assertCompanyMatch(query, sharedCompany.getId());
+            assertEquals(sibling.getId(), companies(query).items().stream()
+                .filter(row -> row.getId() == sharedCompany.getId()).findFirst().orElseThrow().getWorkspaceId());
+        }
+    }
+
+    private String scopeDescription(int recordId, int workspaceId) {
+        return "id=" + recordId + ",workspace=" + workspaceId + ",organization=" + workspaceMapper.getOrgId(workspaceId);
     }
 
     @Test
@@ -227,7 +277,8 @@ class SearchNormalizationTest extends AbstractServiceTest {
         for (Kind kind : Kind.values()) {
             Integer throughId = recordSearchMapper.maxId(workspace.getId(), kind);
             if (throughId != null) {
-                for (var row : recordSearchMapper.findMissing(workspace.getId(), kind, 0, throughId, 500)) {
+                var ids = recordSearchMapper.pageMissingIds(workspace.getId(), kind, 0, throughId, 500);
+                for (var row : recordSearchMapper.findMissing(workspace.getId(), kind, ids)) {
                     recordSearchMapper.reconcile(workspace.getId(), kind, row,
                         SearchNormalizer.name(row.name()), SearchNormalizer.phone(row.phone()));
                 }

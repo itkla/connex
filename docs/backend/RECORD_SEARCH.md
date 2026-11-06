@@ -5,6 +5,12 @@ retain their existing workspace, sharing, privacy, member-scope and archive pred
 search returns at most ten rows per group; list reads retain SQL pagination. Normalization never
 loads the whole workspace into application memory or filters after pagination.
 
+A returned contact or company may belong to another workspace only through an explicit share
+within the viewer's organization. The record retains its owning workspace ID; the viewing workspace
+owns the share and any private overlays. The trusted organization workspace ceiling excludes
+cross-organization owners even if a stale share points at the viewer. Name, phone and NULL-key
+candidate branches all remain subject to that same final visibility predicate.
+
 Tenant V244 adds `search_name` and `search_phone` projections to the existing record tables. They
 are derived search data, never identity keys, duplicate-review authority, merge decisions or
 display values. Their lifecycle follows the owning table. No canonical identities are rewritten.
@@ -33,35 +39,51 @@ branch. A separate workspace-indexed branch preserves other-field and raw-phone 
 excluding records already covered by the phone branch. Raw matches remain available for NULL or
 nonstandard projections, including literal matches within multiple displayed phone numbers. Digit fragments retain
 contains matching, including interior and suffix matches. Name contains matching scans workspace
-candidates; a name-key index
-cannot seek on `%…%`, so V244 does not add one. Mixed-field searches preserve name/title/email
+candidates; a name-key contains index cannot seek on `%…%`, so V244 does not add one for lookup.
+The separate one-character name-prefix indexes serve only indexed `search_name IS NULL` repair
+discovery. Mixed-field searches preserve name/title/email
 matches even when the input is a phone number, so the complete query can still scan its permitted
 workspace candidates. A phone-index range does not make the other contains branches selective.
-The additional predicates compare precomputed columns instead of applying Unicode or phone
-functions to every database row. Existing visibility joins and SQL limits remain authoritative.
+Filled keys use precomputed columns. For NULL keys only, bounded workspace candidates also compare
+raw sources before pagination: name fallback removes Unicode whitespace and standalone kana voicing
+marks and uses the key's width/kana-insensitive collation; phone fallback strips accepted formatting
+and extensions, compares digits, and recognizes Japanese domestic/optional-trunk forms. A voicing-only
+query cannot turn into an empty wildcard. These predicates apply in both candidate selection and
+final matching, including linked company metadata. Existing visibility joins and SQL limits remain
+authoritative, so transitional matching never bypasses archive, membership, sharing or organization
+ceilings. Literal raw-field matches remain available alongside equivalent-form matching.
 
 Single and batch mapper inserts and ordinary updates bind projections from their source values.
 `search_key_revision` distinguishes those writes from legacy writers and privacy scrubbers. Triggers
 clear the affected projection on a source change without a revision advance, preventing stale
 search terms from surviving anonymization. Old binaries can still serve literal matching safely;
-recurring reconciliation restores normalized coverage after legacy writes, including inserts and
-changes made during a rollback. Raw-field predicates remain available until repair commits.
+recurring reconciliation fills keys after legacy writes, including inserts and changes made during
+a rollback. Supported equivalent forms remain searchable through NULL-only fallback until repair
+commits; reads do not fill projections or change canonical identities.
 
-V244 is DDL-only: separate INSTANT column additions, INPLACE phone-index additions with `LOCK=NONE`,
-and legacy-write invalidation triggers. It refuses a table-copy fallback. There is no Java Flyway
+V244 is DDL-only: separate INSTANT column additions, INPLACE phone/backlog-index additions with
+`LOCK=NONE`, and legacy-write invalidation triggers. It refuses a table-copy fallback. Existing
+columns and indexes are skipped only after verifying their definitions in `information_schema`;
+incompatible definitions fail closed. Each committed prefix can be replayed without duplicating
+columns or indexes. Existing trigger table/event/timing/body definitions are verified before
+`CREATE TRIGGER IF NOT EXISTS`; compatible invalidation triggers stay live throughout replay,
+including concurrent legacy/privacy writes. Unknown trigger definitions fail closed rather than
+being dropped. There is no Java Flyway
 callback or data reconciliation inside migration execution. Earlier binaries remain safe; the
 rollback floor stays V243.
 
-`RecordSearchReconciler.sweep()` runs every 60 seconds after an initial 60-second delay. It reads
+`RecordSearchReconciler.sweep()` starts without an initial delay and runs every 60 seconds. It reads
 at most 25 active workspace IDs from the control catalog, then enters `TenantWorkScope.inWorkspace`
 before acquiring each tenant transaction. This mirrors the notification scheduler's control-to-tenant
 routing; organization placement selects the physical catalog, while every record statement also
 binds the exact workspace. No control table is read from an organization catalog.
 
 Each workspace/table page has its own `REQUIRES_NEW`, `READ_COMMITTED` transaction. An initial
-workspace-index/primary-key range selects at most 500 IDs regardless of whether their keys are
-already filled. The repair candidate range therefore spans at most those 500 records, even with
-sparse missing keys. Each update requires the original binary name and phone, original workspace,
+phone-NULL index range and name-NULL index range each select at most 500 numeric IDs, then their
+deduplicated union retains at most 500 IDs in order. Already filled rows cannot delay missing rows.
+Source reads use those exact primary keys and refuse empty or oversized ID lists; even sparse
+missing keys never create a scan across the intervening filled records. Each update requires the
+original binary name and phone, original workspace,
 and a missing key. A concurrent edit wins the CAS; it is never overwritten. Processing-suspended
 and provision-ceased people are excluded during source selection and CAS. Archived sources are
 retained for authorized archive search and restoration through the exact bounded maintenance
@@ -87,14 +109,13 @@ Operation and recovery:
 - Monitor metadata-only warnings identifying workspace, table kind and exception class. To measure
   backlog, count rows with either key NULL in a chosen routed workspace. Do not print names or phones
   or run a whole-catalog repair transaction. Recovery uses the same bounded sweeper.
-- A failed DDL migration is separate from a failed repair page. MySQL DDL can partially commit;
-  inspect Flyway history and actual columns/indexes/triggers before applying the repository's normal
-  migration recovery procedure. `repair` alone never completes DDL. Do not rerun unconditional
-  `ADD COLUMN` against a partially applied catalog or mark V244 successful before all its DDL exists.
-  A crash after successful migration history but before any repair needs only a normal restart.
-  When history is absent and DDL is partial, restore the affected catalog's pre-V244 backup and
-  migrate again, or follow a separately reviewed catalog recovery procedure after identifying
-  every committed DDL step. Never apply history-only repair as a substitute for the missing DDL.
+- A process interruption with absent V244 history needs a normal restart: verified conditional DDL
+  resumes the committed prefix, including a person-only column addition or completed indexes with
+  triggers still absent. A recorded failed Flyway history row still requires the normal Flyway
+  failure-history repair before retry; replay then verifies/completes the schema. Do not adopt
+  incompatible definitions or mark V244 successful before every statement completes. A crash after
+  successful history but before repair also needs only a normal restart. No pre-V244 restore or
+  destructive schema reconstruction is needed for a compatible interrupted prefix.
 
 Global search suppresses debounce requests during IME composition in both the inline box and
 command palette. Enter, Escape and navigation keys do not activate search controls while the

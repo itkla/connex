@@ -69,10 +69,10 @@ class RecordSearchReconcilerTest {
         when(workspaces.findWorkspaceIdsThroughPage(0, 11, 25)).thenReturn(List.of(11));
         when(records.maxId(11, Kind.PERSON)).thenThrow(new IllegalStateException("Injected failure"));
         when(records.maxId(11, Kind.COMPANY)).thenReturn(1);
-        when(records.pageIds(11, Kind.COMPANY, 0, 1, 500)).thenReturn(List.of(1));
-        when(records.findMissing(11, Kind.COMPANY, 0, 1, 500)).thenReturn(List.of());
+        when(records.pageMissingIds(11, Kind.COMPANY, 0, 1, 500)).thenReturn(List.of(1));
+        when(records.findMissing(11, Kind.COMPANY, List.of(1))).thenReturn(List.of());
         reconciler.sweep();
-        verify(records).findMissing(11, Kind.COMPANY, 0, 1, 500);
+        verify(records).findMissing(11, Kind.COMPANY, List.of(1));
         verify(transactions).rollback(any(TransactionStatus.class));
         verify(transactions).commit(any(TransactionStatus.class));
         ArgumentCaptor<TransactionDefinition> definitions = ArgumentCaptor.forClass(TransactionDefinition.class);
@@ -88,13 +88,13 @@ class RecordSearchReconcilerTest {
         when(workspaces.findLastWorkspaceId()).thenReturn(11);
         when(workspaces.findWorkspaceIdsThroughPage(0, 11, 25)).thenReturn(List.of(11));
         when(records.maxId(11, Kind.PERSON)).thenReturn(501);
-        when(records.pageIds(11, Kind.PERSON, 0, 501, 500))
+        when(records.pageMissingIds(11, Kind.PERSON, 0, 501, 500))
             .thenReturn(IntStream.rangeClosed(1, 500).boxed().toList());
-        when(records.findMissing(11, Kind.PERSON, 0, 500, 500)).thenReturn(List.of());
+        when(records.findMissing(11, Kind.PERSON, IntStream.rangeClosed(1, 500).boxed().toList())).thenReturn(List.of());
         doThrow(new IllegalStateException("Injected commit failure")).doNothing()
             .when(transactions).commit(any(TransactionStatus.class));
         reconciler.sweep();
         reconciler.sweep();
-        verify(records, times(2)).pageIds(11, Kind.PERSON, 0, 501, 500);
+        verify(records, times(2)).pageMissingIds(11, Kind.PERSON, 0, 501, 500);
     }
 }

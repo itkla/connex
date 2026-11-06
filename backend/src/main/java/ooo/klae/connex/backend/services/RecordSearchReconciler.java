@@ -45,7 +45,7 @@ public class RecordSearchReconciler {
 
     /** Processes at most one 500-row page per table in each of 25 active workspaces. */
     @Scheduled(fixedDelayString = "${connex.record-search.reconciliation-delay-ms:60000}",
-        initialDelayString = "${connex.record-search.initial-delay-ms:60000}")
+        initialDelayString = "${connex.record-search.initial-delay-ms:0}")
     public synchronized void sweep() {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Record search reconciliation requires no ambient transaction");
@@ -101,14 +101,14 @@ public class RecordSearchReconciler {
                 }
                 cursor = new Cursor(0, maxId);
             }
-            List<Integer> pageIds = recordSearchMapper.pageIds(scope.workspaceId(), scope.kind(),
+            List<Integer> pageIds = recordSearchMapper.pageMissingIds(scope.workspaceId(), scope.kind(),
                 cursor.afterId(), cursor.throughId(), PAGE_SIZE);
             if (pageIds.isEmpty()) {
                 return null;
             }
             int pageEnd = pageIds.getLast();
             List<Row> rows = recordSearchMapper.findMissing(scope.workspaceId(), scope.kind(),
-                cursor.afterId(), pageEnd, PAGE_SIZE);
+                pageIds);
             for (Row row : rows) {
                 recordSearchMapper.reconcile(scope.workspaceId(), scope.kind(), row,
                     SearchNormalizer.name(row.name()), SearchNormalizer.phone(row.phone()));

@@ -1310,7 +1310,10 @@ Do not edit an applied migration or blindly rerun a partially committed ALTER.
 V244 adds search-only name/phone columns, phone indexes and legacy-write invalidation triggers.
 It contains DDL only. Recurring tenant-routed reconciliation fills and repairs projections in
 independently committed pages after migration success; a repair interruption does not rerun DDL
-on startup. Raw-field search remains available while keys are NULL. Earlier compatible binaries
+on startup. A compatible partial DDL prefix replays through schema-verified column/index operations
+and trigger creation without an invalidation gap. Supported equivalent search forms remain
+available through NULL-key fallback before reconciliation; startup prioritizes missing keys.
+Earlier compatible binaries
 can still serve safely, so the rollback floor remains V243. See
 [record-search operation and recovery](backend/RECORD_SEARCH.md) for page bounds, cursor wrap,
 legacy-write repair, scheduling controls and partial-DDL recovery.

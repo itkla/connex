@@ -12,11 +12,11 @@ public interface RecordSearchMapper {
 
     Integer maxId(@Param("workspaceId") int workspaceId, @Param("kind") Kind kind);
 
-    List<Integer> pageIds(@Param("workspaceId") int workspaceId, @Param("kind") Kind kind,
+    List<Integer> pageMissingIds(@Param("workspaceId") int workspaceId, @Param("kind") Kind kind,
         @Param("afterId") int afterId, @Param("throughId") int throughId, @Param("limit") int limit);
 
     List<Row> findMissing(@Param("workspaceId") int workspaceId, @Param("kind") Kind kind,
-        @Param("afterId") int afterId, @Param("throughId") int throughId, @Param("limit") int limit);
+        @Param("ids") List<Integer> ids);
 
     int reconcile(@Param("workspaceId") int workspaceId, @Param("kind") Kind kind,
         @Param("row") Row row, @Param("nameKey") String nameKey, @Param("phoneKey") String phoneKey);

@@ -486,10 +486,10 @@ class ArchiveVisibilityArchTest {
             return "only the exact record-search maintenance page may claim this exception";
         }
         String sql = statement.sql().replaceAll("\\s+", " ");
-        if (!sql.contains("workspace_id = #{workspaceId}") || !sql.contains("id > #{afterId}")
-                || !sql.contains("id <= #{throughId}") || !sql.contains("LIMIT #{limit}")
+        if (!sql.contains("workspace_id = #{workspaceId}") || !sql.contains("id IN")
+                || !sql.contains("#{id}") || !sql.contains("LIMIT 500") || !sql.contains("1 = 0")
                 || !sql.contains("search_name IS NULL OR search_phone IS NULL")) {
-            return "the search projection page lacks its workspace, cursor, missing-key or limit bounds";
+            return "the search projection page lacks its workspace, exact-id, missing-key or limit bounds";
         }
         return columnsFailure(exemption, statement, Set.of("name", "phone"), "search projection sources");
     }
@@ -506,7 +506,7 @@ class ArchiveVisibilityArchTest {
                 new Statement(statement.namespace(), statement.statementId(), statement.sql() + " " + column)) != null);
         }
         assertTrue(searchProjectionRepairFailure(exemption, new Statement(statement.namespace(),
-            statement.statementId(), statement.sql().replace("#{throughId}", "999999"))) != null);
+            statement.statementId(), statement.sql().replace("LIMIT 500", "LIMIT 999999"))) != null);
         assertTrue(searchProjectionRepairFailure(exemption,
             new Statement(statement.namespace(), "otherRead", statement.sql())) != null);
         assertTrue(searchProjectionRepairFailure(exemption, new Statement(statement.namespace(),
