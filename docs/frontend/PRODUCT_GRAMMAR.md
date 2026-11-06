@@ -81,6 +81,8 @@ neighbourhood map and scalable rendering remain deferred under [#2262](https://g
 
 ### Campaigns
 
+Contact details expose marketing preferences for contacts owned by the rendered workspace. Consent and contact-restriction details and changes require `CONSENT_MANAGE`; privacy holds independently require `PERSON_UPDATE`. Consent updates are explicit manual records, and never remove contact restrictions. Removing a restriction requires separate confirmation explaining the shared-address effect. The panel uses the server marketing-status projection for current blocks and explains the existing opt-out default without promising delivery. Missing or unknown consent alone does not block; explicit revocation, contact restrictions, privacy holds, and final dispatch checks still apply. LINE and WhatsApp preferences are recordable but have no delivery support.
+
 Campaign creation asks for the minimum facts required by the backend (name and type) before entering the campaign builder. Objective/status/budget/window belong in the builder rather than an oversized create dialog. Campaign settings use the established quick-edit sheet shell.
 
 ### Calendar peek

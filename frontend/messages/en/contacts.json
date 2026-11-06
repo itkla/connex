@@ -502,5 +502,65 @@
             "firstRespondedAt": "First response",
             "firstResponseBreachedAt": "Response deadline breach"
         }
+    },
+    "ContactMarketingPreferences": {
+        "title": "Marketing preferences",
+        "policy": "Connex currently allows marketing without a recorded opt-in. Missing or unknown consent alone does not block sending.",
+        "dispatch": "Before delivery, Connex checks for archived contacts, opt-outs, contact restrictions, privacy holds, and usable addresses. These preferences do not guarantee delivery.",
+        "privacyBlocked": "Marketing is blocked by a privacy hold.",
+        "privacyAction": "Manage privacy hold",
+        "permissionUnavailable": "Your permission to manage marketing preferences could not be checked. Reload and try again.",
+        "permissionDenied": "You do not have permission to manage marketing preferences in this workspace.",
+        "channel": "Channel",
+        "channels": {
+            "email": "Email",
+            "sms": "SMS",
+            "line": "LINE",
+            "whatsapp": "WhatsApp"
+        },
+        "loading": "Loading marketing preferences",
+        "loadFailed": "Couldn't load marketing preferences. Try again before making changes.",
+        "loadFailedTitle": "Couldn't load marketing preferences",
+        "retry": "Try again",
+        "notDeliverable": "Preferences can be recorded for this channel, but Connex does not support delivery on it yet.",
+        "statusUnavailable": "The current delivery basis could not be checked.",
+        "blocked": "Marketing is blocked on this channel.",
+        "archivedBlocked": "Marketing is blocked while this contact is archived.",
+        "noAddress": "No usable address is available on this channel.",
+        "basis": "No recorded block on this channel. Sending remains subject to final checks.",
+        "recordedConsent": "Marketing consent: {status}",
+        "statuses": {
+            "granted": "Opt-in recorded",
+            "revoked": "Opted out",
+            "unknown": "Not recorded or unknown"
+        },
+        "source": "Recorded source: {source}",
+        "manualSource": "Manual update",
+        "evidence": "Evidence reference: {evidence}",
+        "actions": {
+            "granted": "Record opt-in",
+            "revoked": "Record opt-out",
+            "unknown": "Mark as unknown"
+        },
+        "restrictions": "Contact restrictions",
+        "noRestrictions": "No contact restrictions are recorded for this channel.",
+        "reasons": {
+            "doNotContact": "Do not contact",
+            "unsubscribe": "Opted out",
+            "hardBounce": "Delivery address rejected",
+            "complaint": "Spam complaint",
+            "other": "Marketing stopped"
+        },
+        "restrict": "Set do not contact",
+        "remove": "Remove contact restriction",
+        "removeWarning": "Remove this restriction for {name}? Other contacts using this address may also be affected. Recorded opt-outs, other restrictions, and privacy holds still apply.",
+        "consentWarning": "Record this preference for {name}? This saves a manual update and replaces the previous source and evidence reference. It does not remove any contact restriction or privacy hold.",
+        "clearOptOutWarning": "This replaces the recorded opt-out. Under the current rules, both opt-in and unknown stop this consent record from blocking marketing. Other restrictions still apply.",
+        "restrictWarning": "Block Connex deliveries to {name} on this channel in this workspace? This also blocks other contacts using the same address. The restriction stays linked to this contact if their address changes.",
+        "cancel": "Cancel",
+        "confirm": "Confirm change",
+        "saving": "Saving…",
+        "saved": "Marketing preferences saved",
+        "saveFailed": "Couldn't save marketing preferences"
     }
 }
