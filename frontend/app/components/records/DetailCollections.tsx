@@ -49,11 +49,11 @@ export function DealTasksSection(props: Omit<ComponentProps<typeof DealTaskList>
 }
 
 /** Never mounts the editor with invented line-item totals. */
-export function DealLineItemsSection(props: Omit<ComponentProps<typeof DealLineItems>, 'initial'>) {
+export function DealLineItemsSection(props: Omit<ComponentProps<typeof DealLineItems>, 'initial' | 'embedded'>) {
     const result = useDetailSections()?.results.dealLineItems;
     const t = useTranslations('DealsLineItems');
     return <DetailSectionState sectionKeys={['dealLineItems']} title={t('title')}>
-        {result?.kind === 'loaded' ? <DealLineItems {...props} initial={result.data} /> : null}
+        {result?.kind === 'loaded' ? <DealLineItems {...props} initial={result.data} embedded /> : null}
     </DetailSectionState>;
 }
 
@@ -106,7 +106,7 @@ export function ContactConnectionsSection(props: Pick<ComponentProps<typeof Cont
 export function ContactHistoryQuietState() {
     const result = useDetailSections()?.results.contactHistory;
     const t = useTranslations('ContactsPage');
-    return result?.kind === 'loaded' && result.data.length === 0 ? t('noRecordedInteractions') : null;
+    return result?.kind === 'loaded' && result.data.length === 0 ? <>{t('noRecordedInteractions')}</> : null;
 }
 
 /** Engagement totals are derived afresh from the same recovered collections as the timeline. */

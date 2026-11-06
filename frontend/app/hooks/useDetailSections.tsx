@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 
 import * as api from '@/app/lib/api';
 import type * as Types from '@/app/lib/types';
@@ -115,8 +115,10 @@ export function DetailSectionsProvider({ recordId, workspaceId: requestedWorkspa
         return recovered.every(Boolean);
     }, [initial, recordId, results, workspaceId]);
 
+    const value = useMemo(() => ({ results, pending, retry }), [results, pending, retry]);
+
     if (workspace.switching || workspace.activeWorkspaceId !== workspaceId) return null;
-    return <DetailSectionsContext.Provider value={{ results, pending, retry }}>{children}</DetailSectionsContext.Provider>;
+    return <DetailSectionsContext.Provider value={value}>{children}</DetailSectionsContext.Provider>;
 }
 
 /** Reads the current page's outcomes; shared components outside detail pages keep their ordinary props. */

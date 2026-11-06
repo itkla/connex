@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { memo } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -116,4 +117,22 @@ describe.each([{ locale: 'en', messages: en }, { locale: 'ja', messages: ja }])(
         await waitFor(() => expect(redirect).toHaveBeenCalledOnce());
         expect(screen.queryByText('Successful empty contacts')).toBeNull();
     });
+});
+
+
+it('preserves consumer identity when the provider parent renders without new section state', () => {
+    const observed = vi.fn();
+    const Probe = memo(function Probe() {
+        observed(useDetailSections());
+        return <p>Stable consumer</p>;
+    });
+    const initial: DetailSectionResults = { companyPeople: { kind: 'loaded', data: [] } };
+    const child = <Probe />;
+    const view = (revision: number) => <div data-revision={revision}>
+        <DetailSectionsProvider recordId={7} workspaceId={1} initial={initial}>{child}</DetailSectionsProvider>
+    </div>;
+    const { rerender } = render(view(1));
+    expect(observed).toHaveBeenCalledOnce();
+    rerender(view(2));
+    expect(observed).toHaveBeenCalledOnce();
 });
