@@ -293,7 +293,7 @@ function detailHtml(
     audienceUnavailable: boolean,
     snapshots: CampaignAudienceSnapshotSummary[] = [SNAPSHOT],
     engagement: CampaignEngagement | null = null,
-    failures: Pick<ComponentProps<typeof CampaignDetail>, "deliveryFailure" | "exportsFailure"> = {},
+    failures: Pick<ComponentProps<typeof CampaignDetail>, "messagesFailure" | "sendsFailure" | "exportsFailure"> = {},
 ): string {
     return renderToStaticMarkup(
         <CampaignDetail
@@ -374,10 +374,10 @@ describe("campaign audience labels and unavailable state", () => {
             const catalog = locale === "en" ? enCampaigns : jaCampaigns;
             const records = locale === "en" ? enRecords : jaRecords;
             const html = detailHtml(false, [], null, {
-                deliveryFailure: { kind: "failed", status: 503 },
+                messagesFailure: { kind: "failed", status: 503 },
                 exportsFailure: { kind: "failed", status: 403 },
             });
-            const failedTitle = records.RecordListState.sectionTitle.replace("{section}", catalog.CampaignDetail.tabDelivery);
+            const failedTitle = records.RecordListState.sectionTitle.replace("{section}", catalog.CampaignMessages.title);
             const deniedTitle = records.RecordListState.sectionDeniedTitle.replace("{section}", catalog.CampaignDetail.tabExports);
             expect(html).toContain(failedTitle.replaceAll("'", "&#x27;"));
             expect(html).toContain(deniedTitle.replaceAll("'", "&#x27;"));
@@ -387,6 +387,38 @@ describe("campaign audience labels and unavailable state", () => {
             expect(recovered).toContain(catalog.CampaignMessages.empty);
             expect(recovered).toContain(catalog.CampaignExports.empty);
         }
+    });
+
+    it("keeps message authoring visible when only sends fail in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+            const html = detailHtml(false, [], null, { sendsFailure: { kind: "failed", status: 503 } });
+            expect(html).toContain(catalog.CampaignMessages.empty);
+            expect(html).toContain(catalog.CampaignMessages.new);
+            expect(html).not.toContain(catalog.CampaignSends.empty);
+        }
+    });
+
+    it("keeps send history visible while refusing queueing and hiding message labels after a message denial", () => {
+        const send: ComponentProps<typeof CampaignDelivery>["initialSends"][number] = {
+            id: 9, campaignId: CAMPAIGN.id, snapshotId: 11, origin: "audience",
+            messageId: EMAIL_MESSAGE.id, messageVersion: 1, channel: "email", purpose: "marketing",
+            providerId: null, status: "draft", scheduledAt: null, startedAt: null, completedAt: null,
+            totalRecipients: 1, dispatchedCount: 0, skippedCount: 0, failedCount: 0,
+            createdById: 1, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+        };
+        const html = (denied: boolean) => renderToStaticMarkup(<CampaignDelivery campaignId={CAMPAIGN.id}
+            initialMessages={[EMAIL_MESSAGE]} initialSends={[send]} snapshots={[SNAPSHOT]}
+            messagesFailure={denied ? { kind: "failed", status: 403 } : null}
+            access={{ manage: true, send: true, consent: true }} deliveryAvailability="enabled" />);
+        const queue = (markup: string) => [...markup.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
+            .map((match) => match[0]).find((button) => button.endsWith(`>${enCampaigns.CampaignSends.queue}</button>`));
+        expect(queue(html(false))).not.toContain('disabled=""');
+        const denied = html(true);
+        expect(queue(denied)).toContain('disabled=""');
+        expect(denied).toContain(enCampaigns.CampaignSends.title);
+        expect(denied).not.toContain(EMAIL_MESSAGE.name);
     });
 
     it("labels draft send membership as prepared recipients in both locales", () => {

@@ -1,3 +1,4 @@
+import { DealTasksSection, DealLineItemsSection, DealDocumentsSection, DealEngagementSection, DealBriefSection } from '@/app/components/records/DetailCollections';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -5,8 +6,7 @@ import AccessDeniedPage from '@/app/components/AccessDeniedPage';
 import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import { loadRecord } from '@/app/lib/recordAccess';
 import { loadDetailSection } from '@/app/lib/loadDetailSection';
-import { detailSectionFailure } from '@/app/lib/detailSectionResult';
-import DetailSectionState from '@/app/components/records/DetailSectionState';
+import { DetailSectionsProvider } from '@/app/hooks/useDetailSections';
 import { CrumbLabel } from '@/app/hooks/useNavTrail';
 import RecentRecordBridge from '@/app/components/actions/RecentRecordBridge';
 import ActionRecordBridge from '@/app/components/actions/ActionRecordBridge';
@@ -43,15 +43,12 @@ import {
     getUserReferences,
 } from '@/app/lib/api';
 import {
-    type Activity,
     type Contact,
     type DealPerson,
     type DealStageHistory,
-    type Note,
     type RelationshipTemperature,
     type Stage,
     type Tag,
-    type Task,
     type User,
     type UserReference,
 } from '@/app/lib/types';
@@ -60,11 +57,10 @@ import {
     formatCurrency,
     formatDate,
     formatDateTime,
-    parseMysqlDateTime,
 } from '@/app/lib/utils';
+import { requestNow } from '@/app/lib/requestClock';
 import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
 import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
-import { citationTitleKey } from '@/app/lib/dealBriefCitations';
 
 import Rise from '@/app/components/motion/Rise';
 import { PageShell } from '@/app/components/PageShell';
@@ -77,26 +73,18 @@ import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from '@/app/components/me
 import Attachments from '@/app/components/attachments/Attachments';
 import CommentsSection from '@/app/components/records/comments/CommentsSection';
 import SummaryTile from '@/app/components/SummaryTile';
-import { EngagementSparkline, type EngagementPoint } from '@/app/components/records/companies/CompanyCard';
 import AskConnexRecordEntry from '@/app/components/ask-connex/AskConnexRecordEntry';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
-import DealActivityBreakdown from '@/app/components/records/deals/DealActivityBreakdown';
 import EngineEvaluationPanel from '@/app/components/records/EngineEvaluationPanel';
-import DealBriefPanel from '@/app/components/records/deals/DealBriefPanel';
 import DealRationalePanel from '@/app/components/records/deals/DealRationalePanel';
 import DealRiskPanel from '@/app/components/records/deals/DealRiskPanel';
 import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleProgress';
 import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
-import DealTaskList from '@/app/components/records/deals/DealTaskList';
-import DealLineItems from '@/app/components/records/deals/DealLineItems';
-import DealDocuments from '@/app/components/records/deals/DealDocuments';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
 import RecordDetailSection from '@/app/components/records/RecordDetailSection';
 import RecordStickyContext from '@/app/components/records/RecordStickyContext';
-
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 type ResolvedDealPerson = { person: Contact; role: string | null };
 
@@ -109,7 +97,9 @@ export default async function DealPage({ params }: DealPageProps) {
     const { id: rawId } = await params;
     const id = Number(rawId);
     if (!Number.isInteger(id) || id < 1) notFound();
-    const cookie = (await cookies()).toString();
+    const cookieStore = await cookies();
+    const cookie = cookieStore.toString();
+    const detailWorkspaceId = Number(cookieStore.get("connex_workspace")?.value) || undefined;
     const init = { headers: { cookie } } as const;
     const currentUserResult = await getCurrentUserResultFromCookie(cookie);
     if (!currentUserResult.ok) return <WorkspaceUnavailablePage />;
@@ -181,7 +171,6 @@ export default async function DealPage({ params }: DealPageProps) {
     const activities = activitiesResult.kind === 'loaded' ? activitiesResult.data : [];
     const notes = notesResult.kind === 'loaded' ? notesResult.data : [];
     const tasks = tasksResult.kind === 'loaded' ? tasksResult.data : [];
-    const historyFailure = detailSectionFailure(activitiesResult, notesResult, tasksResult);
     const roleByPersonId = new Map(peopleRefs.map((ref) => [ref.person, ref.role]));
     const dealPeople: ResolvedDealPerson[] = dealContacts.map((person) => ({
         person,
@@ -215,26 +204,6 @@ export default async function DealPage({ params }: DealPageProps) {
     const variance =
         closed && deal.value > 0 ? (deal.actualValue - deal.value) / deal.value : null;
     const currency = deal.currency || 'USD';
-    const now = new Date().getTime();
-    const firstWeekStart = now - 11 * WEEK_MS;
-    const weeklyEngagement: EngagementPoint[] = Array.from({ length: 12 }, (_, i) => ({
-        weekStart: firstWeekStart + i * WEEK_MS,
-        count: 0,
-        activities: 0,
-        tasks: 0,
-        notes: 0,
-    }));
-    const bucket = (ts: number, kind: 'activities' | 'tasks' | 'notes') => {
-        if (!Number.isFinite(ts)) return;
-        const idx = Math.floor((ts - firstWeekStart) / WEEK_MS);
-        if (idx < 0 || idx >= weeklyEngagement.length) return;
-        weeklyEngagement[idx][kind]++;
-        weeklyEngagement[idx].count++;
-    };
-    for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
-    for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
-    for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
-
     const stakeholderWarmth = await getContactTemperatures(
         personSeeds.map((person) => person.id),
         init,
@@ -245,16 +214,10 @@ export default async function DealPage({ params }: DealPageProps) {
         }),
         () => ({ read: false, byPerson: new Map<number, RelationshipTemperature>() }),
     );
-    const citationTitles = buildCitationTitles(
-        deal.id,
-        deal.name,
-        dealPeople,
-        activities,
-        tasks,
-        notes,
-    );
+
 
     return (
+        <DetailSectionsProvider key={`${detailWorkspaceId}:${id}`} recordId={id} workspaceId={detailWorkspaceId} initial={{ dealActivities: activitiesResult, dealNotes: notesResult, dealTasks: tasksResult, dealDocuments: documentsResult, dealLineItems: lineItemsResult }}>
         <PageShell>
                 <RecordStickyContext
                     anchorId="deal-record-identity"
@@ -517,11 +480,12 @@ export default async function DealPage({ params }: DealPageProps) {
 
                             <RecordDetailSection recordKind="deal" section="relationship" className="flex flex-col gap-6">
                                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] xl:items-stretch">
-                                    <DealBriefPanel
+                                    <DealBriefSection
                                         key={`deal-brief-${deal.id}`}
                                         dealId={deal.id}
                                         className="min-w-0"
-                                        citationTitles={citationTitles}
+                                        dealName={deal.name}
+                                        people={dealPeople}
                                     />
                                     <DealRationalePanel
                                         key={`deal-rationale-${deal.id}`}
@@ -532,13 +496,9 @@ export default async function DealPage({ params }: DealPageProps) {
                             </RecordDetailSection>
 
                             <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-8">
-                                <DetailSectionState title={t('openTasks')} failure={detailSectionFailure(tasksResult)}>
-                                    {tasksResult.kind === 'loaded' ? <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasksResult.data} deals={dealSeeds} /> : null}
-                                </DetailSectionState>
+                                <DealTasksSection dealId={deal.id} companyId={deal.company} deals={dealSeeds} />
 
-                                <DetailSectionState title={(await getTranslations('DealsLineItems'))('title')} failure={detailSectionFailure(lineItemsResult)}>
-                                    {lineItemsResult.kind === 'loaded' ? <DealLineItems key={`${deal.workspaceId}:${deal.id}`} dealId={deal.id} dealWorkspaceId={deal.workspaceId ?? null} dealCurrency={deal.currency ?? 'USD'} initial={lineItemsResult.data} /> : null}
-                                </DetailSectionState>
+                                <DealLineItemsSection dealId={deal.id} dealWorkspaceId={deal.workspaceId ?? null} dealCurrency={deal.currency ?? 'USD'} />
                             </RecordDetailSection>
                         </Rise>
                     </div>
@@ -562,16 +522,12 @@ export default async function DealPage({ params }: DealPageProps) {
                         section="files"
                         className="grid grid-cols-1 gap-8 xl:grid-cols-2 xl:items-start"
                     >
-                        <DetailSectionState title={(await getTranslations('DealsDocuments'))('title')} failure={detailSectionFailure(documentsResult)}>
-                            {documentsResult.kind === 'loaded' ? <DealDocuments
-                                dealId={deal.id}
-                                initial={documentsResult.data}
-                                canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
-                                canManageApprovals={effectivePermissions.includes('DOCUMENT_MANAGE')}
-                                canDeleteDocuments={effectivePermissions.includes('DEAL_UPDATE')}
-                                currentUserId={currentUser.id}
-                            /> : null}
-                        </DetailSectionState>
+                        <DealDocumentsSection dealId={deal.id}
+                            canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
+                            canManageApprovals={effectivePermissions.includes('DOCUMENT_MANAGE')}
+                            canDeleteDocuments={effectivePermissions.includes('DEAL_UPDATE')}
+                            currentUserId={currentUser.id}
+                        />
                         <Attachments
                             entityType="deal"
                             entityId={deal.id}
@@ -582,8 +538,6 @@ export default async function DealPage({ params }: DealPageProps) {
 
                 <Rise delay={0.16}>
                     <RecordDetailSection recordKind="deal" section="history" className="flex flex-col gap-8">
-                        <DetailSectionState title={t('timeline')} failure={historyFailure}>
-                            {!historyFailure ? <>
                             <div>
                                 <SectionLabelWithTooltip
                                     title={t('engagement')}
@@ -596,10 +550,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         </div>
                                     }
                                 />
-                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                    <EngagementSparkline data={weeklyEngagement} />
-                                    <DealActivityBreakdown activities={activities} />
-                                </div>
+                                <DealEngagementSection now={requestNow()} />
                             </div>
 
                             <div>
@@ -616,6 +567,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                 />
                                 <div className="overflow-hidden rounded-2xl border border-border bg-card">
                                     <Timeline
+                                        detailKind="deal"
                                         tasks={tasks}
                                         activities={activities}
                                         notes={notes}
@@ -629,11 +581,11 @@ export default async function DealPage({ params }: DealPageProps) {
                                     />
                                 </div>
                             </div>
-                            </> : null}
-                        </DetailSectionState>
+
                     </RecordDetailSection>
                 </Rise>
         </PageShell>
+        </DetailSectionsProvider>
     );
 }
 
@@ -673,38 +625,4 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
             {t('statusOpen')}
         </span>
     );
-}
-
-function buildCitationTitles(
-    dealId: number,
-    dealName: string,
-    people: ResolvedDealPerson[],
-    activities: Activity[],
-    tasks: Task[],
-    notes: Note[],
-): Map<string, string> {
-    const titles = new Map<string, string>();
-    titles.set(citationTitleKey('deal', dealId), clipCitationTitle(dealName));
-    for (const { person } of people) {
-        titles.set(citationTitleKey('person', person.id), clipCitationTitle(person.name));
-    }
-    for (const activity of activities) {
-        const subject = activity.subject?.trim();
-        if (subject) titles.set(citationTitleKey('act', activity.id), clipCitationTitle(subject));
-    }
-    for (const task of tasks) {
-        const description = task.description?.trim();
-        if (description) titles.set(citationTitleKey('task', task.id), clipCitationTitle(description));
-    }
-    for (const note of notes) {
-        const label = note.title?.trim() || note.content?.trim();
-        if (label) titles.set(citationTitleKey('note', note.id), clipCitationTitle(label));
-    }
-    return titles;
-}
-
-function clipCitationTitle(value: string): string {
-    const normalized = value.replace(/\s+/g, ' ').trim();
-    if (normalized.length <= 48) return normalized;
-    return `${normalized.slice(0, 47)}…`;
 }

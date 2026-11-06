@@ -5,8 +5,8 @@ import CompanyPage from '@/app/(app)/records/companies/[id]/page';
 import ContactPage from '@/app/(app)/records/contacts/[id]/page';
 import DealPage from '@/app/(app)/records/deals/[id]/page';
 import CampaignPage from '@/app/(app)/marketing/campaigns/[id]/page';
-import CampaignDetail from '@/app/components/marketing/campaigns/CampaignDetail';
-import DetailSectionState from '@/app/components/records/DetailSectionState';
+import { DetailSectionsProvider } from '@/app/hooks/useDetailSections';
+import Timeline from '@/app/components/me/Timeline';
 import { ApiError } from '@/app/lib/api';
 
 const api = vi.hoisted(() => ({
@@ -62,57 +62,56 @@ beforeEach(() => {
     for (const mock of [api.getContactEvidence, api.getContactLifecycle, api.getPersonMarketingStatus, api.getCompanyEvidence, api.getDealRisk]) mock.mockResolvedValue(null);
 });
 
-function boundaries(node: ReactNode): ComponentProps<typeof DetailSectionState>[] {
-    const found: ComponentProps<typeof DetailSectionState>[] = [];
+function pageSections(node: ReactNode): ComponentProps<typeof DetailSectionsProvider>['initial'] {
+    if (isValidElement<ComponentProps<typeof DetailSectionsProvider>>(node) && node.type === DetailSectionsProvider) return node.props.initial;
+    throw new Error('Expected page section provider');
+}
+
+function containsTimeline(node: ReactNode): boolean {
+    let found = false;
     Children.forEach(node, (child) => {
         if (!isValidElement<{ children?: ReactNode }>(child)) return;
-        if (child.type === DetailSectionState && isValidElement<ComponentProps<typeof DetailSectionState>>(child)) found.push(child.props);
-        found.push(...boundaries(child.props.children));
+        if (child.type === Timeline || containsTimeline(child.props.children)) found = true;
     });
     return found;
 }
 
 const recordCases = [
-    { name: 'company contacts', page: CompanyPage, mock: api.getCompanyPeople, title: 'contacts' },
-    { name: 'company deals', page: CompanyPage, mock: api.getCompanyDeals, title: 'deals' },
-    { name: 'contact employment', page: ContactPage, mock: api.getContactEmployment, title: 'employmentHistory' },
-    { name: 'contact connections', page: ContactPage, mock: api.getContactConnections, title: 'connections' },
-    { name: 'contact introduction path', page: ContactPage, mock: api.getContactIntroPath, title: 'connections' },
-    { name: 'contact lifecycle history', page: ContactPage, mock: api.getContactLifecycleHistory, title: 'timeline' },
-    { name: 'deal activities', page: DealPage, mock: api.getActivitiesForDeal, title: 'timeline' },
-    { name: 'deal notes', page: DealPage, mock: api.getNotesForDeal, title: 'timeline' },
-    { name: 'deal tasks', page: DealPage, mock: api.getTasksForDeal, title: 'openTasks' },
-    { name: 'deal documents', page: DealPage, mock: api.getDealDocuments, title: 'title' },
-    { name: 'deal line items', page: DealPage, mock: api.getDealLineItems, title: 'title' },
+    { name: 'company contacts', page: CompanyPage, mock: api.getCompanyPeople, key: 'companyPeople' as const },
+    { name: 'company deals', page: CompanyPage, mock: api.getCompanyDeals, key: 'companyDeals' as const },
+    { name: 'contact employment', page: ContactPage, mock: api.getContactEmployment, key: 'contactEmployment' as const },
+    { name: 'contact connections', page: ContactPage, mock: api.getContactConnections, key: 'contactConnections' as const },
+    { name: 'contact introduction path', page: ContactPage, mock: api.getContactIntroPath, key: 'contactIntroPath' as const },
+    { name: 'contact lifecycle history', page: ContactPage, mock: api.getContactLifecycleHistory, key: 'contactHistory' as const },
+    { name: 'deal activities', page: DealPage, mock: api.getActivitiesForDeal, key: 'dealActivities' as const },
+    { name: 'deal notes', page: DealPage, mock: api.getNotesForDeal, key: 'dealNotes' as const },
+    { name: 'deal tasks', page: DealPage, mock: api.getTasksForDeal, key: 'dealTasks' as const },
+    { name: 'deal documents', page: DealPage, mock: api.getDealDocuments, key: 'dealDocuments' as const },
+    { name: 'deal line items', page: DealPage, mock: api.getDealLineItems, key: 'dealLineItems' as const },
 ];
 
-describe.each(recordCases)('$name section boundary', ({ page, mock, title }) => {
+describe.each(recordCases)('$name section boundary', ({ page, mock, key }) => {
     it.each([403, 503])('exposes HTTP %s as failure and recovers to a successful empty load', async (status) => {
         mock.mockRejectedValueOnce(new ApiError('private', status, undefined, undefined, 'load-ref'));
         const failedPage = await page({ params: Promise.resolve({ id: 1 }) });
-        if (mock === api.getContactLifecycleHistory) expect(JSON.stringify(failedPage)).not.toContain('noRecordedInteractions');
-        const failed = boundaries(failedPage);
-        expect(failed.find((section) => section.title === title && section.failure?.status === status)?.failure)
-            .toEqual({ kind: 'failed', status, reference: 'load-ref' });
-        const recovered = boundaries(await page({ params: Promise.resolve({ id: 1 }) }));
-        expect(recovered.filter((section) => section.failure)).toEqual([]);
-        expect(recovered.find((section) => section.title === title)).toBeDefined();
+        const failed = pageSections(failedPage);
+        expect(failed[key]).toEqual({ kind: 'failed', status, reference: 'load-ref' });
+        if (mock === api.getCompanyPeople || mock === api.getCompanyDeals) expect(containsTimeline(failedPage)).toBe(true);
+        const recovered = pageSections(await page({ params: Promise.resolve({ id: 1 }) }));
+        expect(recovered[key]?.kind).toBe('loaded');
     });
 });
 
 describe.each([
-    { name: 'messages', mock: api.getCampaignMessages, prop: 'deliveryFailure' },
-    { name: 'sends', mock: api.getCampaignSends, prop: 'deliveryFailure' },
-    { name: 'exports', mock: api.getCampaignExports, prop: 'exportsFailure' },
-] as const)('campaign $name', ({ mock, prop }) => {
+    { name: 'messages', mock: api.getCampaignMessages, key: 'campaignMessages' },
+    { name: 'sends', mock: api.getCampaignSends, key: 'campaignSends' },
+    { name: 'exports', mock: api.getCampaignExports, key: 'campaignExports' },
+] as const)('campaign $name', ({ mock, key }) => {
     it.each([403, 503])('passes HTTP %s failure to its tab boundary and recovers', async (status) => {
         mock.mockRejectedValueOnce(new ApiError('private', status));
         const failed = await CampaignPage({ params: Promise.resolve({ id: '1' }) });
-        expect(failed.type).toBe(CampaignDetail);
-        if (!isValidElement<ComponentProps<typeof CampaignDetail>>(failed)) throw new Error('Expected campaign detail');
-        expect(failed.props[prop]).toMatchObject({ kind: 'failed', status });
+        expect(pageSections(failed)[key]).toMatchObject({ kind: 'failed', status });
         const recovered = await CampaignPage({ params: Promise.resolve({ id: '1' }) });
-        if (!isValidElement<ComponentProps<typeof CampaignDetail>>(recovered)) throw new Error('Expected campaign detail');
-        expect(recovered.props[prop]).toBeNull();
+        expect(pageSections(recovered)[key]?.kind).toBe('loaded');
     });
 });

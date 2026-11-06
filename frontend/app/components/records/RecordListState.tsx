@@ -26,9 +26,9 @@ export function RecordListState({
     children: ReactNode;
 }) {
     const t = useTranslations('RecordListState');
-    const sessionExpired = isSessionExpired(error);
-    const denied = error instanceof ApiError && error.status === 403;
-    const reference = error instanceof ApiError ? error.correlationId : undefined;
+    const sessionExpired = error !== null && isSessionExpired(error);
+    const denied = error !== null && error instanceof ApiError && error.status === 403;
+    const reference = error !== null && error instanceof ApiError ? error.correlationId : undefined;
     const showRecords = !error || (hasRecords && !denied);
 
     useEffect(() => {

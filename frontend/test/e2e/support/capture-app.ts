@@ -38,6 +38,11 @@ function serveApi(request: IncomingMessage, response: ServerResponse): void {
             .end(JSON.stringify({ message: 'Section unavailable', correlationId: 'detail-load-test' }));
         return;
     }
+    if (/(?:^|;\s*)e2e_detail=unrelated(?:;|$)/.test(request.headers.cookie ?? '')
+        && /^\/api\/companies\/1(?:\/(timeline|engagement))?$/.test(pathname)) {
+        response.writeHead(503).end();
+        return;
+    }
     let body: unknown;
     switch (pathname) {
         case '/api/companies/1':
@@ -53,7 +58,7 @@ function serveApi(request: IncomingMessage, response: ServerResponse): void {
             };
             break;
         case '/api/companies/1/timeline':
-            body = { activities: [], tasks: [], notes: [] };
+            body = { activities: [{ id: 1, type: 'call', subject: 'Recorded company call', createdById: 1, timestamp: user.createdAt }], tasks: [], notes: [] };
             break;
         case '/api/companies/page':
         case '/api/persons/page':

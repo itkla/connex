@@ -27,12 +27,26 @@ for (const locale of ['en', 'ja'] as const) {
             await expect(contacts.getByText(emptyContacts, { exact: true })).toHaveCount(0);
             await expect(deals.getByText(emptyDeals, { exact: true })).toHaveCount(0);
 
-            await page.context().clearCookies({ name: 'e2e_detail' });
+            const history = page.locator('#company-detail-history');
+            await expect(history.getByText('Recorded company call', { exact: true })).toBeVisible();
+            let routeRefreshes = 0;
+            page.on('request', (request) => {
+                if (request.headers().rsc === '1' && new URL(request.url()).pathname === '/records/companies/1') routeRefreshes++;
+            });
+            await page.context().addCookies([{ name: 'e2e_detail', value: 'unrelated', url: baseURL }]);
             await contacts.getByRole('button', { name: message(locale, 'records', 'RecordListState.retry'), exact: true }).click();
             await expect(contacts.getByRole('alert')).toHaveCount(0);
-            await expect(deals.getByRole('alert')).toHaveCount(0);
+            await expect(deals.getByRole('alert')).toBeVisible();
             await expect(contacts.getByText(emptyContacts, { exact: true })).toBeVisible();
+            await expect(contacts.getByRole('status')).toHaveText(message(locale, 'records', 'RecordListState.sectionRecovered').replace('{section}', contactsName));
+            await expect(contacts.getByRole('region', { name: contactsName })).toBeFocused();
+            await expect(history.getByText('Recorded company call', { exact: true })).toBeVisible();
+            expect(routeRefreshes).toBe(0);
+            await deals.getByRole('button', { name: message(locale, 'records', 'RecordListState.retry'), exact: true }).click();
+            await expect(deals.getByRole('alert')).toHaveCount(0);
             await expect(deals.getByText(emptyDeals, { exact: true })).toBeVisible();
+            await expect(history.getByText('Recorded company call', { exact: true })).toBeVisible();
+            expect(routeRefreshes).toBe(0);
         });
     }
 }

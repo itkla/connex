@@ -10,6 +10,8 @@
     "viewDeals": "View {currency} deals"
   },
   "RecordListState": {
+    "editChoicesUnavailable": "Retry the unavailable contacts or deals before editing this entry.",
+    "sectionRecovered": "{section} loaded.",
     "sectionTitle": "Couldn't load {section}",
     "sectionDeniedTitle": "You don't have permission to view {section}",
 

@@ -126,7 +126,8 @@ export default function CampaignDetail({
     initialMessages,
     initialSends,
     initialExports,
-    deliveryFailure = null,
+    messagesFailure = null,
+    sendsFailure = null,
     exportsFailure = null,
     initialEngagement,
     access,
@@ -140,7 +141,8 @@ export default function CampaignDetail({
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
     initialExports: CampaignAudienceExport[];
-    deliveryFailure?: DetailSectionFailure | null;
+    messagesFailure?: DetailSectionFailure | null;
+    sendsFailure?: DetailSectionFailure | null;
     exportsFailure?: DetailSectionFailure | null;
     initialEngagement: CampaignEngagementData | null;
     access: CampaignAccess;
@@ -650,16 +652,16 @@ export default function CampaignDetail({
                     </TabsContent>
 
                     <TabsContent value="delivery" forceMount className="data-[state=inactive]:hidden">
-                        <DetailSectionState title={t("tabDelivery")} failure={deliveryFailure}>
-                            {!deliveryFailure ? <CampaignDelivery
+                        <CampaignDelivery
+                                messagesFailure={messagesFailure}
+                                sendsFailure={sendsFailure}
                                 campaignId={current.id}
                                 initialMessages={initialMessages}
                                 initialSends={initialSends}
                                 snapshots={snapshots}
                                 access={access}
                                 deliveryAvailability={deliveryAvailability}
-                            /> : null}
-                        </DetailSectionState>
+                            />
                     </TabsContent>
 
                     <TabsContent value="engagement" forceMount className="data-[state=inactive]:hidden">
@@ -672,14 +674,14 @@ export default function CampaignDetail({
                     </TabsContent>
 
                     <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">
-                        <DetailSectionState title={t("tabExports")} failure={exportsFailure}>
-                            {!exportsFailure ? <CampaignExportPanel
+                        <DetailSectionState title={t("tabExports")} sectionKeys={["campaignExports"]} failure={exportsFailure}>
+                            <CampaignExportPanel
                                 campaignId={current.id}
                                 initialExports={initialExports}
                                 snapshots={snapshots}
                                 access={access}
                                 deliveryAvailability={deliveryAvailability}
-                            /> : null}
+                            />
                         </DetailSectionState>
                     </TabsContent>
                 </Tabs>

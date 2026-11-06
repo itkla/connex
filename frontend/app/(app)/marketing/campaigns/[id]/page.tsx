@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
     getCampaign,
@@ -14,6 +14,7 @@ import {
     toResult,
 } from "@/app/lib/api";
 import { loadDetailSection } from "@/app/lib/loadDetailSection";
+import { DetailSectionsProvider } from "@/app/hooks/useDetailSections";
 import { detailSectionFailure } from "@/app/lib/detailSectionResult";
 import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -29,6 +30,7 @@ export default async function CampaignDetailPage({
     params: Promise<{ id: string }>;
 }) {
     const cookie = (await headers()).get("cookie");
+    const detailWorkspaceId = Number((await cookies()).get("connex_workspace")?.value) || undefined;
     const userResult = await getCurrentUserResultFromCookie(cookie);
     if (!userResult.ok) {
         return <WorkspaceUnavailablePage />;
@@ -80,6 +82,7 @@ export default async function CampaignDetailPage({
         audienceResult.ok && audienceResult.data ? audienceResult.data : null;
 
     return (
+        <DetailSectionsProvider key={`${detailWorkspaceId}:${id}`} recordId={id} workspaceId={detailWorkspaceId} initial={{ campaignMessages: messagesResult, campaignSends: sendsResult, campaignExports: exportsResult }}>
         <CampaignDetail
             campaign={campaignAccess.record}
             initialAudience={initialAudience}
@@ -89,7 +92,8 @@ export default async function CampaignDetailPage({
             initialMessages={messagesResult.kind === "loaded" ? messagesResult.data : []}
             initialSends={sendsResult.kind === "loaded" ? sendsResult.data : []}
             initialExports={exportsResult.kind === "loaded" ? exportsResult.data : []}
-            deliveryFailure={detailSectionFailure(messagesResult, sendsResult)}
+            messagesFailure={detailSectionFailure(messagesResult)}
+            sendsFailure={detailSectionFailure(sendsResult)}
             exportsFailure={detailSectionFailure(exportsResult)}
             initialEngagement={engagement}
             access={resolveCampaignAccess(effectivePermissions.data)}
@@ -97,5 +101,6 @@ export default async function CampaignDetailPage({
                 capabilitiesResult.ok ? capabilitiesResult.data.campaignDelivery : null,
             )}
         />
+        </DetailSectionsProvider>
     );
 }

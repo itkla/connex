@@ -23,6 +23,8 @@ import {
     getContactIntroPath,
     removeContactConnection,
 } from '@/app/lib/api';
+import { useDetailSections, useDetailSectionData } from '@/app/hooks/useDetailSections';
+import DetailSectionState from '@/app/components/records/DetailSectionState';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useContactIntroAsk } from '@/app/components/records/contacts/introAsk';
 import { INTRODUCTIONS_PATH } from '@/app/components/introductions/introductionLinks';
@@ -49,13 +51,20 @@ export default function ContactConnections({
     contactId: number;
     contactName: string;
     initialConnections: PersonConnection[];
-    initialIntroPath: IntroPath;
+    initialIntroPath: IntroPath | null;
 }) {
     const t = useTranslations('ContactConnections');
     const showApiError = useApiErrorToast('ContactConnections');
     const tIntro = useTranslations('Introductions');
-    const [connections, setConnections] = useState(initialConnections);
+    const tContact = useTranslations('ContactsPage');
+    const [connections, setConnections] = useDetailSectionData('contactConnections', initialConnections);
     const [introPath, setIntroPath] = useState(initialIntroPath);
+    const introResult = useDetailSections()?.results.contactIntroPath;
+    const [seenIntroResult, setSeenIntroResult] = useState(introResult);
+    if (introResult !== seenIntroResult) {
+        setSeenIntroResult(introResult);
+        if (introResult?.kind === 'loaded') setIntroPath(introResult.data);
+    }
     const [selected, setSelected] = useState<Contact | null>(null);
     const [type, setType] = useState<string>('knows');
     const [busy, setBusy] = useState(false);
@@ -112,6 +121,7 @@ export default function ContactConnections({
 
     return (
         <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+            <DetailSectionState sectionKeys={['contactIntroPath']} title={t('warmPath')}>
             <div className="border-b border-border px-6 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -124,9 +134,9 @@ export default function ContactConnections({
                         {t('seeAllPaths')}
                     </Link>
                 </div>
-                {introPath.directlyKnown ? (
+                {introPath?.directlyKnown ? (
                     <p className="mt-1.5 text-sm text-foreground">{t('alreadyKnown', { name: contactName })}</p>
-                ) : introPath.reachable ? (
+                ) : introPath?.reachable ? (
                     <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1">
                         {introPath.steps.map((step, i) => (
                             <span key={step.personId} className="flex items-center gap-1.5">
@@ -145,9 +155,9 @@ export default function ContactConnections({
                             </span>
                         ))}
                     </div>
-                ) : (
+                ) : introPath ? (
                     <p className="mt-1.5 text-sm text-muted-foreground">{t('noPath')}</p>
-                )}
+                ) : null}
                 {bridge ? (
                     <Button
                         type="button"
@@ -164,6 +174,8 @@ export default function ContactConnections({
                 ) : null}
             </div>
 
+            </DetailSectionState>
+            <DetailSectionState sectionKeys={['contactConnections']} title={tContact('connections')}>
             {connections.length > 0 ? (
                 <ul className="divide-y divide-border">
                     {connections.map((connection) => (
@@ -254,6 +266,7 @@ export default function ContactConnections({
                     <PlusIcon className="size-4" strokeWidth={2.5} />
                 </Button>
             </div>
+            </DetailSectionState>
         </div>
     );
 }

@@ -219,9 +219,9 @@ describe('record detail grammar', () => {
         const history = source.indexOf('section="history"');
         const risk = source.indexOf('<DealRiskPanel');
         const people = source.indexOf("t('peopleOnThisDeal')");
-        const brief = source.indexOf('<DealBriefPanel');
+        const brief = source.indexOf('<DealBriefSection');
         const evaluation = source.indexOf('<EngineEvaluationPanel');
-        const sparkline = source.indexOf('<EngagementSparkline');
+        const sparkline = source.indexOf('<DealEngagementSection');
         const timeline = source.indexOf('<Timeline');
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
 
@@ -246,9 +246,9 @@ describe('record detail grammar', () => {
         expect(sparkline).toBeLessThan(timeline);
         expect(source).not.toContain('xl:sticky');
         expect(source.indexOf('<DealRiskPanel', risk + 1)).toBe(-1);
-        expect(source.indexOf('<DealBriefPanel', brief + 1)).toBe(-1);
+        expect(source.indexOf('<DealBriefSection', brief + 1)).toBe(-1);
         expect(source.indexOf('<EngineEvaluationPanel', evaluation + 1)).toBe(-1);
-        expect(source.indexOf('<EngagementSparkline', sparkline + 1)).toBe(-1);
+        expect(source.indexOf('<DealEngagementSection', sparkline + 1)).toBe(-1);
         expect(source).toContain('<PageShell>');
     });
 
