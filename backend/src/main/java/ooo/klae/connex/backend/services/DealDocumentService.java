@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.InvalidApprovalCurrencyException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -591,12 +592,19 @@ public class DealDocumentService {
     private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies,
             DocumentApprovalDto latestApproval) {
         DocumentContent content = parseContent(d);
-        boolean requiresApproval = !Set.of("final", "sent", "signed", "superseded", "approved")
-            .contains(d.getStatus())
-            && policyService.firstMatch(policies, d, content) != null;
+        boolean requiresApproval = false;
+        String approvalConfigurationError = null;
+        if (!Set.of("final", "sent", "signed", "superseded", "approved").contains(d.getStatus())) {
+            try {
+                requiresApproval = policyService.firstMatch(policies, d, content) != null;
+            } catch (InvalidApprovalCurrencyException exception) {
+                requiresApproval = true;
+                approvalConfigurationError = InvalidApprovalCurrencyException.CODE;
+            }
+        }
         return new DealDocumentDto(d.getId(), d.getDealId(), d.getTemplateId(), d.getType(), d.getLocale(),
             d.getStatus(), d.getVersion(), d.getTitle(), d.getCurrency(), d.getGeneratedAt(), d.getCreatedBy(), content,
-            requiresApproval, latestApproval);
+            requiresApproval, latestApproval, approvalConfigurationError);
     }
 
     private DocumentContent parseContent(DealDocument d) {

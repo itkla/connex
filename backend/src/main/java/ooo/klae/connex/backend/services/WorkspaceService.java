@@ -26,7 +26,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.validation.WorkspaceCurrencyCodes;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
@@ -341,7 +341,7 @@ public class WorkspaceService {
             int workspaceId, int actorId, String currency, long expectedIdentityVersion) {
         requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        String normalized = WorkspaceCurrencyCodes.required(currency);
+        String normalized = CurrencyCodes.required(currency);
         Workspace before = lockWorkspaceIdentityMutation(workspaceId, actorId);
         if (before.getIdentityVersion() != expectedIdentityVersion) {
             throw new ConflictException("Workspace settings changed; refresh and retry");

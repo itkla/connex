@@ -321,11 +321,13 @@
       "ROW_INVALID": "Check the mapped values, correct or skip this row, then refresh the review.",
       "CUSTOM_REQUIRED": "Enter a value for the required field “{field}”, or skip this row.",
       "CUSTOM_OPTION": "Choose an allowed option for “{field}”, clear it if optional, or skip this row.",
-      "COMPANY_VARIANT_CHOICE_REQUIRED": "An existing company has a similar name. Choose the intended company and refresh the review, or skip this row."
+      "COMPANY_VARIANT_CHOICE_REQUIRED": "An existing company has a similar name. Choose the intended company and refresh the review, or skip this row.",
+      "CURRENCY_INVALID": "The currency is not supported. Enter a supported three-letter currency code such as JPY or USD, then review again or skip this row."
     },
     "refreshCustomFields": "Refresh fields",
     "refreshingCustomFields": "Refreshing fields…",
     "unavailableCustomField": "Field unavailable",
-    "unavailableCustomFieldHint": "This field is no longer available. Select an active field or set this column to Ignore."
+    "unavailableCustomFieldHint": "This field is no longer available. Select an active field or set this column to Ignore.",
+    "currencyInvalid": "The currency is not supported. Enter a three-letter currency code such as JPY or USD and import the file again."
   }
 }

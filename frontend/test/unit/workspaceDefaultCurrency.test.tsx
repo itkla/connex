@@ -53,6 +53,7 @@ vi.mock('@/app/components/records/deals/NewDealDialog', async (original) => ({
 
 beforeEach(() => {
     vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
     state.currency = 'EUR';
     api.create.mockResolvedValue({});
     api.save.mockResolvedValue({ ...workspace, defaultCurrency: 'USD', identityVersion: 3 });
@@ -123,5 +124,11 @@ describe('workspace default deal currency', () => {
         fireEvent.click(screen.getByRole('button', { name: 'currencySave' }));
         await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('currencyInvalid'));
         expect(api.publish).not.toHaveBeenCalled();
+    });
+
+    it('keeps a server-validated saved code outside the picker shortlist available', async () => {
+        render(<WorkspaceCurrencyPanel workspace={{ ...workspace, defaultCurrency: 'KWD' }} />);
+        fireEvent.click(screen.getByRole('combobox'));
+        expect(await screen.findByRole('option', { name: 'KWD' })).toBeTruthy();
     });
 });

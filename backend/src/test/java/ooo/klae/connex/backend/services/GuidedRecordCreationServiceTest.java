@@ -188,6 +188,23 @@ class GuidedRecordCreationServiceTest {
         verify(dealService).createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE));
     }
 
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" "})
+    void missingGuidedCurrencyUsesTemplateBeforeSchemaDefault(String currency) {
+        RecordCreationTemplateUseDto use = use(RecordCreationRecordType.deal);
+        when(dealService.createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        for (JsonNode configured : new JsonNode[]{null, node("JPY")}) {
+            when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, use, SCOPE))
+                .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, configured)));
+            Deal created = service.createDeal(new GuidedDealCreateRequestDto(
+                new GuidedDealRecordDto("Deal", BigDecimal.ZERO, currency, 1, 2, null, null, null),
+                use, Map.of(), List.of()));
+            assertEquals(configured == null ? "USD" : "JPY", created.getCurrency());
+        }
+    }
+
     @Test
     void missingTemplateRequiredValueStopsBeforeCanonicalCreation() {
         RecordCreationTemplateUseDto use = use(RecordCreationRecordType.person);

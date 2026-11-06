@@ -26,12 +26,10 @@ export default function WorkspaceCurrencyPanel({ workspace }: { workspace: Works
     const [currency, setCurrency] = useState(workspaceDefaultCurrency(workspace));
     const [saving, setSaving] = useState(false);
     const [invalid, setInvalid] = useState(false);
+    const currencyChoices = workspace.defaultCurrency && !isKnownCurrency(workspace.defaultCurrency)
+        ? [workspace.defaultCurrency, ...CURRENCY_CODES] : CURRENCY_CODES;
 
     async function save() {
-        if (!isKnownCurrency(currency)) {
-            setInvalid(true);
-            return;
-        }
         setSaving(true);
         setInvalid(false);
         try {
@@ -67,7 +65,7 @@ export default function WorkspaceCurrencyPanel({ workspace }: { workspace: Works
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                            {CURRENCY_CODES.map((code) => <SelectItem key={code} value={code}>{code}</SelectItem>)}
+                            {currencyChoices.map((code) => <SelectItem key={code} value={code}>{code}</SelectItem>)}
                         </SelectContent>
                     </Select>
                     <p id="workspace-currency-hint" className="text-sm text-muted-foreground">

@@ -38,6 +38,16 @@ class AiAssistantToolCatalogTest {
         assertNull(request.currency());
         try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
             assertTrue(factory.getValidator().validate(request).isEmpty());
+            for (String currency : List.of("usd", " kwd ", "CLF")) {
+                var explicit = new AiAssistantWriteToolRequest.CreateDeal(
+                        "r1", "Renewal", "Proposal", "100.00", currency, null);
+                assertTrue(factory.getValidator().validate(explicit).isEmpty());
+                assertTrue(catalog.permitsArguments("create_deal", objectMapper.valueToTree(explicit)));
+            }
+            for (String currency : List.of("YEN", "XXX", "XTS", "XAU")) {
+                assertFalse(factory.getValidator().validate(new AiAssistantWriteToolRequest.CreateDeal(
+                        "r1", "Renewal", "Proposal", "100.00", currency, null)).isEmpty());
+            }
             assertFalse(factory.getValidator().validate(new AiAssistantWriteToolRequest.CreateDeal(
                     "r1", "Renewal", "Proposal", "100.00", "", null)).isEmpty());
         }

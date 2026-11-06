@@ -118,6 +118,43 @@ class DealServiceTest extends AbstractServiceTest {
     @MockitoSpyBean TransactionTemplate transactionTemplate;
 
     @Test
+    void creationDefaultsOnlyAbsentOrBlankCurrenciesAndCanonicalizesExplicitCodes() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        for (String currency : Arrays.asList(null, "", " ", " jpy ")) {
+            Deal request = boardDeal(pipeline, stage, 1);
+            request.setName("Currency creation " + unique());
+            request.setCurrency(currency);
+            Deal created = dealService.create(request);
+            String expected = currency == null || currency.isBlank() ? "USD" : "JPY";
+            assertEquals(expected, created.getCurrency());
+            assertEquals(expected, dealMapper.getDealById(workspace.getId(), created.getId()).getCurrency());
+        }
+    }
+
+    @Test
+    void editingDealsWithLinesPreservesUnchangedPaddedAndLegacyCurrencies() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        DealLineItemRequest line = new DealLineItemRequest();
+        line.setName("Legacy line");
+        line.setUnitPrice(new BigDecimal("100"));
+        line.setQuantity(BigDecimal.ONE);
+        line.setConfirmValueReplacement(true);
+        dealLineItemService.create(deal.getId(), line);
+        for (String currency : List.of(" jpy ", "X-LOCAL", "US$")) {
+            jdbcTemplate.update("UPDATE deal SET currency = ? WHERE workspace_id = ? AND id = ?", currency, workspace.getId(), deal.getId());
+            jdbcTemplate.update("UPDATE deal_line_item SET currency = ? WHERE workspace_id = ? AND deal_id = ?", currency.trim().toUpperCase(java.util.Locale.ROOT), workspace.getId(), deal.getId());
+            Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+            edit.setCurrency(currency.trim().toUpperCase(java.util.Locale.ROOT));
+            edit.setName("Preserved legacy currency");
+            assertEquals(currency, dealService.update(deal.getId(), edit).getCurrency());
+            assertEquals(currency, dealMapper.getDealById(workspace.getId(), deal.getId()).getCurrency());
+        }
+    }
+
+    @Test
     void collaboratorsHydrateActiveProfilesInDisplayOrderAndAuditRawTenantIds() throws Exception {
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());

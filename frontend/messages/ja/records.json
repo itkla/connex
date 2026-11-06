@@ -10,6 +10,11 @@
     "viewDeals": "{currency}の案件を表示"
   },
   "RecordListState": {
+    "editChoicesUnavailable": "履歴を編集するには、読み込めなかった連絡先または案件を再読み込みしてください。",
+    "sectionRecovered": "{section}を読み込みました。",
+    "sectionTitle": "{section}を読み込めませんでした",
+    "sectionDeniedTitle": "{section}を表示する権限がありません",
+
     "title": "一覧を読み込めませんでした",
     "body": "保存済みのデータは変更されていません。もう一度お試しください。",
     "refreshBody": "前回読み込んだ内容を表示しています。最新の内容を読み込むには、もう一度お試しください。",

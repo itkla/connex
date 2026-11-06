@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry.CustomTypeDefinition;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry.FieldDefinition;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 @Service
 public class RecordCreationTemplateValidator {
@@ -286,6 +287,7 @@ public class RecordCreationTemplateValidator {
                     throw defaultForbidden("A string default cannot be empty");
                 }
                 validateStringDefault(recordType, fieldKey, custom, value);
+                if ("currency".equals(fieldKey)) value = CurrencyCodes.required(value);
                 yield new RecordCreationDefaultSpecDto(
                     spec.kind(), value, null, null, null, null, null);
             }
@@ -372,8 +374,8 @@ public class RecordCreationTemplateValidator {
         if ("leadSource".equals(fieldKey) && !LEAD_SOURCES.contains(value)) {
             throw defaultForbidden("The lead source default is not allowed for interactive creation");
         }
-        if ("currency".equals(fieldKey) && !value.matches("^[A-Z]{3}$")) {
-            throw defaultForbidden("The currency default must be a three-letter code");
+        if ("currency".equals(fieldKey) && !CurrencyCodes.isSupported(value)) {
+            throw defaultForbidden("The currency default must be a supported ISO 4217 monetary code");
         }
         if (custom != null && "select".equals(custom.getFieldType())
                 && !customOptionExists(custom, value)) {

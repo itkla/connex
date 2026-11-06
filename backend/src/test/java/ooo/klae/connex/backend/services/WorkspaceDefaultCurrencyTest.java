@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -95,9 +97,11 @@ class WorkspaceDefaultCurrencyTest extends AbstractServiceTest {
         assertEquals("EUR", workspaceService.getCurrentDefaultCurrency());
     }
 
-    @Test
-    void canonicalCreationUsesSavedDefaultAndPreservesExplicitChoices() {
-        workspaceService.updateDefaultCurrency(workspace.getId(), currentUser.getId(), "EUR", 0L);
+    @ParameterizedTest
+    @CsvSource({"EUR,EUR", "' kwd ',KWD"})
+    void canonicalCreationUsesSavedDefaultAndPreservesExplicitChoices(String input, String expected) {
+        assertEquals(expected, workspaceService.updateDefaultCurrency(workspace.getId(), currentUser.getId(), input, 0L).defaultCurrency());
+        assertEquals(expected, workspaceService.getCurrentDefaultCurrency());
         var pipeline = newPipeline();
         var stage = newStage(pipeline, 0);
         Deal missing = new Deal();
@@ -105,11 +109,11 @@ class WorkspaceDefaultCurrencyTest extends AbstractServiceTest {
         missing.setValue(BigDecimal.TEN);
         missing.setPipelineId(pipeline.getId());
         missing.setStageId(stage.getId());
-        assertEquals("EUR", dealService.create(missing).getCurrency());
+        assertEquals(expected, dealService.create(missing).getCurrency());
         Deal explicit = new Deal();
         explicit.setName("Explicit deal currency");
         explicit.setValue(BigDecimal.TEN);
-        explicit.setCurrency("GBP");
+        explicit.setCurrency(" gbp ");
         explicit.setPipelineId(pipeline.getId());
         explicit.setStageId(stage.getId());
         assertEquals("GBP", dealService.createReviewed(explicit, null).getCurrency());
@@ -130,9 +134,10 @@ class WorkspaceDefaultCurrencyTest extends AbstractServiceTest {
         assertThrows(ConflictException.class, () -> importService.commitDeals(request));
     }
 
-    @Test
-    void importsDefaultOnlyNewDealsAndKeepExistingCurrencies() {
-        workspaceService.updateDefaultCurrency(workspace.getId(), currentUser.getId(), "EUR", 0L);
+    @ParameterizedTest
+    @CsvSource({"EUR,EUR", "' kwd ',KWD"})
+    void importsDefaultOnlyNewDealsAndKeepExistingCurrencies(String input, String expected) {
+        workspaceService.updateDefaultCurrency(workspace.getId(), currentUser.getId(), input, 0L);
         var pipeline = newPipeline();
         var stage = newStage(pipeline, 0);
         Deal existing = existingDeal(pipeline, stage);
@@ -142,7 +147,7 @@ class WorkspaceDefaultCurrencyTest extends AbstractServiceTest {
             List.of(Map.of("Name", "Imported default currency")), mappings, "skip", null);
         request.setDuplicateReviewProof(importService.previewDeals(request).getDuplicateReviewProof());
         assertEquals(1, importService.commitDeals(request).getCreated());
-        assertEquals("EUR", jdbcTemplate.queryForObject(
+        assertEquals(expected, jdbcTemplate.queryForObject(
             "SELECT currency FROM deal WHERE workspace_id = ? AND name = ?", String.class,
             workspace.getId(), "Imported default currency"));
         ImportRequest update = new ImportRequest(

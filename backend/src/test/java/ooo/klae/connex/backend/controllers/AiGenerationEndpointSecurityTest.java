@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.BusinessCardService;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
@@ -97,6 +98,7 @@ class AiGenerationEndpointSecurityTest {
     @Autowired private MockMvc mockMvc;
 
     @MockitoBean private DealService dealService;
+    @MockitoBean private CurrencyFilterService currencyFilterService;
     @MockitoBean private BulkOperationService bulkOperationService;
     @MockitoBean private DealRiskService dealRiskService;
     @MockitoBean private AiGenerationAdapterService aiGenerationAdapterService;

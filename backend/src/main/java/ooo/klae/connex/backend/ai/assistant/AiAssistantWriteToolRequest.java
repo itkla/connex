@@ -9,6 +9,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import ooo.klae.connex.backend.validation.ValidCurrency;
+
 /**
  * Closed typed request vocabulary for assistant write tools.
  *
@@ -141,7 +143,7 @@ public sealed interface AiAssistantWriteToolRequest {
             @NotBlank @Size(max = 255) String name,
             @NotBlank @Size(max = 128) String stage,
             @NotBlank @Size(max = 16) String value,
-            @Pattern(regexp = "[A-Z]{3}") String currency,
+            @ValidCurrency String currency,
             @JsonProperty("expected_close_date")
             @Size(min = 10, max = 10) String expectedCloseDate)
             implements AiAssistantWriteToolRequest {

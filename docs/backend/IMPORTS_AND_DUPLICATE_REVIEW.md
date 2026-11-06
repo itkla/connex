@@ -189,6 +189,22 @@ redirecting imported values.
 
 Do not add a dependency-first lock pass; it reverses the interactive mutation order and creates a deadlock cycle.
 
+## Deal currencies
+
+Preview and commit validate supplied nonblank currency cells after resolving the existing deal
+match. `CurrencyCodes.updated` retains an unchanged stored spelling, including legacy buckets and
+padded/lowercase codes. New rows and changed currencies require supported ISO monetary codes.
+The locked target recheck uses normalized equality and refuses a legacy value that is no longer
+unchanged before dependency or record writes. Omitted cells keep existing import merge/default
+semantics; stored currencies are never inferred or repaired.
+
+Currency row refusals use `CURRENCY_INVALID` in the shared import problem-code contract. Review and
+downloadable errors localize each structured problem before joining, including combined currency
+and amount failures. Raw `errors` arrays and joined `reason` remain compatibility fields alongside
+`problems`. Older responses retain localized currency and company-variant refusals; other raw
+diagnostics become generic correction guidance instead of presentation copy. Currency admission
+remains inside the existing preview/commit proof and locked revalidation sequence.
+
 ## Deal history dates
 
 Deal CSV mapping supports `closedAt` (Closed at) and `createdAt` (Created at), separately from

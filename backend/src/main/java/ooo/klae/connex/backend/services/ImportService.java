@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.function.Predicate;
 
 import org.springframework.stereotype.Service;
@@ -79,6 +80,7 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 /**
  * Bulk CSV import for contacts, companies, and deals. The frontend parses the CSV, maps columns to
@@ -1318,6 +1320,36 @@ public class ImportService {
                     markMatch(row, matchIds.getFirst(), row.std.get("name"));
                 }
             }
+            Map<Integer, Integer> currencyTargets = new HashMap<>();
+            for (PlanRow row : plan) {
+                if (!row.std.containsKey("currency")) continue;
+                Integer target = row.matchedId;
+                if (target == null && INVALID.equals(row.status)) {
+                    target = links.get(row.rowIndex);
+                    boolean companyKnown = row.companyName == null || row.resolvedCompanyId != null;
+                    String normalizedName = normName(row.std.get("name"));
+                    List<Integer> matches = companyKnown && normalizedName != null
+                        ? byNameCompany.get(DealDuplicateKey.of(normalizedName, row.resolvedCompanyId)) : null;
+                    if (target == null && matches != null && matches.size() == 1) target = matches.getFirst();
+                }
+                if (target != null) currencyTargets.put(row.rowIndex, target);
+            }
+            List<Integer> currencyTargetIds = currencyTargets.values().stream().distinct().sorted().toList();
+            Map<Integer, Deal> currencyTargetsById = currencyTargetIds.isEmpty() ? Map.of()
+                : dealMapper.getByIds(workspaceId, currencyTargetIds).stream()
+                    .collect(Collectors.toMap(Deal::getId, Function.identity()));
+            for (PlanRow row : plan) {
+                String currency = row.std.get("currency");
+                if (currency == null) continue;
+                Integer currencyTarget = currencyTargets.get(row.rowIndex);
+                Deal existing = currencyTarget == null ? null : currencyTargetsById.get(currencyTarget);
+                try {
+                    row.std.put("currency", existing == null ? CurrencyCodes.required(currency)
+                        : CurrencyCodes.updated(currency, existing.getCurrency()));
+                } catch (BadRequestException exception) {
+                    fail(row, "CURRENCY_INVALID");
+                }
+            }
             String action = resolveAction(request.getOnDuplicate());
             List<PlanRow> mutations = coalesceByCanonicalTarget(
                 plan, action, row -> List.of(dealCanonicalKey(row)));
@@ -1547,9 +1579,14 @@ public class ImportService {
                 fail(row, "Matched deal #" + row.matchedId + " not found");
                 continue;
             }
-            DealUpdateValues updateValues = dealUpdateValues(existing, row, action);
-            boolean currencyChanged = updateValues.currency() != null
-                && !updateValues.currency().equalsIgnoreCase(existing.getCurrency());
+            DealUpdateValues updateValues;
+            try {
+                updateValues = dealUpdateValues(existing, row, action);
+            } catch (BadRequestException exception) {
+                fail(row, "CURRENCY_INVALID");
+                continue;
+            }
+            boolean currencyChanged = !CurrencyCodes.equivalent(updateValues.currency(), existing.getCurrency());
             if ((currencyChanged || updateValues.shouldUpdateValue())
                     && dealLineItemMapper.countByDealIdForUpdate(
                         workspaceId, existing.getId()) > 0) {
@@ -1564,8 +1601,8 @@ public class ImportService {
             Deal existing,
             PlanRow row,
             String action) {
-        String currency = merge(
-            action, existing.getCurrency(), row.std.get("currency"));
+        String currency = CurrencyCodes.updated(merge(
+            action, existing.getCurrency(), row.std.get("currency")), existing.getCurrency());
         String value = row.std.get("value");
         BigDecimal parsedValue = parseValue(value);
         boolean shouldUpdateValue = value != null
@@ -2683,6 +2720,7 @@ public class ImportService {
         for (PlanRow row : plan) {
             if (INVALID.equals(row.status)) {
                 failed.add(new RowError(row.rowIndex, String.join("; ", row.errors),
+                    List.copyOf(row.errors),
                     row.errors.stream().map(ImportProblem::fromDiagnostic).toList()));
             }
         }
