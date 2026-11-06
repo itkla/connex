@@ -25,7 +25,8 @@
     "lastPasskeyRequired": "This passkey wasn't removed because accounts with administrative access must keep at least one passkey. Add another passkey in Account security before removing this one.",
     "lastSufficientPasskeyRequired": "This passkey wasn't removed because it is your last passkey approved everywhere you have administrative access. Add another passkey and have it approved in each organization before removing this one. Ask another workspace owner or an organization owner for a passkey approval code.",
     "organizationMemberEligibilityRequired": "Organization access wasn't granted. The person must first join a workspace in this organization and verify their email when required. Ask a workspace admin to invite them, then ask an organization owner to grant organization access.",
-    "disclosureIdentityVerificationRequired": "The disclosure wasn't prepared because identity verification hasn't been recorded. Ask an organization admin to verify the requester and record verification on the data request before downloading the disclosure."
+    "disclosureIdentityVerificationRequired": "The disclosure wasn't prepared because identity verification hasn't been recorded. Ask an organization admin to verify the requester and record verification on the data request before downloading the disclosure.",
+    "approvalPolicyCurrencyInvalid": "Document approval could not be checked because an approval policy has an invalid currency. Nothing was changed. Ask a workspace administrator to correct it in Settings → CRM configuration → Approval policies."
   },
   "ErrorState": {
     "title": "Something went wrong",

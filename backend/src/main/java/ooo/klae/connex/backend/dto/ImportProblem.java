@@ -23,7 +23,8 @@ public record ImportProblem(String code, String field) {
             else code = "CUSTOM_INVALID";
             return new ImportProblem(code, field);
         }
-        if (diagnostic.equals("Name is required")) code = "NAME_REQUIRED";
+        if (diagnostic.equals("CURRENCY_INVALID")) code = "CURRENCY_INVALID";
+        else if (diagnostic.equals("Name is required")) code = "NAME_REQUIRED";
         else if (diagnostic.startsWith("Name exceeds")) code = "NAME_TOO_LONG";
         else if (diagnostic.startsWith("Invalid email:")) code = "EMAIL_INVALID";
         else if (diagnostic.startsWith("Invalid date")) code = "DATE_INVALID";

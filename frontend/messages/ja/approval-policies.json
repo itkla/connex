@@ -30,7 +30,10 @@
     "delete": "削除",
     "deleted": "ポリシーを削除しました",
     "deleteFailed": "ポリシーを削除できませんでした",
-    "entityLabel": "ポリシー"
+    "entityLabel": "ポリシー",
+    "invalidCurrencyCondition": "通貨の修正が必要です",
+    "invalidCurrencyActive": "条件に該当する文書の承認には、通貨設定の修正が必要です。この承認ポリシーを編集して確認してください。",
+    "invalidCurrencyInactive": "有効にする前に、正しい通貨を選択してください。"
   },
   "ApprovalPolicyDialog": {
     "newTitle": "新規承認ポリシー",
@@ -100,6 +103,9 @@
     "impactItemMeta": "{deal}・v{version}・申請者 {requester}",
     "impactMore": "{count, plural, other {ほか#件}}",
     "impactBack": "編集に戻る",
-    "impactConfirm": "保存して終了する"
+    "impactConfirm": "保存して終了する",
+    "currencyInvalid": "「{currency}」は対応していない通貨です。正しい通貨を選択して保存してください。",
+    "currencyLegacy": "「{currency}」は保存済みの通貨です。そのまま保持できます。修正する場合は、対応している通貨コードを入力してください。",
+    "currencyCodeHint": "JPY、USD、KWD、CLFなど、対応している3文字の通貨コードを入力してください。"
   }
 }

@@ -57,6 +57,7 @@ const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["LAST_SUFFICIENT_PASSKEY_REQUIRED", "ApiErrors.lastSufficientPasskeyRequired"],
     ["ORG_MEMBER_ELIGIBILITY_REQUIRED", "ApiErrors.organizationMemberEligibilityRequired"],
     ["DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED", "ApiErrors.disclosureIdentityVerificationRequired"],
+    ["APPROVAL_POLICY_CURRENCY_INVALID", "ApiErrors.approvalPolicyCurrencyInvalid"],
 ]);
 
 function statusMessageKey(status: number): string {

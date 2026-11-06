@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 @Service
 @RequiredArgsConstructor
@@ -124,6 +125,7 @@ public class GuidedRecordCreationService {
         String duplicateReviewToken = record.duplicateReviewToken();
         Deal deal = record.toBean();
         applyDealDefaults(deal, customFields, tagIds, resolved);
+        deal.setCurrency(CurrencyCodes.forDealCreation(deal.getCurrency()));
         validateRequiredDeal(deal, customFields, tagIds, resolved);
         augmentationService.validateDealReferences(
             deal.getPipelineId(), deal.getStageId(), deal.getCompanyId(), scope);

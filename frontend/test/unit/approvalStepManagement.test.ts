@@ -5,6 +5,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import commonMessages from '@/messages/en/common.json';
+import englishErrors from '@/messages/en/errors.json';
+import japaneseErrors from '@/messages/ja/errors.json';
 import dealsMessages from '@/messages/en/deals.json';
 import japaneseDealsMessages from '@/messages/ja/deals.json';
 
@@ -763,6 +765,25 @@ describe('approval component lifecycle', () => {
             currentUserId: 1,
         }));
     }
+
+    it.each(['en', 'ja'] as const)('keeps blocked drafts and final documents visible with localized guidance for sales users in %s', async (locale) => {
+        const errors = locale === 'ja' ? japaneseErrors : englishErrors;
+        const blocked = { ...documentWith(null, 'draft'), title: 'Blocked draft',
+            approvalConfigurationError: 'APPROVAL_POLICY_CURRENCY_INVALID' };
+        const finalized = { ...documentWith(null, 'final'), id: 21, title: 'Final document', requiresApproval: false };
+        const providerProps = {
+            locale, messages: { ...TEST_MESSAGES, ...errors }, timeZone: 'UTC',
+            children: createElement(DealDocuments, {
+                dealId: 10, initial: [blocked, finalized], canApprove: false, canManageApprovals: false,
+                canDeleteDocuments: false, currentUserId: 1,
+            }),
+        };
+        await render(createElement(NextIntlClientProvider, providerProps));
+        expect(document.body.textContent).toContain('Blocked draft');
+        expect(document.body.textContent).toContain('Final document');
+        expect(document.body.textContent).not.toContain('emptyTitle');
+        expect(document.querySelector('[role="alert"]')?.textContent).toBe(errors.ApiErrors.approvalPolicyCurrencyInvalid);
+    });
 
     describe('DealDocuments approval-step management', () => {
         it('renders management actions only for managers and makes the manager mutation reachable', async () => {

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -16,6 +17,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -42,7 +45,8 @@ class AnalyticsMemberScopeGateTest {
 
     private DealController dealController() {
         return new DealController(dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
     }
 
     private ActivityController activityController() {
