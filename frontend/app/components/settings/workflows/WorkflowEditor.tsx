@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ExclamationTriangleIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
-import { segmentDefinitionLabel } from "@/app/components/records/SegmentBuilder";
+import { segmentDefinitionLabel } from "@/app/lib/segmentLabels";
 import AccessDenied from "@/app/components/AccessDenied";
 import WorkflowCanvasEditor from "@/app/components/settings/workflows/WorkflowCanvasEditor";
 import WorkflowConflictDialog from "@/app/components/settings/workflows/WorkflowConflictDialog";

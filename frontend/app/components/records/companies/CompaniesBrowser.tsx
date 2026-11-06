@@ -30,7 +30,8 @@ import { useRecordPeekController } from '@/app/components/records/useRecordPeekC
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
-import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
+import SegmentBuilder from '@/app/components/records/SegmentBuilder';
+import { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/lib/segmentLabels';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';

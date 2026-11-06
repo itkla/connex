@@ -16,8 +16,8 @@ import { QuickEditSheetShell } from '@/app/components/records/quick-edit/QuickEd
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { usePermission } from '@/app/hooks/usePermissions';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
-import { addDealPerson, removeDealPerson, updateDealPersonRole, workspacePinnedRequest } from '@/app/lib/api';
-import { renderedWorkspaceId } from '@/app/lib/renderedWorkspace';
+import { addDealPerson, removeDealPerson, updateDealPersonRole } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastSuccess } from '@/app/lib/toast';
 import type { Contact, RelationshipTemperature } from '@/app/lib/types';
 
@@ -119,7 +119,7 @@ export default function DealStakeholders({ dealId, people, temperatures }: {
                 dirtySnapshot={editor ? [editor.personId, editor.role] : null}
             >
                 <div className="space-y-4">
-                    <div className="space-y-2" role="group" aria-invalid={contactRequired} aria-describedby={contactRequired ? 'stakeholder-contact-error' : undefined}>
+                    <div className="space-y-2" role="group" aria-describedby={contactRequired ? 'stakeholder-contact-error' : undefined}>
                         <Label htmlFor="stakeholder-contact">{t('contact')}</Label>
                         <RecordSelect
                             id="stakeholder-contact"

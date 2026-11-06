@@ -24,6 +24,7 @@ import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import { isStaleRecordError } from '@/app/lib/recordEditConflict';
 import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import ContactEditConflictDialog from './ContactEditConflictDialog';
+import { contactWorkflowScope } from './contactWorkflowScope';
 import { contactDraftChanged, reconcileSavedContactDraft, submitContactDraftUpdate, toContactDraft as toDraft } from './contactEditConflict';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
@@ -873,22 +874,22 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const workflowSelection = useMemo(() => {
         if (selectedIds.size === 0) return null;
         const warmthNarrowed = hasWarmthFilter(filterState);
-        const canResolveFilter = allMatchingActive && !showArchived && !warmthNarrowed;
-        const scope = allMatchingActive && activeSavedViewId !== null && !warmthNarrowed
-            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
-            : canResolveFilter
-            ? {
-                kind: 'filter_match' as const,
-                filter: {
-                    query: query.trim() || undefined,
-                    companies: filterParams.companies,
-                    titles: filterParams.titles,
-                    noCompany: filterParams.noCompany,
-                    memberScope: filterParams.scope,
-                    memberIds: filterParams.memberIds,
-                },
-            }
-            : { kind: 'explicit_selection' as const, recordIds: selectedContactIds };
+        const scope = contactWorkflowScope({
+            allMatchingActive,
+            activeSavedViewId,
+            showArchived,
+            warmthNarrowed,
+            tagIds: filterParams.tagIds,
+            recordIds: selectedContactIds,
+            filter: {
+                query: query.trim() || undefined,
+                companies: filterParams.companies,
+                titles: filterParams.titles,
+                noCompany: filterParams.noCompany,
+                memberScope: filterParams.scope,
+                memberIds: filterParams.memberIds,
+            },
+        });
         return {
             type: 'person' as const,
             ids: selectedIds,

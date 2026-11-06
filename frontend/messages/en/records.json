@@ -242,6 +242,7 @@
     "linkedCompanyHint": "Linked company checks the company record selected on the contact. Contact name checks the contact’s own name. To find contacts without a linked company, use the Company filter in Contacts.",
     "summaryOr": " or ",
     "summaryAnd": " and ",
+    "summaryNot": "Not ({conditions})",
     "unavailableValue": "Unavailable record",
     "durationDays": "{days} days"
   },

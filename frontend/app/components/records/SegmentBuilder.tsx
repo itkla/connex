@@ -49,6 +49,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { getSegmentCatalog } from "@/app/lib/api";
+import { segmentDefinitionLabel, segmentFieldLabel } from "@/app/lib/segmentLabels";
 import { toastError } from "@/app/lib/toast";
 import { easeOut } from "@/app/lib/motion";
 import type {
@@ -180,12 +181,6 @@ function defaultOp(field: SegmentCatalogField): string {
     }
 }
 
-function operatorTokenFor(op: string | undefined, negate: boolean | undefined): string {
-    const variants = OPERATOR_VARIANTS[op ?? ""];
-    const match = variants?.find((variant) => variant.negate === !!negate);
-    return match?.token ?? "is";
-}
-
 function currentOperatorToken(condition: SegmentCondition, field: SegmentCatalogField | undefined): string {
     if (condition.type === "predicate") {
         return condition.negate ? "isNot" : "is";
@@ -228,78 +223,6 @@ function firstSubject(catalog: SegmentCatalog): string {
 function countConditions(group: SegmentDefinition): number {
     const own = group.conditions?.length ?? 0;
     return own + (group.groups ?? []).reduce((sum, nested) => sum + countConditions(nested), 0);
-}
-
-export const EMPTY_DEFINITION: SegmentDefinition = { match: "all", conditions: [] };
-
-/** Resolves the record's own name separately from its linked company. */
-export function segmentFieldLabel(field: string | undefined, recordType: string, t: (key: string) => string): string {
-    return t(field === "name" ? `recordName.${recordType}` : `field.${field}`);
-}
-
-/**
- * Builds the natural-language label for a condition: e.g. "Industry is Fintech", "Has an open deal",
- * "Tag is not Priority". {@code resolveTagName} maps a tag id to its name. Used by the removable
- * condition chips outside the builder; operator-only comparisons (is set / is empty) render without a
- * value. Derives the operator token from the condition's op + negate, independent of the catalog.
- */
-export function segmentConditionLabel(
-    condition: SegmentCondition,
-    t: (key: string, values?: Record<string, string | number>) => string,
-    resolveTagName: (id: string) => string,
-    resolveOwnerName?: (id: string) => string,
-    recordType = "company",
-): string {
-    if (condition.type === "predicate") {
-        const key = condition.key ?? "";
-        const label = condition.negate ? t(`${key}.labelNot`) : t(`${key}.label`);
-        if (condition.days != null) {
-            return t("chipDays", { label, days: condition.days });
-        }
-        return label;
-    }
-    const field = segmentFieldLabel(condition.field, recordType, t);
-    const op = t(`op.${operatorTokenFor(condition.op, condition.negate)}`);
-    if (condition.op === "is_set") {
-        return `${field} ${op}`;
-    }
-    if (condition.op === "within_days") {
-        return t("chipField", { field, op, value: t("durationDays", { days: condition.days ?? DEFAULT_DAYS }) });
-    }
-    const value = condition.field === "tag"
-        ? resolveTagName(condition.value ?? "")
-        : condition.field === "owner" && resolveOwnerName
-            ? resolveOwnerName(condition.value ?? "")
-            : condition.field === "status" && ["open", "won", "lost"].includes(condition.value ?? "")
-                ? t(`status.${condition.value}`)
-            : (condition.value ?? "");
-    return t("chipField", { field, op, value });
-}
-
-/** Describes a saved condition tree without changing its fields, values or grouping. */
-export function segmentDefinitionLabel(
-    definition: SegmentDefinition,
-    recordType: string,
-    t: (key: string, values?: Record<string, string | number>) => string,
-    fields: SegmentFields | null,
-    options?: RuleBuilderOptions | null,
-): string {
-    const parts = (definition.conditions ?? []).map((condition) => {
-        const references = condition.field === "company" ? options?.companies
-            : condition.field === "stage" ? options?.stages : undefined;
-        const display = ["company", "stage"].includes(condition.field ?? "") && condition.value
-            ? { ...condition, value: references?.find((item) => String(item.id) === condition.value)?.name ?? t("unavailableValue") }
-            : condition;
-        return segmentConditionLabel(display, t,
-            (id) => fields?.tags.find((tag) => String(tag.id) === id)?.name ?? t("unavailableValue"),
-            (id) => options?.owners.find((owner) => String(owner.id) === id)?.name ?? t("unavailableValue"),
-            recordType);
-    });
-    for (const group of definition.groups ?? []) {
-        const label = segmentDefinitionLabel(group, recordType, t, fields, options);
-        if (label) parts.push(`(${label})`);
-    }
-    return parts.join(t(definition.match === "any" ? "summaryOr" : "summaryAnd"));
 }
 
 /**

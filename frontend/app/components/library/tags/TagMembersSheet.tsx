@@ -12,8 +12,8 @@ import { useContactTargetSearch, useDealTargetSearch } from '@/app/hooks/useReco
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { usePermission } from '@/app/hooks/usePermissions';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
-import { addContactTag, removeContactTag, addCompanyTag, removeCompanyTag, addTagToDeal, removeTagFromDeal, getPeopleForTag, getCompaniesForTag, getDealsForTag, workspacePinnedRequest } from '@/app/lib/api';
-import { renderedWorkspaceId } from '@/app/lib/renderedWorkspace';
+import { addContactTag, removeContactTag, addCompanyTag, removeCompanyTag, addTagToDeal, removeTagFromDeal, getPeopleForTag, getCompaniesForTag, getDealsForTag } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastSuccess } from '@/app/lib/toast';
 import type { Tag } from '@/app/lib/types';
 import type { ServerPickerSearch } from '@/lib/server-picker-search';
@@ -112,13 +112,15 @@ function MembershipSection({ kind, members, choices, search, onSearch, searchFai
     onChange: (kind: Kind, id: number, add: boolean) => Promise<void>;
 }) {
     const t = useTranslations('TagMembers');
+    const memberIds = new Set(members.map((member) => member.id));
+    const availableChoices = choices.flatMap((choice) => memberIds.has(choice.id) ? [] : [{ id: choice.id, label: choice.name }]);
     return (
         <section aria-label={t(kind)} className="space-y-3">
             <h2 className="text-sm font-semibold">{t(kind)} <span className="text-muted-foreground">({members.length})</span></h2>
             {canEdit ? (
                 <div>
                     <label htmlFor={`tag-member-${kind}`} className="mb-2 block text-sm">{t(`add.${kind}`)}</label>
-                    <RecordSelect id={`tag-member-${kind}`} value="" options={choices.filter((choice) => !members.some((member) => member.id === choice.id)).map((choice) => ({ id: choice.id, label: choice.name }))} onValueChange={(id) => void onChange(kind, Number(id), true)} onInputValueChange={onSearch} serverSearch={search} placeholder={t('search')} disabled={busy} />
+                    <RecordSelect id={`tag-member-${kind}`} value="" options={availableChoices} onValueChange={(id) => void onChange(kind, Number(id), true)} onInputValueChange={onSearch} serverSearch={search} placeholder={t('search')} disabled={busy} />
                     {searchFailed ? <p role="alert" className="text-sm text-destructive">{t('searchFailed')}</p> : null}
                 </div>
             ) : null}

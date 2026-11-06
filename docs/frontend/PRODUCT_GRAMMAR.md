@@ -93,7 +93,8 @@ Library tag tiles open a membership drawer; the row menu retains tag editing. Me
 contacts, companies and deals with links to their records, counts for the visible membership,
 and permission-gated add/remove actions. Removing membership preserves the record. The contacts
 link opens the list with its Tag facet applied; page results, select-all and export share that
-filter. Selecting several tags matches any of them.
+filter. Selecting several tags matches any of them. A workflow launched from a tag-filtered
+contact list or saved view stays bounded to the selected matching contacts.
 
 The deal stakeholder panel adds contacts directly, including when the deal has no company.
 Its focused editor selects a workspace contact and an optional role; role edits reuse the same
@@ -103,7 +104,8 @@ Segment and workflow name fields always mean the selected record's own name: Com
 Contact name or Deal name. Linked company means the company record selected on a contact,
 not a text comparison with the company's name. The condition builder explains that distinction
 without adding unsupported operators or changing saved conditions. Workflow condition controls
-and summaries describe conditions rather than creating saved smart segments.
+and summaries describe conditions rather than creating saved smart segments. Summaries preserve
+negated comparisons and wrap negated groups explicitly, including nested groups.
 
 ### Products
 

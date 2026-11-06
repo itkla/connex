@@ -5,6 +5,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DealStakeholders from '@/app/components/records/deals/DealStakeholders';
 import { addDealPerson, removeDealPerson, updateDealPersonRole } from '@/app/lib/api';
+import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
 import type { Contact } from '@/app/lib/types';
 import messages from '@/messages/en/deals.json';
 
@@ -13,11 +14,9 @@ const state = vi.hoisted(() => ({ canEdit: true, refresh: vi.fn(), showError: vi
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: state.refresh }) }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermission: () => state.canEdit }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => state.showError }));
-vi.mock('@/app/lib/renderedWorkspace', () => ({ renderedWorkspaceId: () => 11 }));
 vi.mock('@/app/lib/toast', () => ({ toastSuccess: vi.fn() }));
 vi.mock('@/app/lib/api', () => ({
     addDealPerson: vi.fn(), updateDealPersonRole: vi.fn(), removeDealPerson: vi.fn(),
-    workspacePinnedRequest: (id: number) => ({ headers: { 'X-Workspace-Id': String(id) } }),
 }));
 vi.mock('@/app/hooks/useRecordTargetSearch', () => ({ useContactTargetSearch: () => ({
     contacts: [{ id: 7, name: 'Mika' }], serverSearch: {}, onInputValueChange: vi.fn(), error: null,
@@ -33,6 +32,7 @@ vi.mock('@/app/components/records/quick-edit/QuickEditSheetShell', () => ({ Quic
 
 let root: Root;
 let container: HTMLDivElement;
+const workspaceOwner = {};
 const person: Contact = { id: 7, name: 'Mika', email: '', phone: '', title: '', imageUrl: '', createdAt: '', updatedAt: '' };
 
 async function mount(people: { person: Contact; role: string | null }[] = []) {
@@ -46,12 +46,13 @@ async function click(label: string) {
 
 beforeEach(() => {
     vi.clearAllMocks(); state.canEdit = true;
+    bindRenderedWorkspace(workspaceOwner, 11);
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     vi.mocked(addDealPerson).mockResolvedValue([]);
     vi.mocked(updateDealPersonRole).mockResolvedValue([]);
     vi.mocked(removeDealPerson).mockResolvedValue([]);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); releaseRenderedWorkspace(workspaceOwner); });
 
 describe('direct deal stakeholders', () => {
     it('adds a workspace contact without a company or activity and pins the write', async () => {
@@ -60,14 +61,16 @@ describe('direct deal stakeholders', () => {
         if (!selector) throw new Error('Missing contact picker');
         await act(async () => { selector.value = '7'; selector.dispatchEvent(new Event('change', { bubbles: true })); });
         await click('Save stakeholder');
-        expect(addDealPerson).toHaveBeenCalledWith(5, 7, '', { headers: { 'X-Workspace-Id': '11' } });
+        expect(addDealPerson).toHaveBeenCalledWith(5, 7, '', expect.objectContaining({ headers: expect.any(Headers) }));
+        expect(new Headers(vi.mocked(addDealPerson).mock.calls[0]?.[3]?.headers).get('X-Workspace-Id')).toBe('11');
         expect(state.refresh).toHaveBeenCalledOnce();
     });
 
     it('edits a role and removes only the selected stakeholder', async () => {
         await mount([{ person, role: 'Buyer' }]); await click('Edit role for Mika');
         await click('Save stakeholder');
-        expect(updateDealPersonRole).toHaveBeenCalledWith(5, 7, 'Buyer', { headers: { 'X-Workspace-Id': '11' } });
+        expect(updateDealPersonRole).toHaveBeenCalledWith(5, 7, 'Buyer', expect.objectContaining({ headers: expect.any(Headers) }));
+        expect(new Headers(vi.mocked(updateDealPersonRole).mock.calls[0]?.[3]?.headers).get('X-Workspace-Id')).toBe('11');
         await click('Remove Mika from this deal');
         expect(removeDealPerson).toHaveBeenCalledWith(5, 7);
     });

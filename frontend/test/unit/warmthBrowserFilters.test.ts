@@ -384,14 +384,16 @@ describe("the browsers' warmth wiring", () => {
         const browser = source(file);
 
         expect(browser).toContain("const warmthNarrowed = hasWarmthFilter(filterState);");
-        expect(browser).toContain("explicit_selection");
+        expect(browser).toContain(file === CONTACTS_BROWSER ? "contactWorkflowScope({" : "explicit_selection");
         expect(browser).not.toContain("page_selection");
     });
 
     it.each(browsers)("keeps the $name saved-view scope off a warmth-narrowed selection too", ({ file }) => {
-        expect(source(file)).toContain(
-            "allMatchingActive && activeSavedViewId !== null && !warmthNarrowed",
-        );
+        if (file === CONTACTS_BROWSER) {
+            expect(source(file)).toContain('            warmthNarrowed,');
+        } else {
+            expect(source(file)).toContain("allMatchingActive && activeSavedViewId !== null && !warmthNarrowed");
+        }
     });
 
     it.each(browsers)("drops an unhonourable $name horizon before anything can count it", ({ file }) => {

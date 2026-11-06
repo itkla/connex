@@ -36,7 +36,8 @@ import { useRecordPeekController } from '@/app/components/records/useRecordPeekC
 import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
-import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
+import SegmentBuilder from '@/app/components/records/SegmentBuilder';
+import { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/lib/segmentLabels';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';

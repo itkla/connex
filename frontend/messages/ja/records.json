@@ -242,6 +242,7 @@
     "linkedCompanyHint": "「関連会社」は連絡先に紐づく会社を、「連絡先名」は連絡先自身の名前を確認します。会社が未設定の連絡先は、連絡先一覧の会社フィルターで絞り込めます。",
     "summaryOr": " または ",
     "summaryAnd": " かつ ",
+    "summaryNot": "次の条件に一致しない（{conditions}）",
     "unavailableValue": "参照できないレコード",
     "durationDays": "{days}日"
   },

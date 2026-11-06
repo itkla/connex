@@ -106,8 +106,8 @@ for (const locale of ['en', 'ja'] as const) {
     test(`${locale}: workflow conditions describe the contact and preserve saved matching @mobile`, async ({ page, isMobile }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
         const seed = seeder(page.request, fixture.workspaceId, await csrfBootstrap(page.request));
-        const config = { match: 'all', conditions: [
-            { type: 'field', field: 'name', op: 'contains', value: 'Sakura' },
+        const config = { match: 'all', negate: true, conditions: [
+            { type: 'field', field: 'name', op: 'equals', value: 'Sakura', negate: true },
             { type: 'field', field: 'company', op: 'is', value: String(fixture.companies.primary.id) },
         ] };
         const workflow = await seed.post('/api/workflows', {
@@ -128,6 +128,14 @@ for (const locale of ['en', 'ja'] as const) {
         const outline = page.getByRole('list', { name: copy('workspace', 'WorkspaceWorkflows.outlineLabel'), exact: true });
         const step = outline.getByRole('button').filter({ hasText: 'Sakura' });
         await expect(step).toContainText(copy('records', 'SmartSegments.recordName.person'));
+        const nameCondition = copy('records', 'SmartSegments.chipField')
+            .replace('{field}', copy('records', 'SmartSegments.recordName.person'))
+            .replace('{op}', copy('records', 'SmartSegments.op.isNot')).replace('{value}', 'Sakura');
+        const companyCondition = copy('records', 'SmartSegments.chipField')
+            .replace('{field}', copy('records', 'SmartSegments.field.company'))
+            .replace('{op}', copy('records', 'SmartSegments.op.is')).replace('{value}', fixture.companies.primary.name);
+        const summary = copy('records', 'SmartSegments.summaryNot').replace('{conditions}', nameCondition + copy('records', 'SmartSegments.summaryAnd') + companyCondition);
+        await expect(step).toContainText(summary);
         await step.click();
         await page.getByRole('button', { name: copy('records', 'SmartSegments.setCondition'), exact: false }).click();
         const builder = page.getByRole('dialog', { name: copy('records', 'SmartSegments.conditionTitle'), exact: true });

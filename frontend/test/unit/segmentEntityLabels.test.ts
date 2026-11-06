@@ -1,6 +1,6 @@
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
-import { segmentConditionLabel, segmentDefinitionLabel } from '@/app/components/records/SegmentBuilder';
+import { segmentConditionLabel, segmentDefinitionLabel } from '@/app/lib/segmentLabels';
 import type { SegmentDefinition } from '@/app/lib/types';
 import en from '@/messages/en/records.json';
 import ja from '@/messages/ja/records.json';
@@ -12,7 +12,12 @@ describe.each([
     { locale: 'ja', messages: ja, contact: '連絡先名', deal: '案件名', company: '関連会社' },
 ])('saved condition labels in $locale', ({ locale, messages, contact, deal, company }) => {
     const catalog: Messages = messages;
-    const t = createTranslator({ locale, messages: catalog, namespace: 'SmartSegments' });
+    const translator = createTranslator({ locale, messages: catalog, namespace: 'SmartSegments' });
+    const t = (key: string, values?: Record<string, string | number>): string => {
+        const result: unknown = Reflect.apply(translator, undefined, [key, values]);
+        if (typeof result !== 'string') throw new Error(`Expected a translated label for ${key}`);
+        return result;
+    };
 
     it('uses the chosen record type in names without changing saved matching fields', () => {
         const definition: SegmentDefinition = { match: 'all', conditions: [{ type: 'field', field: 'name', op: 'contains', value: 'Sakura' }] };
@@ -52,5 +57,44 @@ describe.each([
         const label = segmentDefinitionLabel(definition, 'deal', t, null);
         expect(label).toContain(t('durationDays', { days: 30 }));
         expect(label).toContain(t('status.won'));
+    });
+
+    it('keeps negated equality distinct from positive equality', () => {
+        const condition = { type: 'field' as const, field: 'name', op: 'equals', value: 'Sakura', negate: true };
+        expect(segmentConditionLabel(condition, t, String, undefined, 'person')).toBe(
+            t('chipField', { field: contact, op: t('op.isNot'), value: 'Sakura' }),
+        );
+        expect(segmentDefinitionLabel({ match: 'all', conditions: [condition] }, 'person', t, null)).toBe(
+            t('chipField', { field: contact, op: t('op.isNot'), value: 'Sakura' }),
+        );
+        expect(segmentConditionLabel({ ...condition, negate: false }, t, String, undefined, 'person')).toBe(
+            t('chipField', { field: contact, op: t('op.is'), value: 'Sakura' }),
+        );
+    });
+
+    it('groups translated negation around the entire root or nested condition group', () => {
+        const negated: SegmentDefinition = { match: 'any', negate: true, conditions: [
+            { type: 'field', field: 'name', op: 'equals', value: 'Sakura' },
+            { type: 'field', field: 'name', op: 'equals', value: 'Lotus', negate: true },
+        ] };
+        const first = t('chipField', { field: contact, op: t('op.is'), value: 'Sakura' });
+        const second = t('chipField', { field: contact, op: t('op.isNot'), value: 'Lotus' });
+        const expected = t('summaryNot', { conditions: first + t('summaryOr') + second });
+        const root: SegmentDefinition = { match: 'all', conditions: [
+            { type: 'field', field: 'title', op: 'equals', value: 'Buyer' },
+        ], groups: [negated] };
+        const before = JSON.stringify(root);
+        expect(segmentDefinitionLabel(negated, 'person', t, null)).toBe(expected);
+        expect(segmentDefinitionLabel(root, 'person', t, null)).toBe(
+            t('chipField', { field: t('field.title'), op: t('op.is'), value: 'Buyer' }) + t('summaryAnd') + `(${expected})`,
+        );
+        expect(JSON.stringify(root)).toBe(before);
+    });
+
+    it('makes negated comparisons explicit when the operator has no inverse label', () => {
+        const label = segmentDefinitionLabel({ match: 'all', conditions: [
+            { type: 'field', field: 'name', op: 'starts_with', value: 'Sakura', negate: true },
+        ] }, 'person', t, null);
+        expect(label).toBe(t('summaryNot', { conditions: t('chipField', { field: contact, op: t('op.startsWith'), value: 'Sakura' }) }));
     });
 });
