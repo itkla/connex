@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealRiskMatchDto;
 import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
@@ -72,13 +73,14 @@ public interface DealMapper {
         @Param("limit") int limit,
         @Param("offset") int offset
     );
-    /** One bounded, ordered candidate page using the visible list predicates before risk assessment. */
+    /** Captures the workspace-owned ID ceiling before a risk-filter candidate scan. */
+    int getRiskFilterUpperId(@Param("workspaceId") int workspaceId);
+
+    /** One indexed ID range using the visible list predicates before risk assessment. */
     List<Integer> getRiskFilterCandidateIds(
         @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("segmentIdsJson") String segmentIdsJson,
         @Param("query") String query,
-        @Param("sort") String sort,
-        @Param("dir") String dir,
         @Param("currency") String currency,
         @Param("pipelineIds") List<Integer> pipelineIds,
         @Param("stageIds") List<Integer> stageIds,
@@ -88,8 +90,17 @@ public interface DealMapper {
         @Param("statuses") List<String> statuses,
         @Param("eligibleOnly") boolean eligibleOnly,
         @Param("memberScope") MemberScope memberScope,
-        @Param("limit") int limit,
-        @Param("offset") int offset
+        @Param("afterId") int afterId,
+        @Param("upperId") int upperId,
+        @Param("limit") int limit
+    );
+
+    /** Loads a bounded matched cohort with display-safe collation keys for in-memory ordering. */
+    List<DealRiskMatchDto> getRiskFilterMatches(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("ids") List<Integer> ids,
+        @Param("sort") String sort
     );
     long countDealsFiltered(
         @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,

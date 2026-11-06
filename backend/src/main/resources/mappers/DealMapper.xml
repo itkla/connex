@@ -384,24 +384,53 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
+  <select id="getRiskFilterUpperId" resultType="int">
+    SELECT COALESCE(MAX(id), 0)
+    FROM deal FORCE INDEX (uq_deal_workspace_id)
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
   <select id="getRiskFilterCandidateIds" resultType="int">
     <bind name="riskIds" value="null"/>
-    SELECT d.id
-    FROM deal d
+    SELECT STRAIGHT_JOIN d.id
+    FROM deal d FORCE INDEX (uq_deal_workspace_id)
     <include refid="segmentIdsJoin"/>
     LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
     LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
       AND <include refid="visibleStageJoin"/>
     <include refid="dealListFilterWhere"/>
+    AND d.id &gt; #{afterId} AND d.id &lt;= #{upperId}
     <if test="eligibleOnly">
       AND d.closed_at IS NULL AND d.risk_excluded = FALSE
     </if>
+    ORDER BY d.id
+    LIMIT #{limit}
+  </select>
+
+  <resultMap id="DealRiskMatchResult" type="ooo.klae.connex.backend.dto.DealRiskMatchDto">
+    <id column="id"/>
+    <result property="sortKey" column="risk_sort_key"/>
+    <association property="deal" resultMap="DealResult"/>
+  </resultMap>
+
+  <select id="getRiskFilterMatches" resultMap="DealRiskMatchResult">
+    SELECT <include refid="qualifiedDealColumns"/>,
     <choose>
-      <when test="sort == 'id'">ORDER BY d.id</when>
-      <otherwise><include refid="dealPageOrderBy"/></otherwise>
-    </choose>
-    LIMIT #{limit} OFFSET #{offset}
+      <when test="sort == 'name'">WEIGHT_STRING(d.name)</when>
+      <when test="sort == 'company'">WEIGHT_STRING(c.name)</when>
+      <when test="sort == 'pipeline'">WEIGHT_STRING(p.name)</when>
+      <when test="sort == 'stage'">WEIGHT_STRING(s.name)</when>
+      <otherwise>NULL</otherwise>
+    </choose> AS risk_sort_key
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
   </select>
 
   <select id="getDealsFiltered" resultMap="DealResult">

@@ -68,6 +68,7 @@ import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
 import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealRiskMatchDto;
 import ooo.klae.connex.backend.dto.DealRevenuePeriodSeriesDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
@@ -367,20 +368,24 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         if (hasRiskFilter(risks)) {
-            List<Integer> pageIds = new ArrayList<>();
-            long total = visitRiskMatches(workspaceId, segmentIdsJson, query, sort, dir, currency,
+            List<Integer> matchIds = new ArrayList<>();
+            visitRiskMatches(workspaceId, segmentIdsJson, query, currency,
                 pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope, scope,
                 batch -> {
-                    for (int index = 0; index < batch.ids().size(); index++) {
-                        if (batch.offset() + index >= offset && pageIds.size() < limit) {
-                            pageIds.add(batch.ids().get(index));
-                        }
+                    if (matchIds.size() + batch.ids().size() > MAX_MATCHING_IDS) {
+                        throw new BadRequestException(
+                            "Risk filter matches too many deals; narrow the other filters before loading records");
                     }
+                    matchIds.addAll(batch.ids());
                 });
-            List<Deal> items = pageIds.isEmpty() ? List.of() : dealMapper.getDealsPageFiltered(
-                workspaceId, scope.workspaceIdsJson(), segmentIdsJson, query, sort, dir, currency,
-                pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, pageIds, memberScope, limit, 0);
-            return new PageResponse<>(items, total);
+            if (matchIds.isEmpty()) {
+                return new PageResponse<>(List.of(), 0);
+            }
+            List<DealRiskMatchDto> matches = new ArrayList<>(dealMapper.getRiskFilterMatches(
+                workspaceId, scope.workspaceIdsJson(), matchIds, sort));
+            matches.sort(DealRiskMatchOrder.comparator(sort, dir));
+            List<Deal> items = matches.stream().skip(offset).limit(limit).map(DealRiskMatchDto::getDeal).toList();
+            return new PageResponse<>(items, matches.size());
         }
         List<Deal> items = dealMapper.getDealsPageFiltered(
             workspaceId, scope.workspaceIdsJson(), segmentIdsJson, query, sort, dir, currency, pipelineIds, stageIds, companyIds,
@@ -438,7 +443,7 @@ public class DealService {
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         if (hasRiskFilter(risks)) {
             List<Deal> items = new ArrayList<>();
-            visitRiskMatches(workspaceId, segmentIdsJson, query, "id", null, currency,
+            visitRiskMatches(workspaceId, segmentIdsJson, query, currency,
                 pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope, scope,
                 batch -> items.addAll(dealMapper.getDealsFiltered(
                     workspaceId, scope.workspaceIdsJson(), segmentIdsJson, query, currency, pipelineIds,
@@ -497,7 +502,7 @@ public class DealService {
         List<DealCurrencyMetricsDto> byCurrency;
         if (hasRiskFilter(risks)) {
             Map<String, DealCurrencyMetricsDto> totals = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-            visitRiskMatches(workspaceId, segmentIdsJson, query, "id", null, currency,
+            visitRiskMatches(workspaceId, segmentIdsJson, query, currency,
                 pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope, scope,
                 batch -> {
                     for (DealCurrencyMetricsDto metrics : dealMapper.dealMetricsFiltered(
@@ -564,7 +569,7 @@ public class DealService {
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         if (hasRiskFilter(risks)) {
             List<Integer> matches = new ArrayList<>();
-            visitRiskMatches(workspaceId, segmentIdsJson, query, "id", null, currency,
+            visitRiskMatches(workspaceId, segmentIdsJson, query, currency,
                 pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope, scope,
                 batch -> {
                     if (matches.size() + batch.ids().size() > MAX_MATCHING_IDS) {
@@ -587,21 +592,21 @@ public class DealService {
         return risks != null && !risks.isEmpty() && !risks.containsAll(ALL_RISK_LEVELS);
     }
 
-    private record RiskMatchBatch(List<Integer> ids, long offset) {}
+    private record RiskMatchBatch(List<Integer> ids) {}
 
-    private long visitRiskMatches(int workspaceId, String segmentIdsJson, String query, String sort,
-            String dir, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
+    private void visitRiskMatches(int workspaceId, String segmentIdsJson, String query, String currency,
+            List<Integer> pipelineIds, List<Integer> stageIds,
             List<Integer> companyIds, List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope, RecordVisibilityScope scope,
             java.util.function.Consumer<RiskMatchBatch> visitor) {
-        long total = 0;
-        for (int offset = 0; ; offset += RISK_BATCH_SIZE) {
+        int upperId = dealMapper.getRiskFilterUpperId(workspaceId);
+        for (int afterId = 0; afterId < upperId; ) {
             List<Integer> candidates = dealMapper.getRiskFilterCandidateIds(
-                workspaceId, scope.workspaceIdsJson(), segmentIdsJson, query, sort, dir, currency,
+                workspaceId, scope.workspaceIdsJson(), segmentIdsJson, query, currency,
                 pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, !risks.contains("none"),
-                memberScope, RISK_BATCH_SIZE, offset);
+                memberScope, afterId, upperId, RISK_BATCH_SIZE);
             if (candidates.isEmpty()) {
-                return total;
+                return;
             }
             Map<Integer, String> levels = new HashMap<>();
             for (DealRiskDto risk : dealRiskService.assessDeals(workspaceId, candidates, null, scope)) {
@@ -611,11 +616,11 @@ public class DealService {
                 .filter(id -> risks.contains(levels.getOrDefault(id, "none")))
                 .toList();
             if (!matches.isEmpty()) {
-                visitor.accept(new RiskMatchBatch(matches, total));
-                total += matches.size();
+                visitor.accept(new RiskMatchBatch(matches));
             }
+            afterId = candidates.getLast();
             if (candidates.size() < RISK_BATCH_SIZE) {
-                return total;
+                return;
             }
         }
     }

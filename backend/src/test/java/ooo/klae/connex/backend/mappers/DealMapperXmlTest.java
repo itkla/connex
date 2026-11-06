@@ -84,16 +84,18 @@ class DealMapperXmlTest {
         parameters.put("sort", "name");
         parameters.put("dir", "desc");
         parameters.put("limit", 250);
-        parameters.put("offset", 1000);
+        parameters.put("afterId", 1000);
+        parameters.put("upperId", 4000);
         var bounded = statement.getBoundSql(parameters);
         String eligible = bounded.getSql().replaceAll("\\s+", " ").trim();
         assertTrue(eligible.contains("d.workspace_id = ?"));
         assertTrue(eligible.contains("AND d.closed_at IS NULL AND d.risk_excluded = FALSE"));
-        assertTrue(eligible.contains("ORDER BY d.name DESC"));
-        assertTrue(eligible.contains("d.id ASC"));
-        assertTrue(eligible.endsWith("LIMIT ? OFFSET ?"));
+        assertTrue(eligible.contains("SELECT STRAIGHT_JOIN d.id FROM deal d FORCE INDEX (uq_deal_workspace_id)"));
+        assertTrue(eligible.contains("d.id > ? AND d.id <= ?"));
+        assertTrue(eligible.endsWith("ORDER BY d.id LIMIT ?"));
+        assertFalse(eligible.contains("OFFSET"));
         assertTrue(bounded.getParameterMappings().stream().map(mapping -> mapping.getProperty()).toList()
-            .containsAll(List.of("workspaceId", "limit", "offset")));
+            .containsAll(List.of("workspaceId", "afterId", "upperId", "limit")));
         parameters.put("eligibleOnly", false);
         String includingNone = statement.getBoundSql(parameters).getSql().replaceAll("\\s+", " ");
         assertFalse(includingNone.contains("d.closed_at IS NULL"));
