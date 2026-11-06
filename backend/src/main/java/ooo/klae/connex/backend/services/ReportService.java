@@ -820,14 +820,46 @@ public class ReportService {
     @RequirePermission(Permission.REPORT_READ)
     public String exportCsv(int id, ReportGenerateRequest request) {
         requireExportStepUp();
-        return appendixCsv(generateInternal(id, request, NarrativeMode.NONE));
+        ReportDocumentDto document = generateInternal(id, request, NarrativeMode.NONE);
+        return completedCsv(id, document, false);
     }
 
     /** Exports a frozen report appendix as RFC-4180 CSV. */
     @RequirePermission(Permission.REPORT_READ)
     public String exportSnapshotCsv(int reportId, int snapshotId) {
         requireExportStepUp();
-        return appendixCsv(getSnapshot(reportId, snapshotId).computedResult());
+        return completedCsv(reportId, getSnapshot(reportId, snapshotId).computedResult(), true);
+    }
+
+    /**
+     * Records a client-prepared PNG release attempt without trusting client counts or image content.
+     * Saved configuration supplies the widget count; no row count is claimed for the client image.
+     */
+    @RequirePermission(Permission.REPORT_READ)
+    public void completeImageExport(int id, String format) {
+        workspaceService.requirePermission(Permission.REPORT_READ);
+        requireExportStepUp();
+        if (!"png".equals(format)) {
+            throw new BadRequestException("Report image export format must be png");
+        }
+        ReportDefinition definition = requireDefinition(id);
+        for (Permission permission : reportPermissionPolicy.requiredFor(definition)) {
+            workspaceService.requirePermission(permission);
+        }
+        ReportConfig config = parseConfig(definition.getConfigJson());
+        validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
+        auditService.recordStrict("report.export", "report", id, null,
+            "Client-prepared report image release attempted", Map.of(
+                "format", "png", "scope", "workspace", "imageCount", 1, "documentCount", 1,
+                "widgetCount", config.widgets().size(), "clientPrepared", true));
+    }
+
+    private String completedCsv(int id, ReportDocumentDto document, boolean snapshot) {
+        String csv = appendixCsv(document);
+        auditService.recordStrict("report.export", "report", id, null, "Report CSV export prepared", Map.of(
+            "format", "csv", "scope", "workspace", "rowCount", document.appendix().size(),
+            "documentCount", 1, "widgetCount", document.widgets().size(), "snapshot", snapshot));
+        return csv;
     }
 
     /**

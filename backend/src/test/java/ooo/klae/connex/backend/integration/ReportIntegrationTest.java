@@ -26,6 +26,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -1635,9 +1636,10 @@ class ReportIntegrationTest {
                 .session(session))
             .andExpect(status().isForbidden());
 
-        mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
+        mockMvc.perform(post("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
                 .header("X-Workspace-Id", workspace.getId())
-                .session(session))
+                .session(session)
+                .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
     }
 
@@ -2091,6 +2093,55 @@ class ReportIntegrationTest {
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
             .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/reports/{id}/export-completion", reportId)
+                .header("X-Workspace-Id", workspace.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"format\":\"png\"}")
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void snapshotCsvPostAppendsOneSuccessAndReadReplaysCannotCreateMore() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace);
+        MvcResult snapshotResult = mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON).content("{}")
+                .session(session).with(csrf().asHeader()))
+            .andExpect(status().isCreated()).andReturn();
+        int snapshotId = responseId(snapshotResult);
+        markRecentlyAuthenticated(session, member.getId());
+
+        mockMvc.perform(post("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId()).session(session))
+            .andExpect(status().isForbidden());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_type = 'report' "
+                    + "AND entity_id = ? AND action = 'report.export'",
+                Integer.class, workspace.getId(), reportId));
+
+        mockMvc.perform(post("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId()).session(session).with(csrf().asHeader()))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId()).session(session))
+            .andExpect(status().isMethodNotAllowed());
+        mockMvc.perform(head("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId()).session(session))
+            .andExpect(status().isMethodNotAllowed());
+
+        var completions = jdbcTemplate.queryForList(
+                "SELECT actor_id, outcome, changes FROM audit_log WHERE workspace_id = ? "
+                    + "AND entity_type = 'report' AND entity_id = ? AND action = 'report.export'",
+                workspace.getId(), reportId);
+        assertEquals(1, completions.size());
+        assertEquals(member.getId(), completions.getFirst().get("actor_id"));
+        assertEquals("success", completions.getFirst().get("outcome"));
+        assertTrue(objectMapper.readTree(String.valueOf(completions.getFirst().get("changes")))
+                .get("snapshot").booleanValue());
     }
 
     @Test
@@ -2116,6 +2167,19 @@ class ReportIntegrationTest {
             .andReturn();
         int snapshotId = responseId(snapshotResult);
 
+        markRecentlyAuthenticated(session, member.getId());
+        for (Workspace unauthorized : List.of(sibling, foreign)) {
+            mockMvc.perform(post("/api/reports/{id}/export-completion", reportId)
+                    .header("X-Workspace-Id", unauthorized.getId()).session(session)
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"format\":\"png\"}")
+                    .with(csrf().asHeader()))
+                .andExpect(status().isNotFound());
+        }
+        mockMvc.perform(post("/api/reports/{id}/export-completion", reportId)
+                .header("X-Workspace-Id", first.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"format\":\"png\"}")
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
         assertReportAbsent(session, sibling, reportId, snapshotId);
         assertReportAbsent(session, foreign, reportId, snapshotId);
         mockMvc.perform(get("/api/reports/{id}", reportId)
@@ -2162,6 +2226,12 @@ class ReportIntegrationTest {
                 .header("X-Workspace-Id", unauthorized.getId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNotFound());
+
+        mockMvc.perform(post("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
+                .header("X-Workspace-Id", unauthorized.getId())
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isNotFound());

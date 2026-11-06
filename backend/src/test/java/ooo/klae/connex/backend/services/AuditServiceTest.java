@@ -23,6 +23,9 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.concurrent.Executors;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -51,7 +54,10 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.config.AuditIntegrityProperties;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
@@ -90,7 +96,7 @@ class AuditServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"workspace", "entity", "organization"})
+    @ValueSource(strings = {"workspace", "entity", "organization", "selectedWorkspace", "selectedOrg"})
     void auditExportsRequireStepUpBeforeReadingEvents(String surface) {
         doThrow(new RecentAuthenticationRequiredException())
                 .when(sessionSecurityService).requireExportStepUp();
@@ -99,10 +105,13 @@ class AuditServiceTest {
                 case "workspace" -> service.exportRecent(10, 0);
                 case "entity" -> service.exportForEntity("person", 1, 10, 0);
                 case "organization" -> service.exportRecentForOrg(8, 10, 0);
+                case "selectedWorkspace" -> service.exportSelected(null, null, List.of(1), 10, 0);
+                case "selectedOrg" -> service.exportSelectedForOrg(8, List.of(1), 10, 0);
                 default -> throw new IllegalArgumentException(surface);
             }
         });
         verifyNoInteractions(auditLogMapper);
+        verify(auditIntegrityService, never()).append(any());
     }
 
     @Test
@@ -191,19 +200,176 @@ class AuditServiceTest {
         entry.setAction("audit.export");
         entry.setSummary("=formula [Private](note:42)");
         entry.setRowHash("abc123");
-        when(auditLogMapper.findWorkspaceExport(7, 10_000, 0)).thenReturn(List.of(entry));
+        when(auditLogMapper.findWorkspaceExport(7, 10_000, 0, null, null, null)).thenReturn(List.of(entry));
         when(auditIntegrityService.integrityPayload(entry))
             .thenReturn("{\"summary\":\"=formula [Private](note:42)\"}");
 
         String csv = service.exportRecent(50_000, -1);
 
-        verify(auditLogMapper).findWorkspaceExport(7, 10_000, 0);
+        verify(auditLogMapper).findWorkspaceExport(7, 10_000, 0, null, null, null);
         assertTrue(csv.contains("rowHash"));
         assertTrue(csv.contains("integrityPayloadRedacted"));
         assertTrue(csv.contains("contentRedacted"));
         assertTrue(csv.contains("'=formula a note"));
         assertFalse(csv.contains("Private"));
         assertTrue(csv.contains("abc123"));
+    }
+
+    @Test
+    void completedCrmExportCapturesActorAndOnlySafeScopeMetadata() {
+        User actor = new User();
+        actor.setId(41);
+        actor.setDisplayName("Export Actor");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        try {
+            service.recordDataExportCompleted("person", 23,
+                new MemberScope(MemberScope.Mode.MEMBERS, null, List.of(51, 52)), true, false);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals("person.export", entry.getAction());
+        assertEquals("person", entry.getEntityType());
+        assertNull(entry.getEntityId());
+        assertNull(entry.getTargetLabel());
+        assertEquals(41, entry.getActorId());
+        assertEquals(7, entry.getWorkspaceId());
+        assertEquals(8, entry.getOrgId());
+        assertEquals("success", entry.getOutcome());
+        assertEquals(objectMapper.readTree("""
+            {"format":"csv","rowCount":23,"scope":"workspace","memberScope":"MEMBERS","filtered":true,"segment":false}
+            """), objectMapper.readTree(entry.getChanges()));
+        assertNull(entry.getContext());
+    }
+
+    @Test
+    void workspaceExportAttemptAndAsyncCompletionRetainTheOriginalActorAndServerCounts() throws Exception {
+        User actor = new User();
+        actor.setId(41);
+        actor.setDisplayName("Original export actor");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        AuditService.PreparedWorkspaceExportAudit prepared;
+        try {
+            prepared = service.recordWorkspaceExportStarted(7, 8, 41, 50);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            executor.submit(() -> service.recordWorkspaceExportCompleted(prepared, 27L, 2, 4L)).get();
+        }
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService, org.mockito.Mockito.times(2)).appendIndependent(captor.capture());
+        AuditLog attempt = captor.getAllValues().getFirst();
+        AuditLog completed = captor.getAllValues().getLast();
+        assertEquals("org.workspace.export_started", attempt.getAction());
+        assertEquals("attempt", attempt.getOutcome());
+        assertEquals("org.workspace.export", completed.getAction());
+        assertEquals("success", completed.getOutcome());
+        assertEquals(41, completed.getActorId());
+        assertEquals("Original export actor", completed.getActorLabel());
+        assertNull(completed.getWorkspaceId());
+        assertEquals(8, completed.getOrgId());
+        assertEquals(7, completed.getEntityId());
+        assertNull(completed.getTargetLabel());
+        assertEquals(objectMapper.readTree("""
+            {"format":"zip","scope":"workspace","rowCount":27,"tableCount":2,"objectCount":4}
+            """), objectMapper.readTree(completed.getChanges()));
+        assertThrows(IllegalStateException.class,
+            () -> service.recordWorkspaceExportCompleted(prepared, 27L, 2, 4L));
+    }
+
+    @Test
+    void workspaceExportCaptureRejectsAnActorDifferentFromTheAuthenticatedMember() {
+        assertThrows(ForbiddenException.class, () -> service.recordWorkspaceExportStarted(7, 8, 41, 50));
+        verifyNoInteractions(auditIntegrityService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void selectedAuditExportsCaptureTheAuthorizedScopeAndActualCount(boolean organization) {
+        AuditLog row = new AuditLog();
+        row.setId(91);
+        if (organization) {
+            when(auditLogMapper.findOrgExport(8, 200, 0, List.of(91, 92))).thenReturn(List.of(row));
+            service.exportSelectedForOrg(8, List.of(91, 92), 200, 0);
+        } else {
+            when(auditLogMapper.findWorkspaceExport(7, 200, 0, List.of(91, 92), "company", 12))
+                .thenReturn(List.of(row));
+            service.exportSelected("company", 12, List.of(91, 92), 200, 0);
+        }
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(organization ? "organization.audit.export" : "audit.export", entry.getAction());
+        assertEquals("audit_log", entry.getEntityType());
+        assertEquals(organization ? null : Integer.valueOf(7), entry.getWorkspaceId());
+        assertEquals(8, entry.getOrgId());
+        var metadata = objectMapper.readTree(entry.getChanges());
+        assertEquals(1, metadata.get("rowCount").intValue());
+        assertTrue(metadata.get("selected").booleanValue());
+        assertEquals(!organization, metadata.get("entityScoped").booleanValue());
+        assertEquals(organization ? "organization" : "workspace", metadata.get("scope").stringValue());
+        assertFalse(entry.getChanges().contains("91"));
+        assertFalse(entry.getChanges().contains("92"));
+    }
+
+    @Test
+    void selectedAuditExportsRejectEmptyInvalidOrOversizedSelectionsBeforeReading() {
+        List<List<Integer>> invalid = List.of(
+            List.of(), List.of(0), List.of(-1), Arrays.asList(1, null), Collections.nCopies(201, 1));
+        for (List<Integer> ids : invalid) {
+            assertThrows(BadRequestException.class, () -> service.exportSelected(null, null, ids, 200, 0));
+            assertThrows(BadRequestException.class, () -> service.exportSelectedForOrg(8, ids, 200, 0));
+        }
+        assertThrows(BadRequestException.class, () -> service.exportSelected(null, null, null, 200, 0));
+        assertThrows(BadRequestException.class, () -> service.exportSelectedForOrg(8, null, 200, 0));
+        verifyNoInteractions(auditLogMapper, auditIntegrityService);
+    }
+
+    @Test
+    void selectedAuditExportDeduplicatesWithoutBroadeningItsScope() {
+        when(auditLogMapper.findWorkspaceExport(7, 10_000, 100_000, List.of(91), null, null))
+            .thenReturn(List.of());
+
+        service.exportSelected("company", null, List.of(91, 91), Integer.MAX_VALUE, Integer.MAX_VALUE);
+
+        verify(auditLogMapper).findWorkspaceExport(7, 10_000, 100_000, List.of(91), null, null);
+    }
+
+    @Test
+    void failedAuditQueryDoesNotRecordACompletedExport() {
+        when(auditLogMapper.findWorkspaceExport(7, 200, 0, List.of(91), null, null))
+            .thenThrow(new IllegalStateException("Read failed"));
+
+        assertThrows(IllegalStateException.class, () -> service.exportSelected(null, null, List.of(91), 200, 0));
+
+        verifyNoInteractions(auditIntegrityService);
+    }
+
+    @Test
+    void failedAuditRenderingDoesNotRecordACompletedExport() {
+        AuditLog row = new AuditLog();
+        row.setId(91);
+        when(auditLogMapper.findOrgExport(8, 200, 0, List.of(91))).thenReturn(List.of(row));
+        when(auditIntegrityService.integrityPayload(row)).thenThrow(new IllegalStateException("Rendering failed"));
+
+        assertThrows(IllegalStateException.class, () -> service.exportSelectedForOrg(8, List.of(91), 200, 0));
+
+        verify(auditIntegrityService, never()).append(any());
+    }
+
+    @Test
+    void failedAuditAppendPreventsTheAuditCsvFromBeingReturned() {
+        when(auditLogMapper.findWorkspaceExport(7, 200, 0, List.of(91), null, null)).thenReturn(List.of());
+        doThrow(new IllegalStateException("Audit unavailable")).when(auditIntegrityService).append(any());
+
+        assertThrows(IllegalStateException.class, () -> service.exportSelected(null, null, List.of(91), 200, 0));
     }
 
     @Test
@@ -501,7 +667,7 @@ class AuditServiceTest {
                 {"provider":"vertex","model":"sk-proj-abc123","feature":"report.narrative","outcome":"success",
                 "prompt":"private CRM content","credential":"raw-secret-token"}
                 """);
-        when(auditLogMapper.findWorkspaceExport(7, 25, 0)).thenReturn(List.of(entry));
+        when(auditLogMapper.findWorkspaceExport(7, 25, 0, null, null, null)).thenReturn(List.of(entry));
 
         String csv = service.exportRecent(25, 0);
 

@@ -237,6 +237,11 @@
         "colActor": "By",
         "colWhen": "When",
         "action": {
+            "organization": {
+                "audit": {
+                    "export": "Organization audit log exported"
+                }
+            },
             "appi": {
                 "subject_request": {
                     "create": "Privacy request logged",
@@ -282,7 +287,8 @@
                 },
                 "workspace": {
                     "create": "Workspace created",
-                    "export": "Workspace data exported"
+                    "export": "Workspace data exported",
+                    "export_started": "Workspace data export started"
                 },
                 "support_bundle": {
                     "completed": "Support bundle prepared",
