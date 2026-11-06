@@ -7415,7 +7415,7 @@ export async function exportReportCsv(
 }
 
 export async function exportReportSnapshotCsv(id: number, snapshotId: number): Promise<void> {
-    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, {});
+    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, { method: "POST" });
     downloadBlob(blob, `report-${id}-snapshot-${snapshotId}.csv`);
 }
 

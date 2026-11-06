@@ -5,7 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
@@ -23,8 +28,29 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
-/** Exercises the narrow image-completion body through Jackson and the real MVC binding. */
+/** Exercises explicit report-export requests through Jackson and the real MVC binding. */
 class ReportExportControllerTest {
+    @Test
+    void snapshotCsvExportsOnceByPostAndReadReplaysCannotReachTheService() throws Exception {
+        ReportService service = mock(ReportService.class);
+        when(service.exportSnapshotCsv(11, 3)).thenReturn("source_id,widget_id\r\nsource,widget\r\n");
+        var mvc = MockMvcBuilders.standaloneSetup(new ReportController(service, mock(ReportComposerService.class)))
+            .setControllerAdvice(new GlobalExceptionHandler(mock(ErrorReporter.class), new TenantContext())).build();
+
+        mvc.perform(post("/api/reports/11/snapshots/3/export.csv"))
+            .andExpect(status().isOk())
+            .andExpect(content().string("\uFEFFsource_id,widget_id\r\nsource,widget\r\n"));
+        mvc.perform(get("/api/reports/11/snapshots/3/export.csv"))
+            .andExpect(status().isMethodNotAllowed());
+        mvc.perform(head("/api/reports/11/snapshots/3/export.csv"))
+            .andExpect(status().isMethodNotAllowed());
+
+        verify(service).exportSnapshotCsv(11, 3);
+        verifyNoMoreInteractions(service);
+        assertEquals(Permission.REPORT_READ, ReportController.class.getMethod("exportSnapshot",
+            int.class, int.class).getAnnotation(RequirePermission.class).value());
+    }
+
     @Test
     void completionBodyRejectsUnknownNamesCountsAndIdentifiersEvenWithLenientGlobalJackson() {
         var mapper = JsonMapper.builder().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();

@@ -22,7 +22,7 @@ function storage() {
     };
 }
 
-type Sent = { path: string; headers: Headers; body: unknown };
+type Sent = { path: string; method: string; headers: Headers; body: unknown };
 const releases: Array<() => void> = [];
 
 async function browser(answer: (call: Sent) => Response = () => new Response(null, { status: 204 })) {
@@ -47,7 +47,7 @@ async function browser(answer: (call: Sent) => Response = () => new Response(nul
         const path = new URL(String(input), 'https://connex.test').pathname;
         if (path === '/api/auth/csrf') return json({ token: 'csrf', headerName: 'X-XSRF-TOKEN', requestIdentity: 'identity-1' });
         const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
-        const call = { path, headers: new Headers(init?.headers), body };
+        const call = { path, method: init?.method ?? 'GET', headers: new Headers(init?.headers), body };
         sent.push(call);
         if (path.endsWith('/export-completion')) events.push('completion');
         return answer(call);
@@ -66,6 +66,53 @@ afterEach(() => {
     vi.resetModules();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+});
+
+describe('report snapshot CSV release evidence', () => {
+    it('sends one explicit POST with CSRF and the rendered workspace before downloading once', async () => {
+        const { api, sent, click, anchor } = await browser(() => new Response('source_id,widget_id\r\n'));
+
+        await api.exportReportSnapshotCsv(14, 3);
+
+        expect(sent).toHaveLength(1);
+        expect(sent[0].path).toBe('/api/reports/14/snapshots/3/export.csv');
+        expect(sent[0].method).toBe('POST');
+        expect(sent[0].headers.get('X-Workspace-Id')).toBe('9');
+        expect(sent[0].headers.get('X-XSRF-TOKEN')).toBe('csrf');
+        expect(click).toHaveBeenCalledOnce();
+        expect(anchor.download).toBe('report-14-snapshot-3.csv');
+    });
+
+    it('retries only after required passkey verification and releases the successful CSV once', async () => {
+        let attempts = 0;
+        const { api, sent, click } = await browser(({ path }) => {
+            if (path.endsWith('/options')) return json({ challenge: 'challenge' });
+            if (path === '/api/auth/webauthn/step-up') return json({ user: { id: 7 } });
+            attempts += 1;
+            return attempts === 1 ? json({ code: 'RECENT_AUTHENTICATION_REQUIRED' }, 403) : new Response('csv');
+        });
+
+        await api.exportReportSnapshotCsv(14, 3);
+
+        const exports = sent.filter(({ path }) => path.endsWith('/export.csv'));
+        expect(exports).toHaveLength(2);
+        for (const request of exports) {
+            expect(request.method).toBe('POST');
+            expect(request.headers.get('X-Workspace-Id')).toBe('9');
+            expect(request.headers.get('X-XSRF-TOKEN')).toBe('csrf');
+        }
+        expect(authenticate).toHaveBeenCalledOnce();
+        expect(click).toHaveBeenCalledOnce();
+    });
+
+    it('does not download a snapshot CSV when authorization fails', async () => {
+        const { api, sent, click } = await browser(() => json({ code: 'FORBIDDEN' }, 403));
+
+        await expect(api.exportReportSnapshotCsv(14, 3)).rejects.toMatchObject({ status: 403 });
+
+        expect(sent).toHaveLength(1);
+        expect(click).not.toHaveBeenCalled();
+    });
 });
 
 describe('report PNG release evidence', () => {

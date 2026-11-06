@@ -51,10 +51,20 @@ for (const locale of ['en', 'ja'] as const) {
         const snapshot: unknown = await snapshotResult.json();
         if (!isRecord(snapshot) || typeof snapshot.id !== 'number') throw new Error('Expected a saved report snapshot');
         await expect(page.getByText(message(locale, 'reports', 'Reports.document.snapshotCreated'), { exact: true })).toBeVisible();
+        const snapshotExportPath = `/api/reports/${reportId}/snapshots/${snapshot.id}/export.csv`;
+        const snapshotExportMethods: string[] = [];
+        page.on('request', (request) => {
+            if (new URL(request.url()).pathname === snapshotExportPath) snapshotExportMethods.push(request.method());
+        });
         await exportButton.click();
-        const snapshotDownload = page.waitForEvent('download');
-        await page.getByRole('menuitem', { name: message(locale, 'reports', 'Reports.document.csv'), exact: true }).click();
-        expect((await snapshotDownload).suggestedFilename()).toBe(`report-${reportId}-snapshot-${snapshot.id}.csv`);
+        const [snapshotExported, snapshotDownload] = await Promise.all([
+            page.waitForResponse((response) => new URL(response.url()).pathname === snapshotExportPath
+                && response.request().method() === 'POST' && response.status() === 200),
+            page.waitForEvent('download'),
+            page.getByRole('menuitem', { name: message(locale, 'reports', 'Reports.document.csv'), exact: true }).click(),
+        ]);
+        expect(snapshotExported.ok()).toBe(true);
+        expect(snapshotDownload.suggestedFilename()).toBe(`report-${reportId}-snapshot-${snapshot.id}.csv`);
 
         const completionPath = `/api/reports/${reportId}/export-completion`;
         const completions: Response[] = [];
@@ -118,6 +128,7 @@ for (const locale of ['en', 'ja'] as const) {
         });
         expect(metadata.filter((event) => event.format === 'csv' && event.snapshot === false)).toHaveLength(1);
         expect(metadata.filter((event) => event.format === 'csv' && event.snapshot === true)).toHaveLength(1);
+        expect(snapshotExportMethods).toEqual(['POST']);
         const png = metadata.filter((event) => event.format === 'png');
         expect(png).toHaveLength(1);
         expect(png[0]).toMatchObject({ imageCount: 1, documentCount: 1, widgetCount: 1 });

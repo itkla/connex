@@ -19,6 +19,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -42,6 +43,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSchedule;
+import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
@@ -198,6 +200,32 @@ class ReportServiceTest {
         verify(auditService).recordStrict("report.export", "report", REPORT_ID, null,
             "Report CSV export prepared", Map.of("format", "csv", "scope", "workspace", "rowCount", 1,
                 "documentCount", 1, "widgetCount", 0, "snapshot", true));
+    }
+
+    @Test
+    void snapshotCsvLoadsTheFrozenDocumentAndAppendsExactlyOneCompletion() {
+        definition(widget("revenue", "won_revenue", "none", "kpi"));
+        ReportDocumentDto document = new ReportDocumentDto(null, null, null, null, null, null,
+            List.of(), List.of(new ReportAppendixRowDto("source", "widget", "Frozen value",
+                BigDecimal.TEN, null, "JPY")), List.of(), "2026-07-12T12:00:00Z");
+        ReportSnapshot snapshot = new ReportSnapshot();
+        snapshot.setId(3);
+        snapshot.setWorkspaceId(WORKSPACE_ID);
+        snapshot.setReportDefinitionId(REPORT_ID);
+        snapshot.setComputedResult(new ObjectMapper().writeValueAsString(document));
+        snapshot.setGeneratedBy(ACTOR_ID);
+        when(reportMapper.getSnapshot(WORKSPACE_ID, REPORT_ID, 3)).thenReturn(snapshot);
+
+        String csv = service.exportSnapshotCsv(REPORT_ID, 3);
+
+        assertTrue(csv.contains("Frozen value"));
+        verify(reportMapper).getSnapshot(WORKSPACE_ID, REPORT_ID, 3);
+        verify(reportMapper, never()).aggregateDeals(any());
+        verifyNoInteractions(aiReportNarrativeService);
+        verify(auditService).recordStrict("report.export", "report", REPORT_ID, null,
+            "Report CSV export prepared", Map.of("format", "csv", "scope", "workspace", "rowCount", 1,
+                "documentCount", 1, "widgetCount", 0, "snapshot", true));
+        verifyNoMoreInteractions(auditService);
     }
 
     @Test

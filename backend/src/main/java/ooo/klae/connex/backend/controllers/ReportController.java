@@ -176,7 +176,7 @@ public class ReportController {
         return csv("report-" + id + ".csv", reportService.exportCsv(id, request));
     }
 
-    @GetMapping("/{id}/snapshots/{snapshotId}/export.csv")
+    @PostMapping("/{id}/snapshots/{snapshotId}/export.csv")
     @RequirePermission(Permission.REPORT_READ)
     public ResponseEntity<byte[]> exportSnapshot(@PathVariable int id, @PathVariable int snapshotId) {
         return csv("report-" + id + "-snapshot-" + snapshotId + ".csv",

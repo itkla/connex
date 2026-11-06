@@ -100,6 +100,13 @@ The approved metadata is `format=csv`, `scope=workspace`, actual appendix `rowCo
 `documentCount=1`, `widgetCount`, and a `snapshot` flag. CSV formula escaping is unchanged.
 Report names, dates, source IDs, labels, values, and definition contents are excluded.
 
+Both CSV exports use explicit POST requests. Snapshot export at
+`/api/reports/{id}/snapshots/{snapshotId}/export.csv` requires the existing CSRF protection,
+rendered-workspace pin, report/domain read permissions and recent-WebAuthn step-up. GET and
+HEAD are no longer mapped to export assembly: response-body inspection, prefetch or other safe
+read replays cannot append another completion. Each authorized POST renders the frozen document
+and appends exactly one event; a separate intentional POST is a separate export.
+
 `POST /api/reports/{id}/export-completion` accepts exactly `{"format":"png"}` and returns
 204 after a strict `report.export` append. Unknown body fields, including client counts and
 names, are rejected. The existing `REPORT_READ`, current-workspace report visibility, saved
