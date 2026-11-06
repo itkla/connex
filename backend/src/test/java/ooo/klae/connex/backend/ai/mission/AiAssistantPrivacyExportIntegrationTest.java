@@ -57,25 +57,35 @@ class AiAssistantPrivacyExportIntegrationTest extends AbstractAiAgentPrivacyInte
         var release = new CountDownLatch(1);
         gateActualWrite(reached, release);
         try (var executor = Executors.newSingleThreadExecutor()) {
-            var writer = executor.submit(() -> {
-                try {
-                    download.writeTo(output);
-                    return null;
-                } catch (IOException failure) {
-                    return failure;
+            try {
+                var writer = executor.submit(() -> {
+                    try {
+                        download.writeTo(output);
+                        return null;
+                    } catch (IOException failure) {
+                        return failure;
+                    }
+                });
+                boolean entered = reached.await(10, TimeUnit.SECONDS);
+                String writerState = writer.isDone() ? "completed" : "pending";
+                if (!entered && writer.isDone()) {
+                    Object outcome = writer.get();
+                    if (outcome instanceof Throwable failure) {
+                        throw new AssertionError("Export failed before reaching the publication guard", failure);
+                    }
                 }
-            });
-            assertTrue(reached.await(10, TimeUnit.SECONDS));
-            transaction().executeWithoutResult(status -> authority.invalidateOrganization(
-                    workspace.getOrgId(), UUID.randomUUID(), "restriction", null, null));
-            release.countDown();
-            assertInstanceOf(IOException.class, writer.get(10, TimeUnit.SECONDS));
-            assertEquals(0, output.size());
-            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tenant_operation_lease WHERE workspace_id=?",
-                    Integer.class, workspace.getId()));
-        } finally {
-            release.countDown();
-            download.cancel();
+                assertTrue(entered, "Export writer was " + writerState + " before the 10-second publication guard bound");
+                transaction().executeWithoutResult(status -> authority.invalidateOrganization(
+                        workspace.getOrgId(), UUID.randomUUID(), "restriction", null, null));
+                release.countDown();
+                assertInstanceOf(IOException.class, writer.get(10, TimeUnit.SECONDS));
+                assertEquals(0, output.size());
+                assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM tenant_operation_lease WHERE workspace_id=?",
+                        Integer.class, workspace.getId()));
+            } finally {
+                release.countDown();
+                download.cancel();
+            }
         }
     }
 

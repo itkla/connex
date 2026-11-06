@@ -218,7 +218,7 @@
       "exporting": "Exporting…",
       "csv": "CSV",
       "png": "PNG",
-      "pngFailed": "The PNG could not be rendered in this browser.",
+      "pngFailed": "Couldn't export the report as PNG",
       "pdf": "Print / PDF",
       "rangePairRequired": "Choose both a start and end date.",
       "attainmentRangeRequired": "Quota attainment must start on the first day of one calendar month or quarter and end within that period.",

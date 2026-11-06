@@ -36,13 +36,15 @@ type Props = {
     dealWorkspaceId: number | null;
     dealCurrency: string;
     initial: DealLineItemsResponse;
+    embedded?: boolean;
 };
 
 /**
  * Keeps new lines local until explicitly saved. Proposed totals and persisted amounts are computed
  * by the server; a nonzero manual-value takeover requires separate consent to that exact amount.
+ * Embedded instances leave their region label to the surrounding detail section.
  */
-export default function DealLineItems({ dealId, dealWorkspaceId, dealCurrency, initial }: Props) {
+export default function DealLineItems({ dealId, dealWorkspaceId, dealCurrency, initial, embedded = false }: Props) {
     const router = useRouter();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
@@ -237,7 +239,7 @@ export default function DealLineItems({ dealId, dealWorkspaceId, dealCurrency, i
     if (invalidated) return null;
 
     return (
-        <section aria-label={t('title')} className="min-w-0">
+        <section aria-label={embedded ? undefined : t('title')} className="min-w-0">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <SectionHeader title={t('title')} />
                 <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
