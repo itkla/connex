@@ -54,6 +54,17 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 class PersonServiceTest extends AbstractServiceTest {
+    @Test
+    void independentWritersPatchOnlyTheirChosenRestrictionAndPreserveTheOtherHold() {
+        Person subject = newPerson(newCompany());
+        Person suspended = personService.updateProcessingRestrictions(subject.getId(), true, null);
+        Person both = personService.updateProcessingRestrictions(subject.getId(), null, true);
+        assertEquals(suspended.getSuspendedAt(), both.getSuspendedAt());
+        assertNotNull(both.getProvisionCeasedAt());
+        Person sharingOnly = personService.updateProcessingRestrictions(subject.getId(), false, null);
+        assertNull(sharingOnly.getSuspendedAt());
+        assertEquals(both.getProvisionCeasedAt(), sharingOnly.getProvisionCeasedAt());
+    }
 
     @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;

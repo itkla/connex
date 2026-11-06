@@ -2857,6 +2857,7 @@ export type ContactChannelConsent = {
     evidenceRef: string | null;
     capturedAt: string | null;
     updatedAt: string;
+    version: number;
 };
 
 export type ContactChannelConsentPayload = {
@@ -2866,6 +2867,20 @@ export type ContactChannelConsentPayload = {
     source: string;
     evidenceRef?: string | null;
     capturedAt?: string | null;
+    expectedVersion: number;
+};
+
+/** Minimal contact-scoped restriction details; excludes unrelated addresses and operator metadata. */
+export type ContactSuppression = {
+    id: number;
+    channel: string;
+    address: string;
+    reason: string;
+};
+
+export type ContactSuppressionPage = {
+    items: ContactSuppression[];
+    nextAfterId?: number | null;
 };
 
 export type SuppressionEntry = {
@@ -6423,3 +6438,16 @@ export type DocumentAcceptanceFailureKind =
     | "unavailable"
     | "throttled"
     | "service-unavailable";
+
+/** Fixed-size supporting projections for the authenticated member's My Work surface. */
+export type MyWorkReadSections = {
+    history: { tasks: Task[]; activities: Activity[]; notes: Note[] };
+    pulse: NoteActivityDay[];
+    relationships: {
+        counts: Record<TemperatureBand, number> & { cooling: number };
+        contacts: Contact[];
+        temperatures: RelationshipTemperature[];
+    };
+    "deal-kpis": { currency: string; metrics: DealMetrics; kpis: DealKpis };
+    risks: { risks: DealRisk[]; deals: Deal[]; inputLimitExceeded: boolean };
+};

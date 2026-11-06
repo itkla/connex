@@ -85,9 +85,9 @@ class AppiComplianceArchTest {
                 violations.add("blank allowlist rationale " + exception.getKey());
             }
         }
-        assertEquals(19, enrollments.size(),
+        assertEquals(20, enrollments.size(),
             "The APPI restriction sweep must retain every reviewed namespace, including "
-                + "identity collision, employment projection, and assistant identifier readers.");
+                + "identity collision, employment projection, assistant identifier, personal work, and search repair readers.");
         assertTrue(violations.isEmpty(),
             "Person-reading mappers must be either strategy-enrolled or explicitly allowlisted "
                 + "with one-line justification: " + violations);

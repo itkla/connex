@@ -325,7 +325,7 @@ public class PersonController {
     }
 
     /**
-     * PUT endpoint to set the contact's processing and third-party-provision restrictions.
+     * Patches only supplied processing and third-party-provision flags, preserving omitted flags.
      * @param id contact id
      * @param dto requested restriction state
      * @return the updated contact

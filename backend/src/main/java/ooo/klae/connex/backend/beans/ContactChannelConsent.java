@@ -19,4 +19,5 @@ public class ContactChannelConsent {
     private String evidenceRef;
     private LocalDateTime capturedAt;
     private LocalDateTime updatedAt;
+    private long version;
 }
