@@ -123,6 +123,10 @@ export default function CalendarNewDealContainer({
             setPayload={setPayload}
             pipelines={pipelines}
             stagesByPipeline={stagesByPipeline}
+            onPipelineCreated={(pipeline, stages) => {
+                setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+                setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+            }}
             isCreating={creating}
             isSuccess={succeeded}
             isDirty={isDirty}

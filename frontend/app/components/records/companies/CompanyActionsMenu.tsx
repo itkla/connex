@@ -438,6 +438,10 @@ export default function CompanyActionsMenu({
                 setPayload={setContextualDealPayload}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onPipelineCreated={(pipeline, stages) => {
+                    setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+                    setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+                }}
                 isCreating={isCreatingDeal}
                 isSuccess={dealCreationSucceeded}
                 createNewDeal={createNewDeal}

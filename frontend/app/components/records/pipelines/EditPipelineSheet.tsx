@@ -11,6 +11,7 @@ import { replacePipelineStages, updatePipeline } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
+import { insertOpenStage } from '@/app/components/records/pipelines/stageDrafts';
 
 function toDraft(p: Pipeline, stages: Stage[] = []): PipelineDraft {
     return {
@@ -81,7 +82,7 @@ export default function EditPipelineSheet({
         clearError('stages');
         setDraft((prev) => ({
             ...prev,
-            stages: [...prev.stages, { id: null, name: '', success: false, failure: false }],
+            stages: insertOpenStage(prev.stages, { id: null, name: '', success: false, failure: false }),
         }));
     };
 

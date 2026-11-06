@@ -321,7 +321,18 @@
         "noCompaniesFound": "No companies found.",
         "expectedCloseDate": "Expected close date",
         "cancel": "Cancel",
-        "create": "Create"
+        "create": "Create",
+        "setupPipeline": "Create a pipeline",
+        "pipelineSetupHint": "A pipeline gives your deals a set of stages. Create one here, then continue with this deal. Your entries will be kept.",
+        "pipelineSetupAskManager": "Ask a member who manages pipelines to create one for this workspace.",
+        "starterPipeline": "Sales pipeline",
+        "starterOpen": "New",
+        "starterWon": "Won",
+        "starterLost": "Lost",
+        "pipelineNeedsOpenStage": "Name every stage and include at least one in-progress stage so you can add your deal.",
+        "pipelineTerminalLimit": "Use at most one Won stage and one Lost stage.",
+        "pipelineSetupFailed": "Couldn't finish pipeline setup",
+        "pipelineSetupRetry": "Your deal entries are kept. Try again."
     },
     "DealsQuickEditSheet": {
         "closedAtInvalid": "That time doesn't exist in the reporting timezone shown below. Choose another time.",

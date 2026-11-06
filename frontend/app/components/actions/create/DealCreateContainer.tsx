@@ -117,6 +117,10 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     const [loaded, setLoaded] = useState(false);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
+    const handlePipelineCreated = useCallback((pipeline: Pipeline, stages: Stage[]) => {
+        setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+        setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+    }, []);
     const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
     const stagesByPipelineRef = useRef<Record<number, Stage[]>>({});
     useEffect(() => {
@@ -330,6 +334,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                 setPayload={setPayload}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onPipelineCreated={handlePipelineCreated}
                 isCreating={creating}
                 isSuccess={succeeded}
                 selectedCompany={selectedCompany}
@@ -347,6 +352,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
             setPayload={setPayload}
             pipelines={pipelines}
             stagesByPipeline={stagesByPipeline}
+            onPipelineCreated={handlePipelineCreated}
             isCreating={creating}
             isSuccess={succeeded}
             isDirty={isDirty}

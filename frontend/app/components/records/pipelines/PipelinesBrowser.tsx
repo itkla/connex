@@ -30,6 +30,7 @@ import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
 import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDialog';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 import { parsePipelineEditId } from '@/app/components/records/pipelines/pipelineLinks';
+import { insertOpenStage } from '@/app/components/records/pipelines/stageDrafts';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import {
@@ -278,7 +279,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             if (!current) return prev;
             return {
                 ...prev,
-                [pipelineId]: { ...current, stages: [...current.stages, { id: null, name: '', success: false, failure: false }] },
+                [pipelineId]: { ...current, stages: insertOpenStage(current.stages, { id: null, name: '', success: false, failure: false }) },
             };
         });
     };

@@ -75,7 +75,7 @@
   "PipelinesQuickEditSheet": {
     "titleSingle": "パイプラインをクイック編集",
     "titleMultiple": "{count} 件のパイプラインをクイック編集",
-    "description": "下のフィールドを更新してください。変更されたパイプラインのみ保存されます。新しいステージは末尾に追加されます。並べ替えはまだサポートされていません。",
+    "description": "下のフィールドを更新してください。変更したパイプラインのみ保存されます。矢印でステージを並べ替えられます。",
     "name": "名前",
     "stages": "ステージ",
     "stageNamePlaceholder": "ステージ名",
@@ -96,5 +96,11 @@
     "singleTerminalPerType": "パイプラインには成約ステージと失注ステージをそれぞれ1つまでしか設定できません",
     "pipelineUpdated": "パイプラインを更新しました",
     "failedToSave": "パイプラインを保存できませんでした"
+  },
+  "PipelineStageOrder": {
+    "moveUp": "ステージを上へ移動",
+    "moveDown": "ステージを下へ移動",
+    "stageName": "ステージ{position}の名前",
+    "moved": "{name}を全{count}ステージ中の{position}番目に移動しました。"
   }
 }

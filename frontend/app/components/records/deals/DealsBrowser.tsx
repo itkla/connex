@@ -1804,6 +1804,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     setPayload={setNewPayload}
                     pipelines={pipelines}
                     stagesByPipeline={stagesByPipeline}
+                    onPipelineCreated={(pipeline, stages) => {
+                        setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+                        setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+                    }}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
                     isDirty={!isCreating && !creationSucceeded && isDealPayloadDirty(newPayload, EMPTY_DEAL_DRAFT)}
