@@ -3384,7 +3384,7 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
 
 export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
-        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany, tagIds: params.tagIds,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
@@ -3573,7 +3573,7 @@ export function bulkChangeDealStage(ids: number[], stageId: number, init: Reques
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
-        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany, tagIds: params.tagIds,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
@@ -5163,6 +5163,11 @@ export function getPeopleForTag(id: number, init: RequestInit = {}) {
 export function getCompaniesForTag(id: number, init: RequestInit = {}) {
     return getJson<Types.Company[]>(`/api/tags/${id}/companies`, init);
 }
+
+/** Lists the visible deals carrying this workspace's tag. */
+export function getDealsForTag(id: number, init: RequestInit = {}) {
+    return getJson<Types.Deal[]>(`/api/tags/${id}/deals`, init);
+}
 /*
 * == Global search
 */
@@ -5933,7 +5938,7 @@ export function getActiveWorkspaceMembers(init: RequestInit = {}): Promise<Types
 }
 
 export function addWorkspaceMember(workspaceId: number, email: string, role: Types.WorkspaceRole) {
-    return postJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members`, { email, role });
+    return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/members`, { email, role });
 }
 
 /**
@@ -7450,7 +7455,7 @@ export function createWorkspaceInvite(workspaceId: number, email: string, role: 
     return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/invites`, { email, role });
 }
 
-export function revokeWorkspaceInvite(workspaceId: number, inviteId: number) {
+export function revokeWorkspaceInvite(workspaceId: number, inviteId: string) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/invites/${inviteId}`);
 }
 

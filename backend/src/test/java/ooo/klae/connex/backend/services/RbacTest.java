@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -198,8 +199,13 @@ class RbacTest extends AbstractServiceTest {
         authenticateAs(delegate, ws.getId());
         approveForStepUp(delegate);
 
-        workspaceService.assignCustomRole(
-            ws.getId(), delegate.getId(), pending.getId(), emptyRole.getId());
+        assertThrows(ResourceNotFoundException.class, () -> workspaceService.assignCustomRole(
+            ws.getId(), delegate.getId(), pending.getId(), emptyRole.getId()));
+        assertNull(workspaceMapper.getMember(ws.getId(), pending.getId()).getRoleId());
+        workspaceMapper.setMemberCustomRole(ws.getId(), pending.getId(), emptyRole.getId());
+        assertEquals(Integer.valueOf(0), jdbcTemplate.queryForObject(
+            "SELECT grant_authorization_version FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+            Integer.class, ws.getId(), pending.getId()));
 
         assertThrows(
             BadRequestException.class,

@@ -152,7 +152,7 @@ public interface PersonMapper {
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
-            @Param("limit") int limit, @Param("offset") int offset);
+            @Param("limit") int limit, @Param("offset") int offset, @Param("tagIds") List<Integer> tagIds);
     long countPersons(@Param("workspaceId") int workspaceId,
             @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("companies") List<String> companies,
@@ -164,7 +164,7 @@ public interface PersonMapper {
             @Param("noLeadSource") boolean noLeadSource,
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
-            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth, @Param("tagIds") List<Integer> tagIds);
     /**
      * CSV export using the browser filters and member scope, excluding suspended contacts.
      * Callers pass {@code archived = false}: an export is defined as the active working set.
@@ -179,7 +179,7 @@ public interface PersonMapper {
             @Param("noLeadSource") boolean noLeadSource,
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
-            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth, @Param("tagIds") List<Integer> tagIds);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId,
             @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
@@ -192,7 +192,7 @@ public interface PersonMapper {
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
-            @Param("limit") int limit);
+            @Param("limit") int limit, @Param("tagIds") List<Integer> tagIds);
     List<String> distinctCompanies(
             @Param("workspaceId") int workspaceId,
             @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);

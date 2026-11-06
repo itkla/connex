@@ -55,7 +55,7 @@
       "tag": "Tag",
       "title": "Job title",
       "email": "Email",
-      "company": "Company",
+      "company": "Linked company",
       "value": "Deal value",
       "stage": "Stage",
       "owner": "Owner",
@@ -70,6 +70,8 @@
     "op": {
       "is": "is",
       "isNot": "is not",
+      "in": "is one of",
+      "notIn": "is none of",
       "contains": "contains",
       "notContains": "doesn't contain",
       "has": "has",
@@ -221,7 +223,31 @@
       "label": "No stakeholders",
       "labelNot": "Has stakeholders",
       "description": "No contacts are linked to the deal."
-    }
+    },
+    "recordName": {
+      "company": "Company name",
+      "person": "Contact name",
+      "deal": "Deal name"
+    },
+    "recordDescription": {
+      "company": "Combine relationship signals and field conditions to find companies.",
+      "person": "Combine relationship signals and field conditions to find contacts.",
+      "deal": "Combine relationship signals and field conditions to find deals."
+    },
+    "setCondition": "Set condition",
+    "conditionTitle": "Workflow condition",
+    "conditionDescription": {
+      "company": "Continue on Yes only when the company matches these conditions.",
+      "person": "Continue on Yes only when the contact matches these conditions.",
+      "deal": "Continue on Yes only when the deal matches these conditions."
+    },
+    "linkedCompanyHint": "Linked company checks the company record selected on the contact. Contact name checks the contact’s own name. To find contacts without a linked company, use the Company filter in Contacts.",
+    "summaryOr": " or ",
+    "summaryAnd": " and ",
+    "summaryNot": "Not ({conditions})",
+    "valueSeparator": ", ",
+    "unavailableValue": "Unavailable record",
+    "durationDays": "{days} days"
   },
   "SavedViews": {
     "all": "All",

@@ -59,6 +59,11 @@ public interface WorkspaceMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    List<Integer> getActiveMemberIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("userIds") List<Integer> userIds
+    );
+    /** Internal authored-reference provenance lookup; never returns recipient profiles. */
     List<Integer> getMemberIdsIncludingPending(
         @Param("workspaceId") int workspaceId,
         @Param("userIds") List<Integer> userIds
@@ -69,6 +74,12 @@ public interface WorkspaceMapper {
     );
     String getRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<User> getMembers(int workspaceId);
+    String findPendingInvitationReferenceByEmail(@Param("workspaceId") int workspaceId,
+        @Param("email") String email);
+
+    Integer findPendingInvitationUserId(@Param("workspaceId") int workspaceId,
+        @Param("reference") String reference);
+
     List<MemberDto> getMembersWithRoles(int workspaceId);
     MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);

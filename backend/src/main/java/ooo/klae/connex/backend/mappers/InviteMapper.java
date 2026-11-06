@@ -57,6 +57,7 @@ public interface InviteMapper {
         @Param("tokenHash") String tokenHash,
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    int markRevokedByReference(@Param("reference") String reference, @Param("workspaceId") int workspaceId);
     int markRevoked(@Param("id") int id, @Param("workspaceId") int workspaceId);
     int revokePendingForEmail(@Param("workspaceId") int workspaceId, @Param("email") String email);
 

@@ -66,8 +66,7 @@ import { citationTitleKey } from '@/app/lib/dealBriefCitations';
 import Rise from '@/app/components/motion/Rise';
 import { PageShell } from '@/app/components/PageShell';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
-import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
-import WarmthPill from '@/app/components/records/WarmthPill';
+import DealStakeholders from '@/app/components/records/deals/DealStakeholders';
 import InfoRow from '@/app/components/me/InfoRow';
 import Timeline from '@/app/components/me/Timeline';
 import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from '@/app/components/me/timelineEntries';
@@ -365,68 +364,7 @@ export default async function DealPage({ params }: DealPageProps) {
                             </RecordDetailSection>
 
                             <RecordDetailSection recordKind="deal" section="related">
-                                <SectionLabelWithTooltip
-                                    title={t('peopleOnThisDeal')}
-                                    tooltip={
-                                        <div className="flex flex-col gap-2">
-                                            <h2 className="text-sm font-medium">{t('peopleOnThisDeal')}</h2>
-                                            <p className="text-xs text-muted-foreground">
-                                                {t('peopleOnThisDealTooltipShort')}
-                                            </p>
-                                            <p>
-                                                {t('peopleOnThisDealTooltipLong')}
-                                            </p>
-                                        </div>
-                                    }
-                                />
-                                <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                    {dealPeople.length === 0 ? (
-                                        <p className="px-6 py-6 text-sm text-muted-foreground">
-                                            {t('noPeopleAssociated')}
-                                        </p>
-                                    ) : (
-                                        <ul className="divide-y divide-border">
-                                            {dealPeople.map(({ person, role }) => {
-                                                return (
-                                                <li key={person.id}>
-                                                    <Link
-                                                        href={`/records/contacts/${person.id}`}
-                                                        className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-muted/60 xl:px-4"
-                                                    >
-                                                        <ContactAvatar contact={person} type="medium" />
-                                                        <div className="min-w-0 flex-1">
-                                                            <p className="truncate text-sm font-medium text-foreground">
-                                                                {person.name}
-                                                            </p>
-                                                            {person.title ? (
-                                                                <p className="truncate text-xs text-muted-foreground">
-                                                                    {person.title}
-                                                                </p>
-                                                            ) : null}
-                                                            <div className="mt-1">
-                                                                {stakeholderWarmth.read ? (
-                                                                    <WarmthPill
-                                                                        temp={stakeholderWarmth.byPerson.get(person.id)}
-                                                                    />
-                                                                ) : (
-                                                                    <span className="text-xs text-muted-foreground">
-                                                                        {t('warmthUnavailable')}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        {role ? (
-                                                            <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
-                                                                {role}
-                                                            </span>
-                                                        ) : null}
-                                                    </Link>
-                                                </li>
-                                                );
-                                            })}
-                                        </ul>
-                                    )}
-                                </div>
+                                <DealStakeholders dealId={id} people={dealPeople} temperatures={stakeholderWarmth.read ? [...stakeholderWarmth.byPerson.values()] : null} />
                             </RecordDetailSection>
 
                             <EngineEvaluationPanel

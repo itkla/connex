@@ -178,7 +178,6 @@ vi.mock("@/components/ui/responsive-dialog", async () => {
 });
 
 vi.mock("@/app/components/records/SegmentBuilder", () => ({
-    EMPTY_DEFINITION: { match: "all", conditions: [] },
     default: () => <div>segment-builder</div>,
 }));
 

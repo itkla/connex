@@ -228,7 +228,7 @@ class PasskeyApprovalMetadataTest extends AbstractServiceTest {
         userMapper.reserveAccountDeletion(reserved.getId(), "metadata-test");
         var members = workspaceService.getMembersWithRoles(scope.getId(), currentUser.getId());
         assertNull(badge(members, reserved));
-        assertNull(badge(members, pending));
+        assertTrue(members.stream().noneMatch(row -> row.getId() == pending.getId()));
         userMapper.reserveAccountDeletion(currentUser.getId(), "metadata-test");
         assertTrue(workspaceService.getMembersWithRoles(scope.getId(), currentUser.getId()).stream()
             .allMatch(row -> row.getPasskeyApprovalNeeded() == null));
