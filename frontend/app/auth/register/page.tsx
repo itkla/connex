@@ -8,6 +8,11 @@ export async function generateMetadata(): Promise<Metadata> {
     return { title: t("title"), robots: { index: false, follow: false } };
 }
 
-export default function RegisterPage() {
-    return <AuthForm mode="register" redirectUrl={null} />;
+export default async function RegisterPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ redirect?: string | string[] }>;
+}) {
+    const { redirect } = await searchParams;
+    return <AuthForm mode="register" redirectUrl={typeof redirect === "string" ? redirect : null} />;
 }

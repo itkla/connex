@@ -7,12 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MembersPanel from "@/app/components/settings/MembersPanel";
 import {
     createWorkspaceInvite, getBuiltInRoles, getWorkspaceInviteLinks, getWorkspaceInvites,
-    getWorkspaceMembers, getWorkspaceOwnershipOffers, getWorkspaceRoles,
+    getWorkspaceMembers, getWorkspaceOwnershipOffers, getWorkspaceRoles, removeWorkspaceMember, revokeWorkspaceInviteLink,
 } from "@/app/lib/api";
-import { toastSuccess } from "@/app/lib/toast";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import type { WorkspaceInvite } from "@/app/lib/types";
 import english from "@/messages/en/workspace.json";
 import japanese from "@/messages/ja/workspace.json";
+import common from "@/messages/en/common.json";
 
 const noop = vi.hoisted(() => () => undefined);
 const permissions = vi.hoisted(() => new Set(["MEMBER_MANAGE", "ROLE_MANAGE"]));
@@ -28,7 +29,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
     createWorkspaceInvite: vi.fn(), getBuiltInRoles: vi.fn(), getWorkspaceInviteLinks: vi.fn(),
     getWorkspaceInvites: vi.fn(), getWorkspaceMembers: vi.fn(), getWorkspaceOwnershipOffers: vi.fn(),
-    getWorkspaceRoles: vi.fn(),
+    getWorkspaceRoles: vi.fn(), removeWorkspaceMember: vi.fn(), revokeWorkspaceInviteLink: vi.fn(),
 }));
 vi.mock("@/app/components/motion/Rise", () => ({ default: ({ children }: { children?: ReactNode }) => <>{children}</> }));
 vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
@@ -50,7 +51,11 @@ vi.mock("@/components/ui/tabs", () => {
 });
 vi.mock("@/components/ui/dropdown-menu", () => {
     const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
-    return { DropdownMenu: Pass, DropdownMenuTrigger: Pass, DropdownMenuContent: () => null, DropdownMenuItem: Pass };
+    return {
+        DropdownMenu: Pass, DropdownMenuTrigger: Pass, DropdownMenuContent: Pass,
+        DropdownMenuItem: ({ children, onSelect, disabled }: { children?: ReactNode; onSelect?: () => void; disabled?: boolean }) =>
+            <button disabled={disabled} onClick={onSelect}>{children}</button>,
+    };
 });
 
 let root: Root;
@@ -64,6 +69,7 @@ const pending: WorkspaceInvite = {
 beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     vi.clearAllMocks();
+    clipboard.mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboard } });
     host = document.createElement("div");
     document.body.append(host);
@@ -78,6 +84,7 @@ beforeEach(() => {
     vi.mocked(getWorkspaceOwnershipOffers).mockResolvedValue([]);
     vi.mocked(getWorkspaceRoles).mockResolvedValue([]);
     vi.mocked(createWorkspaceInvite).mockResolvedValue({ invite: pending });
+    vi.mocked(removeWorkspaceMember).mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -87,7 +94,7 @@ afterEach(async () => {
 
 async function render(language: "en" | "ja") {
     await act(async () => root.render(
-        <NextIntlClientProvider locale={language} messages={language === "en" ? english : japanese} timeZone="UTC">
+        <NextIntlClientProvider locale={language} messages={{ ...common, ...(language === "en" ? english : japanese) }} timeZone="UTC">
             <MembersPanel currentUserId={1} presentation="consolidated" />
         </NextIntlClientProvider>,
     ));
@@ -162,5 +169,81 @@ describe("invitation disclosure in the member-management panel", () => {
         const row = [...host.querySelectorAll("li")].find((item) => item.textContent?.includes("historical@example.test"));
         expect(row?.textContent).toContain(copy.inviteNoExpiry);
         expect(row?.textContent).not.toContain("undefined");
+    });
+});
+
+
+describe("member-flow outcomes", () => {
+    it.each(["en", "ja"] as const)("offers manual recovery without a copied claim after clipboard refusal in %s", async (language) => {
+        const copy = (language === "en" ? english : japanese).WorkspaceMembers;
+        clipboard.mockRejectedValue(new Error("Clipboard refused"));
+        await render(language);
+
+        await submitInvitation();
+
+        const dialog = document.querySelector('[role="dialog"]');
+        const link = dialog?.querySelector("input");
+        expect(dialog?.textContent).toContain(copy.copyFailedDescription);
+        expect(link?.value).toContain("/invite#token=new-token");
+        expect(link?.readOnly).toBe(true);
+        expect(toastSuccess).toHaveBeenCalledWith(copy.invitationCreated);
+        expect(toastSuccess).not.toHaveBeenCalledWith(copy.linkCopied);
+        expect(toastError).toHaveBeenCalledWith(copy.copyFailed, { description: copy.copyFailedDescription });
+        clipboard.mockResolvedValue(undefined);
+        const retry = [...(dialog?.querySelectorAll("button") ?? [])].find((button) => button.textContent === copy.copyLink);
+        await act(async () => retry?.click());
+        expect(toastSuccess).toHaveBeenCalledWith(copy.linkCopied);
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    it.each(["ACCEPTED", "SKIPPED", "FAILED", "UNCONFIRMED"] as const)("reports %s without inferring recipient account state", async (emailDelivery) => {
+        vi.mocked(createWorkspaceInvite).mockResolvedValue({ invite: pending, emailDelivery });
+        await render("en");
+        await submitInvitation();
+        const copy = english.WorkspaceMembers;
+        const key = emailDelivery === "ACCEPTED" ? "emailAccepted" : emailDelivery === "SKIPPED" ? "emailSkipped"
+            : emailDelivery === "FAILED" ? "emailFailed" : "emailUnconfirmed";
+        expect(host.querySelector('[role="status"]')?.textContent).toBe(copy[key]);
+        expect(host.querySelector("section")?.textContent).not.toContain("registered");
+    });
+
+    it("replaces an invitation after reload to recover a copyable link", async () => {
+        vi.mocked(getWorkspaceInvites).mockResolvedValue([{ ...pending, token: undefined }]);
+        await render("en");
+        const replace = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes(english.WorkspaceMembers.replaceInvite));
+        expect(replace).toBeDefined();
+        await act(async () => replace?.click());
+        expect(createWorkspaceInvite).toHaveBeenCalledWith(9, pending.email, "member");
+        expect(clipboard).toHaveBeenCalledWith(expect.stringContaining("/invite#token=new-token"));
+    });
+
+    it("does not offer a replacement for an ungrantable historical owner invitation", async () => {
+        vi.mocked(getWorkspaceInvites).mockResolvedValue([{ ...pending, role: "owner", token: undefined }]);
+        await render("en");
+        const replacement = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes(english.WorkspaceMembers.replaceInvite));
+        expect(replacement).toBeUndefined();
+    });
+
+    it.each(["en", "ja"] as const)("explains removal and reports detached ownership without revoking links in %s", async (language) => {
+        const copy = (language === "en" ? english : japanese).WorkspaceMembers;
+        vi.mocked(getWorkspaceMembers).mockResolvedValue([
+            { id: 1, username: "owner", displayName: "Owner", email: "owner@example.test", role: "owner", builtInRole: "owner", status: "active" },
+            { id: 2, username: "member", displayName: "Teammate", email: "member@example.test", role: "member", builtInRole: "member", status: "active" },
+        ]);
+        await render(language);
+        const remove = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes(copy.remove));
+        expect(remove).toBeDefined();
+        await act(async () => remove?.click());
+        const dialog = document.querySelector('[role="dialog"]');
+        expect(dialog?.textContent).toContain(copy.removeOwnershipConsequences);
+        expect(dialog?.textContent).toContain(copy.removeRejoinConsequences);
+        expect(dialog?.textContent).toContain(copy.reviewInvitations);
+        expect(removeWorkspaceMember).not.toHaveBeenCalled();
+        const confirm = [...(dialog?.querySelectorAll("button") ?? [])].find((button) => button.textContent === copy.remove);
+        await act(async () => confirm?.click());
+        expect(removeWorkspaceMember).toHaveBeenCalledWith(9, 2);
+        expect(revokeWorkspaceInviteLink).not.toHaveBeenCalled();
+        expect(toastSuccess).toHaveBeenCalledWith(copy.removed, { description: copy.removedDescription });
+        expect(host.textContent).not.toContain("Teammate");
     });
 });

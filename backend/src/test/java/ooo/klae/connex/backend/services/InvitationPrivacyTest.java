@@ -42,7 +42,8 @@ class InvitationPrivacyTest extends AbstractServiceTest {
         JsonMapper mapper = JsonMapper.builder().build();
         for (var result : List.of(absent, registered, repeated)) {
             var json = mapper.readTree(mapper.writeValueAsString(result));
-            assertEquals(Set.of("invite"), Set.copyOf(json.propertyNames()));
+            assertEquals(Set.of("invite", "emailDelivery"), Set.copyOf(json.propertyNames()));
+            assertEquals("UNCONFIRMED", json.path("emailDelivery").asString());
             assertEquals(Set.of("id", "email", "role", "status", "token", "invitedByLabel", "expiresAt", "createdAt"),
                 Set.copyOf(json.path("invite").propertyNames()));
             assertEquals(email, json.path("invite").path("email").asString());

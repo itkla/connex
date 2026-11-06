@@ -880,6 +880,7 @@ export type RegisterPayload = {
     displayName: string;
     email: string;
     timezone?: string;
+    skipInitialWorkspace?: boolean;
 };
 
 /** Proof requirements for beginning passkey registration in the current account. */
@@ -5554,6 +5555,7 @@ export type WorkspaceInvite = {
 /** The same address-only invitation result for every recipient. */
 export type InviteResult = {
     invite: WorkspaceInvite;
+    emailDelivery?: "ACCEPTED" | "SKIPPED" | "FAILED" | "UNCONFIRMED";
 };
 
 export type InvitePreview = {

@@ -35,4 +35,7 @@ public class RegisterDto {
 
     @Size(max = 64)
     private String timezone;
+
+    /** Skips optional personal workspace creation; never grants invitation or membership authority. */
+    private boolean skipInitialWorkspace;
 }

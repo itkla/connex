@@ -16,7 +16,8 @@ async function invite(page: Page, section: Locator, email: string, copy: (key: s
     expect(saved.status(), await saved.text()).toBe(200);
     const result: unknown = await saved.json();
     if (typeof result !== "object" || result === null || !("invite" in result)) throw new Error("Missing invitation");
-    expect(Object.keys(result)).toEqual(["invite"]);
+    expect(Object.keys(result).sort()).toEqual(["emailDelivery", "invite"]);
+    expect(result).toHaveProperty("emailDelivery", expect.stringMatching(/^(ACCEPTED|SKIPPED|FAILED|UNCONFIRMED)$/));
     expect(result).not.toHaveProperty("member");
     expect(result.invite).toMatchObject({ email, role: "member", status: "pending" });
     expect(result.invite).not.toHaveProperty("username");

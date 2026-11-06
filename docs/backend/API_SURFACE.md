@@ -77,6 +77,20 @@ non-CORS requests. This is not an end-to-end token, tenant-interceptor, provider
 SSO ceremony test. `/api/v1` and framework protocol routes retain their dedicated tests and are not
 counted by this sentinel test. No alternate port, proxy deployment, or production traffic is tested.
 
+## Invitation and registration outcomes
+
+Workspace invitation creation returns `{invite, emailDelivery}` for every recipient address.
+`emailDelivery` is `ACCEPTED` only after SMTP accepts submission, `SKIPPED` when no usable sender
+is available, `FAILED` when preparation/submission fails, and `UNCONFIRMED` when the caller has no
+submission outcome, including mail deferred by an enclosing transaction. Submission does not prove
+mailbox delivery. The response and sending path
+never depend on whether the recipient has a Connex account; pending profiles stay withheld.
+
+Self-service registration accepts an optional `skipInitialWorkspace` boolean, defaulting to false.
+It suppresses only the optional personal workspace, so invitation entry can continue without
+creating an unrelated workspace. It grants no membership, bypasses no signup or email-verification
+checks, and has no effect on administrator-created accounts.
+
 ## Note link updates
 
 `PUT /api/notes/{id}` distinguishes an omitted `person` or `deal` property from explicit

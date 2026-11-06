@@ -56,6 +56,22 @@ remain distinguishable by their absent expiry; the new contract prevents new acc
 does not erase information disclosed before this change or conceal the historical invitation format.
 Invite-link redemption and removed-member rejoin policy are unchanged.
 
+Invitation creation also reports `emailDelivery`, uniformly for every addressed email: `ACCEPTED`
+means the SMTP server accepted submission, not confirmed inbox delivery; `SKIPPED` means no usable
+sender was available; `FAILED` means preparation or submission failed; `UNCONFIRMED` means no
+submission outcome is available to the caller, including deferred mail in an enclosing transaction.
+None of these outcomes resolves a recipient's Connex
+account. The invitation persists independently of mail success; its creator can share the returned link.
+Ordinary callers submit mail after the invitation transaction fully releases its resources.
+Enclosing transactions enqueue mail asynchronously only after commit and never wait for a
+connection in the callback. The worker explicitly routes the target workspace. SMTP starts after
+sender-resolution locks are released.
+
+Self-service registration accepts `skipInitialWorkspace` to suppress optional personal workspace
+creation while returning to invitation acceptance. This preference grants no workspace membership
+or invitation authority, changes no signup or verification policy, and is ignored by administrator
+account creation. Existing purpose-bound invitation cookies retain their narrow API paths.
+
 ## AI and model-provider egress
 
 Read `docs/backend/AI_SECURITY.md` before changing AI gates, masking, prompts, media admission, provider adapters, endpoint validation, budgets, streaming, assistant tools, or transcript collaboration.

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { authSwitchHref, returnsToInvitation } from "@/app/lib/authReturnPath";
 import { sameOriginPath, withSectionFragment } from "@/app/lib/sessionExpiry";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
@@ -102,7 +103,7 @@ export function AuthForm({
     const tCapability = useTranslations("CapabilityUnavailable");
 
     const fields = FORM_FIELDS[mode];
-    const altHref = ALT_HREF[mode];
+    const altHref = authSwitchHref(ALT_HREF[mode], redirectUrl);
 
     const fieldLabels: Record<FieldKey, string> = {
         username: mode === "login" ? tForm("labelLoginIdentifier") : tForm("labelUsername"),
@@ -274,6 +275,7 @@ export function AuthForm({
                     displayName: values.displayName,
                     password: values.password,
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+                    skipInitialWorkspace: returnsToInvitation(redirectUrl),
                 });
             }
 

@@ -23,7 +23,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function LoginPage({
     searchParams,
 }: {
-    searchParams: Promise<{ redirect?: string; sso_error?: string }>;
+    searchParams: Promise<{ redirect?: string | string[]; sso_error?: string }>;
 }) {
     const cookie = (await headers()).get("cookie");
     const [{ redirect, sso_error }, capabilitiesResult, sessionResult] = await Promise.all([
@@ -40,7 +40,7 @@ export default async function LoginPage({
             {signedInUser === null ? null : <BrowserAccountBridge userId={signedInUser.id} />}
             <AuthForm
                 mode="login"
-                redirectUrl={redirect ?? null}
+                redirectUrl={typeof redirect === "string" ? redirect : null}
                 ssoError={sso_error === "1"}
                 ssoEnabled={capabilities?.sso ?? false}
                 socialProviders={capabilities?.socialLogin ?? {}}

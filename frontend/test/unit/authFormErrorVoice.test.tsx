@@ -13,11 +13,13 @@ const {
     registerMock,
     toastErrorMock,
     toastSuccessMock,
+    pushMock,
 } = vi.hoisted(() => ({
     loginMock: vi.fn(async () => {}),
     registerMock: vi.fn(async () => {}),
     toastErrorMock: vi.fn(),
     toastSuccessMock: vi.fn(),
+    pushMock: vi.fn(),
 }));
 
 vi.mock("next/link", async () => {
@@ -31,7 +33,7 @@ vi.mock("next/link", async () => {
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({
-        push: vi.fn(),
+        push: pushMock,
         refresh: vi.fn(),
         replace: vi.fn(),
     }),
@@ -77,12 +79,13 @@ type Rendered = {
     unmount: () => Promise<void>;
 };
 
-async function renderAuthForm(mode: "login" | "register"): Promise<Rendered> {
+async function renderAuthForm(mode: "login" | "register", redirectUrl: string | null = null): Promise<Rendered> {
     const interactive = installInteractiveDocument("connex_workspace=7");
+    Object.defineProperty(window, "location", { configurable: true, value: new URL("http://localhost/auth/register") });
     const { createRoot } = await import("react-dom/client");
     const root = createRoot(interactive.container);
     await act(async () => {
-        root.render(<AuthForm mode={mode} redirectUrl={null} />);
+        root.render(<AuthForm mode={mode} redirectUrl={redirectUrl} />);
     });
 
     if (mode === "register") {
@@ -310,5 +313,21 @@ describe("registration next step", () => {
         expect(en.AuthRegister.verificationNotice).toContain("{email}");
         expect(ja.AuthRegister.verificationNotice).toContain("{email}");
         expect(ja.AuthRegister.verificationNotice).not.toBe(en.AuthRegister.verificationNotice);
+    });
+});
+
+
+describe("invitation authentication navigation", () => {
+    it.each(["/invite", "/invite-link"])("keeps %s through the login/register switch and registration", async (destination) => {
+        const rendered = await renderAuthForm("register", destination);
+        try {
+            const alternate = rendered.elements.find((element) => element.tagName === "A"
+                && element.attributes.get("href")?.startsWith("/auth/login"));
+            expect(alternate?.attributes.get("href")).toBe(`/auth/login?redirect=${encodeURIComponent(destination)}`);
+            expect(registerMock).toHaveBeenLastCalledWith(expect.objectContaining({ skipInitialWorkspace: true }));
+            expect(pushMock).toHaveBeenLastCalledWith(destination);
+        } finally {
+            await rendered.unmount();
+        }
     });
 });

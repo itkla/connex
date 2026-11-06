@@ -288,6 +288,14 @@ generation cannot be removed by a stale invitation handle. Its audit contains no
 
 Token-invite acceptance checks the current address under the recipient root and authorizes only that invitation. It does not write `app_user.email_verified` or emit a global email-verification audit event: the creator receives the token and can control the workspace SMTP sender. Global registration verification requires the separate instance-delivered token consumed by `RegistrationVerificationService`.
 
+Ordinary token-invite callers submit email only after `FreshMembershipTransaction.execute` fully
+returns and releases its connection. Current non-transactional HTTP callers receive the SMTP
+submission outcome. Callers inside an enclosing transaction register an `afterCommit`
+synchronization that only enqueues asynchronous mail and return `UNCONFIRMED`; they never wait
+for a connection their committed transaction still retains. Rollback sends no mail. The mail
+worker explicitly routes the target workspace, and sender resolution commits before SMTP
+submission. No provider connection is opened while invitation membership locks remain held.
+
 Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation. Its mailbox-proof and organization-domain checks read the account through the locked `app_user` row, not the pre-transaction membership projection.
 
 #### Verified email change as a pending-grant writer
