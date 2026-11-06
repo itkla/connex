@@ -5,6 +5,7 @@ import { resolveWorkspaceTimezone } from "@/app/lib/workspaceSnapshot";
 import { redirect } from "next/navigation";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
+import { currencyCountsForMetrics, resolveDealViewCurrency } from "@/app/components/overview/analytics/currencyScope";
 
 /**
  * Maps the URL {@code status} facet value to a server-side deal filter so the initial
@@ -15,24 +16,6 @@ function statusParam(raw: string | string[] | undefined): Array<'open' | 'closed
     const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
     const normalized = values.filter((value): value is 'open' | 'closed' => value === 'open' || value === 'closed');
     return normalized.length > 0 ? normalized : undefined;
-}
-
-/**
- * Picks the currency with the most deals so the initial server render loads that currency's
- * page (matching the client's default currency selection), rather than an all-currency page
- * the client would then re-filter and under-fill.
- */
-function dominantCurrency(metrics: DealMetrics): string | undefined {
-    let best: string | undefined;
-    let bestCount = -1;
-    for (const c of metrics.byCurrency) {
-        const n = c.openCount + c.closedCount;
-        if (n > bestCount) {
-            bestCount = n;
-            best = c.currency;
-        }
-    }
-    return best;
 }
 
 export default async function DealsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -50,7 +33,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
 
     const params = await searchParams;
     const status = statusParam(params.status);
-    const selectedCurrency = typeof params.currency === 'string' ? params.currency : undefined;
+    const selectedCurrency = typeof params.currency === 'string' ? params.currency : null;
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const [metrics, facets, savedViewsResult, defaultView]: [DealMetrics, DealFacets, CookieResult<SavedView[]>, SavedView | null] = await Promise.all([
         getDealMetricsFromCookie(cookie, { status }),
@@ -59,7 +42,11 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
         getDefaultSavedViewFromCookie("deal", cookie),
     ]);
     const savedViews = savedViewsResult.ok ? savedViewsResult.data : [];
-    const dealsPage: Page<Deal> = await getDealsPage({ page: 1, size: 25, status, currency: selectedCurrency || dominantCurrency(metrics) }, init);
+    const currency = resolveDealViewCurrency(
+        currencyCountsForMetrics(metrics), selectedCurrency,
+        new Map(facets.currencies.map(({ key, count }) => [key, count])),
+    );
+    const dealsPage: Page<Deal> = await getDealsPage({ page: 1, size: 25, status, currency }, init);
 
     return (
         <DealsBrowser

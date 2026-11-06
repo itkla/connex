@@ -70,6 +70,8 @@ Dashboard Projections totals all open deals in its currency, including undated d
 
 Deals and Dashboard show the selected currency before their monetary totals and charts, count deals in other currencies excluded from that view, and offer a currency picker. Dashboard record counts and individual-deal lists still cover all currencies; each record retains its own currency. Its currency-scoped link opens that currency's Deals list. Currency selections survive reloads through the URL; this is a view choice, not a workspace default. Monetary widgets identify their currency and never combine or convert currencies.
 
+Currency links resolve against existing workspace currency buckets before any monetary query. Blank or unrecognized selections fall back to a known currency; known currencies stay selected even when the current filters match no deals. Dashboard explains that its deal count includes all currencies.
+
 ## 4. Vocabulary
 
 **This section is the canonical glossary — the single source of truth for product terms.** There is no other glossary file. The CI banned-terms lint over the product's message catalogs (EN and JA patterns) is **generated from this section**: edit here, and the gate follows. (The generator is `frontend/lint/vocabulary.mjs`, which writes the checked-in pattern set; the gate is the `frontend/test/unit/vocabularyLint.test.ts` suite, which scans both message catalogs against it in error mode over a baseline that only shrinks. Editing this section without regenerating fails the generator test.) Labels, columns, titles, and buttons use these terms verbatim; prose may vary naturally around them. "Never say" applies to product surfaces — code, schema, logs, and engineering docs keep their own names.

@@ -63,6 +63,7 @@ import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import DealsQueryUrlSync from '@/app/components/records/deals/DealsQueryUrlSync';
 import DealCurrencyScope from './DealCurrencyScope';
+import { resolveDealViewCurrency } from '@/app/components/overview/analytics/currencyScope';
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import DealEditConflictDialog from './DealEditConflictDialog';
 import { reconcileSavedDealDraft, submitDealDraftUpdates, submitInlineDealValue, toDealDraft as toDraft } from './dealEditConflict';
@@ -494,20 +495,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         for (const c of dealMetrics.byCurrency) counts.set(c.currency, c.openCount + c.closedCount);
         return counts;
     }, [dealMetrics]);
-    const dominantCurrency = useMemo(() => {
-        let best: string | null = null;
-        let bestCount = -1;
-        for (const c of dealMetrics.byCurrency) {
-            const n = c.openCount + c.closedCount;
-            if (n > bestCount) {
-                bestCount = n;
-                best = c.currency;
-            }
-        }
-        return best;
-    }, [dealMetrics]);
-    const activeCurrency = searchParams.get('currency') || dominantCurrency;
-    const displayCurrency = activeCurrency ?? 'USD';
+    const workspaceCurrencyCounts = useMemo(
+        () => new Map(dealFacets.currencies.map(({ key, count }) => [key, count])),
+        [dealFacets.currencies],
+    );
+    const activeCurrency = resolveDealViewCurrency(currencyCounts, searchParams.get('currency'), workspaceCurrencyCounts);
+    const displayCurrency = activeCurrency;
     const [revenueResult, setRevenueResult] = useState<{ currency: string; data: DealRevenueSeries } | null>(null);
     const [stageResult, setStageResult] = useState<{ currency: string; data: DealStageDistribution[] } | null>(null);
     const revenueSeries = revenueResult?.currency === activeCurrency ? revenueResult.data : { closed: [], projected: [] };

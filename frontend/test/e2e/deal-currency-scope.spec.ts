@@ -36,6 +36,7 @@ for (const [locale, theme] of [['en', 'light'], ['ja', 'dark']] as const) {
         const layout = await context.request.put('/api/dashboard-layout', {
             headers: { 'X-Workspace-Id': String(workspaceId), [csrf.headerName]: csrf.token },
             data: { layout: { version: 1, widgets: [
+                { id: 'overview', type: 'overview', span: 2 },
                 { id: 'pipeline', type: 'pipeline', span: 2 },
                 { id: 'kpis', type: 'analyticsKpis', span: 2 },
                 { id: 'revenue', type: 'revenueTrend', span: 1 },
@@ -68,6 +69,8 @@ for (const [locale, theme] of [['en', 'light'], ['ja', 'dark']] as const) {
         const dashboardBasis = (currency: string) => message(locale, 'records', 'DealCurrencyScope.dashboardBasis').replace('{currency}', currency);
         const dealsBasis = (currency: string) => message(locale, 'records', 'DealCurrencyScope.dealsBasis').replace('{currency}', currency);
         await expect(scope.getByText(dashboardBasis('JPY'), { exact: true })).toBeVisible();
+        const countsBasis = message(locale, 'records', 'DealCurrencyScope.recordCountsBasis');
+        await expect(scope.getByText(countsBasis, { exact: true })).toBeVisible();
         await expect(scope).toContainText(locale === 'en' ? '2 deals in other currencies' : '他の通貨の案件2件');
         const projections = page.getByRole('button', { name: new RegExp(message(locale, 'dashboard', 'DashboardPipelineChart.projections')) });
         await expect(projections).toContainText(formatCompactCurrency(30_000, 'JPY', locale));
@@ -75,6 +78,8 @@ for (const [locale, theme] of [['en', 'light'], ['ja', 'dark']] as const) {
         for (const [currency, amount] of [['USD', 500], ['EUR', 300], ['JPY', 30_000]] as const) {
             await selectCurrency(page, scope, locale, currency);
             await expect(scope.getByText(dashboardBasis(currency), { exact: true })).toBeVisible();
+            await expect(scope.getByText(countsBasis, { exact: true })).toBeVisible();
+            await expect(page.getByRole('main').locator('a[href="/records/deals"]')).toContainText('4');
             await expect(scope).toContainText(locale === 'en'
                 ? `${currency === 'JPY' ? 2 : 3} deals in other currencies`
                 : `他の通貨の案件${currency === 'JPY' ? 2 : 3}件`);
@@ -94,6 +99,17 @@ for (const [locale, theme] of [['en', 'light'], ['ja', 'dark']] as const) {
             await page.reload();
             await expect(scope.getByText(dealsBasis(currency), { exact: true })).toBeVisible();
             await page.goto(`/dashboard?currency=${currency}`);
+        }
+
+        for (const [requested, expectedCurrency] of [[' ', 'JPY'], [' usd ', 'USD'], ['JPY,USD', 'JPY']] as const) {
+            const series = page.waitForResponse((response) => {
+                const url = new URL(response.url());
+                return url.pathname === '/api/deals/revenue-timeseries'
+                    && url.searchParams.get('currency') === expectedCurrency;
+            });
+            await page.goto(`/records/deals?${new URLSearchParams({ currency: requested })}`);
+            await expect(scope.getByText(dealsBasis(expectedCurrency), { exact: true })).toBeVisible();
+            expect((await series).status()).toBe(200);
         }
 
         await page.goto('/records/deals?currency=JPY&view=table&page=2');

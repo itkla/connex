@@ -28,6 +28,7 @@ describe('explicit currency scope', () => {
         const region = screen.getByRole('region');
         expect(region.textContent).toContain('JPY');
         expect(region.textContent).toContain('500');
+        expect(region.textContent).toContain((locale === 'ja' ? ja : en).DealCurrencyScope.recordCountsBasis);
         expect(region.textContent).not.toContain('2,000');
         expect(screen.getByRole('link').getAttribute('href')).toBe('/records/deals?currency=JPY');
         expect(screen.getByRole('button').textContent).toBe('JPY');

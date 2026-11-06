@@ -21,6 +21,7 @@ export default function DealCurrencyScope({ counts, currency, onChange, recordsH
             <div className="min-w-0 space-y-1">
                 <p className="text-sm font-medium">{t(dashboard ? 'dashboardBasis' : 'dealsBasis', { currency })}</p>
                 <p className="text-xs text-muted-foreground">{t(dashboard ? 'dashboardExcluded' : 'excluded', { count: excluded })}</p>
+                {dashboard && <p className="text-xs text-muted-foreground">{t('recordCountsBasis')}</p>}
             </div>
             <div className="flex flex-wrap items-center gap-3">
                 <CurrencyControl counts={options} currency={currency} hasDeals onChange={onChange} />

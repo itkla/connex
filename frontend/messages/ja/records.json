@@ -4,6 +4,7 @@
     "dashboardBasis": "金額の集計・グラフは{currency}の案件のみが対象です",
     "dealsBasis": "{currency}の案件と集計値を表示しています",
     "widgetBasis": "{currency}の案件のみ",
+    "recordCountsBasis": "案件数の表示には、すべての通貨の案件が含まれます。",
     "dashboardExcluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は金額の集計・グラフの対象外です。通貨を切り替えると確認できます。}}",
     "excluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は表示・集計の対象外です。通貨を切り替えると確認できます。}}",
     "viewDeals": "{currency}の案件を表示"

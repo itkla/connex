@@ -20,7 +20,10 @@ vi.mock('@/app/lib/api', () => ({
     getCurrentUserResultFromCookie: vi.fn(async () => ({ ok: true, data: { id: 1 } })),
     getMyWorkspacesFromCookie: vi.fn(async () => ({})),
     getDealMetricsFromCookie: vi.fn(),
-    getDealFacetsFromCookie: vi.fn(async () => ({})),
+    getDealFacetsFromCookie: vi.fn(async () => ({
+        status: [], stages: [], pipelines: [], companies: [], owners: [], risk: [],
+        currencies: [{ key: 'JPY', count: 3 }, { key: 'USD', count: 1 }],
+    })),
     getSavedViewsResultFromCookie: vi.fn(async () => ({ ok: true, data: [] })),
     getDefaultSavedViewFromCookie: vi.fn(async () => null),
     getDealsPage: vi.fn(async () => ({ items: [], total: 0 })),
@@ -43,5 +46,24 @@ describe('currency-scoped Deals deep links', () => {
     it('keeps the dominant currency when no currency was requested', async () => {
         await DealsPage({ searchParams: Promise.resolve({}) });
         expect(getDealsPage).toHaveBeenCalledWith(expect.objectContaining({ currency: 'JPY' }), expect.anything());
+    });
+
+    it('rejects a blank currency instead of allowing an unscoped monetary query', async () => {
+        await DealsPage({ searchParams: Promise.resolve({ currency: ' \t\u3000' }) });
+        expect(getDealsPage).toHaveBeenCalledWith(expect.objectContaining({ currency: 'JPY' }), expect.anything());
+    });
+
+    it.each(['JPY,USD', '<script>', 'UNKNOWN', 'X'.repeat(200)])('rejects an unknown currency %s', async (currency) => {
+        await DealsPage({ searchParams: Promise.resolve({ currency }) });
+        expect(getDealsPage).toHaveBeenCalledWith(expect.objectContaining({ currency: 'JPY' }), expect.anything());
+    });
+
+    it('canonicalizes a known currency while preserving a zero-match status filter', async () => {
+        const { getDealMetricsFromCookie } = await import('@/app/lib/api');
+        vi.mocked(getDealMetricsFromCookie).mockResolvedValue({ totalCount: 3, byCurrency: metrics.byCurrency.filter(({ currency }) => currency === 'JPY') });
+        await DealsPage({ searchParams: Promise.resolve({ currency: ' usd ', status: 'open' }) });
+        expect(getDealsPage).toHaveBeenCalledWith(
+            expect.objectContaining({ currency: 'USD', status: ['open'] }), expect.anything(),
+        );
     });
 });

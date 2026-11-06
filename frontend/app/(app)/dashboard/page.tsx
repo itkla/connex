@@ -77,7 +77,7 @@ import IntroOpportunities from '@/app/components/dashboard/IntroOpportunities';
 import OverviewCard from '@/app/components/dashboard/OverviewCard';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import DashboardCurrencyScope from '@/app/components/dashboard/DashboardCurrencyScope';
-import { currencyCountsForMetrics, resolveCurrency } from '@/app/components/overview/analytics/currencyScope';
+import { currencyCountsForMetrics, resolveDealViewCurrency } from '@/app/components/overview/analytics/currencyScope';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
 import RecentMoves from '@/app/components/dashboard/RecentMoves';
 import Rise from '@/app/components/motion/Rise';
@@ -413,7 +413,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
     const params = await searchParams;
     const currencyCounts = currencyCountsForMetrics(dealMetrics);
-    const currency = resolveCurrency(currencyCounts, typeof params.currency === 'string' ? params.currency : null);
+    const currency = resolveDealViewCurrency(currencyCounts, typeof params.currency === 'string' ? params.currency : null);
     const [dealKpisResult, pipelineValuesResult, revenueSeriesResult, openRevenueSeriesResult, stageDistributionResult] = await Promise.all([
         toResult(getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE)),
         toResult(getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE)),
