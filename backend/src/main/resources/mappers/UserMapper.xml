@@ -570,6 +570,7 @@
            u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id AND wm.workspace_id = #{workspaceId}
+      AND wm.status = 'active'
     WHERE u.username LIKE #{query} OR u.display_name LIKE #{query} OR u.email LIKE #{query}
     ORDER BY u.username
     LIMIT 10

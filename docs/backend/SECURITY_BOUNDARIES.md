@@ -37,11 +37,14 @@ Workspace teams are tenant-plane configuration. Reads require active workspace m
 ### Workspace invitation disclosure
 
 Both email invitation creation and the compatibility member-add route return the same token
-invitation for every address. Creation does not resolve recipient accounts. Before acceptance,
+invitation for every address. Creation does not resolve recipient profiles to choose its response. Before acceptance,
 administrators see the addressed email, requested role, invitation status, expiry and revocation
 control; account ids, names, usernames, avatars and verification/account state are withheld.
-Member rosters, organization layout rosters, member search and reference hydration expose only
-active memberships. Profile-returning role mutations also require an active target.
+Member rosters, organization layout rosters, member search (including global user search) and
+reference hydration expose only active memberships. Profile-returning role mutations also require an active target.
+Authored reference labels for historical pending grants remain internal to mention persistence and
+assistant masking. Reader hydration and write-response reference projections filter pending targets;
+masking provenance never resolves or returns the recipient's account profile.
 
 Historical pending-membership grants remain acceptable by their recipients. Administrators manage
 them as address-only invitations using opaque membership-generation references, with no invented

@@ -4,6 +4,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,17 +89,18 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertEquals(currentUser.getId(), stored(note).get(0).getRefId());
     }
 
-    /** A pending invitation cannot disclose or acquire a member identity through mentions. */
+    /** Historical pending grants retain authored mentions for notification delivery after acceptance. */
     @Test
-    void syncReferences_excludesPendingMemberMention() {
+    void syncReferences_persistsPendingMemberMentionWithoutReaderDisclosure() {
         User pending = newPendingMember();
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
             "Welcome " + mention("Invitee", pending));
 
-        assertTrue(added.isEmpty());
-        assertTrue(stored(note).isEmpty());
+        assertEquals(List.of(pending.getId()), added);
+        assertEquals(pending.getId(), stored(note).getFirst().getRefId());
+        assertTrue(referenceService.referencesForReader(workspace.getId(), "note", note.getId()).isEmpty());
     }
 
     /**
@@ -121,8 +123,49 @@ class ReferenceServiceTest extends AbstractServiceTest {
         int active = newUser().getId();
         int pending = newPendingMember().getId();
         int outsider = newNonMember().getId();
+        Workspace other = new Workspace();
+        other.setOrgId(workspace.getOrgId());
+        other.setName("Other provenance " + unique());
+        other.setSlug("provenance_" + unique());
+        workspaceMapper.insert(other);
+        workspaceMapper.addPendingMember(other.getId(), outsider, "member");
         assertEquals(java.util.Set.of(active),
                 referenceService.visibleMemberIds(workspace.getId(), List.of(active, pending, outsider, active)));
+        assertEquals(java.util.Set.of(active, pending),
+                referenceService.memberIdsForMasking(workspace.getId(), List.of(active, pending, outsider, active)));
+    }
+
+    @Test
+    void pendingAuthoredLabelsRemainInternalUntilAcceptance() {
+        User pending = newPendingMember();
+        User outsider = newNonMember();
+        Note pendingDraft = new Note();
+        pendingDraft.setContent(mention("Authored alias", pending));
+        pendingDraft.setVisibility("workspace");
+        Note created = noteService.create(pendingDraft);
+        Note outsiderDraft = new Note();
+        outsiderDraft.setContent(mention("Authored alias", outsider));
+        outsiderDraft.setVisibility("workspace");
+        Note foreign = noteService.create(outsiderDraft);
+
+        assertTrue(created.getReferences().isEmpty());
+        assertTrue(foreign.getReferences().isEmpty());
+        assertEquals(1, stored(created).size());
+        assertTrue(stored(foreign).isEmpty());
+        Note reader = noteService.getNoteById(created.getId());
+        assertTrue(reader.getReferences().isEmpty());
+        assertEquals("(unavailable reference)", reader.getContent());
+        assertEquals(reader.getContent(), noteService.getNoteById(foreign.getId()).getContent());
+
+        Note masking = referenceService.hydrateForMasking(workspace.getId(), List.of(created)).getFirst();
+        assertEquals(mention("Authored alias", pending), masking.getContent());
+        assertEquals("Authored alias", masking.getReferences().getFirst().getLabel());
+        assertFalse(masking.getContent().contains(pending.getDisplayName()));
+        assertEquals("(unavailable reference)", referenceService.hydrateForMasking(
+            workspace.getId(), List.of(foreign)).getFirst().getContent());
+
+        workspaceMapper.activateMember(workspace.getId(), pending.getId());
+        assertEquals(mention("Authored alias", pending), noteService.getNoteById(created.getId()).getContent());
     }
 
     @Test
@@ -140,7 +183,8 @@ class ReferenceServiceTest extends AbstractServiceTest {
         var result = identifierResolver.resolve(text);
 
         assertEquals(List.of(
-                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Active Name")),
+                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Active Name"),
+                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Pending Name")),
                 result.identifiers());
         assertTrue(result.resources().isEmpty());
     }
@@ -169,7 +213,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
 
         var resolution = identifierResolver.resolve(content);
 
-        assertEquals(java.util.Set.of("Active Parser Alias"), resolution.identifiers().stream()
+        assertEquals(java.util.Set.of("Active Parser Alias", "Pending Parser Alias"), resolution.identifiers().stream()
                 .map(AiAssistantIdentifierResolver.Identifier::value).collect(java.util.stream.Collectors.toSet()));
         assertTrue(resolution.resources().isEmpty());
         Note note = newNote(currentUser, null, null);

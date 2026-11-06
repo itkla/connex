@@ -121,7 +121,33 @@ describe("invitation disclosure in the member-management panel", () => {
         const row = [...host.querySelectorAll("li")].find((item) => item.textContent?.includes(pending.email));
         expect(row?.textContent).toContain(pending.email);
         expect(row?.textContent).toContain(copy.expires.replace("{date}", "2026-11-20"));
+        const pendingHeading = [...host.querySelectorAll("h3")].find((heading) => heading.textContent === copy.pendingTitle);
+        expect(pendingHeading?.parentElement?.querySelector("span")?.textContent).toBe("1");
+        expect(getWorkspaceMembers).toHaveBeenCalledTimes(1);
+        expect(getWorkspaceInvites).toHaveBeenCalledTimes(1);
         expect(clipboard).toHaveBeenCalledWith(expect.stringContaining("/invite#token=new-token"));
+    });
+
+    it.each(["en", "ja"] as const)("replaces a historical invite and keeps both counts correct in %s", async (language) => {
+        const copy = (language === "en" ? english : japanese).WorkspaceMembers;
+        vi.mocked(getWorkspaceInvites).mockResolvedValue([{
+            id: "b".repeat(64), email: pending.email, role: "admin", status: "pending",
+            createdAt: "2026-10-01T00:00:00Z",
+        }]);
+        await render(language);
+
+        await submitInvitation();
+
+        const rows = [...host.querySelectorAll("li")].filter((item) => item.textContent?.includes(pending.email));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.textContent).toContain(copy.roleMember);
+        expect(rows[0]?.textContent).toContain(copy.expires.replace("{date}", "2026-11-20"));
+        expect(rows[0]?.textContent).not.toContain(copy.inviteNoExpiry);
+        const pendingHeading = [...host.querySelectorAll("h3")].find((heading) => heading.textContent === copy.pendingTitle);
+        expect(pendingHeading?.parentElement?.querySelector("span")?.textContent).toBe("1");
+        expect(host.querySelector("section")?.textContent).toContain(copy.count.replace("{count}", "1"));
+        expect(getWorkspaceMembers).toHaveBeenCalledTimes(1);
+        expect(getWorkspaceInvites).toHaveBeenCalledTimes(1);
     });
 
     it.each(["en", "ja"] as const)("renders a historical invitation with omitted expiry in %s", async (language) => {

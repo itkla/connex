@@ -201,9 +201,16 @@ Stored prose can name a member who has renamed themselves or is still pending. N
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
-labels, including both authored HTML-entity spellings and decoded labels. Both member provenance
-and reader visibility now use the pure `ReferenceContentReader` shared by `ReferenceService`.
-It parses original source with pinned CommonMark Java 0.30.1, the GFM tables extension and the
+labels, including both authored HTML-entity spellings and decoded labels.
+
+Assistant reads use `hydrateForMasking`, `hydrateTasksForMasking` and
+`hydrateActivitiesForMasking` only after authorizing the containing record. These internal paths
+retain authored labels for scoped active or pending membership IDs without resolving account profiles.
+Ordinary hydration and write-response reference projection remain active-only; internal mention
+persistence retains pending grants so queued notifications can surface after acceptance.
+
+Both member provenance and reader visibility use the pure `ReferenceContentReader` shared by
+`ReferenceService`. It parses original source with pinned CommonMark Java 0.30.1, the GFM tables extension and the
 footnotes extension, with block and inline source spans. It does not globally decode the document
 before parsing. Resolved links, images and all link-reference definitions (including unused and
 duplicate definitions) contribute internal targets; HTML `href` attributes do not, matching
@@ -591,9 +598,12 @@ and short names must not corrupt ordinary words. Exact replacements such as `x{{
 precise member provenance, including through echoed write arguments, independently of these raw-text
 rules. At queue time, the shared member-reference collector reads labels and user targets from
 the original text. Distinct target ids are checked in workspace-scoped batches of at most 500 against
-active membership. An authored or decoded label is registered when any of its possible
-targets is visible, preserving conservative masking for ambiguous keys. The combined identifier
-budget still refuses excess labels with `identifier_limit_exceeded`. An unrelated invisible target
+active or pending membership through the ID-only `memberIdsForMasking` boundary. An authored or decoded
+label is registered when any of its possible targets belongs to that exact workspace, preserving
+conservative masking for ambiguous keys without exposing a pending profile. Admission counts every
+distinct authored member-reference label before membership lookup, including labels with invisible
+targets, so `identifier_limit_exceeded` cannot reveal pending membership. The combined identifier
+budget remains 20. An unrelated invisible target
 that collapses the reader-redacted body cannot suppress an authorized member label. Invisible user
 targets contribute no reference labels. These labels are
 persisted in user-message `memberIdentifiers`, deduplicated with directory mentions within the

@@ -116,7 +116,7 @@ final class AiAssistantMaskingTestSupport {
         when(scope.getForWorkspace(workspaceId)).thenReturn(new WorkspaceScope(
                 organizationId, List.of(workspaceId), "[" + workspaceId + "]"));
         ReferenceService references = fixtureMock(ReferenceService.class);
-        when(references.hydrateActivities(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
+        when(references.hydrateActivitiesForMasking(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         AiAssistantScopeReadService service = new AiAssistantScopeReadService(
                 activities, fixtureMock(SegmentService.class), fixtureMock(SegmentMapper.class), fixtureMock(SavedViewService.class),
                 fixtureMock(ScoringService.class), fixtureMock(DealRiskService.class), people, fixtureMock(CompanyMapper.class), fixtureMock(DealMapper.class),

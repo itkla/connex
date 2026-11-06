@@ -105,6 +105,11 @@ public class AiAssistantIdentifierResolver {
         AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId)).stream()
                 .filter(label -> MaskingEngine.containsMemberMention(scanText, label)).forEach(memberLabels::add);
         List<ReferenceService.MemberReference> memberReferences = memberReading.references();
+        var memberBudgetLabels = new LinkedHashSet<>(memberLabels);
+        memberReferences.stream().map(ReferenceService.MemberReference::label).forEach(memberBudgetLabels::add);
+        if (identifiers.size() + memberBudgetLabels.size() > MAX_IDENTIFIERS) {
+            throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+        }
         Set<Set<Integer>> targetGroups = Collections.newSetFromMap(new IdentityHashMap<>());
         var memberIds = new LinkedHashSet<Integer>();
         for (ReferenceService.MemberReference reference : memberReferences) {
@@ -112,7 +117,7 @@ public class AiAssistantIdentifierResolver {
                 memberIds.addAll(reference.memberIds());
             }
         }
-        Set<Integer> visibleMembers = referenceService.visibleMemberIds(workspaceId, memberIds);
+        Set<Integer> visibleMembers = referenceService.memberIdsForMasking(workspaceId, memberIds);
         var memberVisibility = new IdentityHashMap<Set<Integer>, Boolean>();
         for (ReferenceService.MemberReference reference : memberReferences) {
             if (memberVisibility.computeIfAbsent(reference.memberIds(),

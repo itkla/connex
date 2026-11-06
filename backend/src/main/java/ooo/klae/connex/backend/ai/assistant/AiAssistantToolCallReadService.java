@@ -507,7 +507,7 @@ public class AiAssistantToolCallReadService {
         if (!tasks.isEmpty()) {
             Map<Integer, String> versions = new LinkedHashMap<>();
             tasks.forEach(task -> versions.put(task.getId(), TaskService.assistantStateVersion(task)));
-            for (Task task : referenceService.hydrateTasks(workspaceId, tasks)) {
+            for (Task task : referenceService.hydrateTasksForMasking(workspaceId, tasks)) {
                 if (task.getPerson() != null
                         && !visible.containsKey(new RecordKey("person", task.getPerson().getId()))
                         || task.getDeal() != null

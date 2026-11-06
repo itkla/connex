@@ -63,6 +63,11 @@ public interface WorkspaceMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userIds") List<Integer> userIds
     );
+    /** Internal authored-reference provenance lookup; never returns recipient profiles. */
+    List<Integer> getMemberIdsIncludingPending(
+        @Param("workspaceId") int workspaceId,
+        @Param("userIds") List<Integer> userIds
+    );
     int countActiveMembers(
         @Param("workspaceId") int workspaceId,
         @Param("memberIds") List<Integer> memberIds

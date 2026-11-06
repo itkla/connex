@@ -142,10 +142,25 @@ class NoteBodyReadBoundaryArchTest {
             assertTrue(method.find(), "Full note reader missing for " + kind);
             String body = method.group();
             assertTrue(body.contains("requireLimit(limit);"));
-            assertTrue(body.contains("referenceService.hydrate(workspaceId, noteMapper.getAiAssistantVisibleNotesBy" + kind + "Id("));
+            assertTrue(body.contains("referenceService.hydrateForMasking(workspaceId, noteMapper.getAiAssistantVisibleNotesBy" + kind + "Id("));
             assertTrue(body.contains("workspaceId, " + kind.toLowerCase(Locale.ROOT)
                 + "Id, workspaceService.getCurrentUserId(),"));
             assertTrue(body.contains("currentOrganizationWorkspaceIds(workspaceId), limit, includePrivateNotes)"));
+        }
+    }
+
+    @Test
+    void pendingMemberMaskingProvenanceIsConfinedToAssistantCallers() throws Exception {
+        Path sources = repoRoot().resolve("backend/src/main/java/ooo/klae/connex/backend");
+        Pattern maskingRead = Pattern.compile(
+            "\\.(?:hydrate(?:Tasks|Activities)?ForMasking|memberIdsForMasking)\\s*\\(");
+        try (var files = Files.walk(sources)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                if (maskingRead.matcher(Files.readString(file)).find()) {
+                    assertTrue(file.startsWith(sources.resolve("ai/assistant")),
+                        "Pending masking provenance cannot feed reader responses: " + sources.relativize(file));
+                }
+            }
         }
     }
 

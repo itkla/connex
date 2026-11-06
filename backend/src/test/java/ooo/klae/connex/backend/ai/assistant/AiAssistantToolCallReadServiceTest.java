@@ -118,7 +118,7 @@ class AiAssistantToolCallReadServiceTest {
         activityMapper = mock(ActivityMapper.class);
         taskMapper = mock(TaskMapper.class);
         referenceService = mock(ooo.klae.connex.backend.services.ReferenceService.class);
-        when(referenceService.hydrateTasks(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList()))
+        when(referenceService.hydrateTasksForMasking(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
         noteMapper = mock(NoteMapper.class);
         reportMapper = mock(ooo.klae.connex.backend.mappers.ReportMapper.class);
@@ -3039,7 +3039,7 @@ class AiAssistantToolCallReadServiceTest {
             task.setDescription("Private reference");
             return List.of(task);
         });
-        when(referenceService.hydrateTasks(WORKSPACE_ID, List.of(task))).thenAnswer(invocation -> {
+        when(referenceService.hydrateTasksForMasking(WORKSPACE_ID, List.of(task))).thenAnswer(invocation -> {
             task.setDescription("[unavailable]");
             return List.of(task);
         });

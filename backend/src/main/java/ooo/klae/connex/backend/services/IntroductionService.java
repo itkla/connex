@@ -566,7 +566,7 @@ public class IntroductionService {
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_INTRODUCTION, dto.getId(), dto.getNote());
         notifyMentions(workspaceId, dto, mentioned, actor);
         dto.setReferences(referenceService
-            .referencesFor(workspaceId, ReferenceService.SOURCE_INTRODUCTION, dto.getId())
+            .referencesForReader(workspaceId, ReferenceService.SOURCE_INTRODUCTION, dto.getId())
             .stream().map(ReferenceDto::from).toList());
         return dto;
     }
