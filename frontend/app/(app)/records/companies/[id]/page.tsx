@@ -8,7 +8,7 @@ import { loadRecord } from "@/app/lib/recordAccess";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import { UserIcon } from "@heroicons/react/24/outline";
 import PipelineCard from "@/app/components/records/PipelineCard";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +28,7 @@ import {
     getEntityCustomFieldsFromCookie,
     getTags,
     getUserReferences,
+    getRelationshipMapAvailability,
 } from "@/app/lib/api";
 import { type Company, type Contact, type Deal, type Tag } from "@/app/lib/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
@@ -59,6 +60,7 @@ type CompanyPageProps = {
 };
 
 export default async function CompanyPage({ params }: CompanyPageProps) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
@@ -86,6 +88,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         evidence,
         effectivePermissions,
         commentThreads,
+        mapAvailability,
     ] = await Promise.all([
         getTranslations("CompaniesDetail"),
         getLocale(),
@@ -101,6 +104,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getCompanyEvidence(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
         getCommentThreads("company", id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
+        getRelationshipMapAvailability(init),
     ]);
 
     if (companyAccess.kind === "forbidden") {
@@ -203,7 +207,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
 
                     <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
                         <AskConnexRecordEntry kind="company" />
-                        <CompanyActionsMenu company={company} />
+                        <CompanyActionsMenu company={company} mapAvailability={mapAvailability} />
                     </RecordDetailSection>
                 </Rise>
 
@@ -222,8 +226,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
                                         : t("ownerUnassigned")}
                                 />
-                                <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
-                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
+                                <InfoRow label={t("added")} value={formatDate(company.createdAt, locale, timeZone)} />
+                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale, timeZone)} />
                                 <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
                             </dl>
                         </RecordDetailSection>

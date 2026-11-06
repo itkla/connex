@@ -36,6 +36,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import DealTeamDialog from '@/app/components/records/deals/DealTeamDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
+import { latestDealSnapshot } from './dealEditConflict';
 import {
     RecordActivityComposer,
     RecordTaskComposer,
@@ -49,7 +50,9 @@ import {
     useDealTargetSearch,
 } from '@/app/hooks/useRecordTargetSearch';
 
-import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
+import { closeDeal, deleteDeal, getDealById, reopenDeal } from '@/app/lib/api';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 
@@ -67,17 +70,21 @@ const EMPTY_USERS: User[] = [];
  */
 export default function DealActionsMenu({
     deal,
+    timezone,
     pipelines,
     stagesByPipeline,
     currentUserId,
+    mapAvailability = 'unknown',
     personSeeds = EMPTY_CONTACTS,
     dealSeeds = EMPTY_DEALS,
     collaborators = EMPTY_USERS,
 }: {
     deal: Deal;
+    timezone: string;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
+    mapAvailability?: RelationshipMapAvailability;
     personSeeds?: Contact[];
     dealSeeds?: Deal[];
     collaborators?: User[];
@@ -92,7 +99,10 @@ export default function DealActionsMenu({
     const canAddTask = usePermission('TASK_CREATE');
     const showApiError = useApiErrorToast('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
+    const [lastSavedDeal, setLastSavedDeal] = useState<Deal | null>(null);
+    const editDeal = latestDealSnapshot(deal, lastSavedDeal);
     const [editOpen, setEditOpen] = useState(false);
+    const [isPreparingEdit, setIsPreparingEdit] = useState(false);
     const [teamOpen, setTeamOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
@@ -110,13 +120,27 @@ export default function DealActionsMenu({
     const personSearch = useContactTargetSearch(noteOpen, [], personSeeds);
     const dealSearch = useDealTargetSearch(noteOpen, [deal.id], stableDealSeeds);
 
-    const closed = isDealClosed(deal);
+    const closed = isDealClosed(editDeal);
+
+    const prepareEdit = async () => {
+        const originWorkspaceId = renderedWorkspaceId();
+        setIsPreparingEdit(true);
+        try {
+            const current = await getDealById(deal.id, workspacePinnedRequest(originWorkspaceId));
+            if (renderedWorkspaceId() !== originWorkspaceId) return;
+            setLastSavedDeal(current);
+            setEditOpen(true);
+        } catch (err) {
+            showApiError(err, 'failedToLoadDeal');
+        } finally {
+            setIsPreparingEdit(false);
+        }
+    };
 
     const toggleDealStatus = async (won: boolean | null) => {
         setIsUpdatingStatus(true);
         try {
-            if (won === null) await reopenDeal(deal.id);
-            else await closeDeal(deal.id, { won });
+            setLastSavedDeal(won === null ? await reopenDeal(deal.id) : await closeDeal(deal.id, { won }));
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {
@@ -143,20 +167,21 @@ export default function DealActionsMenu({
         <div className="flex flex-row gap-2">
             <ButtonGroup orientation="horizontal">
                 {canUpdate && (
-                    <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
-                        <PencilSquareIcon className="size-4" />
+                    <Button variant="outline" size="toolbar" onClick={prepareEdit} disabled={isPreparingEdit} aria-busy={isPreparingEdit}>
+                        {isPreparingEdit ? <LoaderCircle className="size-4 animate-spin" /> : <PencilSquareIcon className="size-4" />}
                         {t('edit')}
                     </Button>
                 )}
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    disabled={deal.company == null}
-                    onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
-                >
-                    <EyeIcon className="size-4" />
-                    {t('viewInMap')}
-                </Button>
+                {mapAvailability !== 'overCapacity' && deal.company != null && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
+                    >
+                        <EyeIcon className="size-4" />
+                        {t('viewInMap')}
+                    </Button>
+                )}
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 {canAttach && (
@@ -293,19 +318,22 @@ export default function DealActionsMenu({
             />
 
             <EditDealSheet
-                deal={deal}
+                timezone={timezone}
+                deal={editDeal}
                 open={editOpen}
                 onOpenChange={setEditOpen}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onDealUpdated={setLastSavedDeal}
             />
 
             <DealTeamDialog
                 open={teamOpen}
                 onOpenChange={setTeamOpen}
                 dealId={deal.id}
-                initialOwnerId={deal.ownerId}
+                initialOwnerId={editDeal.ownerId}
                 initialCollaborators={collaborators}
+                onDealUpdated={setLastSavedDeal}
             />
 
             <RecordActivityComposer
@@ -332,7 +360,9 @@ export default function DealActionsMenu({
                 currentUserId={currentUserId}
                 onPersonQueryChange={personSearch.onInputValueChange}
                 onDealQueryChange={dealSearch.onInputValueChange}
+                personServerSearch={personSearch.serverSearch}
                 personOptionsLoading={personSearch.loading}
+                dealServerSearch={dealSearch.serverSearch}
                 dealOptionsLoading={dealSearch.loading}
             />
 

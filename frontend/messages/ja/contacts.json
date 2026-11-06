@@ -131,7 +131,9 @@
         "toastContactsRestoredPartial": "{total}件中{succeeded}件の連絡先を復元しました",
         "toastContactsRestoreFailed": "{failed}件の連絡先を復元できませんでした",
         "toastFailedRestore": "選択した連絡先を復元できませんでした",
-        "entityLabelPlural": "連絡先"
+        "entityLabelPlural": "連絡先",
+        "toastFailedLoadContact": "連絡先を読み込めませんでした",
+        "inlineSavePending": "連絡先の保存が完了するまでお待ちください。"
     },
     "ContactsCard": {
         "copyEmail": "メールをコピー",
@@ -148,11 +150,12 @@
         "toastPhoneCopied": "電話番号をコピーしました",
         "toastFailedCopyPhone": "電話番号をコピーできませんでした",
         "toastCompanyChanged": "会社を変更しました",
-        "ownerLabel": "担当者: {name}"
+        "ownerLabel": "担当者: {name}",
+        "toastFailedLoadContact": "連絡先を読み込めませんでした"
     },
     "ContactsActionsMenu": {
         "edit": "編集",
-        "viewInMap": "地図で表示",
+        "viewInMap": "マップで表示",
         "add": "追加",
         "new": "新規",
         "moreActions": "その他のアクション",
@@ -176,7 +179,8 @@
         "toastContactRestored": "連絡先を復元しました",
         "toastFailedArchive": "連絡先をアーカイブできませんでした",
         "toastFailedRestore": "連絡先を復元できませんでした",
-        "entityLabelPlural": "連絡先"
+        "entityLabelPlural": "連絡先",
+        "toastFailedLoadContact": "連絡先を読み込めませんでした"
     },
     "ContactsStatCard": {
         "viewAllTitle": "{label} をすべて表示",
@@ -196,7 +200,11 @@
         "toastPickCompany": "会社を選択してください",
         "toastAssociatedSingle": "{contactName} を {companyName} に関連付けました",
         "toastAssociatedMultiple": "{count} 件の連絡先を {companyName} に関連付けました",
-        "toastFailedUpdate": "会社を変更できませんでした"
+        "toastFailedUpdate": "会社を変更できませんでした",
+        "toastFailedLoadContact": "連絡先を読み込めませんでした",
+        "removeTitle": "会社との関連付けを解除",
+        "toastRemoved": "{count}件の連絡先の会社との関連付けを解除しました",
+        "removeDescription": "選択した連絡先の会社との関連付けを解除します。"
     },
     "ContactsEditSheet": {
         "toastNoChanges": "保存する変更はありません",
@@ -219,6 +227,7 @@
         "save": "保存"
     },
     "ContactsNewContactDialog": {
+        "companySelectionRequired": "検索結果から会社を選択するか、検索欄を空にして続けてください。",
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "dialogTitle": "新規連絡先",
         "description": "連絡先に人物を追加します。追加した連絡先はこのワークスペースのメンバー全員と共有されます。",
@@ -457,6 +466,41 @@
             "BUSINESS_CARD": "名刺",
             "IMPORT": "インポート",
             "OTHER": "その他"
+        }
+    },
+    "ContactsEditConflict": {
+        "title": "連絡先が更新されています",
+        "description": "「{name}」を読み込んだ後に、別の変更が保存されました。入力中の内容は保持されています。変更された項目：",
+        "loadFailed": "「{name}」は更新されています。入力中の内容は保持されていますが、最新の情報を取得できませんでした。編集を続け、再度保存すると変更内容を確認できます。",
+        "otherChanges": "表示中の項目以外も含め、別の更新が保存されています。",
+        "keepEditing": "編集を続ける",
+        "reload": "最新の情報を読み込む",
+        "confirmTitle": "入力内容を破棄して再読み込みしますか？",
+        "confirmDescription": "「{name}」の未保存の変更は失われます。最新の保存内容に置き換わります。",
+        "discardAndReload": "破棄して再読み込み",
+        "fields": {
+            "name": "名前",
+            "email": "メールアドレス",
+            "phone": "電話番号",
+            "title": "役職",
+            "companyId": "会社",
+            "ownerId": "担当者",
+            "imageUrl": "写真",
+            "riskExcluded": "リスク評価",
+            "introExcluded": "紹介候補",
+            "suspendedAt": "プライバシー保護のため利用停止中",
+            "provisionCeasedAt": "プライバシー保護のため共有停止中",
+            "archivedAt": "アーカイブ状態",
+            "lifecycleStage": "リードステージ",
+            "lifecycleChangedAt": "ステージの変更日時",
+            "disqualifiedReason": "対象外の理由",
+            "qualificationNotes": "見極めメモ",
+            "leadSource": "獲得経路",
+            "leadSourceDetail": "獲得経路の詳細",
+            "referrerPersonId": "紹介者",
+            "firstResponseDueAt": "初回対応の期限",
+            "firstRespondedAt": "初回対応日時",
+            "firstResponseBreachedAt": "初回対応の期限超過"
         }
     }
 }

@@ -108,6 +108,8 @@
     "documentApprovalPolicyInvalidatedBody": "承認ポリシーが変更されたため、{document}の承認依頼は終了しました。",
     "documentApprovalUnsatisfiableBody": "承認チェーンを完了できなくなったため、{document}の承認依頼は終了しました。",
     "documentApprovalTerminatedBody": "{document}の承認依頼は終了しました。",
+    "taskAssignedTitle": "タスクを依頼されました",
+    "taskAssignedBody": "{actor}さんから「{task}」を依頼されました。",
     "taskDueTitle": "期限が近いタスク",
     "taskDueBody": "{task} の期限は {date} です。",
     "taskOverdueTitle": "期限切れのタスク",

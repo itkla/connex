@@ -42,6 +42,7 @@ import type {
     WorkItemSource,
     WorkItemUrgency,
 } from "@/app/lib/types";
+import { parseCalendarDateUtc, parseMysqlDateTime } from "@/app/lib/utils";
 import { cn } from "@/lib/utils";
 import { toastError, toastSuccess, toastWarn } from "@/app/lib/toast";
 import { emitNotificationStateChanged } from "@/app/components/notifications/notificationEvents";
@@ -694,12 +695,12 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                         </Button>
                     </div>
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={rejectGuard.confirm.open}
+                    onKeepEditing={rejectGuard.confirm.onKeepEditing}
+                    onDiscard={rejectGuard.confirm.onDiscard}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={rejectGuard.confirm.open}
-                onKeepEditing={rejectGuard.confirm.onKeepEditing}
-                onDiscard={rejectGuard.confirm.onDiscard}
-            />
 
             <Drawer
                 open={detail != null}
@@ -792,7 +793,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                                     : ""}
                                                 {t(`queueEvidence_${row.code}`)}
                                                 {" · "}
-                                                {formatInstant(format, row.date != null ? `${row.date}T00:00:00` : row.occurredAt)}
+                                                {row.date != null ? formatDay(format, row.date) : formatInstant(format, row.occurredAt)}
                                             </span>
                                         </li>
                                     ))}
@@ -854,11 +855,11 @@ type Translate = ReturnType<typeof useTranslations<"MePage">>;
 type Format = ReturnType<typeof useFormatter>;
 
 function formatDay(format: Format, isoDate: string): string {
-    return format.dateTime(new Date(`${isoDate}T00:00:00`), { month: "short", day: "numeric" });
+    return format.dateTime(parseCalendarDateUtc(isoDate), { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function formatInstant(format: Format, iso: string): string {
-    return format.dateTime(new Date(iso), {
+    return format.dateTime(parseMysqlDateTime(iso), {
         month: "short", day: "numeric", hour: "numeric", minute: "numeric",
     });
 }

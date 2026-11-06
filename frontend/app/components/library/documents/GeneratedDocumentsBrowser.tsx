@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 import { DocumentCheckIcon } from '@heroicons/react/24/outline';
 
@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/pagination';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { RecordListState } from '@/app/components/records/RecordListState';
 import { getGeneratedDocuments } from '@/app/lib/api';
 import { formatDate } from '@/app/lib/utils';
 import type {
@@ -75,6 +76,7 @@ function toggle(values: Set<string>, value: string): Set<string> {
  * @param owners - workspace members, used to name the deal owner a document is scoped by
  */
 export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('GeneratedDocuments');
     const tf = useTranslations('Filters');
     const router = useRouter();
@@ -98,7 +100,7 @@ export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }
         [statuses, types],
     );
 
-    const { items, total, loading, page, setPage, query, setQuery } = useServerRecords<
+    const { items, total, loading, error, page, setPage, query, setQuery, reload } = useServerRecords<
         GeneratedDocumentSummary,
         GeneratedDocumentsPageParams
     >(fetchDocuments, extraParams, { defaultSize: PAGE_SIZE });
@@ -175,91 +177,93 @@ export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }
             </Rise>
 
             <Rise delay={0.12}>
-                {loading && items.length === 0 ? (
-                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                        <div className="divide-y divide-border">
-                            {Array.from({ length: 6 }).map((_, row) => (
-                                <div key={row} className="flex items-center gap-6 px-4 py-3 sm:px-6">
-                                    <div className="min-w-0 flex-1 space-y-1.5">
-                                        <Skeleton className="h-4 w-48 max-w-full" />
-                                        <Skeleton className="h-3 w-32" />
+                <RecordListState error={error} loading={loading} hasRecords={items.length > 0} onRetry={reload}>
+                    {loading && items.length === 0 ? (
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            <div className="divide-y divide-border">
+                                {Array.from({ length: 6 }).map((_, row) => (
+                                    <div key={row} className="flex items-center gap-6 px-4 py-3 sm:px-6">
+                                        <div className="min-w-0 flex-1 space-y-1.5">
+                                            <Skeleton className="h-4 w-48 max-w-full" />
+                                            <Skeleton className="h-3 w-32" />
+                                        </div>
+                                        <Skeleton className="hidden h-4 w-24 md:block" />
+                                        <Skeleton className="hidden h-4 w-20 sm:block" />
+                                        <Skeleton className="h-4 w-16" />
                                     </div>
-                                    <Skeleton className="hidden h-4 w-24 md:block" />
-                                    <Skeleton className="hidden h-4 w-20 sm:block" />
-                                    <Skeleton className="h-4 w-16" />
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                ) : items.length === 0 ? (
-                    <EmptyState
-                        icon={DocumentCheckIcon}
-                        title={filtersActive ? t('noMatchesTitle') : t('emptyTitle')}
-                        body={filtersActive ? t('noMatchesBody') : t('emptyBody')}
-                        tone={filtersActive ? 'muted' : 'brand'}
-                        action={filtersActive ? (
-                            <Button variant="outline" onClick={clearFilters}>
-                                {tf('clearAll')}
-                            </Button>
-                        ) : (
-                            <Button variant="brand" onClick={() => router.push('/records/deals')}>
-                                {t('emptyAction')}
-                            </Button>
-                        )}
-                    />
-                ) : (
-                    <div className="overflow-hidden rounded-2xl border border-border bg-card" aria-busy={loading}>
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                                    <th className="px-4 py-3 font-medium sm:px-6">{t('columnDocument')}</th>
-                                    <th className="hidden px-4 py-3 font-medium sm:px-6 md:table-cell">{t('columnDeal')}</th>
-                                    <th className="px-4 py-3 font-medium sm:px-6">{t('columnStatus')}</th>
-                                    <th className="hidden px-4 py-3 font-medium sm:table-cell sm:px-6">{t('columnOwner')}</th>
-                                    <th className="hidden px-4 py-3 font-medium sm:px-6 lg:table-cell">{t('columnGenerated')}</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border">
-                                {items.map((document) => (
-                                    <tr key={document.id} className="transition-colors hover:bg-muted/50">
-                                        <td className="px-4 py-3 sm:px-6">
-                                            <Link
-                                                href={dealDocumentsHref(document.dealId)}
-                                                className="block font-medium text-foreground underline-offset-2 hover:underline"
-                                            >
-                                                {document.title || t(TYPE_KEY[document.type])}
-                                            </Link>
-                                            <div className="text-xs text-muted-foreground">
-                                                {t('versionLabel', { version: document.version })}
-                                                {' · '}
-                                                {t(TYPE_KEY[document.type])}
-                                            </div>
-                                        </td>
-                                        <td className="hidden px-4 py-3 sm:px-6 md:table-cell">
-                                            <Link
-                                                href={dealDocumentsHref(document.dealId)}
-                                                className="text-muted-foreground underline-offset-2 hover:text-brand hover:underline"
-                                            >
-                                                {document.dealName ?? t('dealUnavailable')}
-                                            </Link>
-                                        </td>
-                                        <td className={`px-4 py-3 sm:px-6 ${STATUS_CLASS[document.status]}`}>
-                                            {t(STATUS_KEY[document.status])}
-                                        </td>
-                                        <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell sm:px-6">
-                                            {document.dealOwnerId != null
-                                                ? ownerNames.get(document.dealOwnerId) ?? t('ownerUnknown')
-                                                : t('ownerUnassigned')}
-                                        </td>
-                                        <td className="hidden px-4 py-3 text-muted-foreground sm:px-6 lg:table-cell">
-                                            {formatDate(document.generatedAt, locale)}
-                                        </td>
-                                    </tr>
                                 ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
+                            </div>
+                        </div>
+                    ) : items.length === 0 ? (
+                        <EmptyState
+                            icon={DocumentCheckIcon}
+                            title={filtersActive ? t('noMatchesTitle') : t('emptyTitle')}
+                            body={filtersActive ? t('noMatchesBody') : t('emptyBody')}
+                            tone={filtersActive ? 'muted' : 'brand'}
+                            action={filtersActive ? (
+                                <Button variant="outline" onClick={clearFilters}>
+                                    {tf('clearAll')}
+                                </Button>
+                            ) : (
+                                <Button variant="brand" onClick={() => router.push('/records/deals')}>
+                                    {t('emptyAction')}
+                                </Button>
+                            )}
+                        />
+                    ) : (
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card" aria-busy={loading}>
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                                        <th className="px-4 py-3 font-medium sm:px-6">{t('columnDocument')}</th>
+                                        <th className="hidden px-4 py-3 font-medium sm:px-6 md:table-cell">{t('columnDeal')}</th>
+                                        <th className="px-4 py-3 font-medium sm:px-6">{t('columnStatus')}</th>
+                                        <th className="hidden px-4 py-3 font-medium sm:table-cell sm:px-6">{t('columnOwner')}</th>
+                                        <th className="hidden px-4 py-3 font-medium sm:px-6 lg:table-cell">{t('columnGenerated')}</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-border">
+                                    {items.map((document) => (
+                                        <tr key={document.id} className="transition-colors hover:bg-muted/50">
+                                            <td className="px-4 py-3 sm:px-6">
+                                                <Link
+                                                    href={dealDocumentsHref(document.dealId)}
+                                                    className="block font-medium text-foreground underline-offset-2 hover:underline"
+                                                >
+                                                    {document.title || t(TYPE_KEY[document.type])}
+                                                </Link>
+                                                <div className="text-xs text-muted-foreground">
+                                                    {t('versionLabel', { version: document.version })}
+                                                    {' · '}
+                                                    {t(TYPE_KEY[document.type])}
+                                                </div>
+                                            </td>
+                                            <td className="hidden px-4 py-3 sm:px-6 md:table-cell">
+                                                <Link
+                                                    href={dealDocumentsHref(document.dealId)}
+                                                    className="text-muted-foreground underline-offset-2 hover:text-brand-text hover:underline"
+                                                >
+                                                    {document.dealName ?? t('dealUnavailable')}
+                                                </Link>
+                                            </td>
+                                            <td className={`px-4 py-3 sm:px-6 ${STATUS_CLASS[document.status]}`}>
+                                                {t(STATUS_KEY[document.status])}
+                                            </td>
+                                            <td className="hidden px-4 py-3 text-muted-foreground sm:table-cell sm:px-6">
+                                                {document.dealOwnerId != null
+                                                    ? ownerNames.get(document.dealOwnerId) ?? t('ownerUnknown')
+                                                    : t('ownerUnassigned')}
+                                            </td>
+                                            <td className="hidden px-4 py-3 text-muted-foreground sm:px-6 lg:table-cell">
+                                                {formatDate(document.generatedAt, locale, timeZone)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </RecordListState>
             </Rise>
 
             {pageCount > 1 ? (

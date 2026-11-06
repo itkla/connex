@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 
-import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
+import { formatUtcDateTime, parseCalendarDateUtc, parseMysqlDateTime } from '@/app/lib/utils';
 import enCommon from '@/messages/en/common.json';
 import jaCommon from '@/messages/ja/common.json';
 import { askConnexToolCall } from '@/test/unit/helpers/askConnexToolCards';
@@ -22,6 +22,7 @@ import {
     askConnexCreatedRecordHref,
     askConnexTemplateDefaultsText,
     askConnexReasoningSurvives,
+    askConnexMessageAuthor,
     askConnexMessageNarration,
     askConnexCitationHref,
     askConnexCitations,
@@ -1522,11 +1523,6 @@ describe('assistant progress vocabulary', () => {
 });
 
 describe('answer timestamps read the same way twice', () => {
-    /**
-     * Every timestamp shape the backend step guard accepts, in a timezone that is not UTC. The
-     * relative half of a freshness line reads these through `parseMysqlDateTime`, so the absolute
-     * half has to reach the same instant or the two halves disagree by the offset.
-     */
     const ACCEPTED_INSTANTS = [
         '2026-08-01T09:00:00Z',
         '2026-08-01T09:00:00+09:00',
@@ -1536,19 +1532,19 @@ describe('answer timestamps read the same way twice', () => {
 
     it('formats every accepted shape from the same instant the relative reading uses', () => {
         for (const value of ACCEPTED_INSTANTS) {
-            const parsed = parseMysqlDateTime(value);
+            const parsed = value.length === 10 ? parseCalendarDateUtc(value) : parseMysqlDateTime(value);
             expect(Number.isNaN(parsed)).toBe(false);
             expect(formatAnswerInstant(value, 'en-US'))
                 .toBe(new Intl.DateTimeFormat('en-US', value.length === 10
-                    ? { dateStyle: 'medium' }
-                    : { dateStyle: 'medium', timeStyle: 'short' })
+                    ? { dateStyle: 'medium', timeZone: 'UTC' }
+                    : { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })
                     .format(new Date(parsed)));
         }
     });
 
     it('reads an offset-less date-time as UTC, exactly as the relative half does', () => {
         expect(formatAnswerInstant('2026-08-01T09:00:00', 'en-US')).toBe(
-            new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+            new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })
                 .format(new Date('2026-08-01T09:00:00Z')),
         );
     });
@@ -1695,22 +1691,6 @@ describe('narration accumulation and replay', () => {
     });
 });
 
-/**
- * Runs one assertion with the process clock in a zone east of UTC, where reading an offset-less
- * UTC value as local time lands nine hours away from the instant it names. A suite pinned to UTC,
- * as CI is, cannot tell the two readings apart without it.
- */
-function inTokyo<T>(run: () => T): T {
-    const previous = process.env.TZ;
-    process.env.TZ = 'Asia/Tokyo';
-    try {
-        return run();
-    } finally {
-        if (previous === undefined) delete process.env.TZ;
-        else process.env.TZ = previous;
-    }
-}
-
 /** The provider's own hour wording, formatted through the real message catalogue. */
 function responseDueInHours(locale: 'en' | 'ja') {
     const t = createTranslator({
@@ -1725,18 +1705,16 @@ describe('a reviewed first-response deadline', () => {
     it('reads the stored deadline as UTC, exactly as the contact lead panel does', () => {
         const stored = '2026-08-13T09:30:15';
 
-        inTokyo(() => {
-            const text = askConnexChangeValueText(
-                'responseDue', stored, 'current', 'en', responseDueInHours('en'));
+        const text = askConnexChangeValueText(
+            'responseDue', stored, 'current', 'en', responseDueInHours('en'), undefined, 'Asia/Tokyo');
 
-            expect(text).toBe(new Intl.DateTimeFormat('en', {
-                dateStyle: 'medium',
-                timeStyle: 'short',
-                timeZone: 'Asia/Tokyo',
-            }).format(Date.UTC(2026, 7, 13, 9, 30, 15)));
-            expect(text).toContain('6:30');
-            expect(text).toBe(formatUtcDateTime(stored, 'en', stored));
-        });
+        expect(text).toBe(new Intl.DateTimeFormat('en', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            timeZone: 'Asia/Tokyo',
+        }).format(Date.UTC(2026, 7, 13, 9, 30, 15)));
+        expect(text).toContain('6:30');
+        expect(text).toBe(formatUtcDateTime(stored, 'en', stored, 'Asia/Tokyo'));
     });
 
     it('states a deadline that does not parse as it stands', () => {
@@ -1769,5 +1747,39 @@ describe('a reviewed first-response deadline', () => {
         expect(askConnexChangeValueText(
             'owner', '2026-08-13T09:30:15', 'current', 'en', responseDueInHours('en')))
             .toBe('2026-08-13T09:30:15');
+    });
+});
+
+
+describe('retained message author labels', () => {
+    const labels = {
+        assistantAuthor: 'Connex',
+        formerMember: 'Former member',
+        memberAuthor: (id: number) => `Member ${id}`,
+    };
+
+    it('uses the former member fallback when erased author fields are absent', () => {
+        expect(askConnexMessageAuthor({ authorKind: 'user' }, labels)).toBe('Former member');
+        expect(askConnexMessageAuthor({ authorKind: 'user', authorUserId: null }, labels)).toBe('Former member');
+    });
+
+    it('groups absent and null erased author IDs under the same local identity', () => {
+        const message = {
+            id: 1, sessionId: 4, seq: 1, authorKind: 'user',
+            content: 'Retained message', createdAt: '2026-11-04T08:00:00Z',
+        };
+        const groups = groupAskConnexMessages([
+            message,
+            { ...message, id: 2, seq: 2, authorUserId: null },
+        ]);
+        expect(groups).toHaveLength(1);
+        expect(groups[0].authorUserId).toBeNull();
+        expect(groups[0].messages.map((entry) => entry.id)).toEqual([1, 2]);
+    });
+
+    it('keeps known user and assistant labels', () => {
+        expect(askConnexMessageAuthor({ authorKind: 'user', authorUserId: 7 }, labels)).toBe('Member 7');
+        expect(askConnexMessageAuthor({ authorKind: 'user', authorDisplayName: 'Operator' }, labels)).toBe('Operator');
+        expect(askConnexMessageAuthor({ authorKind: 'assistant' }, labels)).toBe('Connex');
     });
 });

@@ -1135,6 +1135,7 @@ const COMPOSERS: ReadonlyArray<{ file: string; reports: string }> = [
     { file: "app/components/actions/create/DealCreateContainer.tsx", reports: "useApiErrorToast" },
     { file: "app/components/records/deals/NewDealDialog.tsx", reports: "workspaceRefusal" },
     { file: "app/components/records/deals/EditDealSheet.tsx", reports: "useApiErrorToast" },
+    { file: "app/components/records/deals/DealLineItems.tsx", reports: "useApiErrorToast" },
     { file: "app/components/actions/create/CompanyCreateContainer.tsx", reports: "useApiErrorToast" },
     { file: "app/components/records/companies/NewCompanyDialog.tsx", reports: "workspaceRefusal" },
     { file: "app/components/records/companies/EditCompanySheet.tsx", reports: "useApiErrorToast" },

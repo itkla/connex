@@ -30,7 +30,7 @@ function GroupDestinations({ group, pathname }: { group: SettingsNavGroup; pathn
                             aria-current={current ? "page" : undefined}
                             className={cn(
                                 "-mx-2 block px-2 py-1 text-sm outline-none transition-colors duration-(--motion-micro) hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40 motion-reduce:transition-none",
-                                current ? "font-medium text-brand-dark" : "text-muted-foreground",
+                                current ? "font-medium text-brand-text" : "text-muted-foreground",
                             )}
                         >
                             {destination.title}
@@ -88,7 +88,7 @@ export default function SettingsDirectory({ scopes }: { scopes: SettingsNavModel
                                         <span
                                             className={cn(
                                                 "min-w-0 truncate text-sm font-medium",
-                                                current ? "text-brand-dark" : "text-foreground",
+                                                current ? "text-brand-text" : "text-foreground",
                                             )}
                                         >
                                             {group.title}

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTimeZoneSearch } from "@/app/hooks/useTimeZoneSearch";
+
 import {
     type Dispatch,
     type FormEvent,
@@ -10,7 +12,7 @@ import {
     useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { CameraIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
@@ -154,7 +156,7 @@ function ProfilePhotoField({ previewUrl, initial, disabled, onSelect }: ProfileP
                     alt={t("photoAlt")}
                     className="size-full object-cover"
                     fallback={(
-                        <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-dark">
+                        <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-text">
                             {initial}
                         </span>
                     )}
@@ -194,6 +196,7 @@ function ProfilePhotoField({ previewUrl, initial, disabled, onSelect }: ProfileP
 }
 
 function ProfileDetails({ user }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations("AccountProfile");
     const locale = useLocale();
 
@@ -203,12 +206,12 @@ function ProfileDetails({ user }: Props) {
             <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex items-center justify-between gap-4 px-4 py-3">
                     <dt className="text-sm text-muted-foreground">{t("memberSince")}</dt>
-                    <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale)}</dd>
+                    <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale, timeZone)}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 px-4 py-3">
                     <dt className="text-sm text-muted-foreground">{t("lastLogin")}</dt>
                     <dd className="text-sm text-foreground">
-                        {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("lastLoginNever")}
+                        {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale, timeZone) : t("lastLoginNever")}
                     </dd>
                 </div>
             </dl>
@@ -280,6 +283,7 @@ function ProfileForm({
     onSubmit,
     onChangeEmail,
 }: ProfileFormProps) {
+    const timeZoneSearch = useTimeZoneSearch(timeZones);
     const t = useTranslations("AccountProfile");
     const { displayName, username, timezone, preferredLocale } = draft;
 
@@ -366,7 +370,7 @@ function ProfileForm({
                                 field: "timezone",
                                 value: value ?? confirmedUser.timezone,
                             })}
-                            itemToStringLabel={(tz: string) => tz}
+                            {...timeZoneSearch}
                         >
                             <ComboboxInput
                                 id="account-timezone"
@@ -374,13 +378,13 @@ function ProfileForm({
                                 className={comboboxInputClass}
                             />
                             <ComboboxContent className="pointer-events-auto">
+                                <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
                                 <ComboboxList>
-                                    <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
-                                    {timeZones.map((tz) => (
+                                    {(tz: (typeof timeZones)[number]) => (
                                         <ComboboxItem key={tz} value={tz}>
-                                            {tz}
+                                            {timeZoneSearch.itemToStringLabel(tz)}
                                         </ComboboxItem>
-                                    ))}
+                                    )}
                                 </ComboboxList>
                             </ComboboxContent>
                         </Combobox>
@@ -438,6 +442,7 @@ export default function ProfilePanel({ user }: Props) {
 
     const timeZones = useMemo(() => {
         const zones = supportedTimeZones();
+        if (!zones.includes("UTC")) zones.unshift("UTC");
         if (confirmedUser.timezone && !zones.includes(confirmedUser.timezone)) {
             return [confirmedUser.timezone, ...zones];
         }

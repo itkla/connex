@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { createTranslator } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import enAccount from "@/messages/en/account.json";
+import jaAccount from "@/messages/ja/account.json";
 import { ApiError } from "@/app/lib/api";
 import { type MessageTranslator, toastApiError, userMessageFor } from "@/app/lib/errorMessages";
 import { isAuthPath, redirectToSignIn, resetRedirectMemoForTests, sameOriginPath, signInHref } from "@/app/lib/sessionExpiry";
@@ -40,6 +42,7 @@ function flattenKeys(tree: { [key: string]: MessageValue }, prefix = ""): string
 function translator(locale: string): MessageTranslator {
     const messages: { [key: string]: MessageValue } = {
         ...errorMessages(locale),
+        AccountSecurity: (locale === "ja" ? jaAccount : enAccount).AccountSecurity,
         Contacts: {
             toastFailedSave: "Couldn't save the contact",
             refusalDescription: "The requested change was refused. Nothing changed. Review it and try again.",
@@ -70,7 +73,27 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
+describe("deal line consent errors", () => {
+    it.each(["DEAL_LINE_VALUE_CONSENT_REQUIRED", "DEAL_LINE_VALUE_CONSENT_STALE"])("asks for review while preserving the draft for %s", (code) => {
+        const error = new ApiError(POISONED_MESSAGE, 409, code);
+        const english = userMessageFor(error, t)?.description;
+        const japanese = userMessageFor(error, ja)?.description;
+        expect(english).toContain("Your line is still here");
+        expect(english?.toLowerCase()).toContain("review");
+        expect(english).not.toContain("Reload");
+        expect(japanese).toContain("明細は残っています");
+        expect(japanese).not.toContain("再読み込み");
+    });
+});
+
 describe("userMessageFor status mapping", () => {
+    it("gives stale edits specific localized copy ahead of generic conflict fallbacks", () => {
+        const error = new ApiError(POISONED_MESSAGE, 409, "STALE_RECORD");
+        expect(userMessageFor(error, t, undefined, "Contacts.refusalDescription")?.description)
+            .toBe(t("ApiErrors.staleRecord"));
+        expect(userMessageFor(error, ja)?.description).toBe(ja("ApiErrors.staleRecord"));
+    });
+
     it.each([
         [400, "Some of what you entered can't be accepted. Check the details and try again."],
         [422, "Some of what you entered can't be accepted. Check the details and try again."],
@@ -83,6 +106,15 @@ describe("userMessageFor status mapping", () => {
         [503, "Something went wrong on our side. Nothing was lost — try again in a moment."],
     ])("describes %i in the product's error dialect", (status, expected) => {
         expect(describedBy(new ApiError(POISONED_MESSAGE, status))).toBe(expected);
+    });
+
+    it.each(["en", "ja"] as const)("explains a refused passkey step in %s without asking the owner for an admin", (locale) => {
+        const account = (locale === "ja" ? jaAccount : enAccount).AccountSecurity;
+        const translate = translator(locale);
+        expect(userMessageFor(new ApiError("Confined", 403, "PRIVILEGED_MFA_ENROLLMENT_REQUIRED"), translate)?.description)
+            .toBe(account.enrollmentNeededDescription);
+        expect(userMessageFor(new ApiError("Confined", 403, "PRIVILEGED_MFA_ATTESTATION_REQUIRED"), translate)?.description)
+            .toBe(account.approvalNeededDescription);
     });
 
     it("fails safe to generic copy on a status it has no rule for", () => {

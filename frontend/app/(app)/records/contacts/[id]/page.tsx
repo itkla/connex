@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getCommentThreads, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactQualification, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getPersonCampaignTouches, getPersonMarketingStatus, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCommentThreads, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactQualification, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getPersonCampaignTouches, getPersonMarketingStatus, getTags, getUserReferences, getRelationshipMapAvailability } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -10,7 +10,7 @@ import { type Tag, type Contact, type IntroPath, type PersonCampaignTouch, type 
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { UserIcon } from "@heroicons/react/24/outline";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
@@ -47,6 +47,7 @@ type ContactPageProps = {
 };
 
 export default async function ContactPage({ params }: ContactPageProps) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookieStore = await cookies();
     const cookie = cookieStore.toString();
@@ -63,7 +64,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
     }
 
     const permissionsPromise = getEffectivePermissionsFromCookie(cookie);
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus, campaignTouches] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus, campaignTouches, mapAvailability] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -95,6 +96,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     .then((page) => page.items)
                     .catch(() => [])
                 : []),
+        getRelationshipMapAvailability(init),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -239,6 +241,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
                         <AskConnexRecordEntry kind="person" />
                         <ContactActionsMenu
+                            mapAvailability={mapAvailability}
                             contact={contact}
                             currentUserId={currentUser.id}
                             dealSeeds={deals}
@@ -277,8 +280,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                         label={t("owner")}
                                         value={contact.ownerId != null ? owner?.displayName ?? '' : t("ownerUnassigned")}
                                     />
-                                    <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
-                                    <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
+                                    <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale, timeZone)} />
+                                    <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale, timeZone)} />
                                     <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                                 </dl>
                             </div>
@@ -293,7 +296,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                     {stint.companyId ? (
                                                         <Link
                                                             href={`/records/companies/${stint.companyId}`}
-                                                            className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                                            className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                                                         >
                                                             {stint.companyName ?? t("unknownCompany")}
                                                         </Link>
@@ -303,7 +306,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                         </span>
                                                     )}
                                                     {stint.current ? (
-                                                        <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                        <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
                                                             {t("current")}
                                                         </span>
                                                     ) : null}
@@ -312,7 +315,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                     <p className="mt-0.5 text-xs text-muted-foreground">{stint.title}</p>
                                                 ) : null}
                                                 <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                                                    {formatShortDate(stint.startedAt ?? undefined, locale)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale) : t("present")}
+                                                    {formatShortDate(stint.startedAt ?? undefined, locale, timeZone)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale, timeZone) : t("present")}
                                                 </p>
                                             </li>
                                         ))}

@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import * as React from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
@@ -23,8 +24,8 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ti
     const currentIndex = current.year * 12 + current.month - 1;
     const startIndex = currentIndex - MONTHS_BACK;
 
-    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
-    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
+    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
 
@@ -146,8 +147,8 @@ interface RevenueChartTooltipProps {
     active?: boolean;
     payload?: Array<{ payload: Bucket }>;
     currency?: string;
-    projectedLabel?: (amount: string) => string;
-    actualLabel?: (amount: string) => string;
+    projectedLabel: (amount: string) => string;
+    actualLabel: (amount: string) => string;
 }
 
 function RevenueChartTooltip({ active, payload, currency = 'USD', projectedLabel, actualLabel }: RevenueChartTooltipProps) {
@@ -164,11 +165,11 @@ function RevenueChartTooltip({ active, payload, currency = 'USD', projectedLabel
             <div className="space-y-0.5">
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: 'var(--muted-foreground)' }} />
-                    {projectedLabel ? projectedLabel(projectedAmount) : `Projected · ${projectedAmount}`}
+                    {projectedLabel(projectedAmount)}
                 </div>
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
-                    {actualLabel ? actualLabel(actualAmount) : `Actual · ${actualAmount}`}
+                    {actualLabel(actualAmount)}
                 </div>
             </div>
         </div>

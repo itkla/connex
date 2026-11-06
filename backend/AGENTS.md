@@ -89,6 +89,7 @@ Read the relevant contract before editing that subsystem:
 | Automation, segments, rules, workflows | `../docs/backend/AUTOMATION.md` |
 | Duplicate review, CSV, interaction-history import | `../docs/backend/IMPORTS_AND_DUPLICATE_REVIEW.md` |
 | Tenancy, routing, lifecycle, data planes | `../docs/MULTITENANCY_PLAN.md` |
+| Whole-record edits, optimistic concurrency | `../docs/backend/RECORD_EDIT_CONCURRENCY.md` |
 | Transactions, concurrency, lock order | `../docs/backend/LOCKING.md` |
 | Flyway/schema/table placement | `../docs/backend/MIGRATIONS.md` |
 | Object storage/uploads/deletion queue | `../docs/backend/OBJECT_STORAGE.md` |

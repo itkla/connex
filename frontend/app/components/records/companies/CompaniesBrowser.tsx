@@ -48,6 +48,7 @@ import FirstRunDoors from '@/app/components/FirstRunDoors';
 import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { RecordListState } from '@/app/components/records/RecordListState';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyListRow from '@/app/components/records/companies/CompanyListRow';
@@ -243,6 +244,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         items: companies,
         total,
         loading,
+        error,
         page,
         setPage,
         size,
@@ -263,7 +265,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         selectedIds,
         setSelectedIds,
         companies,
-        !loading,
+        !loading && !error,
     );
 
     const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
@@ -814,7 +816,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const runCompanyImport = useCallback(() => {
         void runAction(IMPORT_COMPANIES_ACTION, { source: 'empty-state' });
     }, [runAction]);
-    const firstRunEmpty = total === 0 && !hasActiveFiltersOrScope;
+    const firstRunEmpty = !loading && !error && total === 0 && !hasActiveFiltersOrScope;
     const [contactsOutstanding, setContactsOutstanding] = useState(false);
     useEffect(() => {
         if (!firstRunEmpty) return;
@@ -1175,7 +1177,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                             {allMatchingSelected ? (
                                 <>
                                     <span>{t('allMatchingSelected', { total })}</span>
-                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
+                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand-text transition hover:underline">
                                         {t('clearSelection')}
                                     </button>
                                 </>
@@ -1186,7 +1188,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                         type="button"
                                         onClick={selectAllMatching}
                                         disabled={selectingAll || loading}
-                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                        className="font-medium text-brand-text transition hover:underline disabled:opacity-50"
                                     >
                                         {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
                                     </button>
@@ -1197,74 +1199,76 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 })()}
 
                 <Rise delay={0.18}>
-                    <RecordsRenderView<Company>
-                        data={companies}
-                        loading={loading}
-                        columns={visibleColumns}
-                        addColumnSlot={addColumnSlot}
-                        renderCard={(item, { onQuickEdit, onDelete }) => (
-                            <CompanyCard
-                                company={item}
-                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
-                                metrics={metricsByCompanyId.get(item.id)}
-                                metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
-                                onFirstExpand={() => ensureMetricsLoaded(item.id)}
-                                onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                                onDelete={onDelete ? () => onDelete(item) : undefined}
-                                readOnly={showArchived}
-                                removeIntent={showArchived ? 'restore' : 'archive'}
-                                returnSelection={returnSelection}
-                            />
-                        )}
-                        renderListRow={(item) => (
-                            <CompanyListRow
-                                company={item}
-                                temperature={showArchived ? undefined : tempByCompanyId.get(item.id)}
-                            />
-                        )}
-                        renderAvatar={(item) => <CompanyAvatar company={item} />}
-                        detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}
-                        onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
-                        activeId={peek.activeId}
-                        recordRef={recordRef}
-                        displayMode={effectiveDisplayMode}
-                        density={density}
-                        selectedIds={selectedIds}
-                        onSelectedIdsChange={handleSelectedIdsChange}
-                        onQuickEdit={showArchived ? undefined : quickEditOne}
-                        onDelete={archiveOne}
-                        readOnly={showArchived}
-                        removeIntent={showArchived ? 'restore' : 'archive'}
-                        gridClassName="grid grid-cols-1 gap-3"
-                        entityLabel={t('entityLabel')}
-                        selectionActions={selectionActions}
-                        emptyState={
-                            <EmptyState
-                                icon={BuildingOffice2Icon}
-                                title={t('emptyTitle')}
-                                body={!canCreateCompanies
-                                    ? t('emptyReadOnlyBody')
-                                    : contactsOutstanding
-                                    ? t('emptyContactsFirstBody')
-                                    : t('emptyBody')}
-                                action={
-                                    <FirstRunDoors
-                                        doors={firstRunEntryDoors}
-                                        size="page"
-                                        importLabel={tActions('utility.importCompanies')}
-                                        createLabel={t('emptyCta')}
-                                        importPending={companyImportPending}
-                                        onImport={runCompanyImport}
-                                        onCreate={openNewDialog}
-                                    />
-                                }
-                            />
-                        }
-                        filtersActive={hasActiveFiltersOrScope}
-                        onClearFilters={clearFiltersAndScope}
-                        sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
-                        pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
-                    />
+                    <RecordListState error={error} loading={loading} hasRecords={companies.length > 0} onRetry={reload}>
+                        <RecordsRenderView<Company>
+                            data={companies}
+                            loading={loading}
+                            columns={visibleColumns}
+                            addColumnSlot={addColumnSlot}
+                            renderCard={(item, { onQuickEdit, onDelete }) => (
+                                <CompanyCard
+                                    company={item}
+                                    ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
+                                    metrics={metricsByCompanyId.get(item.id)}
+                                    metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
+                                    onFirstExpand={() => ensureMetricsLoaded(item.id)}
+                                    onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                    onDelete={onDelete ? () => onDelete(item) : undefined}
+                                    readOnly={showArchived}
+                                    removeIntent={showArchived ? 'restore' : 'archive'}
+                                    returnSelection={returnSelection}
+                                />
+                            )}
+                            renderListRow={(item) => (
+                                <CompanyListRow
+                                    company={item}
+                                    temperature={showArchived ? undefined : tempByCompanyId.get(item.id)}
+                                />
+                            )}
+                            renderAvatar={(item) => <CompanyAvatar company={item} />}
+                            detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}
+                            onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
+                            activeId={peek.activeId}
+                            recordRef={recordRef}
+                            displayMode={effectiveDisplayMode}
+                            density={density}
+                            selectedIds={selectedIds}
+                            onSelectedIdsChange={handleSelectedIdsChange}
+                            onQuickEdit={showArchived ? undefined : quickEditOne}
+                            onDelete={archiveOne}
+                            readOnly={showArchived}
+                            removeIntent={showArchived ? 'restore' : 'archive'}
+                            gridClassName="grid grid-cols-1 gap-3"
+                            entityLabel={t('entityLabel')}
+                            selectionActions={selectionActions}
+                            emptyState={
+                                <EmptyState
+                                    icon={BuildingOffice2Icon}
+                                    title={t('emptyTitle')}
+                                    body={!canCreateCompanies
+                                        ? t('emptyReadOnlyBody')
+                                        : contactsOutstanding
+                                        ? t('emptyContactsFirstBody')
+                                        : t('emptyBody')}
+                                    action={
+                                        <FirstRunDoors
+                                            doors={firstRunEntryDoors}
+                                            size="page"
+                                            importLabel={tActions('utility.importCompanies')}
+                                            createLabel={t('emptyCta')}
+                                            importPending={companyImportPending}
+                                            onImport={runCompanyImport}
+                                            onCreate={openNewDialog}
+                                        />
+                                    }
+                                />
+                            }
+                            filtersActive={hasActiveFiltersOrScope}
+                            onClearFilters={clearFiltersAndScope}
+                            sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
+                            pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
+                        />
+                    </RecordListState>
                 </Rise>
 
                 {peek.drawer}

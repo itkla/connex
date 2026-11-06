@@ -1,4 +1,24 @@
 {
+  "DealCurrencyScope": {
+    "title": "Currency scope",
+    "dashboardBasis": "Money totals and charts: {currency} only",
+    "dealsBasis": "Deals and totals: {currency} only",
+    "widgetBasis": "{currency} only",
+    "recordCountsBasis": "Deal counts include all currencies.",
+    "dashboardExcluded": "{count, plural, =0 {No deals in other currencies are excluded from these money totals and charts.} =1 {1 deal in another currency is excluded from these money totals and charts. Switch currency to view it.} other {# deals in other currencies are excluded from these money totals and charts. Switch currency to view them.}}",
+    "excluded": "{count, plural, =0 {No deals in other currencies are excluded.} =1 {1 deal in another currency is excluded. Switch currency to view it.} other {# deals in other currencies are excluded. Switch currency to view them.}}",
+    "viewDeals": "View {currency} deals"
+  },
+  "RecordListState": {
+    "title": "Couldn't load the list",
+    "body": "Your records haven't been changed. Try again.",
+    "refreshBody": "Showing the last loaded records. Try again to refresh the list.",
+    "deniedTitle": "You don't have permission to view this list",
+    "deniedBody": "Ask a workspace admin for access, then try again.",
+    "retry": "Retry",
+    "retrying": "Retrying…",
+    "reference": "Reference: {id}"
+  },
   "EngineEvaluation": {
     "title": "Insights",
     "contactRiskLabel": "Risk & cooling signals",
@@ -414,8 +434,7 @@
     "omitted": "{count, plural, one {# additional eligible source is included in the score} other {# additional eligible sources are included in the score}}.",
     "limited": "Limited evidence. At least {minimum} eligible sources are required for a higher-confidence reading.",
     "privateNotesExcluded": "{count, plural, one {# of your private notes is excluded} other {# of your private notes are excluded}} from this score.",
-    "asOf": "Calculated {date} with model {version}.",
-    "unknownModel": "unknown",
+    "asOf": "Calculated {date}.",
     "actionsTitle": "What to do next",
     "actionLogInteraction": "Log an interaction",
     "actionScheduleFollowUp": "Schedule a follow-up",
@@ -429,6 +448,7 @@
     "evaluationHeading": "What Radar watches here"
   },
   "RecordPeek": {
+    "closedAt": "Closed at",
     "type_company": "Company",
     "type_person": "Contact",
     "type_deal": "Deal",

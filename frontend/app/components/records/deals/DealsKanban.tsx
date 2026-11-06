@@ -9,15 +9,17 @@ import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/Kanba
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
 import DealKanbanCard from '@/app/components/records/deals/DealKanbanCard';
 import { classifyStage } from './dealOutcome';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { usePermission } from '@/app/hooks/usePermissions';
-import { getCompaniesByIds, getDealBoard, getDealRisks, moveDeal } from '@/app/lib/api';
+import { getCompaniesByIds, getDealBoard, getDealById, getDealRisks, moveDeal } from '@/app/lib/api';
 import { withDealMoved } from '@/app/lib/dealBoard';
 import { toastError } from '@/app/lib/toast';
 import type { Company, Deal, DealFilterParams, DealRisk, Pipeline, Stage } from '@/app/lib/types';
 import type { RecordReturnSelectionSnapshot } from '@/app/lib/recordReturnPath';
 
 interface DealsKanbanProps {
+    timezone: string;
     deals: Deal[];
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
@@ -69,6 +71,7 @@ function dealPosition(deal: Deal): number {
 }
 
 export default function DealsKanban({
+    timezone,
     deals,
     pipelines,
     stagesByPipeline,
@@ -283,19 +286,34 @@ export default function DealsKanban({
     );
 
     const dealsById = useMemo(() => new Map(boardDeals.map((d) => [d.id, d])), [boardDeals]);
+    const [preparingQuickEdit, setPreparingQuickEdit] = useState(false);
+    const prepareQuickEdit = useCallback(async (deal: Deal) => {
+        if (!onQuickEdit) return;
+        setPreparingQuickEdit(true);
+        try {
+            const originWorkspaceId = renderedWorkspaceId();
+            const current = await getDealById(deal.id, workspacePinnedRequest(originWorkspaceId));
+            if (renderedWorkspaceId() === originWorkspaceId) onQuickEdit(current);
+        } catch (error) {
+            showApiError(error, 'loadFailed');
+        } finally {
+            setPreparingQuickEdit(false);
+        }
+    }, [onQuickEdit, showApiError]);
 
     const renderCard = useCallback(
         (deal: Deal) => (
             <DealKanbanCard
+                timezone={timezone}
                 deal={deal}
                 company={deal.company != null ? resolvedCompanyById.get(deal.company) : undefined}
                 risk={boardRisks.get(deal.id)}
-                onQuickEdit={onQuickEdit ? () => onQuickEdit(deal) : undefined}
+                onQuickEdit={onQuickEdit ? () => prepareQuickEdit(deal) : undefined}
                 onDelete={onDelete ? () => onDelete(deal) : undefined}
                 returnSelection={returnSelection}
             />
         ),
-        [boardRisks, onQuickEdit, onDelete, resolvedCompanyById, returnSelection],
+        [boardRisks, onQuickEdit, prepareQuickEdit, onDelete, resolvedCompanyById, returnSelection, timezone],
     );
 
     const onMove = useCallback(
@@ -350,7 +368,7 @@ export default function DealsKanban({
     }
 
     const selectedPipeline = pipelineById.get(selectedPipelineId);
-    const boardContent = boardLoading || boardRiskLoading || segmentLoading ? (
+    const boardContent = boardLoading || boardRiskLoading || segmentLoading || preparingQuickEdit ? (
         <div aria-busy="true" className="rounded-2xl border border-border px-6 py-12 text-center text-sm text-muted-foreground">
             {t('loading')}
         </div>

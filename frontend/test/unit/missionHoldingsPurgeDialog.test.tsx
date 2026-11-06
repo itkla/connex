@@ -26,7 +26,7 @@ function translated(namespace: string, key: string): string {
     return value;
 }
 
-vi.mock('next-intl', () => ({ useTranslations: (namespace: string) => (key: string) => translated(namespace, key) }));
+vi.mock('next-intl', () => ({ useTimeZone: () => "UTC", useTranslations: (namespace: string) => (key: string) => translated(namespace, key) }));
 vi.mock('@/app/hooks/useAccountStorageGeneration', () => ({ useAccountStorageGeneration: () => () => true }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => harness.error }));
 vi.mock('@/app/lib/browserAccountStorage', () => ({ currentAccountBinding: () => ({ identity: 'account' }) }));

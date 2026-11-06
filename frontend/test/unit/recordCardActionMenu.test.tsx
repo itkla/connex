@@ -15,6 +15,8 @@ import { ActionProvider } from '@/app/hooks/useActions';
 import { PermissionsProvider } from '@/app/hooks/usePermissions';
 import { WorkspaceProvider } from '@/app/hooks/useWorkspace';
 import type { Deal, Pipeline, Stage, User, Workspace } from '@/app/lib/types';
+import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
+import { deferred, json } from './helpers/workspaceChainBackend';
 
 declare global {
     var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -208,7 +210,10 @@ function deal(id = 29): Deal {
     };
 }
 
-async function renderDealKanban(permissions: readonly string[]) {
+async function renderDealKanban(permissions: readonly string[], options: {
+    onQuickEdit?: (deal: Deal) => void;
+    loadCurrent?: (init: RequestInit) => Promise<Response>;
+} = {}) {
     const pipeline: Pipeline = {
         id: 3,
         name: 'Sales',
@@ -233,7 +238,7 @@ async function renderDealKanban(permissions: readonly string[]) {
     };
     const stages = [qualifiedStage, proposalStage];
     const boardDeal = { ...deal(), pipeline: pipeline.id, stage: qualifiedStage.id };
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
         const url = String(input);
         if (url.includes('/api/deals/board')) {
             return new Response(JSON.stringify([boardDeal]), { status: 200 });
@@ -241,11 +246,13 @@ async function renderDealKanban(permissions: readonly string[]) {
         if (url.includes('/api/deals/risk')) {
             return new Response('[]', { status: 200 });
         }
+        if (url.endsWith('/api/deals/29') && options.loadCurrent) return options.loadCurrent(init);
         throw new Error(`Unexpected request: ${url}`);
     }));
 
     await renderCard(
         <DealsKanban
+                timezone="UTC"
             deals={[boardDeal]}
             pipelines={[pipeline]}
             stagesByPipeline={{ [pipeline.id]: stages }}
@@ -253,7 +260,7 @@ async function renderDealKanban(permissions: readonly string[]) {
             pipelineById={new Map([[pipeline.id, pipeline]])}
             stageById={new Map(stages.map((stage) => [stage.id, stage]))}
             riskByDealId={new Map()}
-            onQuickEdit={() => undefined}
+            onQuickEdit={options.onQuickEdit ?? (() => undefined)}
             onDelete={() => undefined}
             onMoved={() => undefined}
             query=""
@@ -277,6 +284,32 @@ async function renderDealKanban(permissions: readonly string[]) {
 }
 
 describe('real record card action menus', () => {
+    it.each([false, true])('pins the current Quick-edit snapshot with a workspace switch pending: %s', async (switchPending) => {
+        const pending = deferred<Response>();
+        const onQuickEdit = vi.fn();
+        const loadCurrent = vi.fn<(init: RequestInit) => Promise<Response>>(() => pending.promise);
+        const switchedShell = {};
+        try {
+            await renderDealKanban(['DEAL_UPDATE'], { onQuickEdit, loadCurrent });
+            document.cookie = 'connex_workspace=5; path=/';
+            await selectItem('Quick edit');
+            expect(loadCurrent).toHaveBeenCalledOnce();
+            expect(new Headers(loadCurrent.mock.calls[0]?.[0].headers).get('X-Workspace-Id')).toBe(String(workspace.id));
+            expect(onQuickEdit).not.toHaveBeenCalled();
+            if (switchPending) bindRenderedWorkspace(switchedShell, 5);
+            const current = { ...deal(), version: 2, name: 'Latest origin deal' };
+            await act(async () => {
+                pending.resolve(json(current));
+                await pending.promise;
+            });
+            if (switchPending) expect(onQuickEdit).not.toHaveBeenCalled();
+            else expect(onQuickEdit).toHaveBeenCalledExactlyOnceWith(current);
+        } finally {
+            releaseRenderedWorkspace(switchedShell);
+            document.cookie = 'connex_workspace=; path=/; max-age=0';
+        }
+    });
+
     it.each([
         {
             name: 'contact',
@@ -284,7 +317,7 @@ describe('real record card action menus', () => {
         },
         {
             name: 'deal',
-            card: <DealCard deal={deal(16)} />,
+            card: <DealCard timezone="UTC" deal={deal(16)} />,
         },
     ])('opens a $name from the whole card with Enter', async ({ card }) => {
         await renderCard(card);
@@ -306,7 +339,7 @@ describe('real record card action menus', () => {
         },
         {
             name: 'deal',
-            card: <DealCard deal={deal(29)} returnSelection={{ userId: user.id, workspaceId: workspace.id, ids: [29, 30], visibleCount: 40 }} />,
+            card: <DealCard timezone="UTC" deal={deal(29)} returnSelection={{ userId: user.id, workspaceId: workspace.id, ids: [29, 30], visibleCount: 40 }} />,
             collection: 'deals',
         },
     ])('retains the $name list selection when Open record is selected', async ({ card, collection }) => {
@@ -419,7 +452,7 @@ describe('real record card action menus', () => {
         { permissions: ['DEAL_DELETE'], present: ['Delete'], absent: ['Quick edit'] },
     ])('gates deal mutations on their distinct effective permissions: $permissions', async ({ permissions, present, absent }) => {
         await renderCard(
-            <DealCard deal={deal()} onQuickEdit={() => undefined} onDelete={() => undefined} />,
+            <DealCard timezone="UTC" deal={deal()} onQuickEdit={() => undefined} onDelete={() => undefined} />,
             permissions,
         );
 

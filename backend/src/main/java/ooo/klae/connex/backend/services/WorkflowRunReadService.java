@@ -181,7 +181,7 @@ public class WorkflowRunReadService {
             true);
     }
 
-    private WorkflowRunSummaryDto legacySummary(RuleExecution execution) {
+    WorkflowRunSummaryDto legacySummary(RuleExecution execution) {
         String status = normalizeLegacyStatus(execution.getStatus());
         LocalDateTime executedAt = legacyTimestamp(execution);
         return new WorkflowRunSummaryDto(
@@ -197,8 +197,8 @@ public class WorkflowRunReadService {
                 execution.getTriggerEntityId()),
             null,
             executedAt,
-            executedAt,
-            0L,
+            "running".equals(status) ? null : executedAt,
+            "running".equals(status) ? null : 0L,
             legacyFailure(execution.getStatus()),
             false);
     }
@@ -269,12 +269,13 @@ public class WorkflowRunReadService {
     }
 
     private WorkflowRunDetailDto legacyDetail(int workflowId, RuleExecution execution) {
+        String status = normalizeLegacyStatus(execution.getStatus());
         LocalDateTime executedAt = legacyTimestamp(execution);
         return new WorkflowRunDetailDto(
             "legacy-" + execution.getId(),
             "legacy",
             workflowId,
-            normalizeLegacyStatus(execution.getStatus()),
+            status,
             execution.getStatus(),
             null,
             null,
@@ -285,8 +286,8 @@ public class WorkflowRunReadService {
                 execution.getTriggerEntityId()),
             null,
             executedAt,
-            executedAt,
-            0L,
+            "running".equals(status) ? null : executedAt,
+            "running".equals(status) ? null : 0L,
             legacyFailure(execution.getStatus()),
             false,
             List.of());

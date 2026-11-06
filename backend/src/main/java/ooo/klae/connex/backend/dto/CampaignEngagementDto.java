@@ -3,12 +3,15 @@ package ooo.klae.connex.backend.dto;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
  * Deterministic engagement rollup for a whole campaign, aggregated across its sends.
  *
- * <p>The named counts are read from the delivery pipeline's current status, except
- * {@code unsubscribed}, which is only ever an append-only event and never a delivery
- * status. {@code deliveryReceiptsAvailable} is {@code true} only when a provider reported
+ * <p>Outcome counts use the delivery pipeline's current status. {@code dispatched} counts
+ * persisted confirmed submissions, including operator-confirmed acceptance and later failures;
+ * {@code unsubscribed} counts unsubscribe events.
+ * {@code deliveryReceiptsAvailable} is {@code true} only when a provider reported
  * at least one delivery, bounce, or complaint event for the campaign; on the plain SMTP
  * path no such receipts exist, so {@code delivered}/{@code bounced}/{@code complained} are
  * zero by absence of measurement rather than by measurement, and the rate fields are
@@ -16,8 +19,8 @@ import java.util.Map;
  * never tracked and never reported. Rates are fractions in {@code [0, 1]}.
  *
  * @param campaignId the campaign id
- * @param totalRecipients the materialized recipient count across all sends
- * @param dispatched deliveries currently in the dispatched status
+ * @param preparedRecipients prepared send recipients, including drafts and repeat contacts across sends
+ * @param dispatched confirmed submissions, regardless of current delivery status
  * @param delivered deliveries a provider confirmed delivered
  * @param bounced deliveries a provider reported bounced
  * @param complained deliveries a recipient reported as spam
@@ -26,7 +29,7 @@ import java.util.Map;
  * @param skipped deliveries skipped before dispatch
  * @param skipReasons skipped-delivery counts by skip reason
  * @param eventCounts append-only lifecycle event counts by event type
- * @param channels per-channel delivery volume
+ * @param channels per-channel preparation, dispatch, and receipt-backed outcomes
  * @param deliveryReceiptsAvailable whether provider delivery receipts exist for the campaign
  * @param deliveryRate delivered over handed-off, or {@code null} when not measured
  * @param bounceRate bounced over handed-off, or {@code null} when not measured
@@ -35,7 +38,7 @@ import java.util.Map;
  */
 public record CampaignEngagementDto(
         int campaignId,
-        int totalRecipients,
+        int preparedRecipients,
         int dispatched,
         int delivered,
         int bounced,
@@ -51,4 +54,16 @@ public record CampaignEngagementDto(
         Double bounceRate,
         Double complaintRate,
         List<CampaignSendEngagementDto> sends) {
+
+    /**
+     * Compatibility count for older frontends that labeled this field as recipients reached.
+     * Retained throughout the supported rollback window; removal requires a reviewed client cutover.
+     * @return confirmed-delivered messages, excluding drafts and unconfirmed submissions
+     * @deprecated use {@link #preparedRecipients()} for preparation or {@link #delivered()} for delivery
+     */
+    @Deprecated
+    @JsonProperty("totalRecipients")
+    public int totalRecipients() {
+        return delivered;
+    }
 }

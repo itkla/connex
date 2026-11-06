@@ -112,7 +112,8 @@
         "cannotChangeStatus": "Cannot change status: deal is missing pipeline or stage",
         "dealClosed": "Deal closed",
         "dealReopened": "Deal reopened",
-        "failedToUpdateStatus": "Couldn't update the deal status"
+        "failedToUpdateStatus": "Couldn't update the deal status",
+        "failedToLoadDeal": "Couldn't load the deal"
     },
     "DealsActivityBreakdown": {
         "activityMix": "Activity mix",
@@ -120,6 +121,7 @@
         "total": "total"
     },
     "DealsCard": {
+        "closedOn": "Closed {date}",
         "dealActions": "Deal actions",
         "view": "View",
         "quickEdit": "Quick edit",
@@ -147,6 +149,7 @@
         "achievedOn": "Reached on {date}"
     },
     "DealsTaskList": {
+        "entityLabel": "task",
         "taskDeleted": "Task deleted",
         "failedToDeleteTask": "Couldn't delete the task",
         "taskMarkedAsComplete": "Task marked as complete",
@@ -185,6 +188,7 @@
         "a11yCancelled": "Moving deal {name} was cancelled."
     },
     "DealsBrowser": {
+        "columnClosedAt": "Closed at",
         "title": "Deals",
         "addDeal": "Add deal",
         "newButton": "New",
@@ -194,12 +198,12 @@
         "openPipelineTooltip": "Total forecast value of all deals that are still open. Not bounded by close date.",
         "openDeals": "Open deals",
         "openDealsTooltip": "Number of deals that are still open.",
-        "closedForecast": "Closed forecast",
-        "closedForecastTooltip": "Total forecast value of deals that have closed. This is the baseline that actual results are measured against.",
-        "closedRevenue": "Closed revenue",
-        "closedRevenueTooltip": "Total actual value recorded across closed deals.",
+        "closedForecast": "Won deal value",
+        "closedForecastTooltip": "Total projected value of won deals only. This is the baseline for forecast accuracy.",
+        "closedRevenue": "Won revenue",
+        "closedRevenueTooltip": "Total actual value recorded on won deals only.",
         "forecastAccuracy": "Forecast accuracy",
-        "forecastAccuracyTooltip": "Closed revenue ÷ Closed forecast — how close actual results came to what was forecast across all closed deals. 100% means actuals matched the forecast exactly; above 100% means deals beat their forecast.",
+        "forecastAccuracyTooltip": "Won revenue ÷ Won deal value. Only won deals are included; lost deals do not affect this figure. 100% means actual values matched projected values; above 100% means wins exceeded their projected values.",
         "displayMode": "Display mode",
         "gridView": "Grid view",
         "tableView": "Table view",
@@ -283,9 +287,9 @@
     },
     "DealsRevenueChart": {
         "actualRevenue": "Actual revenue",
-        "projectedRevenue": "Projected revenue",
+        "projectedRevenue": "All deal value by expected close",
         "today": "Today",
-        "projectedAmount": "Projected · {amount}",
+        "projectedAmount": "All deal value · {amount}",
         "actualAmount": "Actual · {amount}"
     },
     "DealsEditSheet": {
@@ -320,6 +324,7 @@
         "create": "Create"
     },
     "DealsQuickEditSheet": {
+        "closedAtInvalid": "That time doesn't exist in the reporting timezone shown below. Choose another time.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "titleSingle": "Quick edit deal",
         "titleMulti": "Quick edit {count} deals",
@@ -387,7 +392,22 @@
         "grandTotal": "Total",
         "totalsUnavailable": "Totals are unavailable while line currencies are being repaired.",
         "currencyMismatch": "This line uses {lineCurrency}; the deal uses {dealCurrency}. Check the amounts before editing this line in {dealCurrency}, or remove it. No currency conversion is applied.",
-        "saveFailed": "Couldn't save the line item"
+        "saveFailed": "Couldn't save the line item",
+        "draftTitle": "New line item",
+        "draftHelp": "This line is unsaved. Enter a price, then save to review the deal value.",
+        "saveLine": "Save line",
+        "discardDraft": "Discard line",
+        "taxRate": "Tax rate (%)",
+        "discountType": "Discount type",
+        "discountValue": "Discount value",
+        "discountNone": "No discount",
+        "discountPercent": "Percentage (%)",
+        "discountAmount": "Fixed amount",
+        "confirmTitle": "Replace the deal value?",
+        "confirmDescription": "The deal value will change from {previous} to {next}, including tax. Removing the last line will restore the previous manual amount.",
+        "confirmReplacement": "Replace value and save",
+        "cancel": "Cancel",
+        "restoreHelp": "Removing the last line will restore the manual deal value of {amount}."
     },
     "DealsDocuments": {
         "title": "Documents",
@@ -551,5 +571,33 @@
         "approverChangeRefusedDescription": "One or more selected members may not be allowed to approve documents. No approvers were changed. Review the selection and try again.",
         "refreshFailed": "Couldn't refresh the document",
         "statusFailed": "Couldn't update the document status"
+    },
+    "DealsEditConflict": {
+        "title": "This deal has changed",
+        "description": "Changes to “{name}” were saved after you loaded it. Your draft is still here. Changed fields:",
+        "loadFailed": "“{name}” has changed. Your draft is still here, but the latest version could not be loaded. Keep editing and try saving again to check the changes.",
+        "otherChanges": "Another update was saved, including changes outside the fields shown here.",
+        "keepEditing": "Keep editing",
+        "reload": "Reload latest",
+        "confirmTitle": "Discard your draft and reload?",
+        "confirmDescription": "Your unsaved changes to “{name}” will be lost. The latest saved version will replace this draft.",
+        "discardAndReload": "Discard draft and reload",
+        "fields": {
+            "name": "Name",
+            "value": "Value",
+            "actualValue": "Actual value",
+            "valueSource": "Value source",
+            "currency": "Currency",
+            "pipeline": "Pipeline",
+            "stage": "Stage",
+            "position": "Board position",
+            "company": "Company",
+            "ownerId": "Owner",
+            "expectedCloseDate": "Expected close date",
+            "closedAt": "Closed date",
+            "closedReason": "Closed reason",
+            "won": "Outcome",
+            "riskExcluded": "Deal risk evaluation"
+        }
     }
 }

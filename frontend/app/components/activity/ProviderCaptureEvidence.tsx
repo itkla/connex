@@ -1,7 +1,7 @@
 'use client';
 
 import { CircleStackIcon } from '@heroicons/react/24/outline';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import type { CapturedActivityEvidence } from '@/app/lib/types';
 import { formatDateTime } from '@/app/lib/utils';
@@ -55,6 +55,7 @@ export default function ProviderCaptureEvidence({
     evidence: CapturedActivityEvidence;
     compact?: boolean;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('CapturedEvidence');
     const tDisclosure = useTranslations('AccountCaptureDisclosure');
     const tConnections = useTranslations('AccountConnections');
@@ -103,13 +104,13 @@ export default function ProviderCaptureEvidence({
                 <div>
                     <dt className="text-xs text-muted-foreground">{t('capturedAt')}</dt>
                     <dd className="mt-1 tabular-nums text-foreground">
-                        {formatDateTime(evidence.capturedAt, locale)}
+                        {formatDateTime(evidence.capturedAt, locale, timeZone)}
                     </dd>
                 </div>
                 <div>
                     <dt className="text-xs text-muted-foreground">{t('captureAsOf')}</dt>
                     <dd className="mt-1 tabular-nums text-foreground">
-                        {formatDateTime(evidence.captureAsOf, locale)}
+                        {formatDateTime(evidence.captureAsOf, locale, timeZone)}
                     </dd>
                 </div>
                 <div>

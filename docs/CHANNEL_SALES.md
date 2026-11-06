@@ -15,9 +15,7 @@ This is the conservative response to #568 placing #566 in Wave 3 while the meani
 channel demand remain unvalidated. The external experience in Increment 8 has its own stricter gate.
 
 When implementation begins, each migration uses the next globally available Flyway version at that
-time. The current floor is **V196**, because
-[`V195__record_creation_templates.sql`](../backend/src/main/resources/db/migration/tenant/V195__record_creation_templates.sql)
-is the present maximum. V196–V200 are not reserved. The global tenant/control-plane sequence and
+time. No channel-sales migration versions are reserved. The global tenant/control-plane sequence and
 rebase rule remain authoritative in [`backend/MIGRATIONS.md`](backend/MIGRATIONS.md).
 
 ## Terminology

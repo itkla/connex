@@ -188,6 +188,7 @@
     "summaryUnavailable": "We couldn't load your day's summary."
   },
   "DashboardPipelineChart": {
+    "currencyScope": "{currency} only",
     "pipelineLabel": "Pipeline",
     "activePipeline": "Active pipeline",
     "summary": "{openCount} open · {scheduled} scheduled in next {months} months",
@@ -196,7 +197,7 @@
     "chartDescription": "Realized revenue vs forecast",
     "currency": "Currency",
     "profitTooltip": "Realized revenue from deals that have closed.",
-    "projectionsTooltip": "Forecasted value of open deals, by expected close date."
+    "projectionsTooltip": "Total value of all open deals in this currency. The chart groups deals with an expected close date by month."
   },
   "DashboardTaskSummary": {
     "openTasks": "Open tasks",

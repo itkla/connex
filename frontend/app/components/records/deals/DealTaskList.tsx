@@ -1,8 +1,8 @@
 'use client';
 
-import { startTransition, useOptimistic, useState } from "react";
+import { startTransition, useOptimistic, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { EllipsisVerticalIcon, PencilIcon, TrashIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 
@@ -12,12 +12,14 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDate } from "@/app/lib/utils";
+import { noteSnippet } from "@/app/lib/noteText";
 import { durationMicro, easeOut } from "@/app/lib/motion";
 import { toastSuccess } from "@/app/lib/toast";
 import { deleteTask, updateTask } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
+import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 
 /**
  * The open-task list on the deal detail page. Completing a task is a single click on its checkbox:
@@ -25,6 +27,7 @@ import NoteContent from "@/app/components/activity/notes/NoteContent";
  * lands, so the round trip never blocks the feedback. Editing and deleting stay in the row menu.
  */
 export default function DealTaskList({ dealId, companyId, tasks, deals }: { dealId: number, companyId?: number | null, tasks: Task[], deals: Deal[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealsTaskList');
     const showApiError = useApiErrorToast('DealsTaskList');
     const locale = useLocale();
@@ -32,6 +35,10 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
     const reduce = useReducedMotion() ?? false;
     const [editTaskOpen, setEditTaskOpen] = useState(false);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+    const [deleting, setDeleting] = useState(false);
+    const taskActions = useRef(new Map<number, HTMLButtonElement>());
+    const deleteActionsRef = useRef<HTMLButtonElement | null>(null);
 
     const openTasks = tasks.filter((task) => !task.completed);
     const [visibleTasks, dismissTask] = useOptimistic<Task[], number>(
@@ -39,17 +46,22 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
         (state, taskId) => state.filter((task) => task.id !== taskId),
     );
 
-    const deleteThisTask = (task: Task) => {
-        startTransition(async () => {
-            dismissTask(task.id);
-            try {
-                await deleteTask(task.id);
-                toastSuccess(t('taskDeleted'));
+    const deleteThisTask = async () => {
+        if (!deleteTarget || deleting) return;
+        setDeleting(true);
+        try {
+            await deleteTask(deleteTarget.id);
+            toastSuccess(t('taskDeleted'));
+            setDeleteTarget(null);
+            startTransition(() => {
+                dismissTask(deleteTarget.id);
                 router.refresh();
-            } catch (err) {
-                showApiError(err, 'failedToDeleteTask');
-            }
-        });
+            });
+        } catch (err) {
+            showApiError(err, 'failedToDeleteTask');
+        } finally {
+            setDeleting(false);
+        }
     };
 
     const markTaskAsComplete = (task: Task) => {
@@ -130,13 +142,17 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                                                 <p className="text-sm text-foreground"><NoteContent content={task.description} references={task.references} /></p>
                                                 {task.dueDate ? (
                                                     <p className="mt-0.5 text-xs text-muted-foreground">
-                                                        {t('due', { date: formatDate(task.dueDate, locale) })}
+                                                        {t('due', { date: formatDate(task.dueDate, locale, timeZone) })}
                                                     </p>
                                                 ) : null}
                                             </div>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <Button
+                                                        ref={(node) => {
+                                                            if (node) taskActions.current.set(task.id, node);
+                                                            else taskActions.current.delete(task.id);
+                                                        }}
                                                         variant="ghost"
                                                         size="icon"
                                                         className="p-1 h-8 w-8 shrink-0 rounded-full shadow-none border-none bg-transparent hover:bg-muted focus:ring-0 focus:ring-offset-0"
@@ -151,7 +167,10 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                                                         {t('edit')}
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator />
-                                                    <DropdownMenuItem variant="destructive" onClick={() => deleteThisTask(task)}>
+                                                    <DropdownMenuItem variant="destructive" onClick={() => {
+                                                        deleteActionsRef.current = taskActions.current.get(task.id) ?? null;
+                                                        setDeleteTarget(task);
+                                                    }}>
                                                         <TrashIcon className="size-4" />
                                                         {t('delete')}
                                                     </DropdownMenuItem>
@@ -165,6 +184,22 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                     </motion.div>
                 ) : null}
             </AnimatePresence>
+            <DeleteRecordDialog<Task>
+                open={deleteTarget !== null}
+                onOpenChange={(open) => {
+                    if (!open && !deleting) setDeleteTarget(null);
+                }}
+                onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    deleteActionsRef.current?.focus();
+                }}
+                selectedIds={new Set(deleteTarget ? [deleteTarget.id] : [])}
+                selectedItems={deleteTarget ? [deleteTarget] : []}
+                entityLabel={t('entityLabel')}
+                getDisplayName={(task) => noteSnippet(task.description, 120) || t('entityLabel')}
+                isDeleting={deleting}
+                confirmDelete={() => void deleteThisTask()}
+            />
             {selectedTask && (
                 <EditTaskSheet
                     key={selectedTask.id}

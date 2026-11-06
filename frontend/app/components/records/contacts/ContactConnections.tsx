@@ -119,7 +119,7 @@ export default function ContactConnections({
                     </p>
                     <Link
                         href={INTRODUCTIONS_PATH}
-                        className="text-xs text-brand transition-colors hover:text-brand-hover"
+                        className="text-xs text-brand-text transition-colors hover:text-brand-text"
                     >
                         {t('seeAllPaths')}
                     </Link>
@@ -134,7 +134,7 @@ export default function ContactConnections({
                                 <Link
                                     href={`/records/contacts/${step.personId}`}
                                     className={cn(
-                                        'text-sm transition-colors hover:text-brand-hover',
+                                        'text-sm transition-colors hover:text-brand-text',
                                         i === 0 || i === introPath.steps.length - 1
                                             ? 'font-medium text-foreground'
                                             : 'text-muted-foreground',
@@ -171,7 +171,7 @@ export default function ContactConnections({
                             <div className="min-w-0 flex-1">
                                 <Link
                                     href={`/records/contacts/${connection.personId}`}
-                                    className="block truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                    className="block truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                                 >
                                     {connection.personName}
                                 </Link>
@@ -201,7 +201,7 @@ export default function ContactConnections({
                 <div className="min-w-0 flex-1">
                     <Combobox
                         items={candidates}
-                        filter={null}
+                        serverSearch={contactSearch.serverSearch}
                         itemToStringLabel={(c: Contact) => c.name}
                         value={selected}
                         onOpenChange={setPickerOpen}
@@ -213,19 +213,19 @@ export default function ContactConnections({
                             className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                         />
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>
+                                {contactSearch.loading
+                                    ? t('searching')
+                                    : contactSearch.error
+                                      ? t('searchFailed')
+                                      : t('noContacts')}
+                            </ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>
-                                    {contactSearch.loading
-                                        ? t('searching')
-                                        : contactSearch.error
-                                          ? t('searchFailed')
-                                          : t('noContacts')}
-                                </ComboboxEmpty>
-                                {candidates.map((c) => (
+                                {(c: (typeof candidates)[number]) => (
                                     <ComboboxItem key={c.id} value={c}>
                                         {c.name}
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>

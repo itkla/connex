@@ -12,11 +12,13 @@ import {
     getRelationshipMapData,
     getStagesByPipelineId,
     getUsers,
+    RelationshipMapCapacityError,
 } from "@/app/lib/api";
 import type { Pipeline, RelationshipTemperature, Stage, TemperatureBand, User } from "@/app/lib/types";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import MapView from "@/app/components/map/MapView";
 import { buildGraph, companyNodeId, contactNodeId } from "@/app/components/map/graph/buildGraph";
+import { Button } from "@/components/ui/button";
 
 type MapSearchParams = { companyId?: string; contactId?: string };
 
@@ -37,17 +39,43 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
             getTranslations("MapPage"),
             searchParams,
             getMyWorkspacesFromCookie(cookie),
-            getRelationshipMapData(init).catch(() => null),
+            getRelationshipMapData(init).catch((error: unknown) => {
+                if (error instanceof RelationshipMapCapacityError) return null;
+                throw error;
+            }),
             getUsers(init).catch(() => [] as User[]),
             getPipelines(init).catch(() => [] as Pipeline[]),
         ]);
 
     if (!mapData) {
+        const contact = Number(contactId);
+        const company = Number(companyId);
+        const recordHref = Number.isSafeInteger(contact) && contact > 0
+            ? `/records/contacts/${contact}`
+            : Number.isSafeInteger(company) && company > 0
+              ? `/records/companies/${company}`
+              : null;
         return (
             <div className="flex min-h-0 flex-1 items-center justify-center">
                 <div role="alert" className="max-w-md rounded-2xl border border-border bg-card px-6 py-12 text-center">
                     <h2 className="text-lg font-semibold text-foreground">{t("limitTitle")}</h2>
                     <p className="mt-2 text-sm text-muted-foreground">{t("limitBody")}</p>
+                    <div className="mt-6 flex flex-wrap justify-center gap-2">
+                        {recordHref ? (
+                            <Button asChild size="page">
+                                <Link href={recordHref}>{t("openRecord")}</Link>
+                            </Button>
+                        ) : null}
+                        <Button asChild variant="outline" size="page">
+                            <Link href="/records/contacts">{t("browseContacts")}</Link>
+                        </Button>
+                        <Button asChild variant="outline" size="page">
+                            <Link href="/records/companies">{t("browseCompanies")}</Link>
+                        </Button>
+                        <Button asChild variant="outline" size="page">
+                            <Link href="/records/deals">{t("browseDeals")}</Link>
+                        </Button>
+                    </div>
                 </div>
             </div>
         );
@@ -103,7 +131,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
             {isEmpty ? (
                 <div className="flex min-h-0 flex-1 items-center justify-center">
                     <div className="flex max-w-md flex-col items-center rounded-2xl border border-border bg-card px-6 py-16 text-center">
-                        <span className="flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand">
+                        <span className="flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-text">
                             <ShareIcon className="size-7" />
                         </span>
                         <h2 className="mt-6 text-xl font-semibold text-foreground">{t("emptyTitle")}</h2>

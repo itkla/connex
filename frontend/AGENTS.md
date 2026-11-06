@@ -23,7 +23,7 @@ Next.js 16 App Router/RSC · React 19 · strict TypeScript · Tailwind v4 · sha
 
 ## Task routing
 
-Read the relevant contract before editing that area:
+Before editing, read:
 
 | Work | Required reading |
 |---|---|
@@ -31,6 +31,7 @@ Read the relevant contract before editing that area:
 | New page, redesign, cross-surface UI pattern | `../docs/frontend/PRODUCT_GRAMMAR.md` |
 | Motion or animated interaction | `../docs/frontend/MOTION.md` |
 | Frontend testing/browser verification | `../docs/FRONTEND_TESTING.md` |
+| Dates | `../docs/frontend/DATES_AND_TIME_ZONES.md` |
 | Production build/image/release asset gate | `../docs/frontend/BUILD_ASSET_GATE.md` |
 | Deployment/staging/build pipeline | `../docs/DEPLOYMENT.md`, `../docs/STAGING_DEPLOY.md` |
 
@@ -61,7 +62,7 @@ The active agent environment may provide named design/review skills; use the sma
 - Every user action acknowledges input promptly; network latency must not make the UI appear dead.
 - Loading, empty, error, and permission states are distinct. Never render a permission failure as an empty result.
 - Choose interaction weight proportionately: simple reversible fields may edit inline; short focused operations use dialogs/sheets; complex authoring gets a page. Follow `../docs/PRODUCT.md` and the product-grammar contract for exact mappings.
-- Every interactive control is keyboard-operable with visible focus. Prefer semantic HTML and Base UI/Radix behavior over custom ARIA implementations.
+- Keep controls keyboard-operable with visible focus. Use semantic HTML and Base UI/Radix; respect IME composition (`isComposing`, key code 229). See `../docs/frontend/PICKER_INPUT.md`.
 - Do not use color alone to communicate state.
 - Respect `prefers-reduced-motion`. Motion changes must follow `../docs/frontend/MOTION.md` and be verified with reduced motion enabled.
 - Mobile preserves capability semantics but may use task-adaptive presentation. Do not solve mobile by horizontally scrolling desktop tables or stacking desktop cards blindly.
@@ -70,6 +71,7 @@ The active agent environment may provide named design/review skills; use the sma
 
 - The backend is reached through `/api/*`; `next.config.ts` rewrites to the backend during local development.
 - Use `app/lib/api.ts` instead of scattering raw `fetch` calls. Keep frontend types aligned with backend DTOs.
+- Nullable response fields are optional without `@JsonInclude(ALWAYS)`; use nullish checks and absent-key fixtures. Preserve request null semantics.
 - Auth/session is cookie-based and workspace-aware. Route protection lives in `proxy.ts`; update it when a new protected route requires it.
 - Writes belong to the workspace on screen, not to the `connex_workspace` cookie. `api.ts` pins every workspace-bound state-changing request to the workspace `WorkspaceProvider` renders (`app/lib/renderedWorkspace.ts`), because a safe read can heal the cookie to another membership after a revocation while the page still holds a draft composed for the revoked one. Account, organization and selection routes stay on the cookie; they are the documented `UNPINNED_WRITE_ROUTES` allowlist, derived from `WebConfig` and `TenantResolutionInterceptor` and guarded by `test/unit/workspaceBoundSubmission.test.tsx`, so add a route there only with that evidence. A surface that saves later than the user's action (autosave, debounce, a flush on unmount) must capture the workspace when the content is composed and send it through `workspacePinnedRequest`, because a workspace switch publishes the new selection before navigation unmounts the page; likewise an `api.ts` helper that awaits anything (identity, CSRF) before sending calls `pinWriteNow` first and waits through `identityBeforePinnedWrite`, which a workspace or account transition abandons. A surface that keeps refused text locally gives it its own draft identity through `useFormDraft` so it never overwrites another composer's draft. Never derive a write's `X-Workspace-Id` from the cookie, and never resubmit a `WORKSPACE_UNAVAILABLE` refusal elsewhere: report it through `useApiErrorToast` (or `isWorkspaceUnavailableError` where a surface owns its copy) and keep the draft. Persisted drafts are keyed by that same rendered workspace (`formDrafts.ts`), so one started in a workspace is only ever offered for resume there (#1732).
 - Uploads go to authenticated backend endpoints. Never store user uploads in Next.js `public/` or add a frontend filesystem upload path.

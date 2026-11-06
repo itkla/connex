@@ -404,7 +404,7 @@ function ImagePopover({
                                 className={cn(
                                     "flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-3 text-xs transition-colors",
                                     dragActive
-                                        ? "border-brand bg-brand/5 text-brand"
+                                        ? "border-brand bg-brand/5 text-brand-text"
                                         : "border-border text-muted-foreground hover:border-muted-foreground/40 hover:bg-muted/60",
                                     "disabled:pointer-events-none disabled:opacity-60",
                                 )}

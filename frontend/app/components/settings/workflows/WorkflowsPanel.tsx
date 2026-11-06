@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useReducer, useRef } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
     ArchiveBoxIcon,
@@ -54,11 +54,9 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-colors motion-reduce:transition-none hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 type WorkflowsPanelState = {
     archived: boolean;
@@ -92,6 +90,7 @@ function workflowsPanelReducer(state: WorkflowsPanelState, action: WorkflowsPane
 
 /** The workflow list, with lifecycle, archive, duplication, and each workflow's latest run. */
 export default function WorkflowsPanel() {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const locale = useLocale();
@@ -241,8 +240,8 @@ export default function WorkflowsPanel() {
             updatePanelState((current) => ({
                 workflows: current.workflows.map((item) => item.id === workflow.id ? {
                     ...item,
-                    intakePausedAt: updated.intakePausedAt,
-                    intakePausedById: updated.intakePausedById,
+                    intakePausedAt: updated.intakePausedAt ?? null,
+                    intakePausedById: updated.intakePausedById ?? null,
                 } : item),
             }));
             toastSuccess(t(workflow.intakePausedAt ? "resumed" : "paused"));
@@ -314,7 +313,7 @@ export default function WorkflowsPanel() {
                                     <Switch
                                         checked={workflow.enabled}
                                         onCheckedChange={() => void toggleEnabled(workflow)}
-                                        disabled={archived || busy || (workflow.executionMode === "system" && !canRunAsSystem)}
+                                        disabled={archived || busy || (!workflow.enabled && workflow.executionAvailable === false) || (workflow.executionMode === "system" && !canRunAsSystem)}
                                         aria-label={t("toggleEnabled", { name: workflow.name })}
                                     />
                                     <button
@@ -334,6 +333,9 @@ export default function WorkflowsPanel() {
                                             </Badge>
                                             {!workflow.enabled && !archived ? (
                                                 <Badge variant="outline" className="text-muted-foreground">{t("disabledBadge")}</Badge>
+                                            ) : null}
+                                            {workflow.executionAvailable === false && !archived ? (
+                                                <Badge variant="outline" className="text-destructive">{t("unavailableBadge")}</Badge>
                                             ) : null}
                                             {workflow.intakePausedAt && !archived ? (
                                                 <Badge variant="outline" className="border-risk-low/40 bg-risk-low/10 text-foreground">
@@ -355,6 +357,9 @@ export default function WorkflowsPanel() {
                                                 actions: workflow.actionCount,
                                             })}
                                         </span>
+                                        {workflow.executionAvailable === false && !archived ? (
+                                            <span className="block text-xs text-destructive">{t("executionUnavailable")}</span>
+                                        ) : null}
                                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                             {workflow.latestRun && latestStatus ? (
                                                 <>
@@ -369,10 +374,10 @@ export default function WorkflowsPanel() {
                                                     </Badge>
                                                     <time
                                                         dateTime={normalizeWorkflowRunDateTime(workflow.latestRun.startedAt)}
-                                                        title={formatWorkflowRunDateTime(workflow.latestRun.startedAt, locale)}
+                                                        title={formatWorkflowRunDateTime(workflow.latestRun.startedAt, locale, timeZone)}
                                                     >
                                                         {t("runs.latest", {
-                                                            time: formatRelativeTime(workflow.latestRun.startedAt, locale, now),
+                                                            time: formatRelativeTime(workflow.latestRun.startedAt, locale, now, timeZone),
                                                         })}
                                                     </time>
                                                 </>

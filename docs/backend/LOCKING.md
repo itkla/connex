@@ -802,6 +802,27 @@ After the board root is held, discover workspace task ids without locks, add the
 
 Do not replace this with an ordered range `FOR UPDATE` scan or return to non-locking board reads after waiting for exact locks. Compact affected status columns to contiguous zero-based positions before commit.
 
+Task assignment notices reuse the requested active membership retained before the board root.
+After a full update changes the assignee, resolve only the old recipient's workspace/task-scoped
+`task.assigned` notice. Immediately before delivery, mark the new recipient's existing notice resolved
+inside the same transaction, even if History restored it. `NotificationDelivery` then revives it
+unread and publishes the update through its established resolved-row path. No old
+recipient membership lock is acquired after the board. Notification state versions retain their
+existing deferred before-commit order after domain rows.
+
+## Warmth model transitions
+
+Notification model baselines use the existing background organization duplicate-decision mutex and
+notification transaction. The tenant `warmth_notification_model_state` marker advances atomically
+with preference-independent relationship baselines only after a successful complete warmth snapshot.
+No mutation-only reconciliation advances it. Scoring and snapshot failure preserve pending state.
+
+Radar replacement retains its family root, then locks each exact `(workspace_id, dedupe_key)` signal
+before its actor state. At a signal model change, only dismissed/follow-up hashes equal to that signal's
+previous persisted hash are rebased; mismatched historical hashes stay stale. This preserves the
+interactive signal → actor-state order. Task completion timestamps are written in the existing task
+statements under their established board/task locks; no new task lock order is introduced.
+
 ## AI assistant chat
 
 Assistant-chat mutations run at `READ_COMMITTED`.
@@ -1776,7 +1797,9 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
    synchronization root, not dependency creation. After the set lock is held, recompute the
    set of absent definition keys and fail closed with a review conflict if it differs in
    either direction from the pre-lock reading, so a definition created or removed concurrently
-   under `READ_COMMITTED` cannot be silently adopted or created twice.
+   under `READ_COMMITTED` cannot be silently adopted or created twice. Recompute resolved
+   import definition keys too: a label, type or archive-state change must not redirect a
+   mapping to a different key after its creation-permission check.
 9. Lock writable record targets ascending by record id.
 10. Lock canonical identity groups in deterministic kind/value order.
 11. Requery/revalidate current identities while locks are held.
@@ -2540,3 +2563,26 @@ encoded-frame provenance and concurrent-session delegate as ordinary assistant f
 socket write takes publication S, freshly checks control authority in a separate READ COMMITTED
 transaction and retains publication S through the write. Broker enqueue validation alone does not
 authorize a buffered frame after organization invalidation.
+
+## Deal manual-value fallback (V243)
+
+Line preview and write paths retain their existing parent-deal-first lock order. Preview takes
+the parent lock for an exact value/line snapshot and performs no writes. Fallback capture and
+clear update that same parent row after its lock is held. Final-line restoration reads the
+fallback FOR UPDATE under that existing lock, so an older repeatable-read snapshot cannot
+restore a stale amount. No additional aggregate or authorization lock is introduced.
+Fallback capture and clear advance the deal version through #2276's UPDATE trigger. Line-item
+confirmation does not submit a parent version or replay a broad deal update after these writes.
+
+## Conditional record edit versions (V241/V242)
+
+Deal full-record UPDATEs condition on the optional client snapshot version in the tenant-scoped
+WHERE clause, before dependent value writes. The database BEFORE UPDATE counter covers every
+writer. The BEFORE DELETE company trigger detaches exact deal references before the FK's existing
+SET NULL action, retaining its parent company → child deal order while advancing the counter.
+V242 applies the same atomic expected-version fence to person full edits under their existing
+organization duplicate mutex → person row lock order at READ_COMMITTED. The company-delete person
+trigger follows V241's deal-detach trigger and detaches indexed person references before FK SET
+NULL; person ownership cleanup remains explicit (the V90 owner column has no FK).
+No new application lock hierarchy or isolation change is introduced. See
+[Conditional record edits](RECORD_EDIT_CONCURRENCY.md) for the transport, writer inventory and tests.

@@ -2,7 +2,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
@@ -54,12 +54,12 @@ type EditSession = {
     workspaceId: number;
 };
 
-function toDraft(a: Activity): ActivityDraft {
+function toDraft(a: Activity, timeZone: string | undefined): ActivityDraft {
     return {
         type: normalizeType(a.type),
         subject: a.subject ?? '',
         notes: a.notes ?? '',
-        timestamp: toDatetimeLocalValue(a.timestamp),
+        timestamp: toDatetimeLocalValue(a.timestamp, timeZone),
         personId: a.personId ?? null,
         dealId: a.dealId ?? null,
     };
@@ -95,9 +95,10 @@ export default function EditActivitySheet({
 }) {
     const router = useRouter();
     const t = useTranslations('ActivityEditActivitySheet');
+    const timeZone = useTimeZone();
     const showApiError = useApiErrorToast('ActivityEditActivitySheet');
     const { activeWorkspaceId, switching } = useWorkspace();
-    const [draft, setDraft] = useState<ActivityDraft>(() => toDraft(activity));
+    const [draft, setDraft] = useState<ActivityDraft>(() => toDraft(activity, timeZone));
     const [session, setSession] = useState<EditSession | null>(() =>
         open && !switching && originWorkspaceId !== null && activeWorkspaceId === originWorkspaceId
             ? createEditSession(activity.id, originWorkspaceId)
@@ -122,9 +123,9 @@ export default function EditActivitySheet({
 
     const closeSheet = useCallback(() => {
         closeSession();
-        setDraft(toDraft(latestActivityRef.current));
+        setDraft(toDraft(latestActivityRef.current, timeZone));
         onOpenChange(false);
-    }, [closeSession, onOpenChange]);
+    }, [closeSession, onOpenChange, timeZone]);
 
     const finishSaving = useCallback((current: EditSession) => {
         if (sessionRef.current !== current || current.controller.signal.aborted) return;
@@ -153,8 +154,8 @@ export default function EditActivitySheet({
         const next = createEditSession(activity.id, originWorkspaceId);
         sessionRef.current = next;
         setSession(next);
-        setDraft(toDraft(latestActivityRef.current));
-    }, [activeWorkspaceId, activity.id, closeSession, closeSheet, open, originWorkspaceId, switching]);
+        setDraft(toDraft(latestActivityRef.current, timeZone));
+    }, [activeWorkspaceId, activity.id, closeSession, closeSheet, open, originWorkspaceId, switching, timeZone]);
 
     useLayoutEffect(() => () => {
         sessionRef.current?.controller.abort();
@@ -194,7 +195,7 @@ export default function EditActivitySheet({
                 subject: draft.subject.trim(),
                 createdById: activity.createdById,
                 notes: draft.notes.trim() || undefined,
-                timestamp: draft.timestamp ? toMysqlDateTime(draft.timestamp) : undefined,
+                timestamp: draft.timestamp ? toMysqlDateTime(draft.timestamp, timeZone, activity.timestamp) : undefined,
                 personId: draft.personId,
                 dealId: draft.dealId,
             };
@@ -230,7 +231,7 @@ export default function EditActivitySheet({
             <DrawerContent className="flex w-full flex-col sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                             <ChatBubbleLeftRightIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
@@ -292,6 +293,7 @@ export default function EditActivitySheet({
                                     imageUrl: person.imageUrl,
                                 }))}
                                 onInputValueChange={personSearch.onInputValueChange}
+                                serverSearch={personSearch.serverSearch}
                                 emptyLabel={
                                     personSearch.loading
                                         ? t('searching')
@@ -318,6 +320,7 @@ export default function EditActivitySheet({
                                     label: deal.name,
                                 }))}
                                 onInputValueChange={dealSearch.onInputValueChange}
+                                serverSearch={dealSearch.serverSearch}
                                 emptyLabel={
                                     dealSearch.loading
                                         ? t('searching')

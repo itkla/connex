@@ -3,7 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -51,9 +51,10 @@ import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { usePermission } from '@/app/hooks/usePermissions';
-import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
+import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl, writeOwnedParamsToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
+import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
 import DealListRow from '@/app/components/records/deals/DealListRow';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
@@ -61,14 +62,18 @@ import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import DealsQueryUrlSync from '@/app/components/records/deals/DealsQueryUrlSync';
+import DealCurrencyScope from './DealCurrencyScope';
+import { resolveDealViewCurrency } from '@/app/components/overview/analytics/currencyScope';
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
+import DealEditConflictDialog from './DealEditConflictDialog';
+import { reconcileSavedDealDraft, submitDealDraftUpdates, submitInlineDealValue, toDealDraft as toDraft } from './dealEditConflict';
+import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
     createDeal,
+    getDealById,
     closeDeal,
     reopenDeal,
-    updateDeal,
-    updateDealValue,
     getCompaniesByIds,
     getDealsPage,
     getDealsSegmentPage,
@@ -126,11 +131,10 @@ import {
     type Pipeline,
     type Stage,
     type Contact,
-    type UpdateDealPayload,
     type Tag,
     type WorkspaceMember,
 } from '@/app/lib/types';
-import { actualValueForOutcome, isDealClosed } from './dealOutcome';
+import { isDealClosed } from './dealOutcome';
 import { DEAL_COMPANY_FILTER_KEY, DEAL_CONTACT_FILTER_KEY, DEAL_PIPELINE_FILTER_KEY } from './dealLinks';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
@@ -147,21 +151,6 @@ import {
     segmentConditionEntries,
 } from '@/app/lib/segmentDefinition';
 
-function toDraft(d: Deal): DealDraft {
-    return {
-        name: d.name ?? '',
-        value: d.value ?? 0,
-        actualValue: d.actualValue ?? 0,
-        currency: d.currency ?? 'USD',
-        pipeline: d.pipeline ?? 0,
-        stage: d.stage ?? 0,
-        company: d.company ?? null,
-        expectedCloseDate: d.expectedCloseDate ?? '',
-        closedAt: d.closedAt ?? null,
-        closedReason: d.closedReason ?? null,
-        won: d.won ?? null,
-    };
-}
 
 function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     return (
@@ -179,30 +168,6 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
-type DealDraftUpdate = {
-    dealId: number;
-    draft: DealDraft;
-};
-
-/** Persists quick-edit drafts with outcome-canonicalized realized values. */
-export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>): Promise<void> {
-    await Promise.all(updates.map(({ dealId, draft }) => {
-        const payload: UpdateDealPayload = {
-            name: draft.name.trim(),
-            value: draft.value,
-            actualValue: actualValueForOutcome(draft.won, draft.actualValue),
-            currency: draft.currency.trim(),
-            pipeline: draft.pipeline,
-            stage: draft.stage,
-            company: draft.company ?? null,
-            expectedCloseDate: draft.expectedCloseDate || undefined,
-            closedAt: draft.closedAt,
-            closedReason: draft.closedReason,
-            won: draft.won,
-        };
-        return updateDeal(dealId, payload);
-    }));
-}
 
 /**
  * Maps a table column key to the backend {@code sort} token accepted by
@@ -220,11 +185,12 @@ const DEAL_SORT_TOKENS: Record<string, string> = {
     updatedAt: 'updated_at',
 };
 
+const DEAL_CURRENCY_URL_KEYS = ['currency'] as const;
+
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
 const EMPTY_DEAL_DRAFT: CreateDealPayload = {
     name: '',
     value: 0,
-    actualValue: 0,
     currency: 'USD',
     pipeline: 0,
     stage: 0,
@@ -360,6 +326,7 @@ function dealSegmentChipCondition(
 }
 
 export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, savedViewsUnavailable, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean; timezone: string; currentUserId: number }) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -528,25 +495,16 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         for (const c of dealMetrics.byCurrency) counts.set(c.currency, c.openCount + c.closedCount);
         return counts;
     }, [dealMetrics]);
-    const dominantCurrency = useMemo(() => {
-        let best: string | null = null;
-        let bestCount = -1;
-        for (const c of dealMetrics.byCurrency) {
-            const n = c.openCount + c.closedCount;
-            if (n > bestCount) {
-                bestCount = n;
-                best = c.currency;
-            }
-        }
-        return best;
-    }, [dealMetrics]);
-    const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
-    const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
-        ? selectedCurrency
-        : dominantCurrency;
-    const displayCurrency = activeCurrency ?? 'USD';
-    const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
-    const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
+    const workspaceCurrencyCounts = useMemo(
+        () => new Map(dealFacets.currencies.map(({ key, count }) => [key, count])),
+        [dealFacets.currencies],
+    );
+    const activeCurrency = resolveDealViewCurrency(currencyCounts, searchParams.get('currency'), workspaceCurrencyCounts);
+    const displayCurrency = activeCurrency;
+    const [revenueResult, setRevenueResult] = useState<{ currency: string; data: DealRevenueSeries } | null>(null);
+    const [stageResult, setStageResult] = useState<{ currency: string; data: DealStageDistribution[] } | null>(null);
+    const revenueSeries = revenueResult?.currency === activeCurrency ? revenueResult.data : { closed: [], projected: [] };
+    const stageDistribution = stageResult?.currency === activeCurrency ? stageResult.data : [];
     useEffect(() => {
         let cancelled = false;
         if (!activeCurrency) {
@@ -555,11 +513,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             };
         }
         getDealRevenueTimeseries(activeCurrency, timezone)
-            .then((series) => { if (!cancelled) setRevenueSeries(series); })
-            .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
+            .then((series) => { if (!cancelled) setRevenueResult({ currency: activeCurrency, data: series }); })
+            .catch(() => { if (!cancelled) setRevenueResult(null); });
         getDealStageDistribution(activeCurrency)
-            .then((distribution) => { if (!cancelled) setStageDistribution(distribution); })
-            .catch(() => { if (!cancelled) setStageDistribution([]); });
+            .then((distribution) => { if (!cancelled) setStageResult({ currency: activeCurrency, data: distribution }); })
+            .catch(() => { if (!cancelled) setStageResult(null); });
         return () => { cancelled = true; };
     }, [activeCurrency, dataRevision, timezone]);
 
@@ -589,6 +547,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         storageKey: 'deals:view',
         searchFields,
         restoreUrlQuery: true,
+        ownedUrlKeys: DEAL_CURRENCY_URL_KEYS,
     });
     const returnSelection = useRecordReturnSelection(
         'deals',
@@ -598,6 +557,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         !loadingPage,
     );
     const [selectedBoardDeal, setSelectedBoardDeal] = useState<Deal | null>(null);
+    const replaceDeal = useCallback((saved: Deal) => {
+        if (saved.workspaceId !== undefined && saved.workspaceId !== renderedWorkspaceId()) return;
+        setDeals((current) => current.map((row) => row.id === saved.id ? saved : row));
+        setSelectedBoardDeal((current) => current?.id === saved.id ? saved : current);
+    }, []);
     const selectedDeals = useMemo(() => {
         if (pageSelectedDeals.length > 0) return pageSelectedDeals;
         return selectedBoardDeal != null && selectedIds.has(selectedBoardDeal.id)
@@ -828,11 +792,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [allMatchingActive, clearSelection, sortKey, sortDir]);
     const changeCurrency = useCallback((currency: string) => {
         clearSelection();
-        setRevenueSeries({ closed: [], projected: [] });
-        setStageDistribution([]);
-        setSelectedCurrency(currency);
+        setRevenueResult(null);
+        setStageResult(null);
+        writeOwnedParamsToUrl(pathname, { currency, page: undefined });
         dispatchViewState({ type: 'resetPage' });
-    }, [clearSelection]);
+    }, [clearSelection, pathname]);
     const changeDefinition = useCallback((nextDefinition: SegmentDefinition) => {
         clearSelection();
         dispatchViewState({ type: 'definitionChanged', definition: nextDefinition });
@@ -840,14 +804,18 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const refreshRecords = useCallback(() => {
         clearSelection();
         setDealMetrics(EMPTY_DEAL_METRICS);
-        setRevenueSeries({ closed: [], projected: [] });
-        setStageDistribution([]);
+        setRevenueResult(null);
+        setStageResult(null);
         refreshData();
     }, [clearSelection, refreshData]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
+    const [editBases, setEditBases] = useState<Deal[]>([]);
+    const [editReloadRevision, setEditReloadRevision] = useState(0);
+    const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getDealById);
     const [drafts, setDrafts] = useState<Record<number, DealDraft>>({});
+    const draftRevisionRef = useRef(0);
     const [isSaving, setIsSaving] = useState(false);
 
     const [newDialogOpen, setNewDialogOpen] = useState(false);
@@ -872,7 +840,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 ...newPayload,
                 name: newPayload.name.trim(),
                 value: Number.isFinite(newPayload.value) ? newPayload.value : 0,
-                actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : 0,
+                actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : undefined,
                 currency: newPayload.currency.trim() || 'USD',
                 pipeline: newPayload.pipeline || null,
                 stage: newPayload.stage || null,
@@ -897,6 +865,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     };
 
     const openEditSheet = () => {
+        clearConflict();
+        setEditBases(selectedDeals);
         const next: Record<number, DealDraft> = {};
         for (const d of selectedDeals) next[d.id] = toDraft(d);
         setDrafts(next);
@@ -904,11 +874,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     };
 
     const updateDraft = (id: number, patch: Partial<DealDraft>) => {
+        draftRevisionRef.current += 1;
         setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
     };
 
     const saveEdits = async () => {
-        const changed = selectedDeals.filter((d) => {
+        const changed = editBases.filter((d) => {
             const draft = drafts[d.id];
             return draft && diffDraft(toDraft(d), draft);
         });
@@ -928,26 +899,40 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             return;
         }
 
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
+        const submittedRevision = draftRevisionRef.current;
         setIsSaving(true);
         try {
-            const updates = changed.flatMap((deal) => {
-                const draft = drafts[deal.id];
-                return draft ? [{ dealId: deal.id, draft }] : [];
-            });
-            await submitDealDraftUpdates(updates);
+            for (const base of changed) {
+                const draft = drafts[base.id];
+                if (!draft) continue;
+                try {
+                    const [saved] = await submitDealDraftUpdates([{ dealId: base.id, draft }], origin);
+                    if (!saved) throw new Error('Deal update returned no record');
+                    replaceDeal(saved);
+                    setEditBases((current) => current.map((item) => item.id === saved.id ? saved : item));
+                    setDrafts((current) => {
+                        const latest = current[saved.id];
+                        return latest ? { ...current, [saved.id]: reconcileSavedDealDraft(latest, draft, saved) } : current;
+                    });
+                } catch (error) {
+                    if (!await captureConflict(error, base, origin)) reportApiError(error, 'failedToSave');
+                    return;
+                }
+            }
+            if (draftRevisionRef.current !== submittedRevision) return;
             toastSuccess(
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
             );
             setEditSheetOpen(false);
             refreshRecords();
-        } catch (err) {
-            reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
     };
 
     const quickEditOne = useCallback((deal: Deal) => {
+        setEditBases([deal]);
         clearSelection();
         setSelectedBoardDeal(deal);
         setSelectedIds(new Set([deal.id]));
@@ -1052,14 +1037,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const toggleDealStatus = useCallback(async (deal: Deal, won: boolean | null) => {
         try {
-            if (won === null) await reopenDeal(deal.id);
-            else await closeDeal(deal.id, { won });
+            const saved = won === null ? await reopenDeal(deal.id) : await closeDeal(deal.id, { won });
+            replaceDeal(saved);
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             refreshRecords();
         } catch (err) {
             reportApiError(err, 'failedToUpdateStatus');
         }
-    }, [refreshRecords, reportApiError, t]);
+    }, [refreshRecords, replaceDeal, reportApiError, t]);
 
     const summary = useMemo(() => {
         const m = dealMetrics.byCurrency.find((c) => c.currency === activeCurrency);
@@ -1095,9 +1080,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             editable: {
                 getValue: (d) => (d.value != null ? String(d.value) : ''),
                 save: (d, v) =>
-                    inlineEdit.commit(d, 'value', Number(v), async (full) => {
-                        await updateDealValue(full.id, full.value ?? 0);
-                    }),
+                    inlineEdit.commit(d, 'value', Number(v), (full) => submitInlineDealValue(full, replaceDeal)),
                 validate: (v) => (v !== '' && /^\d+(\.\d{1,2})?$/.test(v) ? null : t('valueInvalid')),
                 disabled: (d) => (d.valueSource === 'line_items' ? t('valueDerivedFromLineItems') : null),
             },
@@ -1112,7 +1095,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             key: 'company',
             label: t('columnCompany'),
             getSortValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null),
-            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} onClick={(e) => e.stopPropagation()} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
+            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} onClick={(e) => e.stopPropagation()} className="text-brand-text hover:text-brand-text hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
             filter: { getValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null), emptyLabel: t('freelancer') },
         },
         {
@@ -1130,10 +1113,16 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             filter: { getValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null) },
         },
         {
+            key: 'closedAt',
+            label: t('columnClosedAt'),
+            sortable: false,
+            render: (d) => isDealClosed(d) ? formatDealClosedAt(d.closedAt, locale, timezone) : '—',
+        },
+        {
             key: 'expectedCloseDate',
             label: t('columnExpectedClose'),
             getSortValue: (d) => (d.expectedCloseDate ? parseCalendarDate(d.expectedCloseDate) : null),
-            render: (d) => formatDate(d.expectedCloseDate, locale),
+            render: (d) => formatDate(d.expectedCloseDate, locale, timeZone),
         },
         {
             key: 'risk',
@@ -1199,9 +1188,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
-            render: (d) => formatDateTime(d.updatedAt, locale),
+            render: (d) => formatDateTime(d.updatedAt, locale, timeZone),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit, commentCounts]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, timeZone, timezone, inlineEdit, replaceDeal, commentCounts]);
 
     const visibleDeals = deals;
 
@@ -1447,30 +1436,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         title={t('title')}
                         actions={
                             <>
-                                {currencyCounts.size > 1 && (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <button
-                                                type="button"
-                                                aria-label={t('currency')}
-                                                className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/80"
-                                            >
-                                                {displayCurrency}
-                                                <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-                                            </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            {Array.from(currencyCounts.entries())
-                                                .sort((a, b) => b[1] - a[1])
-                                                .map(([c, n]) => (
-                                                    <DropdownMenuItem key={c} onSelect={() => changeCurrency(c)}>
-                                                        <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
-                                                        <span className="ml-auto text-xs text-muted-foreground">{t('currencyCount', { count: n })}</span>
-                                                    </DropdownMenuItem>
-                                                ))}
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                )}
                                 <RecordsActions
                                     entity="deals"
                                     onNew={() => setNewDialogOpen(true)}
@@ -1484,12 +1449,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     />
                 </Rise>
 
+                <DealCurrencyScope counts={currencyCounts} currency={displayCurrency} onChange={changeCurrency} />
+
                 <Rise delay={0.06}>
                     <section>
                         <SectionHeader title={t('sectionPerformance')} />
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={displayCurrency} timezone={timezone} />} />
-                            <SummaryTile label={t('stageRatio')} value={<StageRatio distribution={stageDistribution} currency={displayCurrency} />} />
+                            <SummaryTile className="sm:col-span-2" label={`${t('revenueTrend')} · ${displayCurrency}`} value={<DealsRevenueChart series={revenueSeries} currency={displayCurrency} timezone={timezone} />} />
+                            <SummaryTile label={`${t('stageRatio')} · ${displayCurrency}`} value={<StageRatio distribution={stageDistribution} currency={displayCurrency} />} />
                         </div>
                     </section>
                 </Rise>
@@ -1499,7 +1466,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         <SectionHeader title={t('sectionSummary')} />
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                             <SummaryTile
-                                label={t('openPipeline')}
+                                label={`${t('openPipeline')} · ${displayCurrency}`}
                                 tooltip={t('openPipelineTooltip')}
                                 value={formatCompactCurrency(summary.openValue, displayCurrency, locale)}
                             />
@@ -1509,12 +1476,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 value={String(summary.openCount)}
                             />
                             <SummaryTile
-                                label={t('closedForecast')}
+                                label={`${t('closedForecast')} · ${displayCurrency}`}
                                 tooltip={t('closedForecastTooltip')}
                                 value={formatCompactCurrency(summary.closedForecastValue, displayCurrency, locale)}
                             />
                             <SummaryTile
-                                label={t('closedRevenue')}
+                                label={`${t('closedRevenue')} · ${displayCurrency}`}
                                 tooltip={t('closedRevenueTooltip')}
                                 value={formatCompactCurrency(summary.closedActualValue, displayCurrency, locale)}
                             />
@@ -1660,7 +1627,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             {allMatchingSelected ? (
                                 <>
                                     <span>{t('allMatchingSelected', { total })}</span>
-                                    <button type="button" onClick={clearSelection} className="font-medium text-brand transition hover:underline">
+                                    <button type="button" onClick={clearSelection} className="font-medium text-brand-text transition hover:underline">
                                         {t('clearSelection')}
                                     </button>
                                 </>
@@ -1671,7 +1638,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                         type="button"
                                         onClick={selectAllMatching}
                                         disabled={selectingAll || loadingPage}
-                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                        className="font-medium text-brand-text transition hover:underline disabled:opacity-50"
                                     >
                                         {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
                                     </button>
@@ -1693,6 +1660,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 <Rise delay={0.3}>
                     {renderedDisplayMode === 'kanban' ? (
                         <DealsKanban
+                            timezone={timezone}
                             deals={visibleDeals}
                             pipelines={pipelines}
                             stagesByPipeline={stagesByPipeline}
@@ -1724,6 +1692,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             addColumnSlot={addColumnSlot}
                             renderCard={(item, { onQuickEdit, onDelete, menu }) => (
                                 <DealCard
+                                    timezone={timezone}
                                     deal={item}
                                     company={item.company != null ? companyById.get(item.company) : undefined}
                                     pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
@@ -1738,6 +1707,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             cardOwnsRecordMenu
                             renderListRow={(item) => (
                                 <DealListRow
+                                    timezone={timezone}
                                     deal={item}
                                     company={item.company != null ? companyById.get(item.company) : undefined}
                                     stage={item.stage != null ? stageById.get(item.stage) : undefined}
@@ -1798,10 +1768,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 {peek.drawer}
 
                 <QuickEditDealSheet
+                    key={editReloadRevision}
+                    timezone={timezone}
                     open={editSheetOpen}
-                    onOpenChange={setEditSheetOpen}
+                    onOpenChange={(open) => { setEditSheetOpen(open); if (!open) clearConflict(); }}
                     selectedIds={selectedIds}
-                    selectedDeals={selectedDeals}
+                    selectedDeals={editBases}
                     drafts={drafts}
                     updateDraft={updateDraft}
                     pipelines={pipelines}
@@ -1809,6 +1781,21 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     isSaving={isSaving}
                     saveEdits={saveEdits}
                 />
+
+                {editSheetOpen && conflict && <DealEditConflictDialog
+                    conflict={conflict}
+                    onKeepEditing={clearConflict}
+                    onReload={(current) => {
+                        const otherDraftsRemain = editBases.some((base) => {
+                            const draft = drafts[base.id];
+                            return base.id !== current.id && draft && diffDraft(toDraft(base), draft);
+                        });
+                        setEditBases((bases) => bases.map((item) => item.id === current.id ? current : item));
+                        setDrafts((currentDrafts) => ({ ...currentDrafts, [current.id]: toDraft(current) }));
+                        if (!otherDraftsRemain) setEditReloadRevision((revision) => revision + 1);
+                        clearConflict();
+                    }}
+                />}
 
                 <NewDealDialog
                     open={newDialogOpen}

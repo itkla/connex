@@ -92,6 +92,7 @@ import {
     askConnexCitationHref,
     askConnexCitations,
     askConnexGroupedToolCallIds,
+    askConnexMessageAuthor,
     askConnexMessageNarration,
     askConnexMessageTodos,
     askConnexPromptFocusPending,
@@ -191,6 +192,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import AskConnexCommandCenter from '@/app/components/ask-connex/AskConnexCommandCenter';
 
@@ -204,6 +206,8 @@ const ASK_CONNEX_MENTION_TYPES = {
 type UnavailableState = {
     title: string;
     body: string;
+    /** Retains an existing editor during revalidation while submission stays disabled. */
+    preserveComposer?: boolean;
 } | null;
 
 const noopRecovery = () => {};
@@ -848,10 +852,7 @@ function TranscriptMessage({
     const format = useFormatter();
     const reduceMotion = useReducedMotion() ?? false;
     const user = message.authorKind === 'user';
-    const author = user
-        ? message.authorDisplayName
-            ?? (message.authorUserId === null ? labels.formerMember : labels.memberAuthor(message.authorUserId))
-        : labels.assistantAuthor;
+    const author = askConnexMessageAuthor(message, labels);
     const allowedRecords = useMemo<ReadonlySet<string>>(
         () => new Set(
             (message.citations ?? []).map((citation) => `${citation.kind}:${citation.id}`),
@@ -861,7 +862,7 @@ function TranscriptMessage({
     const narration = useMemo(() => askConnexMessageNarration(message), [message]);
     const todos = useMemo(() => askConnexMessageTodos(message), [message]);
     const animateEntrance = fresh && !user;
-    const createdAt = new Date(message.createdAt);
+    const createdAt = new Date(parseMysqlDateTime(message.createdAt));
     const timestamp = Number.isNaN(createdAt.getTime())
         ? null
         : format.dateTime(createdAt, { hour: 'numeric', minute: '2-digit' });
@@ -1793,13 +1794,13 @@ function ConversationSurface({
         excludedToolCallIds: excludedProposals,
         labels: labels.proposalReview,
         formatDeadline: (instant: string) => {
-            const deadline = new Date(instant);
+            const deadline = new Date(parseMysqlDateTime(instant));
             return Number.isNaN(deadline.getTime())
                 ? instant
                 : surfaceFormat.dateTime(deadline, { hour: 'numeric', minute: '2-digit' });
         },
         formatRemaining: (instant: string) => {
-            const deadline = new Date(instant);
+            const deadline = new Date(parseMysqlDateTime(instant));
             return Number.isNaN(deadline.getTime())
                 ? instant
                 : surfaceFormat.relativeTime(deadline, now);
@@ -2091,8 +2092,8 @@ function ConversationSurface({
                                 <MessageScrollerItem messageId="empty">
                                     <EmptyState
                                         icon={SparklesIcon}
-                                        title={labels.emptyTitle}
-                                        body={labels.emptyBody}
+                                        title={unavailable?.title ?? labels.emptyTitle}
+                                        body={unavailable?.body ?? labels.emptyBody}
                                         tone="brand"
                                         className="border-0 bg-transparent px-4 py-12"
                                         action={(
@@ -2102,7 +2103,7 @@ function ConversationSurface({
                                                     workspace ? 'max-w-xl' : 'max-w-sm',
                                                 )}
                                             >
-                                                {jobs.map((job) => (
+                                                {(unavailable ? [] : jobs).map((job) => (
                                                     <Button
                                                         key={job.id}
                                                         type="button"
@@ -2113,9 +2114,9 @@ function ConversationSurface({
                                                         {job.label}
                                                     </Button>
                                                 ))}
-                                                <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
+                                                {!unavailable ? <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
                                                     {labels.disclosureCreation}
-                                                </p>
+                                                </p> : null}
                                                 {workspace ? (
                                                     <>
                                                         <Separator className="my-4" />
@@ -2257,7 +2258,7 @@ function ConversationSurface({
                 </MessageScroller>
             </MessageScrollerProvider>
 
-            {unavailable ? (
+            {unavailable && !unavailable.preserveComposer ? (
                 loadState !== 'forbidden' ? (
                     <div role="status" className="shrink-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                         <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
@@ -2272,6 +2273,12 @@ function ConversationSurface({
                         requestSend();
                     }}
                 >
+                    {unavailable?.preserveComposer ? (
+                        <p role="status" className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                            <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
+                            {unavailable.body}
+                        </p>
+                    ) : null}
                     {offeringJobs ? (
                         <JobSuggestions
                             jobs={jobs}

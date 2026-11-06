@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
@@ -44,7 +44,7 @@ import { createActivity, createTask, isFieldError } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-import { toMysqlDateTime } from '@/app/lib/utils';
+import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { addDays, startOfDay } from '@/app/lib/calendar';
 import {
@@ -92,11 +92,6 @@ type Props = {
     createRequest?: (payload: CreateActivityPayload, init?: RequestInit) => Promise<unknown>;
 };
 
-function nowLocalValue(): string {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 /** Formats a Date as the `YYYY-MM-DD` local calendar value an `<input type="date">` expects. */
 function toDateInputValue(d: Date): string {
@@ -198,15 +193,15 @@ export default function ActivityDialog({
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={() => {
+                        draft.clear();
+                        guard.confirm.onDiscard();
+                    }}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={() => {
-                    draft.clear();
-                    guard.confirm.onDiscard();
-                }}
-            />
         </>
     );
 }
@@ -270,12 +265,13 @@ export function ActivityDialogForm({
 }: ActivityDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
+    const timeZone = useTimeZone();
     const showApiError = useApiErrorToast('ActivityCreateDialog');
 
     const [type, setType] = useState<ActivityType>(() => defaultType ?? ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState(() => defaultSubject);
     const [notes, setNotes] = useState(() => defaultNotes);
-    const [when, setWhen] = useState(() => defaultTimestamp ?? nowLocalValue());
+    const [when, setWhen] = useState(() => defaultTimestamp ?? toDatetimeLocalValue(new Date().toISOString(), timeZone));
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const [submitting, setSubmitting] = useState(false);
@@ -362,7 +358,7 @@ export function ActivityDialogForm({
                         subject: subject.trim(),
                         notes: notes.trim() || undefined,
                         createdById: currentUserId,
-                        timestamp: when ? toMysqlDateTime(when) : undefined,
+                        timestamp: when ? toMysqlDateTime(when, timeZone) : undefined,
                         personId: selectedPerson?.id ?? undefined,
                         dealId: selectedDeal?.id ?? undefined,
                     },
@@ -428,7 +424,7 @@ export function ActivityDialogForm({
             <div className="px-6 pb-6">
                 <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                             <ChatBubbleLeftRightIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
@@ -540,13 +536,13 @@ export function ActivityDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
-                                        {persons.map((p) => (
+                                        {(p: (typeof persons)[number]) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -574,13 +570,13 @@ export function ActivityDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
-                                        {deals.map((d) => (
+                                        {(d: (typeof deals)[number]) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -597,7 +593,7 @@ export function ActivityDialogForm({
                             <button
                                 type="button"
                                 onClick={enableFollowUp}
-                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                             >
                                 <CheckCircleIcon className="size-4" />
                                 {t('followUpAdd')}
@@ -645,7 +641,7 @@ export function ActivityDialogForm({
                                                     aria-pressed={active}
                                                     className={cn(
                                                         'rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
-                                                        active ? 'bg-brand-light text-brand-dark ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
+                                                        active ? 'bg-brand-light text-brand-text ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
                                                     )}
                                                 >
                                                     {t(`followUp_${preset.key}` as 'followUp_today')}

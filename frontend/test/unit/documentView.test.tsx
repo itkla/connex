@@ -1,11 +1,16 @@
 /** @vitest-environment jsdom */
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import DocumentView from "@/app/components/records/documents/DocumentView";
-import type { DocumentBodyNode, DocumentContent } from "@/app/lib/types";
+import DocumentPaper from "@/app/components/records/deals/DocumentPaper";
+import DocumentAcceptance from "@/app/components/marketing/campaigns/DocumentAcceptance";
+import type { DealDocument, DocumentAcceptancePreview, DocumentBodyNode, DocumentContent } from "@/app/lib/types";
 import dealsMessages from "@/messages/en/deals.json";
+import jaDealsMessages from "@/messages/ja/deals.json";
+import acceptanceMessages from "@/messages/en/document-acceptance.json";
+import jaAcceptanceMessages from "@/messages/ja/document-acceptance.json";
 
 const frozenContent: DocumentContent = {
     generatedAt: "2026-09-01T10:30:00",
@@ -41,6 +46,7 @@ function renderedDocument(nodes?: DocumentBodyNode[]): Document {
         <NextIntlClientProvider locale="en" timeZone="UTC" messages={dealsMessages}>
             <DocumentView
                 type="quote"
+                documentLocale="en"
                 content={{
                     ...frozenContent,
                     body: nodes ? { type: "doc", content: nodes } : null,
@@ -63,7 +69,111 @@ function expectFrozenTotal(document: Document) {
     expect(stacked[0].querySelector("dl:last-child > div:last-child dd")?.textContent).toBe(expected);
 }
 
+afterEach(() => { vi.unstubAllEnvs(); });
+
 describe("DocumentView authoritative monetary content", () => {
+    it.each([
+        { uiLocale: "en", documentLocale: "ja", expected: "￥220" },
+        { uiLocale: "ja", documentLocale: "en", expected: "¥220" },
+    ])("keeps $documentLocale document money consistent under $uiLocale UI in every renderer", ({
+        uiLocale, documentLocale, expected,
+    }) => {
+        for (const blockBody of [false, true]) {
+            const content: DocumentContent = {
+                ...frozenContent,
+                deal: { ...frozenContent.deal, currency: "JPY" },
+                sections: { title: "Quote", terms: `Frozen total: ${expected}` },
+                body: blockBody ? {
+                    type: "doc",
+                    content: [
+                        { type: "paragraph", content: [{ type: "text", text: `Frozen total: ${expected}` }] },
+                        { type: "lineItems" },
+                    ],
+                } : null,
+                lineItems: frozenContent.lineItems.map((item) => ({
+                    ...item, currency: "JPY", unitPrice: 220, lineSubtotal: 220, lineTotal: 220,
+                })),
+                totals: {
+                    currency: "JPY", subtotal: 220, tax: 0, oneTimeTotal: 220,
+                    recurringTotal: 0, grandTotal: 220,
+                },
+            };
+            const document: DealDocument = {
+                id: 1, dealId: 1, type: "quote", locale: documentLocale, status: "draft",
+                version: 1, currency: "JPY", generatedAt: content.generatedAt, createdBy: null,
+                content, requiresApproval: false,
+            };
+            const preview: DocumentAcceptancePreview = {
+                flowId: "frozen-flow", content, dealName: "Quote", workspaceName: "Workspace",
+                recipientEmail: "recipient", deliveryStatus: "sent", recipientStatus: "pending",
+                actionable: false, documentType: "quote", documentVersion: 1, documentLocale,
+            };
+            const messages = uiLocale === "ja"
+                ? { ...jaDealsMessages, ...jaAcceptanceMessages }
+                : { ...dealsMessages, ...acceptanceMessages };
+            for (const view of [
+                <DocumentView key="view" type="quote" content={content} documentLocale={documentLocale} />,
+                <DocumentPaper key="print" document={document} />,
+                <DocumentAcceptance key="acceptance" initialPreview={preview} />,
+            ]) {
+                const markup = renderToStaticMarkup(
+                    <NextIntlClientProvider locale={uiLocale} timeZone="UTC" messages={messages}>
+                        {view}
+                    </NextIntlClientProvider>,
+                );
+                const rendered = new DOMParser().parseFromString(markup, "text/html");
+                expect(rendered.body.textContent).toContain(`Frozen total: ${expected}`);
+                expect(rendered.querySelector(
+                    '[data-testid="document-line-items-table"] tfoot tr:last-child td:last-child',
+                )?.textContent).toBe(expected);
+                expect(rendered.querySelector(
+                    '[data-testid="document-line-items-stacked"] dl:last-child > div:last-child dd',
+                )?.textContent).toBe(expected);
+                expect(rendered.querySelector(
+                    '[data-testid="document-line-items-table"] tbody tr td:last-child',
+                )?.textContent).toBe(expected);
+            }
+        }
+    });
+
+    it.each([
+        { uiLocale: "en", documentLocale: "ja", timeZone: "Asia/Tokyo", expected: "2026/09/02 8:30" },
+        { uiLocale: "ja", documentLocale: "en", timeZone: "Asia/Tokyo", expected: "Sep 2, 2026, 8:30 AM" },
+        { uiLocale: "en", documentLocale: "ja", timeZone: "UTC", expected: "2026/09/01 23:30" },
+        { uiLocale: "ja", documentLocale: "en", timeZone: "UTC", expected: "Sep 1, 2026, 11:30 PM" },
+    ])("uses frozen $documentLocale dates with $timeZone under $uiLocale UI in every renderer", ({
+        uiLocale, documentLocale, timeZone, expected,
+    }) => {
+        vi.stubEnv("TZ", "America/Los_Angeles");
+        const content: DocumentContent = { ...frozenContent, generatedAt: "2026-09-01T23:30:00" };
+        const document: DealDocument = {
+            id: 1, dealId: 1, type: "quote", locale: documentLocale, status: "draft",
+            version: 1, currency: "USD", generatedAt: content.generatedAt, createdBy: null,
+            content, requiresApproval: false,
+        };
+        const preview: DocumentAcceptancePreview = {
+            flowId: "frozen-flow", content, dealName: "Quote", workspaceName: "Workspace",
+            recipientEmail: "recipient", deliveryStatus: "sent", recipientStatus: "pending",
+            actionable: false, documentType: "quote", documentVersion: 1, documentLocale,
+        };
+        const messages = uiLocale === "ja"
+            ? { ...jaDealsMessages, ...jaAcceptanceMessages }
+            : { ...dealsMessages, ...acceptanceMessages };
+        for (const view of [
+            <DocumentView key="view" type="quote" content={content} documentLocale={documentLocale} generatedAt={content.generatedAt} />,
+            <DocumentPaper key="print" document={document} />,
+            <DocumentAcceptance key="acceptance" initialPreview={preview} />,
+        ]) {
+            const markup = renderToStaticMarkup(
+                <NextIntlClientProvider locale={uiLocale} timeZone={timeZone} messages={messages}>
+                    {view}
+                </NextIntlClientProvider>,
+            );
+            const rendered = new DOMParser().parseFromString(markup, "text/html");
+            expect(rendered.body.textContent).toContain(expected);
+        }
+    });
+
     it.each(["paragraph", "heading", "codeBlock", "unknown", "horizontalRule"])(
         "renders the frozen USD 100,000 fallback when lineItems is hidden inside %s",
         (type) => {

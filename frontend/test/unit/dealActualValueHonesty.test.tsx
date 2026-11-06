@@ -8,14 +8,21 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { submitDealDraftUpdates } from "@/app/components/records/deals/DealsBrowser";
-import { submitDealDraftUpdate } from "@/app/components/records/deals/EditDealSheet";
+import { submitDealDraftUpdate, submitDealDraftUpdates } from "@/app/components/records/deals/dealEditConflict";
 import QuickEditDealSheet, { type DealDraft } from "@/app/components/records/deals/QuickEditDealSheet";
-import { actualValueForOutcome } from "@/app/components/records/deals/dealOutcome";
-import type { Deal, Pipeline, Stage } from "@/app/lib/types";
+import { actualValueForOutcome, requestedActualValue } from "@/app/components/records/deals/dealOutcome";
+import type { Deal, Pipeline, Stage, UpdateDealPayload } from "@/app/lib/types";
+import { toastError } from "@/app/lib/toast";
+
+const displayZone = vi.hoisted<{ value: string | undefined }>(() => ({ value: "UTC" }));
+
+vi.mock("@/app/lib/toast", async () => ({
+    ...await vi.importActual<typeof import("@/app/lib/toast")>("@/app/lib/toast"),
+    toastError: vi.fn(),
+}));
 
 const { updateDealMock } = vi.hoisted(() => ({
-    updateDealMock: vi.fn(),
+    updateDealMock: vi.fn<(id: number, payload: UpdateDealPayload, init?: RequestInit) => Promise<Deal>>(),
 }));
 
 vi.mock("react", async () => {
@@ -35,7 +42,7 @@ vi.mock("@/app/lib/api", async () => {
 });
 
 vi.mock("next-intl", () => ({
-    useTranslations: () => (key: string) => key,
+    useTimeZone: () => displayZone.value, useTranslations: () => (key: string) => key,
 }));
 
 vi.mock("motion/react", async () => {
@@ -225,9 +232,10 @@ function findFailureStageSelector(root: unknown): (stage: Stage) => unknown {
     return (stage) => onValueChange(stage);
 }
 
-function createOutcomeDraftHarness() {
+function createOutcomeDraftHarness(timezone = "UTC") {
     let draft: DealDraft = { ...WON_LINE_ITEM_DRAFT };
     const props = {
+        timezone,
         open: true,
         onOpenChange: () => undefined,
         selectedIds: new Set([WON_LINE_ITEM_DEAL.id]),
@@ -244,6 +252,11 @@ function createOutcomeDraftHarness() {
 
     return {
         getDraft: () => draft,
+        changeClosedAt: (value: string) => {
+            const tree = QuickEditDealSheet({ ...props, drafts: { [WON_LINE_ITEM_DEAL.id]: draft } });
+            findElementFunction(tree, (_type, inputProps) => inputProps.id === `deal-closed-at-${WON_LINE_ITEM_DEAL.id}`,
+                "onChange", "Close date input was not rendered")({ target: { value } });
+        },
         selectOutcome: (outcome: "Open" | "Won" | "Lost") => {
             const tree = QuickEditDealSheet({
                 ...props,
@@ -262,12 +275,49 @@ function createOutcomeDraftHarness() {
 }
 
 beforeEach(() => {
+    displayZone.value = "UTC";
+    vi.mocked(toastError).mockClear();
     updateDealMock.mockReset().mockResolvedValue(WON_LINE_ITEM_DEAL);
 });
 
+describe("deal edit versions", () => {
+    it("sends the snapshot version from both full-record sheet save paths", async () => {
+        const draft: DealDraft = {
+            expectedVersion: 17, name: "Draft", value: 100, actualValue: 0, currency: "JPY",
+            pipeline: 2, stage: 3, company: null, expectedCloseDate: "", closedAt: null,
+            closedReason: null, won: null,
+        };
+        await submitDealDraftUpdate(7, draft);
+        expect(updateDealMock).toHaveBeenLastCalledWith(7, expect.objectContaining({ expectedVersion: 17 }), {});
+        await submitDealDraftUpdates([{ dealId: 7, draft }]);
+        expect(updateDealMock).toHaveBeenLastCalledWith(7, expect.objectContaining({ expectedVersion: 17 }), {});
+    });
+
+    it("stops a batch on the first refused record before sending later drafts", async () => {
+        updateDealMock.mockResolvedValueOnce(WON_LINE_ITEM_DEAL).mockRejectedValueOnce(new Error('Refused'));
+        await expect(submitDealDraftUpdates([
+            { dealId: 1, draft: WON_LINE_ITEM_DRAFT },
+            { dealId: 2, draft: WON_LINE_ITEM_DRAFT },
+            { dealId: 3, draft: WON_LINE_ITEM_DRAFT },
+        ])).rejects.toThrow('Refused');
+        expect(updateDealMock).toHaveBeenCalledTimes(2);
+    });
+});
+
 describe("lost-deal actual value", () => {
+    it("rejects a missing DST time without throwing from the close-date editor", () => {
+        displayZone.value = "Asia/Tokyo";
+        const harness = createOutcomeDraftHarness("America/New_York");
+        const previous = harness.getDraft().closedAt;
+        expect(() => harness.changeClosedAt("2026-03-08T02:30")).not.toThrow();
+        expect(harness.getDraft().closedAt).toBe(previous);
+        expect(toastError).toHaveBeenCalledWith("closedAtInvalid");
+        harness.changeClosedAt("2026-03-08T03:30");
+        expect(harness.getDraft().closedAt).toBe("2026-03-08 07:30:00");
+    });
     function renderActualValueInput(won: boolean, actualValue: number) {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "UTC",
             open: true,
             onOpenChange: () => undefined,
             selectedIds: new Set([LOST_DEAL.id]),
@@ -309,6 +359,86 @@ describe("lost-deal actual value", () => {
         expect(actualValueForOutcome(null, 275)).toBe(275);
     });
 
+    it("omits an untouched amount on each edit entry point and preserves an entered zero", async () => {
+        const draft: DealDraft = {
+            ...LOST_DRAFT,
+            actualValue: 0,
+            actualValueEdited: false,
+            won: true,
+        };
+        await submitDealDraftUpdate(LOST_DEAL.id, draft);
+        await submitDealDraftUpdates([{ dealId: LOST_DEAL.id, draft }]);
+        for (const call of updateDealMock.mock.calls) {
+            expect(JSON.stringify(call[1])).not.toContain('"actualValue"');
+        }
+
+        updateDealMock.mockClear();
+        draft.actualValueEdited = true;
+        await submitDealDraftUpdate(LOST_DEAL.id, draft);
+        await submitDealDraftUpdates([{ dealId: LOST_DEAL.id, draft }]);
+        for (const call of updateDealMock.mock.calls) {
+            expect(call[1]).toMatchObject({ actualValue: 0 });
+        }
+        expect(requestedActualValue(true, 0, false)).toBeUndefined();
+        expect(requestedActualValue(true, 0, true)).toBe(0);
+    });
+
+    it.each([false, true])("keeps the imported Tokyo close date and fresh-win amount when edited=%s", (edited) => {
+        displayZone.value = "Asia/Tokyo";
+        const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "Asia/Tokyo",
+            open: true,
+            onOpenChange: () => undefined,
+            selectedIds: new Set([LOST_DEAL.id]),
+            selectedDeals: [{ ...LOST_DEAL, won: null, actualValue: 0 }],
+            drafts: { [LOST_DEAL.id]: {
+                ...LOST_DRAFT, won: true, actualValue: 0, actualValueEdited: edited,
+                closedAt: "2025-02-28 15:00:00",
+            } },
+            updateDraft: () => undefined,
+            pipelines: [],
+            stagesByPipeline: {},
+            isSaving: false,
+            saveEdits: () => undefined,
+        }));
+        const input = html.match(/<input\b[^>]*id="deal-actual-value-7"[^>]*>/)?.[0];
+        const closedAt = html.match(/<input\b[^>]*id="deal-closed-at-7"[^>]*>/)?.[0];
+        expect(input).toContain(`value="${edited ? 0 : 500}"`);
+        expect(closedAt).toContain('value="2025-03-01T00:00"');
+    });
+
+    it.each([
+        { profile: "UTC", workspace: "Asia/Tokyo", expected: "2025-03-01T00:00" },
+        { profile: "Asia/Tokyo", workspace: "America/New_York", expected: "2025-02-28T10:00" },
+        { profile: undefined, workspace: "Asia/Tokyo", expected: "2025-03-01T00:00" },
+        { profile: "invalid", workspace: "UTC+9", expected: "2025-03-01T00:00" },
+        { profile: undefined, workspace: "invalid", expected: "2025-02-28T15:00" },
+    ])("uses reporting workspace $workspace despite profile $profile in the close editor", ({ profile, workspace, expected }) => {
+        displayZone.value = profile;
+        const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: workspace,
+            open: true,
+            onOpenChange: () => undefined,
+            selectedIds: new Set([LOST_DEAL.id]),
+            selectedDeals: [LOST_DEAL],
+            drafts: { [LOST_DEAL.id]: { ...LOST_DRAFT, closedAt: "2025-02-28 15:00:00" } },
+            updateDraft: () => undefined,
+            pipelines: [],
+            stagesByPipeline: {},
+            isSaving: false,
+            saveEdits: () => undefined,
+        }));
+        const closedAt = html.match(/<input\b[^>]*id="deal-closed-at-7"[^>]*>/)?.[0];
+        expect(closedAt).toContain(`value="${expected}"`);
+    });
+
+    it.each(["Asia/Tokyo", "America/New_York"])("saves Tokyo reporting midnight as the same UTC instant under %s profile", (zone) => {
+        displayZone.value = zone;
+        const harness = createOutcomeDraftHarness("Asia/Tokyo");
+        harness.changeClosedAt("2025-03-01T00:00");
+        expect(harness.getDraft().closedAt).toBe("2025-02-28 15:00:00");
+    });
+
     it("preserves realized value when a won deal is toggled through lost back to won before submit", async () => {
         const form = createOutcomeDraftHarness();
 
@@ -335,6 +465,7 @@ describe("lost-deal actual value", () => {
         expect(updateDealMock).toHaveBeenCalledWith(
             WON_LINE_ITEM_DEAL.id,
             expect.objectContaining({ actualValue: WON_LINE_ITEM_DEAL.actualValue }),
+            {},
         );
     });
 
@@ -356,6 +487,7 @@ describe("lost-deal actual value", () => {
             2,
             WON_LINE_ITEM_DEAL.id,
             expect.objectContaining({ actualValue: 0 }),
+            {},
         );
     });
 

@@ -148,6 +148,7 @@ export default function NeedsYou({ cooling, risks }: { cooling: CoolingItem[]; r
                                     </div>
                                     <span className="shrink-0 text-sm font-medium tabular-nums text-foreground">
                                         {formatCompactCurrency(d.value, d.currency, locale)}
+                                        <span className="block text-xs text-muted-foreground">{d.currency}</span>
                                     </span>
                                     {d.level !== "none" && (
                                         <span

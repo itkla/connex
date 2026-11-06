@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DealLineItems from '@/app/components/records/deals/DealLineItems';
 import type { DealLineItem, DealLineItemsResponse, Product } from '@/app/lib/types';
 import en from '@/messages/en/deals.json';
+import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
 import ja from '@/messages/ja/deals.json';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 
@@ -14,11 +15,12 @@ const api = vi.hoisted(() => ({
     refresh: vi.fn(),
 }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: api.refresh }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: api.refresh }), usePathname: () => '/' }));
+vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 9 }) }));
 vi.mock('next-intl', async () => {
     const { createTranslator } = await vi.importActual<typeof import('next-intl')>('next-intl');
     return {
-        useLocale: () => state.locale,
+        useTimeZone: () => "UTC", useLocale: () => state.locale,
         useTranslations: () => createTranslator({
             locale: state.locale,
             messages: state.locale === 'ja' ? ja.DealsLineItems : en.DealsLineItems,
@@ -53,6 +55,16 @@ vi.mock('@/components/ui/combobox', () => {
     };
 });
 
+vi.mock('@/components/ui/select', () => {
+    const Container = ({ children }: PropsWithChildren) => <div>{children}</div>;
+    return { Select: Container, SelectContent: Container, SelectItem: Container, SelectTrigger: Container, SelectValue: () => null };
+});
+vi.mock('@/components/ui/dialog', () => ({
+    Dialog: () => null,
+    DialogContent: () => null, DialogDescription: () => null, DialogFooter: () => null,
+    DialogHeader: () => null, DialogTitle: () => null,
+}));
+
 function foreignLine(id: number): DealLineItem {
     return {
         id,
@@ -73,14 +85,17 @@ function foreignLine(id: number): DealLineItem {
     };
 }
 
+const shell = {};
 const mountedRoots: Array<{ unmount: () => void }> = [];
 
 async function mount(initial: DealLineItemsResponse) {
     const { createRoot } = await import('react-dom/client');
     const installed = installInteractiveDocument();
+    Object.assign(window, { location: { pathname: '/' } });
+    bindRenderedWorkspace(shell, 9);
     const root = createRoot(installed.container);
     mountedRoots.push(root);
-    await act(async () => root.render(<DealLineItems dealId={7} dealCurrency="USD" initial={initial} />));
+    await act(async () => root.render(<DealLineItems dealId={7} dealWorkspaceId={9} dealCurrency="USD" initial={initial} />));
     return installed;
 }
 
@@ -93,6 +108,7 @@ beforeEach(() => {
 
 afterEach(async () => {
     for (const root of mountedRoots.splice(0)) await act(async () => root.unmount());
+    releaseRenderedWorkspace(shell);
     vi.unstubAllGlobals();
 });
 
@@ -106,7 +122,7 @@ describe('deal line currency repair', () => {
         expect(text).toContain(messages.totalsUnavailable);
         expect(text).toContain(messages.currencyMismatch.replaceAll('{lineCurrency}', 'JPY').replaceAll('{dealCurrency}', 'USD'));
         expect(text).toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'JPY' }).format(100000));
-        expect(text).toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'JPY' }).format(20));
+        expect(mounted.elements.some((element) => element.getAttribute('aria-label') === messages.discountValue && element.value === '20')).toBe(true);
         expect(text).not.toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(100000));
         expect(text).not.toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(0));
         expect(mounted.elements.some((element) => element.tagName === 'TFOOT')).toBe(false);
@@ -119,12 +135,12 @@ describe('deal line currency repair', () => {
         const mounted = await mount({ items: [first, remaining], totals: null });
         api.deleteLine.mockResolvedValueOnce({ items: [remaining], totals: null });
         const remove = mounted.elements.find((element) => element.tagName === 'BUTTON'
-            && element.getAttribute('aria-label') === en.DealsLineItems.remove);
+            && element.textContent === en.DealsLineItems.remove);
         if (!remove) throw new Error('Remove line button was not rendered');
 
         await act(async () => mounted.dispatch('click', remove));
 
-        expect(api.deleteLine).toHaveBeenCalledWith(7, first.id);
+        expect(api.deleteLine).toHaveBeenCalledWith(7, first.id, expect.any(Object));
         expect(api.refresh).toHaveBeenCalledOnce();
         expect(mounted.container.textContent).toContain(en.DealsLineItems.totalsUnavailable);
         expect(mounted.container.textContent).toContain('¥100,000');
@@ -136,12 +152,12 @@ describe('deal line currency repair', () => {
             totals: { currency: null, subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 },
         });
         const lastRemove = mounted.elements.find((element) => element.tagName === 'BUTTON'
-            && element.getAttribute('aria-label') === en.DealsLineItems.remove
+            && element.textContent === en.DealsLineItems.remove
             && element !== remove);
         if (!lastRemove) throw new Error('Remaining line button was not rendered');
         await act(async () => mounted.dispatch('click', lastRemove));
 
-        expect(api.deleteLine).toHaveBeenLastCalledWith(7, remaining.id);
+        expect(api.deleteLine).toHaveBeenLastCalledWith(7, remaining.id, expect.any(Object));
         expect(mounted.container.textContent).not.toContain(en.DealsLineItems.totalsUnavailable);
         expect(mounted.container.textContent).toContain(en.DealsLineItems.empty);
     });

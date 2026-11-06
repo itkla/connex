@@ -196,6 +196,7 @@ public final class TablePlaneRegistry {
         "product",
         "entity_reference",
         "historical_notification_baseline",
+        "warmth_notification_model_state",
         "identity_collision",
         "introduction",
         "job_run",

@@ -3,6 +3,18 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
+  <resultMap id="CompanyEngagementCountsResult"
+             type="ooo.klae.connex.backend.dto.CompanyEngagementCountsDto">
+    <constructor>
+      <arg name="personCount" column="person_count" javaType="_long"/>
+      <arg name="numDeals" column="num_deals" javaType="_long"/>
+      <arg name="numTasks" column="num_tasks" javaType="_long"/>
+      <arg name="openTasks" column="open_tasks" javaType="_long"/>
+      <arg name="numActivities" column="num_activities" javaType="_long"/>
+      <arg name="numNotes" column="num_notes" javaType="_long"/>
+    </constructor>
+  </resultMap>
+
   <sql id="companyColumns">
     id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at,
     logo_url, archived_at
@@ -118,22 +130,24 @@
            t.id AS source_id,
            p.company_id,
            'task' AS interaction_type,
-           t.created_at AS touched_at,
+           t.completed_at AS touched_at,
            #{model.taskWeight} AS weight
     FROM task t
     JOIN person p ON p.id = t.person_id
     WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+      AND t.completed = TRUE AND t.completed_at IS NOT NULL
       AND <include refid="attributablePerson"/>
     UNION ALL
     SELECT 'task' AS source_type,
            t.id AS source_id,
            d.company_id,
            'task' AS interaction_type,
-           t.created_at AS touched_at,
+           t.completed_at AS touched_at,
            #{model.taskWeight} AS weight
     FROM task t
     JOIN deal d ON d.id = t.deal_id
     WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+      AND t.completed = TRUE AND t.completed_at IS NOT NULL
       AND d.company_id IS NOT NULL
       AND (t.person_id IS NULL OR EXISTS (
         SELECT 1 FROM person p
@@ -212,22 +226,24 @@
     SELECT 'task' AS source_type,
            t.id AS source_id,
            'task' AS interaction_type,
-           t.created_at AS touched_at,
+           t.completed_at AS touched_at,
            #{model.taskWeight} AS weight
     FROM task t
     JOIN person p ON p.id = t.person_id
     WHERE t.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+      AND t.completed = TRUE AND t.completed_at IS NOT NULL
       AND <include refid="attributablePerson"/>
-      AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+      AND t.completed_at &lt;= #{reference}
     UNION ALL
     SELECT 'task' AS source_type,
            t.id AS source_id,
            'task' AS interaction_type,
-           t.created_at AS touched_at,
+           t.completed_at AS touched_at,
            #{model.taskWeight} AS weight
     FROM task t
     JOIN deal d ON d.id = t.deal_id
     WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+      AND t.completed = TRUE AND t.completed_at IS NOT NULL
       AND d.company_id = #{companyId}
       AND (t.person_id IS NULL OR EXISTS (
         SELECT 1 FROM person p
@@ -238,7 +254,7 @@
         WHERE p.id = t.person_id AND p.company_id = d.company_id
           AND <include refid="attributablePerson"/>
       )
-      AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+      AND t.completed_at &lt;= #{reference}
   </sql>
 
   <!-- Company evidence reads the capped source set twice: once collapsed to totals, once ranked for
@@ -635,7 +651,7 @@
   </select>
 
   <select id="getCompanyEngagementCounts"
-          resultType="ooo.klae.connex.backend.dto.CompanyEngagementCountsDto">
+          resultMap="CompanyEngagementCountsResult">
     SELECT
       (SELECT COUNT(*) FROM person p
        WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}

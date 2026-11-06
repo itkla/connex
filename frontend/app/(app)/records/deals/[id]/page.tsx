@@ -10,7 +10,7 @@ import ActionRecordBridge from '@/app/components/actions/ActionRecordBridge';
 import type { ReactNode } from 'react';
 import { BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
-import { getLocale, getTranslations } from 'next-intl/server';
+import { getTimeZone, getLocale, getTranslations } from 'next-intl/server';
 
 import {
     getActivitiesForDeal,
@@ -20,6 +20,7 @@ import {
     getContacts,
     getContactTemperatures,
     getCurrentUserResultFromCookie,
+    getMyWorkspacesFromCookie,
     getEntityCustomFieldsFromCookie,
     getContextNotifications,
     getDealById,
@@ -30,6 +31,7 @@ import {
     getDealPeople,
     getDealRisk,
     getDealStageHistory,
+    getRelationshipMapAvailability,
     getNotesForDeal,
     getPipelineById,
     getStagesByPipelineId,
@@ -57,6 +59,8 @@ import {
     formatDateTime,
     parseMysqlDateTime,
 } from '@/app/lib/utils';
+import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
+import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
 import { citationTitleKey } from '@/app/lib/dealBriefCitations';
 
 import Rise from '@/app/components/motion/Rise';
@@ -98,6 +102,7 @@ type DealPageProps = {
 };
 
 export default async function DealPage({ params }: DealPageProps) {
+    const timeZone = await getTimeZone();
     const { id: rawId } = await params;
     const id = Number(rawId);
     if (!Number.isInteger(id) || id < 1) notFound();
@@ -107,6 +112,8 @@ export default async function DealPage({ params }: DealPageProps) {
     if (!currentUserResult.ok) return <WorkspaceUnavailablePage />;
     const currentUser = currentUserResult.data;
     if (!currentUser) redirect('/auth/login');
+    const workspaceSnapshot = await getMyWorkspacesFromCookie(cookie);
+    const timezone = resolveWorkspaceTimezone(workspaceSnapshot, currentUser.timezone);
 
     const [
         t,
@@ -123,6 +130,7 @@ export default async function DealPage({ params }: DealPageProps) {
         customFields,
         risk,
         stageHistory,
+        mapAvailability,
     ] =
         await Promise.all([
             getTranslations('DealsPage'),
@@ -144,6 +152,7 @@ export default async function DealPage({ params }: DealPageProps) {
             getEntityCustomFieldsFromCookie("deal", id, cookie),
             getDealRisk(id, init).catch(() => null),
             getDealStageHistory(id, init).catch(() => [] as DealStageHistory[]),
+            getRelationshipMapAvailability(init),
         ]);
 
     if (dealAccess.kind === 'forbidden') return <AccessDeniedPage />;
@@ -292,7 +301,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                     {deal.expectedCloseDate ? (
                                         <span className="inline-flex items-center gap-1">
                                             <CalendarIcon className="size-3.5" />
-                                            {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
+                                            {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale, timeZone) })}
                                         </span>
                                     ) : null}
                                 </h3>
@@ -312,6 +321,8 @@ export default async function DealPage({ params }: DealPageProps) {
                     <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
                         <AskConnexRecordEntry kind="deal" />
                         <DealActionsMenu
+                            timezone={timezone}
+                            mapAvailability={mapAvailability}
                             deal={deal}
                             pipelines={pipelines}
                             stagesByPipeline={stagesByPipeline}
@@ -343,10 +354,10 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
                                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
                                         <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
-                                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale)} />
-                                        <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt, locale) : '—'} />
-                                        <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
-                                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
+                                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale, timeZone)} />
+                                        <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : '—'} />
+                                        <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale, timeZone)} />
+                                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale, timeZone)} />
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
                                     </dl>
                                 </div>
@@ -405,7 +416,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                                             </div>
                                                         </div>
                                                         {role ? (
-                                                            <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                            <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
                                                                 {role}
                                                             </span>
                                                         ) : null}
@@ -446,6 +457,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         }
                                     />
                                     <DealLifecycleProgress
+                                        timezone={timezone}
                                         stages={stages}
                                         currentStageId={deal.stage ?? null}
                                         outcome={outcome}
@@ -491,7 +503,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         />
                                         <SummaryTile
                                             label={closed ? t('closed') : t('expectedClose')}
-                                            value={closed ? formatDate(deal.closedAt, locale) : formatDate(deal.expectedCloseDate, locale)}
+                                            value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : formatDate(deal.expectedCloseDate, locale, timeZone)}
                                         />
                                     </div>
                                 </div>
@@ -516,7 +528,7 @@ export default async function DealPage({ params }: DealPageProps) {
                             <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-8">
                                 <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
 
-                                <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
+                                <DealLineItems key={`${deal.workspaceId}:${deal.id}`} dealId={deal.id} dealWorkspaceId={deal.workspaceId ?? null} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
                             </RecordDetailSection>
                         </Rise>
                     </div>
@@ -628,7 +640,7 @@ function SectionLabelWithTooltip({ title, tooltip }: { title: string; tooltip: R
 function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => string }) {
     if (outcome === 'won') {
         return (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
                 <CheckCircleIcon className="size-3" /> {t('statusWon')}
             </span>
         );

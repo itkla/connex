@@ -112,7 +112,8 @@
         "cannotChangeStatus": "ステータスを変更できません: パイプラインまたはステージが未設定です",
         "dealClosed": "案件を決着にしました",
         "dealReopened": "案件を進行中に戻しました",
-        "failedToUpdateStatus": "案件のステータスを更新できませんでした"
+        "failedToUpdateStatus": "案件のステータスを更新できませんでした",
+        "failedToLoadDeal": "案件を読み込めませんでした"
     },
     "DealsActivityBreakdown": {
         "activityMix": "アクティビティ構成",
@@ -120,6 +121,7 @@
         "total": "合計"
     },
     "DealsCard": {
+        "closedOn": "決着日：{date}",
         "dealActions": "案件アクション",
         "view": "表示",
         "quickEdit": "クイック編集",
@@ -147,6 +149,7 @@
         "achievedOn": "{date} に到達"
     },
     "DealsTaskList": {
+        "entityLabel": "タスク",
         "taskDeleted": "タスクを削除しました",
         "failedToDeleteTask": "タスクを削除できませんでした",
         "taskMarkedAsComplete": "タスクを完了にしました",
@@ -185,6 +188,7 @@
         "a11yCancelled": "案件「{name}」の移動をキャンセルしました。"
     },
     "DealsBrowser": {
+        "columnClosedAt": "決着日",
         "title": "案件",
         "addDeal": "案件を追加",
         "newButton": "新規",
@@ -194,12 +198,12 @@
         "openPipelineTooltip": "オープンのままの全案件の予測金額の合計です。決着予定日では絞り込みません。",
         "openDeals": "オープン案件",
         "openDealsTooltip": "まだオープンの案件の件数です。",
-        "closedForecast": "決着案件の予測金額",
-        "closedForecastTooltip": "決着した案件の予測金額の合計です。実績を比較する基準となります。",
-        "closedRevenue": "決着案件の実績収益",
-        "closedRevenueTooltip": "決着した案件で記録された実績金額の合計です。",
+        "closedForecast": "受注案件の予測金額",
+        "closedForecastTooltip": "受注案件のみの予測金額の合計です。予測精度の比較基準となります。",
+        "closedRevenue": "受注売上",
+        "closedRevenueTooltip": "受注案件に記録された実績金額の合計です。",
         "forecastAccuracy": "予測精度",
-        "forecastAccuracyTooltip": "決着案件の実績収益 ÷ 決着案件の予測金額。決着したすべての案件で、実績が予測にどれだけ近かったかを示します。100% は実績が予測と完全に一致したことを意味し、100% を超える場合は予測を上回ったことを意味します。",
+        "forecastAccuracyTooltip": "受注売上 ÷ 受注案件の予測金額。受注案件のみを対象とし、失注案件は影響しません。100%は実績金額と予測金額が一致し、100%を超える場合は実績が予測を上回ったことを意味します。",
         "displayMode": "表示モード",
         "gridView": "グリッド表示",
         "tableView": "テーブル表示",
@@ -283,9 +287,9 @@
     },
     "DealsRevenueChart": {
         "actualRevenue": "実績収益",
-        "projectedRevenue": "予測収益",
+        "projectedRevenue": "全案件の金額（予定成約日別）",
         "today": "本日",
-        "projectedAmount": "予測 · {amount}",
+        "projectedAmount": "全案件の金額 · {amount}",
         "actualAmount": "実績 · {amount}"
     },
     "DealsEditSheet": {
@@ -320,6 +324,7 @@
         "create": "作成"
     },
     "DealsQuickEditSheet": {
+        "closedAtInvalid": "下に表示された集計タイムゾーンでは存在しない時刻です。別の時刻を選んでください。",
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "titleSingle": "案件をクイック編集",
         "titleMulti": "{count} 件の案件をクイック編集",
@@ -387,7 +392,22 @@
         "grandTotal": "合計",
         "totalsUnavailable": "明細の通貨を修正している間は、合計を表示できません。",
         "currencyMismatch": "この明細の通貨は{lineCurrency}、商談の通貨は{dealCurrency}です。金額を確認してから{dealCurrency}で明細を編集するか、明細を削除してください。通貨換算は行われません。",
-        "saveFailed": "明細を保存できませんでした"
+        "saveFailed": "明細を保存できませんでした",
+        "draftTitle": "明細を追加",
+        "draftHelp": "この明細は未保存です。単価を入力して保存すると、案件金額の変更を確認できます。",
+        "saveLine": "明細を保存",
+        "discardDraft": "明細を破棄",
+        "taxRate": "税率（%）",
+        "discountType": "値引き方法",
+        "discountValue": "値引き額・率",
+        "discountNone": "値引きなし",
+        "discountPercent": "割合（%）",
+        "discountAmount": "金額指定",
+        "confirmTitle": "案件金額を変更しますか？",
+        "confirmDescription": "案件金額が{previous}から税込み{next}に変わります。最後の明細を削除すると、以前の手入力金額に戻ります。",
+        "confirmReplacement": "金額を変更して保存",
+        "cancel": "キャンセル",
+        "restoreHelp": "最後の明細を削除すると、案件金額は手入力の{amount}に戻ります。"
     },
     "DealsDocuments": {
         "title": "ドキュメント",
@@ -551,5 +571,33 @@
         "approverChangeRefusedDescription": "選択したメンバーの中に、ドキュメントを承認できない方が含まれている可能性があります。承認者は変更されていません。選択内容を確認して、もう一度お試しください。",
         "refreshFailed": "ドキュメントを更新できませんでした",
         "statusFailed": "ドキュメントのステータスを更新できませんでした"
+    },
+    "DealsEditConflict": {
+        "title": "案件が更新されています",
+        "description": "「{name}」を読み込んだ後に、別の変更が保存されました。入力中の内容は保持されています。変更された項目：",
+        "loadFailed": "「{name}」は更新されています。入力中の内容は保持されていますが、最新の情報を取得できませんでした。編集を続け、再度保存すると変更内容を確認できます。",
+        "otherChanges": "表示中の項目以外も含め、別の更新が保存されています。",
+        "keepEditing": "編集を続ける",
+        "reload": "最新の情報を読み込む",
+        "confirmTitle": "入力内容を破棄して再読み込みしますか？",
+        "confirmDescription": "「{name}」の未保存の変更は失われます。最新の保存内容に置き換わります。",
+        "discardAndReload": "破棄して再読み込み",
+        "fields": {
+            "name": "案件名",
+            "value": "予測金額",
+            "actualValue": "実績金額",
+            "valueSource": "金額の算出方法",
+            "currency": "通貨",
+            "pipeline": "パイプライン",
+            "stage": "ステージ",
+            "position": "ボード内の位置",
+            "company": "会社",
+            "ownerId": "担当者",
+            "expectedCloseDate": "決着予定日",
+            "closedAt": "決着日時",
+            "closedReason": "決着理由",
+            "won": "結果",
+            "riskExcluded": "案件リスク評価"
+        }
     }
 }

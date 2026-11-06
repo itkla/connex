@@ -44,8 +44,8 @@ class DealMapperXmlTest {
         "dealKpiNewPipelineSeriesByBoundaries",
         "dealPipelineValueWindow",
         "revenueClosedByPeriods",
-        "revenueScheduledClosedByPeriods",
-        "revenueProjectedByPeriods"
+        "revenueProjectedByPeriods",
+        "revenueProjectedByMonth"
     );
 
     @Test
@@ -158,7 +158,6 @@ class DealMapperXmlTest {
                 "dealKpiClosedSeriesByBoundaries",
                 "dealKpiNewPipelineSeriesByBoundaries",
                 "revenueClosedByPeriods",
-                "revenueScheduledClosedByPeriods",
                 "revenueProjectedByPeriods")) {
             String sql = sql(configuration, statement, MemberScope.allTeam());
 

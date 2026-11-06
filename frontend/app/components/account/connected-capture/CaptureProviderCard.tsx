@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { ArrowPathIcon, LinkIcon, TrashIcon } from '@heroicons/react/24/outline';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import { useLiveNow } from '@/app/hooks/useNow';
 import {
@@ -130,6 +130,7 @@ export default function CaptureProviderCard({
     onSync: () => void;
     onRetryCapture: () => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AccountConnections');
     const tCapture = useTranslations('AccountCaptureProvider');
     const locale = useLocale();
@@ -348,7 +349,7 @@ export default function CaptureProviderCard({
                                 })}
                                 <GlanceItem label={t('lastSyncLabel')}>
                                     {lastSuccess
-                                        ? formatRelativeTime(lastSuccess, locale, now)
+                                        ? formatRelativeTime(lastSuccess, locale, now, timeZone)
                                         : t('lastSyncNever')}
                                 </GlanceItem>
                             </dl>

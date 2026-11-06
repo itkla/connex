@@ -1,5 +1,6 @@
 'use client';
 
+import type { ComboboxRootChangeEventDetails } from '@base-ui/react/combobox';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -32,6 +33,7 @@ import { SegmentedControl } from '@/components/ui/segmented-control';
 import RichNoteEditor from './RichNoteEditor';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
+import type { ServerPickerSearch } from '@/lib/server-picker-search';
 import { cn } from '@/lib/utils';
 
 import { createNote, updateNote, isFieldError } from '@/app/lib/api';
@@ -143,9 +145,11 @@ type Props = {
     initialDraftGeneration?: number;
     onDraftMounted?: () => void;
     requestInit?: RequestInit;
-    onPersonQueryChange?: (query: string) => void;
-    onDealQueryChange?: (query: string) => void;
+    onPersonQueryChange?: (query: string, details?: ComboboxRootChangeEventDetails) => void;
+    onDealQueryChange?: (query: string, details?: ComboboxRootChangeEventDetails) => void;
+    personServerSearch?: ServerPickerSearch;
     personOptionsLoading?: boolean;
+    dealServerSearch?: ServerPickerSearch;
     dealOptionsLoading?: boolean;
     /** Runs after a successful create or update so list consumers can reload their current page. */
     onSaved?: () => void;
@@ -179,7 +183,9 @@ function ScopedNoteDialog({
     requestInit,
     onPersonQueryChange,
     onDealQueryChange,
+    personServerSearch,
     personOptionsLoading = false,
+    dealServerSearch,
     dealOptionsLoading = false,
     onSaved,
     activeWorkspaceId,
@@ -270,7 +276,9 @@ function ScopedNoteDialog({
                             requestInit={requestInit}
                             onPersonQueryChange={onPersonQueryChange}
                             onDealQueryChange={onDealQueryChange}
+                            personServerSearch={personServerSearch}
                             personOptionsLoading={personOptionsLoading}
+                            dealServerSearch={dealServerSearch}
                             dealOptionsLoading={dealOptionsLoading}
                             onSaved={onSaved}
                             onSubmittingChange={(value) => {
@@ -285,15 +293,15 @@ function ScopedNoteDialog({
                         />
                     </div>
                 </DrawerContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={() => {
+                        if (isCreate) draft.clear();
+                        guard.confirm.onDiscard();
+                    }}
+                />
             </Drawer>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={() => {
-                    if (isCreate) draft.clear();
-                    guard.confirm.onDiscard();
-                }}
-            />
         </>
     );
 }
@@ -313,9 +321,11 @@ type FormProps = {
     contentWidth?: 'default' | 'wide';
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
-    onPersonQueryChange?: (query: string) => void;
-    onDealQueryChange?: (query: string) => void;
+    onPersonQueryChange?: (query: string, details?: ComboboxRootChangeEventDetails) => void;
+    onDealQueryChange?: (query: string, details?: ComboboxRootChangeEventDetails) => void;
+    personServerSearch?: ServerPickerSearch;
     personOptionsLoading?: boolean;
+    dealServerSearch?: ServerPickerSearch;
     dealOptionsLoading?: boolean;
     /** Runs after a successful create or update. */
     onSaved?: () => void;
@@ -341,7 +351,9 @@ function NoteLinkFields({
     onDealSelect,
     onPersonQueryChange,
     onDealQueryChange,
+    personServerSearch,
     personOptionsLoading,
+    dealServerSearch,
     dealOptionsLoading,
     documentStyle = false,
 }: {
@@ -351,9 +363,11 @@ function NoteLinkFields({
     selectedDeal: Deal | null;
     onPersonSelect: (id: number | null) => void;
     onDealSelect: (id: number | null) => void;
-    onPersonQueryChange?: (query: string) => void;
-    onDealQueryChange?: (query: string) => void;
+    onPersonQueryChange?: (query: string, details?: ComboboxRootChangeEventDetails) => void;
+    onDealQueryChange?: (query: string, details?: ComboboxRootChangeEventDetails) => void;
+    personServerSearch?: ServerPickerSearch;
     personOptionsLoading: boolean;
+    dealServerSearch?: ServerPickerSearch;
     dealOptionsLoading: boolean;
     documentStyle?: boolean;
 }) {
@@ -369,13 +383,13 @@ function NoteLinkFields({
         [dealQuery, deals],
     );
 
-    const handlePersonQueryChange = (query: string) => {
+    const handlePersonQueryChange = (query: string, details: ComboboxRootChangeEventDetails) => {
         setPersonQuery(query);
-        onPersonQueryChange?.(query);
+        onPersonQueryChange?.(query, details);
     };
-    const handleDealQueryChange = (query: string) => {
+    const handleDealQueryChange = (query: string, details: ComboboxRootChangeEventDetails) => {
         setDealQuery(query);
-        onDealQueryChange?.(query);
+        onDealQueryChange?.(query, details);
     };
 
     return (
@@ -383,8 +397,8 @@ function NoteLinkFields({
             <div className={cn(documentStyle ? 'min-w-48 flex-1' : 'grid gap-1.5')}>
                 <Label htmlFor="note-person" className={documentStyle ? 'sr-only' : undefined}>{t('personLabel')}</Label>
                 <Combobox
-                    items={filteredPersons}
-                    filter={null}
+                    items={personServerSearch ? persons : filteredPersons}
+                    serverSearch={personServerSearch}
                     itemToStringLabel={(person: Contact) => person.name}
                     value={selectedPerson}
                     onInputValueChange={handlePersonQueryChange}
@@ -403,11 +417,11 @@ function NoteLinkFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
+                        <ComboboxEmpty>{personOptionsLoading ? t('searching') : t('noPersonFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={handleListWheel}>
-                            <ComboboxEmpty>{personOptionsLoading ? t('searching') : t('noPersonFound')}</ComboboxEmpty>
-                            {filteredPersons.map((person) => (
+                            {(person: (typeof filteredPersons)[number]) => (
                                 <ComboboxItem key={person.id} value={person}>{person.name}</ComboboxItem>
-                            ))}
+                            )}
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>
@@ -416,8 +430,8 @@ function NoteLinkFields({
             <div className={cn(documentStyle ? 'min-w-48 flex-1' : 'grid gap-1.5')}>
                 <Label htmlFor="note-deal" className={documentStyle ? 'sr-only' : undefined}>{t('dealLabel')}</Label>
                 <Combobox
-                    items={filteredDeals}
-                    filter={null}
+                    items={dealServerSearch ? deals : filteredDeals}
+                    serverSearch={dealServerSearch}
                     itemToStringLabel={(deal: Deal) => deal.name}
                     value={selectedDeal}
                     onInputValueChange={handleDealQueryChange}
@@ -436,11 +450,11 @@ function NoteLinkFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
+                        <ComboboxEmpty>{dealOptionsLoading ? t('searching') : t('noDealFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={handleListWheel}>
-                            <ComboboxEmpty>{dealOptionsLoading ? t('searching') : t('noDealFound')}</ComboboxEmpty>
-                            {filteredDeals.map((deal) => (
+                            {(deal: (typeof filteredDeals)[number]) => (
                                 <ComboboxItem key={deal.id} value={deal}>{deal.name}</ComboboxItem>
-                            ))}
+                            )}
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>
@@ -470,7 +484,9 @@ export function NoteDialogForm({
     requestInit,
     onPersonQueryChange,
     onDealQueryChange,
+    personServerSearch,
     personOptionsLoading = false,
+    dealServerSearch,
     dealOptionsLoading = false,
     onSaved,
     onSubmittingChange,
@@ -611,7 +627,6 @@ export function NoteDialogForm({
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         resetFieldErrors();
-        const trimmed = content.trim();
         const normalizedTitle = title.trim() || null;
         setSubmitting(true);
         onSubmittingChange(true);
@@ -620,7 +635,7 @@ export function NoteDialogForm({
                 await updateNote(
                     persistedNoteId,
                     {
-                        content: trimmed,
+                        content,
                         title: normalizedTitle,
                         visibility,
                         author: note?.author ?? currentUserId,
@@ -639,7 +654,7 @@ export function NoteDialogForm({
             } else {
                 await createNote(
                     {
-                        content: trimmed,
+                        content,
                         title: normalizedTitle,
                         visibility,
                         author: currentUserId,
@@ -740,7 +755,9 @@ export function NoteDialogForm({
                                 onDealSelect={setSelectedDealId}
                                 onPersonQueryChange={onPersonQueryChange}
                                 onDealQueryChange={onDealQueryChange}
+                                personServerSearch={personServerSearch}
                                 personOptionsLoading={personOptionsLoading}
+                                dealServerSearch={dealServerSearch}
                                 dealOptionsLoading={dealOptionsLoading}
                                 documentStyle
                             />
@@ -805,7 +822,9 @@ export function NoteDialogForm({
                             onDealSelect={setSelectedDealId}
                             onPersonQueryChange={onPersonQueryChange}
                             onDealQueryChange={onDealQueryChange}
+                            personServerSearch={personServerSearch}
                             personOptionsLoading={personOptionsLoading}
+                            dealServerSearch={dealServerSearch}
                             dealOptionsLoading={dealOptionsLoading}
                         />
                     ) : null}

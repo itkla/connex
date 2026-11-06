@@ -29,8 +29,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  *
  * <p>Each row is one materialized {@code campaign_delivery}, so filtering by delivery status or by a
  * lifecycle event returns exactly the population a counter in
- * {@link CampaignEngagementService} reports: named counts are read from the current delivery status,
- * while {@code unsubscribed} exists only as an event.
+ * {@link CampaignEngagementService} reports: outcomes are read from the current delivery status,
+ * while sent selects persisted confirmed submissions and unsubscribes select their event.
  *
  * <p>Authorization mirrors the audience snapshot read rather than the counter read: a delivery is
  * always contact-scoped, so this is a per-person marketing roster and therefore needs both
@@ -66,6 +66,7 @@ public class CampaignRecipientService {
      * @param eventType a validated lifecycle event the delivery must carry, or null
      * @param limit the page size
      * @param offset the page offset
+     * @param submitted whether to include only confirmed submissions, regardless of later status
      * @return the page of recipients and the total it was drawn from
      */
     @RequirePermission(Permission.CAMPAIGN_VIEW)
@@ -75,7 +76,8 @@ public class CampaignRecipientService {
             List<String> statuses,
             String eventType,
             int limit,
-            int offset) {
+            int offset,
+            boolean submitted) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Campaign campaign = campaignMapper.getCampaign(workspaceId, campaignId);
         if (campaign == null) {
@@ -97,9 +99,9 @@ public class CampaignRecipientService {
                     "status must be one of: " + String.join(", ", RECIPIENT_STATUSES));
         }
         List<CampaignRecipientRow> rows = campaignDeliveryMapper.listRecipients(
-                workspaceId, campaignId, sendId, statuses, eventType, limit, offset);
+                workspaceId, campaignId, sendId, statuses, eventType, limit, offset, submitted);
         long total = campaignDeliveryMapper.countRecipients(
-                workspaceId, campaignId, sendId, statuses, eventType);
+                workspaceId, campaignId, sendId, statuses, eventType, submitted);
         return new PageResponse<>(withLabels(rows), total);
     }
 
@@ -118,7 +120,7 @@ public class CampaignRecipientService {
                         row.deliveryId(), row.sendId(), row.channel(), row.personId(),
                         row.personId() == null ? null : labels.get(row.personId()),
                         row.status(), row.skipReason(), row.reconciliationRequiredAt() != null,
-                        row.reasonCode(), row.createdAt(), row.updatedAt()))
+                        row.reasonCode(), row.createdAt(), row.updatedAt(), row.messageName(), row.sendNumber()))
                 .toList();
     }
 }

@@ -141,7 +141,7 @@ export default function EditTaskSheet({
             <DrawerContent className="flex w-full flex-col sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                             <ClipboardDocumentCheckIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
@@ -230,6 +230,7 @@ export default function EditTaskSheet({
                                     label: deal.name,
                                 }))}
                                 onInputValueChange={dealSearch.onInputValueChange}
+                                serverSearch={dealSearch.serverSearch}
                                 emptyLabel={dealSearch.loading ? t('searching') : t('noDealFound')}
                             />
                         </div>
@@ -261,7 +262,7 @@ export default function EditTaskSheet({
                             />
                             <Label
                                 htmlFor="task-completed"
-                                className={cn('cursor-pointer text-sm font-medium', draft.completed ? 'text-brand-dark' : 'text-foreground')}
+                                className={cn('cursor-pointer text-sm font-medium', draft.completed ? 'text-brand-text' : 'text-foreground')}
                             >
                                 {t('completedLabel')}
                             </Label>
@@ -283,12 +284,12 @@ export default function EditTaskSheet({
                     </Button>
                 </DrawerFooter>
             </DrawerContent>
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={guard.confirm.onDiscard}
+            />
         </Drawer>
-        <ConfirmDiscardDialog
-            open={guard.confirm.open}
-            onKeepEditing={guard.confirm.onKeepEditing}
-            onDiscard={guard.confirm.onDiscard}
-        />
         </>
     );
 }

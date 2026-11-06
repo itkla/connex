@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 
 import RelationshipEvidencePanel from '@/app/components/records/RelationshipEvidencePanel';
@@ -65,6 +65,7 @@ export default function WarmthEvidenceChip({
     evidence: RelationshipEvidence;
     actions?: RelationshipEvidenceActionContext;
 }) {
+    const timeZone = useTimeZone();
     const tTemp = useTranslations('Temperature');
     const tEvidence = useTranslations('RelationshipEvidence');
     const locale = useLocale();
@@ -79,7 +80,7 @@ export default function WarmthEvidenceChip({
     const temperature = evidence.temperature;
     const hasHistory = Boolean(temperature.lastTouchAt);
     const lastTouch = temperature.lastTouchAt
-        ? formatRelativeTime(temperature.lastTouchAt, locale, now)
+        ? formatRelativeTime(temperature.lastTouchAt, locale, now, timeZone)
         : null;
     const bandLabel = hasHistory ? tTemp(temperature.band) : tTemp('noHistory');
 
@@ -134,7 +135,7 @@ export default function WarmthEvidenceChip({
                             && temperature.goesColdAt ? (
                             <p className="text-xs text-muted-foreground">
                                 {tTemp('goesCold', {
-                                    when: formatRelativeTime(temperature.goesColdAt, locale, now),
+                                    when: formatRelativeTime(temperature.goesColdAt, locale, now, timeZone),
                                 })}
                             </p>
                         ) : null}
@@ -197,7 +198,7 @@ export default function WarmthEvidenceChip({
                         currentUserId={actions.currentUserId}
                         open={taskOpen}
                         onOpenChange={setTaskOpen}
-                        defaultDueDate={followUpDueDate(actions.goesColdAt, now)}
+                        defaultDueDate={followUpDueDate(actions.goesColdAt, now, timeZone)}
                         defaultDescription={tEvidence('followUpDescription', {
                             name: actions.contact.name,
                         })}

@@ -2,15 +2,17 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Cog6ToothIcon } from "@heroicons/react/24/outline";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 
 import {
     getContactTemperaturesFromCookie,
     getContactsFromCookie,
     getCurrentUserResultFromCookie,
+    getDealMetricsFromCookie,
     getDealRisksFromCookie,
     getDealsFromCookie,
     getMyWorkResultFromCookie,
+    getMyWorkspacesFromCookie,
     getUserActivitiesFromCookie,
     getUserNotesFromCookie,
     getUserNoteActivityResultFromCookie,
@@ -19,17 +21,18 @@ import {
 } from "@/app/lib/api";
 import SectionUnavailable from "@/app/components/SectionUnavailable";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import type { Activity, Contact, Deal, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
-import { formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/utils";
+import type { Activity, Contact, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
+import { formatDate, formatDateTime } from "@/app/lib/utils";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
-import { computeKpis } from "@/app/components/overview/analytics/metrics";
+import { resolveWorkspaceTimezone } from "@/app/lib/workspaceSnapshot";
+import { requestNow } from "@/app/lib/requestClock";
 
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Timeline from "@/app/components/me/Timeline";
 import MeHero from "@/app/components/me/MeHero";
-import SignalStrip from "@/app/components/me/SignalStrip";
+import PersonalDealSignals from "@/app/components/me/PersonalDealSignals";
 import NeedsYou from "@/app/components/me/NeedsYou";
 import MyWorkQueue from "@/app/components/me/MyWorkQueue";
 import PulseStrip from "@/app/components/me/PulseStrip";
@@ -42,15 +45,8 @@ import {
     warmthDistribution,
 } from "@/app/components/me/meData";
 
-/**
- * Computes the current user's deal KPIs over the trailing 90 days.
- * Kept at module scope so the `Date.now()` read stays out of the component render body.
- */
-function personalKpis(deals: Deal[]) {
-    return computeKpis(deals, Date.now(), 90);
-}
-
 export default async function MePage() {
+    const timeZone = await getTimeZone();
     const t = await getTranslations("MePage");
     const locale = await getLocale();
     const cookie = (await headers()).get("cookie");
@@ -65,17 +61,20 @@ export default async function MePage() {
     }
 
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const [contacts, deals, tasks, activities, notes, users, myWorkResult, noteActivityResult]
+    const [contacts, dealResult, tasks, activities, notes, users, myWorkResult, noteActivityResult, dealMetrics, workspaces]
         = await Promise.all([
             getContactsFromCookie(cookie).catch(() => [] as Contact[]),
-            getDealsFromCookie(cookie).catch(() => [] as Deal[]),
+            getDealsFromCookie(cookie).catch(() => null),
             getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
             getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
             getUserNotesFromCookie(user.id, cookie, { size: 25 }).catch(() => [] as Note[]),
             getUsers(init).catch(() => [] as User[]),
             getMyWorkResultFromCookie(cookie),
             getUserNoteActivityResultFromCookie(user.id, cookie),
+            getDealMetricsFromCookie(cookie, { scope: "me" }).catch(() => null),
+            getMyWorkspacesFromCookie(cookie),
         ]);
+    const deals = dealResult ?? [];
     const myDeals = deals.filter((deal) => deal.ownerId === user.id);
     const [temps, dealRisks] = await Promise.all([
         getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id))
@@ -83,15 +82,14 @@ export default async function MePage() {
         getDealRisksFromCookie(cookie, myDeals.map((deal) => deal.id))
             .catch(() => [] as DealRisk[]),
     ]);
-    const currency = pickDominantCurrency(myDeals);
-    const kpis = personalKpis(myDeals);
+    const timezone = resolveWorkspaceTimezone(workspaces, user.timezone);
     const distribution = warmthDistribution(temps);
     const nodes = constellationNodes(temps, contacts, 18);
     const cooling = coolingRelationships(temps, contacts, 6);
     const risks = riskItems(dealRisks, myDeals, 6);
     const pulse = noteActivityResult.ok ? activityPulse(activities, tasks, noteActivityResult.data, 84) : null;
     const coolingCount = temps.filter((temp) => temp.trend === "cooling").length;
-    const greeting = t(`greeting_${greetingKey(user.timezone)}`);
+    const greeting = t(`greeting_${greetingKey(timeZone, requestNow())}`);
     const hasWork = tasks.length + activities.length + notes.length > 0;
 
     return (
@@ -107,7 +105,14 @@ export default async function MePage() {
                 </Rise>
 
                 <Rise delay={0.08}>
-                    <SignalStrip kpis={kpis} currency={currency} />
+                    {dealResult ? (
+                        <PersonalDealSignals
+                            key={`${user.id}:${workspaces.activeWorkspaceId}`}
+                            deals={myDeals}
+                            dealMetrics={dealMetrics}
+                            timezone={timezone}
+                        />
+                    ) : <SectionUnavailable />}
                 </Rise>
 
                 <Rise delay={0.14}>
@@ -145,12 +150,12 @@ export default async function MePage() {
 
                 <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6 text-sm text-muted-foreground">
                     <div className="flex flex-wrap gap-x-6 gap-y-1">
-                        <span>{t("memberSince", { date: formatDate(user.createdAt, locale) })}</span>
-                        <span>{t("lastActive", { date: formatDateTime(user.lastLoginAt, locale) })}</span>
+                        <span>{t("memberSince", { date: formatDate(user.createdAt, locale, timeZone) })}</span>
+                        <span>{t("lastActive", { date: formatDateTime(user.lastLoginAt, locale, timeZone) })}</span>
                     </div>
                     <Link
                         href={settingsDestination("account.home").href}
-                        className="inline-flex items-center gap-1.5 font-medium text-brand transition-colors hover:text-brand-hover"
+                        className="inline-flex items-center gap-1.5 font-medium text-brand-text transition-colors hover:text-brand-text"
                     >
                         <Cog6ToothIcon className="size-4" />
                         {t("accountSettings")}

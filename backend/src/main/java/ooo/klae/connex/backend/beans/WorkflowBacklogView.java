@@ -5,7 +5,7 @@ import java.time.LocalDateTime;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** Bounded aggregate of queued and waiting work for one workflow. */
+/** Backlog counts and the latest completed outcome for one workflow. */
 @Data
 @NoArgsConstructor
 public class WorkflowBacklogView {
@@ -16,4 +16,5 @@ public class WorkflowBacklogView {
     private int overdueCount;
     private LocalDateTime nextResumeAt;
     private int recentFailureCount;
+    private boolean latestOutcomeFailed;
 }

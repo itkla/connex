@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -78,6 +78,7 @@ export default function AskConnexWatchDialog({
     subjectLabel: string;
     onCreated?: (watch: AiWatch) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AskConnex.commandCenter');
     const locale = useLocale();
     const showApiError = useApiErrorToast('AskConnex.commandCenter');
@@ -105,7 +106,7 @@ export default function AskConnexWatchDialog({
     const limits = askConnexWatchLimitsText(
         { cooldownDays: DEFAULT_COOLDOWN_DAYS, expiresOn: null },
         t,
-        (isoDate) => formatDate(isoDate, locale),
+        (isoDate) => formatDate(isoDate, locale, timeZone),
     );
 
     async function apply() {

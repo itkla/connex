@@ -57,7 +57,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         CampaignDelivery delivery = newDelivery(send, person, "dispatched", null);
 
         PageResponse<CampaignRecipientDto> page =
-                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0);
+                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0, false);
 
         assertEquals(1, page.total());
         CampaignRecipientDto row = page.items().getFirst();
@@ -78,7 +78,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newDelivery(send, newPerson(newCompany()), "skipped", "suppressed");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, List.of("dispatched"), null, 25, 0);
+                campaign.getId(), null, List.of("dispatched"), null, 25, 0, false);
 
         assertEquals(1, page.total());
         assertEquals(dispatched.getId(), page.items().getFirst().deliveryId());
@@ -91,7 +91,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newDelivery(send, newPerson(newCompany()), "skipped", "suppressed");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, List.of("skipped"), null, 25, 0);
+                campaign.getId(), null, List.of("skipped"), null, 25, 0, false);
 
         assertEquals("suppressed", page.items().getFirst().skipReason());
     }
@@ -109,7 +109,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
                 "deadline_ambiguous");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, List.of("failed"), null, 25, 0);
+                campaign.getId(), null, List.of("failed"), null, 25, 0, false);
 
         CampaignRecipientDto row = page.items().getFirst();
         assertTrue(row.reconciliationRequired());
@@ -168,7 +168,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newEvent(unsubscribed, "unsubscribed");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, null, "unsubscribed", 25, 0);
+                campaign.getId(), null, null, "unsubscribed", 25, 0, false);
 
         assertEquals(1, page.total());
         assertEquals(unsubscribed.getId(), page.items().getFirst().deliveryId());
@@ -178,7 +178,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
     void unknownEventIsRejected() {
         Campaign campaign = newCampaign();
         assertThrows(BadRequestException.class, () -> recipientService.getRecipients(
-                campaign.getId(), null, null, "opened", 25, 0));
+                campaign.getId(), null, null, "opened", 25, 0, false));
     }
 
     @Test
@@ -187,7 +187,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         Campaign other = newCampaign();
         CampaignSend send = newSend(other);
         assertThrows(ResourceNotFoundException.class, () -> recipientService.getRecipients(
-                campaign.getId(), send.getId(), null, null, 25, 0));
+                campaign.getId(), send.getId(), null, null, 25, 0, false));
     }
 
     @Test
@@ -198,7 +198,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, workspace.getId());
 
         assertThrows(ForbiddenException.class, () -> recipientService.getRecipients(
-                campaign.getId(), null, null, null, 25, 0));
+                campaign.getId(), null, null, null, 25, 0, false));
     }
 
     @Test
@@ -211,7 +211,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, sibling.getId());
 
         assertThrows(ResourceNotFoundException.class, () -> recipientService.getRecipients(
-                campaign.getId(), null, null, null, 25, 0));
+                campaign.getId(), null, null, null, 25, 0, false));
     }
 
     @Test
@@ -221,7 +221,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newDelivery(send, null, "dispatched", null);
 
         PageResponse<CampaignRecipientDto> page =
-                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0);
+                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0, false);
 
         assertEquals(1, page.total());
         assertNull(page.items().getFirst().personId());

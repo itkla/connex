@@ -50,15 +50,15 @@ import {
  */
 export default function AskConnexRecordEntry({ kind }: { kind: AiChatPageContextKind }) {
     const t = useTranslations('AskConnex');
-    const { openWithPrompt } = useAskConnex();
+    const { openWithPrompt, canAsk, canWatch } = useAskConnex();
     const { context } = useActions();
     const skills = useAskConnexSkills(kind);
     const assistantPermission = usePermissionCheck('AI_USE');
-    const jobs = askConnexJobs(skills, { kind, hasSubject: true });
+    const jobs = canAsk ? askConnexJobs(skills, { kind, hasSubject: true }) : [];
     const [watchOpen, setWatchOpen] = useState(false);
     const record = context.record;
     const subjectId = record === null ? Number.NaN : Number(record.id);
-    const watchable = assistantPermission === 'granted'
+    const watchable = canWatch && assistantPermission === 'granted'
         && record !== null
         && record.type === kind
         && Number.isInteger(subjectId)

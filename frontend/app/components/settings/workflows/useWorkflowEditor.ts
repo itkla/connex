@@ -1,11 +1,14 @@
 "use client";
 
+import type { ComboboxRootChangeEventDetails } from "@base-ui/react/combobox";
+import { createServerPickerSearch, pickerQueryKey } from "@/lib/server-picker-search";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import type { RecordSelectOption } from "@/app/components/records/RecordSelect";
 import { supportsSimulation } from "@/app/components/settings/workflows/vocabulary";
+import { workflowIsReadyToPublish } from "@/app/components/settings/workflows/workflowValidation";
 import {
     connectWorkflowBranch,
     createEmptyWorkflowGraph,
@@ -19,6 +22,7 @@ import {
     createWorkflowEditorHistory,
     mergeWorkflowDocuments,
     workflowDocumentIsDirty,
+    workflowDocumentNeedsValidationSave,
     workflowEditorReducer,
     type WorkflowEditorAction,
     type WorkflowEditorDocument,
@@ -65,8 +69,8 @@ type PendingState = "idle" | "loading";
 function documentFromWorkflow(workflow: WorkflowDto): WorkflowEditorDocument {
     return {
         name: workflow.name,
-        description: workflow.description,
-        recordType: workflow.recordType,
+        description: workflow.description ?? null,
+        recordType: workflow.recordType ?? null,
         executionMode: workflow.executionMode,
         definition: workflow.definition,
         canvas: workflow.canvas,
@@ -116,7 +120,7 @@ export function useWorkflowEditor({
         const documentChanged = nextHistory.present !== currentHistory.present
             || nextHistory.baseline !== currentHistory.baseline;
         historyRef.current = nextHistory;
-        if (documentChanged) documentGenerationRef.current += 1;
+        if (documentChanged && action.type !== "moveViewport") documentGenerationRef.current += 1;
         reduceHistory(action);
         return documentChanged;
     }, []);
@@ -133,7 +137,8 @@ export function useWorkflowEditor({
     const [versionsLoadState, setVersionsLoadState] = useState<PendingState>("idle");
     const [simulation, setSimulation] = useState<WorkflowSimulation | null>(null);
     const [simulationLoadState, setSimulationLoadState] = useState<PendingState>("idle");
-    const [simulationRecords, setSimulationRecords] = useState<RecordSelectOption[]>([]);
+    const [simulationQuery, setSimulationQuery] = useState("");
+    const [simulationSearchResult, setSimulationSearchResult] = useState<{ query: string; items: RecordSelectOption[] }>({ query: "", items: [] });
     const [conflict, setConflict] = useState<ConflictState | null>(null);
     const [conflictOpen, setConflictOpen] = useState(false);
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(initialDocument.definition.entryNodeId);
@@ -181,7 +186,8 @@ export function useWorkflowEditor({
         if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
         setValidation(null);
         clearSimulation();
-        setSimulationRecords([]);
+        setSimulationQuery("");
+        setSimulationSearchResult({ query: "", items: [] });
     }, [clearSimulation]);
 
     const loadVersions = useCallback(async (id: number, workspaceId: number, signal?: AbortSignal) => {
@@ -295,6 +301,7 @@ export function useWorkflowEditor({
     }, []);
 
     const dirty = workflowDocumentIsDirty(history);
+    const validationDirty = workflowDocumentNeedsValidationSave(history);
     const scopeReady = activeWorkspaceId != null
         && loadedWorkspaceId === activeWorkspaceId
         && !switching;
@@ -329,9 +336,9 @@ export function useWorkflowEditor({
 
     useEffect(() => cancelCreationContinuation, [cancelCreationContinuation]);
 
-    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit" | "untracked") => {
+    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit") => {
         if (creationLockRef.current) return false;
-        dispatch({ type: mode === "transient" ? "replace" : mode === "untracked" ? "untracked" : "commit", document });
+        dispatch({ type: mode === "transient" ? "replace" : "commit", document });
         invalidateDocumentEvidence();
         return true;
     }, [dispatch, invalidateDocumentEvidence]);
@@ -424,8 +431,8 @@ export function useWorkflowEditor({
     }, [history.present, updateDocument]);
 
     const moveViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
-        updateDocument({ ...history.present, canvas: { ...history.present.canvas, viewport } }, "untracked");
-    }, [history.present, updateDocument]);
+        if (!creationLockRef.current) dispatch({ type: "moveViewport", viewport });
+    }, [dispatch]);
 
     const reconcileServerWorkflow = useCallback((serverWorkflow: WorkflowDto) => {
         const serverDocument = documentFromWorkflow(serverWorkflow);
@@ -539,7 +546,7 @@ export function useWorkflowEditor({
 
     const validate = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
-        if (!workflow || dirty || workspaceId == null || !scopeReady) return;
+        if (!workflow || validationDirty || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
         const scopeGeneration = editorScopeGenerationRef.current;
         if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
@@ -558,7 +565,7 @@ export function useWorkflowEditor({
                 return;
             }
             setValidation(result);
-            if (result.valid) toastSuccess(t("validationReady"));
+            if (workflowIsReadyToPublish(result)) toastSuccess(t("validationReady"));
         } catch {
             if (documentGeneration === documentGenerationRef.current
                 && actionGeneration === busyActionGenerationRef.current
@@ -567,11 +574,11 @@ export function useWorkflowEditor({
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
         }
-    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkflow, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, isCurrentWorkflow, scopeReady, t, validationDirty, workflow]);
 
     const publish = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
-        if (!workflow || dirty || validation?.draftRevision !== workflow.draftRevision || !validation.canPublish
+        if (!workflow || validationDirty || validation?.draftRevision !== workflow.draftRevision || !workflowIsReadyToPublish(validation)
             || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
         const scopeGeneration = editorScopeGenerationRef.current;
@@ -601,7 +608,7 @@ export function useWorkflowEditor({
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
         }
-    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkflow, loadVersions, scopeReady, t, validation, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, isCurrentWorkflow, loadVersions, scopeReady, t, validation, validationDirty, workflow]);
 
     const toggleEnabled = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
@@ -635,7 +642,7 @@ export function useWorkflowEditor({
 
     const runSimulation = useCallback(async (recordId: number) => {
         const workspaceId = activeWorkspaceId;
-        if (!workflow || dirty || workspaceId == null || !scopeReady) return;
+        if (!workflow || validationDirty || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
         const scopeGeneration = editorScopeGenerationRef.current;
         if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
@@ -659,9 +666,12 @@ export function useWorkflowEditor({
             if (simulationGeneration === simulationGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationLoadState("idle");
         }
-    }, [activeWorkspaceId, beginConflictRecovery, dirty, isCurrentWorkflow, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, isCurrentWorkflow, scopeReady, t, validationDirty, workflow]);
 
-    const searchSimulationRecords = useCallback((query: string) => {
+    const searchSimulationRecords = useCallback((inputQuery: string, details?: ComboboxRootChangeEventDetails) => {
+        if (details && details.reason !== "input-change" && details.reason !== "clear-press") return;
+        const query = pickerQueryKey(inputQuery);
+        setSimulationQuery(query);
         const workspaceId = activeWorkspaceId;
         if (!workflow || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
@@ -671,7 +681,7 @@ export function useWorkflowEditor({
         if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
         const recordType = history.present.recordType ?? "deal";
         if (query.trim().length < 2 || !supportsSimulation(recordType)) {
-            setSimulationRecords([]);
+            setSimulationSearchResult({ query, items: [] });
             return;
         }
         const documentGeneration = documentGenerationRef.current;
@@ -697,12 +707,12 @@ export function useWorkflowEditor({
                                 : recordType === "deal"
                                     ? results.deals.map((deal) => ({ id: deal.id, label: deal.name }))
                                     : [];
-                    setSimulationRecords(options.slice(0, 50));
+                    setSimulationSearchResult({ query, items: options.slice(0, 50) });
                 })
                 .catch(() => {
                     if (!controller.signal.aborted
                         && documentGeneration === documentGenerationRef.current
-                        && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationRecords([]);
+                        && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationSearchResult({ query, items: [] });
                 });
         }, 200);
     }, [activeWorkspaceId, history.present.recordType, isCurrentWorkflow, scopeReady, workflow]);
@@ -768,7 +778,8 @@ export function useWorkflowEditor({
         versionsLoading: scopeReady && versionsLoadState === "loading",
         simulation: scopeReady ? simulation : null,
         simulationLoading: scopeReady && simulationLoadState === "loading",
-        simulationRecords: scopeReady ? simulationRecords : [],
+        simulationRecords: scopeReady ? simulationSearchResult.items : [],
+        simulationServerSearch: createServerPickerSearch(simulationQuery, scopeReady ? simulationSearchResult : null),
         simulationSupported: supportsSimulation(history.present.recordType ?? "deal"),
         conflict,
         conflictOpen,
@@ -776,6 +787,7 @@ export function useWorkflowEditor({
         focusFieldPath,
         focusRequestId,
         dirty,
+        validationDirty,
         readOnly,
         creationLocked,
         editingReadOnly,

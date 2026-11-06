@@ -36,13 +36,14 @@ import { ApiError, createUser } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastSuccess } from "@/app/lib/toast";
+import { MAX_NEW_PASSWORD_LENGTH, missingPasswordRequirements } from "@/app/lib/passwordPolicy";
+import { PasswordRequirements } from "@/app/components/auth/PasswordRequirements";
 import { type RegisterPayload } from "@/app/lib/types";
 
 const EMPTY: RegisterPayload = { displayName: "", username: "", email: "", password: "" };
 const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
 const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
 const PASSWORD_TOO_LONG_CODE = "PASSWORD_TOO_LONG";
-const MAX_NEW_PASSWORD_LENGTH = 72;
 
 type FieldIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -57,6 +58,7 @@ function Field({
     autoFocus,
     icon,
     maxLength,
+    describedBy,
 }: {
     id: string;
     label: string;
@@ -68,6 +70,7 @@ function Field({
     autoFocus?: boolean;
     icon?: FieldIcon;
     maxLength?: number;
+    describedBy?: string;
 }) {
     const LeadIcon = icon ?? null;
     const errorId = `${id}-error`;
@@ -86,7 +89,7 @@ function Field({
                     autoFocus={autoFocus}
                     maxLength={maxLength}
                     aria-invalid={error ? true : undefined}
-                    aria-describedby={error ? errorId : undefined}
+                    aria-describedby={[error ? errorId : undefined, describedBy].filter(Boolean).join(" ") || undefined}
                 />
             </div>
             {error && (
@@ -100,6 +103,7 @@ function Field({
 
 export default function NewUserDialog() {
     const t = useTranslations("UsersNewUserDialog");
+    const tPassword = useTranslations("PasswordPolicy");
     const showApiError = useApiErrorToast("UsersNewUserDialog");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
@@ -127,6 +131,11 @@ export default function NewUserDialog() {
         payload.password.length > 0;
 
     const submit = async () => {
+        const missing = missingPasswordRequirements(payload.password)[0];
+        if (missing) {
+            setErrors({ password: tPassword(missing) });
+            return;
+        }
         setIsCreating(true);
         setErrors({});
         try {
@@ -250,7 +259,9 @@ export default function NewUserDialog() {
                                 error={errors.password}
                                 icon={LockClosedIcon}
                                 maxLength={MAX_NEW_PASSWORD_LENGTH}
+                                describedBy="new-user-password-hint"
                             />
+                            <PasswordRequirements id="new-user-password-hint" password={payload.password} />
                         </div>
 
                         <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: "290ms" }}>

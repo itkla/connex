@@ -43,7 +43,7 @@ vi.mock("next/dynamic", () => ({
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: browser.noop, push: browser.noop }),
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => translate, useLocale: () => "en" }));
+vi.mock("next-intl", () => ({ useTranslations: () => translate, useTimeZone: () => "UTC", useLocale: () => "en" }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn() }));
 vi.mock("@/app/lib/managed-image", async (importOriginal) => ({

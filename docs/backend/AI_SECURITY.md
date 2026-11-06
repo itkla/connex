@@ -21,6 +21,13 @@ Ask Connex (`ASSISTANT_CHAT`) additionally requires a model whose context window
 
 Provider credentials remain envelope-encrypted with the existing AI-provider secret purpose. Provider configuration changes remain organization-admin plus recent-authentication/step-up gated.
 
+The member-authorized command-centre read exposes `chatAvailable` from the unchanged full
+`AiFeatureGate.isAiUsable(ASSISTANT_CHAT)` decision so the client can withhold questions before a
+known refusal. This is an availability hint, not admission: starting an answer retains every server
+gate. It is independent of `briefSkillAvailable`, which also requires the brief skill, and
+`watchesAvailable`, which needs governance but no provider. A failed availability read must not be
+displayed as AI being switched off.
+
 ## Invocation choke point
 
 Every model call goes through `AiInvocationService`. Do not call `AiProvider`, a provider client, or a raw HTTP client directly from a feature.
@@ -956,8 +963,8 @@ turn/message association under the session mutex, insert parent and members in o
 and require complete membership before commit. Storage provenance guards and privacy cleanup are
 active at V237. Production set creation, effective-tier decisions and whole-call publication/decision
 routes remain disabled until their own slices. V233 itself retained its then-V232 floor; the current
-V237 privacy compatibility minimum applies independently of future producer activation; V238 is
-the active release rollback floor.
+V237 privacy compatibility minimum applies independently of future producer activation; V243 is
+the active release rollback floor (see [the deal-value cutover](../UPGRADING.md#deal-line-value-takeover-tenant-v243)).
 
 ### Adding an assistant write tool
 

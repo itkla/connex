@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
@@ -80,6 +79,7 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.StaleRecordException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -632,7 +632,12 @@ public class DealService {
         return dealMapper.getDealBoard(workspaceId, pipelineId);
     }
 
-    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone, MemberScope memberScope) {
+    /**
+     * Returns realized revenue and expected-close values in the requested currency and member scope.
+     * openOnly restricts the projected series to open deals; realized revenue is unchanged.
+     */
+    public DealRevenueSeriesDto getRevenueTimeseries(
+            String currency, String timezone, MemberScope memberScope, boolean openOnly) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ZoneId zone = ZoneId.of(TimezoneSupport.validate(timezone, "UTC"));
         DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency, memberScope);
@@ -641,29 +646,9 @@ public class DealService {
             ? List.of()
             : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries, memberScope);
         return new DealRevenueSeriesDto(
-            revenueClosedByMonth(
-                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency, memberScope),
-                timezoneBucketed),
-            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency, memberScope))
+            publicMonthTotals(timezoneBucketed),
+            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency, memberScope, openOnly))
         );
-    }
-
-    static List<DealMonthTotalDto> revenueClosedByMonth(
-            List<DealMonthDecimalTotalDto> scheduled,
-            List<DealMonthDecimalTotalDto> timezoneBucketed) {
-        Map<YearMonth, BigDecimal> totals = new TreeMap<>();
-        for (DealMonthDecimalTotalDto month : scheduled) {
-            totals.merge(
-                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
-        }
-        for (DealMonthDecimalTotalDto month : timezoneBucketed) {
-            totals.merge(
-                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
-        }
-        return totals.entrySet().stream()
-            .map(entry -> new DealMonthTotalDto(
-                entry.getKey().getYear(), entry.getKey().getMonthValue(), entry.getValue()))
-            .toList();
     }
 
     private static List<DealMonthTotalDto> publicMonthTotals(
@@ -819,12 +804,10 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<DealPeriodDecimalTotalDto> closed = dealMapper.revenueClosedByPeriods(
             workspaceId, currency, window.startUtc(), window.endUtc(), periods, memberScope);
-        List<DealPeriodDecimalTotalDto> scheduled = dealMapper.revenueScheduledClosedByPeriods(
-            workspaceId, currency, window.fromDate(), window.endDate(), periods, memberScope);
         List<DealPeriodDecimalTotalDto> projected = dealMapper.revenueProjectedByPeriods(
             workspaceId, currency, window.fromDate(), window.endDate(), periods, memberScope);
         return new DealRevenuePeriodSeriesDto(
-            publicPeriodTotals(periods, closed, scheduled),
+            publicPeriodTotals(periods, closed),
             publicPeriodTotals(periods, projected));
     }
 
@@ -1205,7 +1188,8 @@ public class DealService {
         }
         deal.setCreatedAt(null);
         admission.beforeMutation();
-        dealOutcomeWriter.create(deal, requestedActualValue, stageOutcome);
+        DealOutcomeWriter.OutcomeChange outcomeChange =
+            dealOutcomeWriter.create(deal, requestedActualValue, stageOutcome);
         if (deal.getStageId() != null) {
             dealStageHistoryService.recordInitial(
                 workspaceId, deal.getId(), deal.getStageId(), deal.getWon(), scope);
@@ -1221,6 +1205,7 @@ public class DealService {
             "Created deal " + deal.getName(),
             auditChanges);
         notificationChanges.publish(workspaceId, "deal", deal.getId());
+        dealOutcomeWriter.publish(outcomeChange);
         ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
@@ -1265,15 +1250,15 @@ public class DealService {
         String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
+        if (deal.getExpectedVersion() != null && deal.getExpectedVersion() != before.getVersion()) {
+            throw new StaleRecordException(before.getVersion());
+        }
         boolean currencyChanged = deal.getCurrency() != null
             && !deal.getCurrency().equalsIgnoreCase(before.getCurrency());
         boolean valueChanged = before.getValue().compareTo(deal.getValue()) != 0;
         if (currencyChanged && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
             throw new BadRequestException(
                 "Cannot change the deal currency while it has line items; remove the line items first");
-        }
-        if (valueChanged) {
-            deal.setValue(dealValueService.setManualValue(workspaceId, before, deal.getValue()));
         }
         Boolean previousOutcome = before.getWon();
         BigDecimal requestedActualValue = deal.getActualValue();
@@ -1289,7 +1274,11 @@ public class DealService {
         deal.setPosition(stageChanged
             ? dealMapper.nextDealPosition(workspaceId, newStage)
             : before.getPosition());
-        dealOutcomeWriter.write(workspaceId, deal, previousOutcome, requestedActualValue, scope);
+        DealOutcomeWriter.OutcomeChange outcomeChange =
+            dealOutcomeWriter.write(workspaceId, deal, previousOutcome, requestedActualValue, scope);
+        if (valueChanged) {
+            deal.setValue(dealValueService.setManualValue(workspaceId, before, deal.getValue()));
+        }
         boolean reopened = previousOutcome != null && deal.getWon() == null;
         if ((stageChanged || reopened) && newStage != null) {
             dealStageHistoryService.recordTransition(
@@ -1299,12 +1288,13 @@ public class DealService {
             "Updated deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
+        dealOutcomeWriter.publish(outcomeChange);
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
         if (valueChanged) {
             ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
         }
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**
@@ -1481,14 +1471,15 @@ public class DealService {
         Deal deal = mutableCopy(before);
         deal.setWon(won != null ? won : Boolean.FALSE);
         if (reason != null && !reason.isBlank()) deal.setClosedReason(reason);
-        dealOutcomeWriter.write(workspaceId, deal, before.getWon(), actualValue, scope);
+        DealOutcomeWriter.OutcomeChange outcomeChange =
+            dealOutcomeWriter.write(workspaceId, deal, before.getWon(), actualValue, scope);
         auditService.record("deal.close", "deal", id, deal.getName(),
             (Boolean.TRUE.equals(deal.getWon()) ? "Won deal " : "Lost deal ") + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
-        ruleTriggers.publish(workspaceId, "deal", id, Boolean.TRUE.equals(deal.getWon()) ? "deal.won" : "deal.lost");
+        dealOutcomeWriter.publish(outcomeChange);
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**
@@ -1530,7 +1521,8 @@ public class DealService {
             deal.setStageId(normalStage);
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, normalStage));
         }
-        dealOutcomeWriter.writeOutcome(workspaceId, deal, previousOutcome, scope);
+        DealOutcomeWriter.OutcomeChange outcomeChange =
+            dealOutcomeWriter.writeOutcome(workspaceId, deal, previousOutcome, scope);
         if (wasClosed && deal.getStageId() != null) {
             dealStageHistoryService.recordTransition(
                 workspaceId, id, deal.getStageId(), previousOutcome, deal.getWon(), scope);
@@ -1539,8 +1531,9 @@ public class DealService {
             "Reopened deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
+        dealOutcomeWriter.publish(outcomeChange);
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**
@@ -2059,7 +2052,8 @@ public class DealService {
         Deal deal = mutableCopy(before);
         deal.setStageId(stageId);
         deal.setPosition(index);
-        dealOutcomeWriter.write(workspaceId, deal, previousOutcome, null, lockedStageChange.scope);
+        DealOutcomeWriter.OutcomeChange outcomeChange =
+            dealOutcomeWriter.write(workspaceId, deal, previousOutcome, null, lockedStageChange.scope);
         if (stageChanged) {
             dealStageHistoryService.recordTransition(
                 workspaceId, dealId, stageId, previousOutcome, deal.getWon(), lockedStageChange.scope);
@@ -2075,6 +2069,7 @@ public class DealService {
                                 : "Reordered deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", dealId);
+        dealOutcomeWriter.publish(outcomeChange);
         ruleTriggers.publish(workspaceId, "deal", dealId, publishStageChanged ? "deal.stage_changed" : "deal.updated");
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }

@@ -4,7 +4,7 @@ import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import { BriefcaseIcon, UserIcon } from "@heroicons/react/24/outline";
 
 import {
@@ -40,6 +40,7 @@ export default async function ActivityDetailPage({
 }: {
     params: Promise<{ id: string }>;
 }) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const userResult = await getCurrentUserResultFromCookie(cookie);
@@ -104,7 +105,7 @@ export default async function ActivityDetailPage({
                             </h1>
                             <p className="mt-1 text-sm text-muted-foreground">
                                 {typeLabel}
-                                {activity.timestamp ? ` · ${formatDateTime(activity.timestamp, locale)}` : ""}
+                                {activity.timestamp ? ` · ${formatDateTime(activity.timestamp, locale, timeZone)}` : ""}
                             </p>
                         </div>
                     </div>
@@ -126,7 +127,7 @@ export default async function ActivityDetailPage({
                             <MetaRow label={t("contact")}>
                                 <Link
                                     href={`/records/contacts/${person.id}`}
-                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
                                 >
                                     <UserIcon className="size-3.5 shrink-0" />
                                     <span className="truncate">{person.name}</span>
@@ -138,7 +139,7 @@ export default async function ActivityDetailPage({
                             <MetaRow label={t("deal")}>
                                 <Link
                                     href={`/records/deals/${deal.id}`}
-                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
                                 >
                                     <BriefcaseIcon className="size-3.5 shrink-0" />
                                     <span className="truncate">{deal.name}</span>
@@ -165,7 +166,7 @@ export default async function ActivityDetailPage({
                         {activity.timestamp ? (
                             <MetaRow label={t("when")}>
                                 <span className="tabular-nums">
-                                    {formatDateTime(activity.timestamp, locale)}
+                                    {formatDateTime(activity.timestamp, locale, timeZone)}
                                 </span>
                             </MetaRow>
                         ) : null}

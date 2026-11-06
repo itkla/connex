@@ -286,7 +286,8 @@ public class DealController {
     }
 
     /**
-     * GET endpoint for workspace-wide realized and projected deal revenue by month.
+     * GET endpoint for realized revenue and deal value by expected close month.
+     * The comparison includes all outcomes unless openOnly selects the open-deal forecast.
      * Calendar boundaries use the server-owned workspace timezone; legacy timezone query
      * parameters remain accepted during client migration but cannot override it.
      */
@@ -296,12 +297,13 @@ public class DealController {
         @RequestParam(name = "timezone", required = false) String legacyTimezone,
         @RequestParam(name = "tzOffset", required = false) String legacyTzOffset,
         @RequestParam(required = false) String scope,
-        @RequestParam(required = false) List<Integer> memberIds
+        @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(defaultValue = "false") boolean openOnly
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
         return dealService.getRevenueTimeseries(
             normalizedCurrency, workspaceService.getCurrentAnalyticsTimezone(),
-            analyticsMemberScope(scope, memberIds));
+            analyticsMemberScope(scope, memberIds), openOnly);
     }
 
     /**

@@ -1,21 +1,25 @@
 // transplanted from /me 
 
+import { getDateTimeFormatter, getNumberFormatter, getRelativeTimeFormatter } from '@/app/lib/intlFormatters';
 import { type DealRiskSeverity, type TemperatureBand } from '@/app/lib/types';
 import { LOCALE_COOKIE, type Locale } from '@/i18n/config';
+import { DEFAULT_TIME_ZONE, dateTimeInTimeZone, fixedOffsetSeconds } from '@/app/lib/timeZone';
+export { fixedOffsetSeconds } from '@/app/lib/timeZone';
 
-export function formatShortDate(value: string | undefined, locale: string) {
+export function formatShortDate(value: string | undefined, locale: string, timeZone = DEFAULT_TIME_ZONE) {
     if (!value) {
         return '—';
     }
 
-    const date = dateForDisplay(value);
+    const date = dateForDisplay(value, timeZone);
 
-    if (Number.isNaN(date.getTime())) return value;
+    if (Number.isNaN(date.timestamp)) return value;
 
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         month: 'short',
         day: 'numeric',
-    }).format(date);
+        timeZone: date.timeZone,
+    }).format(date.timestamp);
 }
 
 /**
@@ -44,49 +48,56 @@ export function setLocaleCookie(locale: Locale) {
 
 export function timeOf(value?: string) {
     if (!value) return 0;
-    const t = isCalendarDate(value) ? parseCalendarDate(value) : new Date(value).getTime();
+    const t = isCalendarDate(value) ? parseCalendarDateUtc(value) : parseMysqlDateTime(value);
     return Number.isNaN(t) ? 0 : t;
 }
 
-export function formatDate(value: string | undefined, locale: string) {
+export function formatDate(value: string | undefined, locale: string, timeZone = DEFAULT_TIME_ZONE) {
     if (!value) {
         return '—';
     }
 
-    const date = dateForDisplay(value);
+    const date = dateForDisplay(value, timeZone);
 
-    if (Number.isNaN(date.getTime())) {
+    if (Number.isNaN(date.timestamp)) {
         return value;
     }
 
-    return new Intl.DateTimeFormat(locale, { dateStyle: 'long' }).format(date);
+    return getDateTimeFormatter(locale, {
+        dateStyle: 'long', timeZone: date.timeZone,
+    }).format(date.timestamp);
 }
 
-export function formatDateTime(value: string | undefined, locale: string) {
+export function formatDateTime(value: string | undefined, locale: string, timeZone = DEFAULT_TIME_ZONE) {
     if (!value) {
         return 'Never';
     }
 
-    const date = new Date(value);
+    const date = dateForDisplay(value, timeZone);
 
-    if (Number.isNaN(date.getTime())) {
+    if (Number.isNaN(date.timestamp)) {
         return value;
     }
 
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         dateStyle: 'medium',
         timeStyle: 'short',
-    }).format(date);
+        timeZone: date.timeZone,
+    }).format(date.timestamp);
 }
 
 /**
- * converts a date to a mysql datetime string
+ * Converts an instant to UTC MySQL format. Minute-precision datetime-local strings are civil
+ * inputs in the supplied display zone; other API strings are parsed as UTC instants.
  * @param value - the date to convert to a mysql datetime string
  * @returns 
  */
-export function toMysqlDateTime(value?: string | Date | number): string {
+export function toMysqlDateTime(value?: string | Date | number, timeZone = DEFAULT_TIME_ZONE, previous?: string | null): string {
     const date =
-        value == null ? new Date() : value instanceof Date ? value : new Date(value);
+        typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)
+            ? new Date(parseDatetimeLocalValue(value, timeZone, previous))
+            : value == null ? new Date() : value instanceof Date ? value
+                : new Date(typeof value === 'string' ? parseMysqlDateTime(value) : value);
 
     if (Number.isNaN(date.getTime())) {
         throw new Error('Invalid date');
@@ -97,7 +108,8 @@ export function toMysqlDateTime(value?: string | Date | number): string {
 }
 
 /**
- * parses a mysql datetime string to a number
+ * Parses offset-less API datetimes as UTC. Bare dates retain the local calendar adapter for
+ * existing date-grid callers; use parseCalendarDateUtc for comparisons and zoned formatting.
  * @param value - the mysql datetime string to parse
  * @returns 
  */
@@ -143,31 +155,78 @@ function isCalendarDate(value: string): boolean {
     return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-function dateForDisplay(value: string): Date {
-    const timestamp = isCalendarDate(value) ? parseCalendarDate(value) : new Date(value).getTime();
-    return new Date(timestamp);
+function dateForDisplay(value: string, timeZone: string) {
+    return dateTimeInTimeZone(parseDateForDisplay(value), isCalendarDate(value) ? 'UTC' : timeZone);
+}
+
+/** Parses a UTC API instant or anchors a calendar-only value to UTC for stable day formatting. */
+export function parseDateForDisplay(value?: string | null): number {
+    return value && isCalendarDate(value) ? parseCalendarDateUtc(value) : parseMysqlDateTime(value);
+}
+
+/** A date-only value represented at UTC midnight for zone-independent calendar formatting. */
+export function parseCalendarDateUtc(value: string): number {
+    if (!isCalendarDate(value)) return NaN;
+    const normalized = value.trim();
+    const timestamp = Date.parse(`${normalized}T00:00:00Z`);
+    return Number.isNaN(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== normalized
+        ? NaN : timestamp;
+}
+
+/** Formats a calendar-only date without converting it through the viewer's time zone. */
+export function formatCalendarDate(value: string, locale: string, options: Intl.DateTimeFormatOptions): string {
+    const timestamp = parseCalendarDateUtc(value);
+    return Number.isNaN(timestamp) ? value : getDateTimeFormatter(locale, { ...options, timeZone: 'UTC' }).format(timestamp);
 }
 
 /**
- * Converts a UTC MySQL datetime string into the local "YYYY-MM-DDTHH:mm" value
- * expected by an <input type="datetime-local">. Returns '' for empty/invalid input.
- * The inverse is toMysqlDateTime(), which reads the local input value back to UTC.
+ * Converts a UTC API instant to the selected zone's datetime-local control value.
+ * The inverse is toMysqlDateTime(value, timeZone, previous).
  */
-export function toDatetimeLocalValue(value?: string | null): string {
+export function toDatetimeLocalValue(value?: string | null, timeZone = DEFAULT_TIME_ZONE): string {
+    if (value && isCalendarDate(value)) {
+        return Number.isFinite(parseCalendarDateUtc(value)) ? `${value.trim()}T00:00` : '';
+    }
     const ts = parseMysqlDateTime(value);
     if (Number.isNaN(ts)) return '';
-    const d = new Date(ts);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return civilParts(ts, timeZone).input;
+}
+
+function civilParts(timestamp: number, timeZone: string) {
+    const display = dateTimeInTimeZone(timestamp, timeZone);
+    const parts = getDateTimeFormatter('en', {
+        timeZone: display.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(display.timestamp);
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value ?? '';
+    return {
+        input: `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`,
+        wallTimestamp: Date.UTC(Number(part('year')), Number(part('month')) - 1, Number(part('day')),
+            Number(part('hour')), Number(part('minute')), Number(part('second'))),
+    };
+}
+
+/** Rejects missing DST times; preserves an unchanged repeated time, otherwise chooses its first occurrence. */
+export function parseDatetimeLocalValue(value: string, timeZone = DEFAULT_TIME_ZONE, previous?: string | null): number {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return NaN;
+    const anchor = Date.parse(`${value}Z`);
+    if (!Number.isFinite(anchor)) return NaN;
+    const prior = parseMysqlDateTime(previous);
+    if (previous && !isCalendarDate(previous) && Number.isFinite(prior) && toDatetimeLocalValue(previous, timeZone) === value) return prior;
+    const offsets = new Set([-36, -12, 0, 12, 36].map((hours) => {
+        const sample = anchor + hours * 3_600_000;
+        return civilParts(sample, timeZone).wallTimestamp - sample;
+    }));
+    const candidates = [...offsets].map((offset) => anchor - offset)
+        .filter((timestamp) => toDatetimeLocalValue(new Date(timestamp).toISOString(), timeZone) === value)
+        .sort((left, right) => left - right);
+    return candidates[0] ?? NaN;
 }
 
 /**
  * Formats a UTC timestamp as an absolute localized date and time.
  *
- * Unlike {@link formatDateTime}, which hands the raw string to `new Date`, this parses through
- * {@link parseMysqlDateTime} so an offset-less value is read as UTC rather than as browser-local
- * time. Backend `LocalDateTime` fields serialize without an offset, so formatting them with the
- * former shows an administrator outside UTC the UTC wall clock labelled as their own.
+ * Offset-less API timestamps are UTC. The display zone is explicit so server and client agree.
  *
  * @param value - the UTC timestamp to format
  * @param locale - BCP-47 locale tag
@@ -177,13 +236,16 @@ export function formatUtcDateTime(
     value: string | undefined | null,
     locale: string,
     fallback = '—',
+    timeZone = DEFAULT_TIME_ZONE,
 ): string {
-    const ms = parseMysqlDateTime(value);
+    const ms = parseDateForDisplay(value);
     if (Number.isNaN(ms)) return fallback;
-    return new Intl.DateTimeFormat(locale, {
+    const display = dateTimeInTimeZone(ms, value && isCalendarDate(value) ? 'UTC' : timeZone);
+    return getDateTimeFormatter(locale, {
         dateStyle: 'medium',
         timeStyle: 'short',
-    }).format(new Date(ms));
+        timeZone: display.timeZone,
+    }).format(display.timestamp);
 }
 
 /**
@@ -207,13 +269,15 @@ export function formatRelativeTime(
     value: string | undefined | null,
     locale: string,
     now: number,
+    timeZone = DEFAULT_TIME_ZONE,
 ): string {
+    if (value && isCalendarDate(value)) return formatShortDate(value, locale);
     const ms = parseMysqlDateTime(value);
     if (Number.isNaN(ms)) return '—';
 
     const diff = ms - now;
     const absSec = Math.abs(diff) / 1000;
-    const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' });
+    const rtf = getRelativeTimeFormatter(locale, { numeric: 'auto', style: 'short' });
 
     if (absSec < 45) return rtf.format(0, 'second');
     const minute = 60;
@@ -224,7 +288,7 @@ export function formatRelativeTime(
     if (absSec < day) return rtf.format(Math.round(diff / 1000 / hour), 'hour');
     if (absSec < 30 * day) return rtf.format(Math.round(diff / 1000 / day), 'day');
 
-    return formatShortDate(value ?? undefined, locale);
+    return formatShortDate(value ?? undefined, locale, timeZone);
 }
 
 export function pickDominantCurrency(items: { currency?: string | null }[]): string {
@@ -257,7 +321,7 @@ export function pickDominantCurrency(items: { currency?: string | null }[]): str
  */
 export function formatCompactCurrency(value: number, currency = 'USD', locale = 'en-US') {
     try {
-        return new Intl.NumberFormat(locale, {
+        return getNumberFormatter(locale, {
             notation: 'compact',
             minimumFractionDigits: 0,
             maximumFractionDigits: 1,
@@ -265,7 +329,7 @@ export function formatCompactCurrency(value: number, currency = 'USD', locale = 
             currency,
         }).format(value);
     } catch {
-        return new Intl.NumberFormat(locale, {
+        return getNumberFormatter(locale, {
             notation: 'compact',
             maximumFractionDigits: 1,
         }).format(value);
@@ -281,12 +345,12 @@ export function formatCompactCurrency(value: number, currency = 'USD', locale = 
  */
 export function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
     try {
-        return value.toLocaleString(locale, {
+        return getNumberFormatter(locale, {
             style: 'currency',
             currency,
-        });
+        }).format(value);
     } catch {
-        return value.toLocaleString(locale);
+        return getNumberFormatter(locale).format(value);
     }
 }
 
@@ -569,24 +633,6 @@ export function riskTextClass(severity: DealRiskSeverity): string {
 
 export type CalendarYearMonth = { year: number; month: number };
 
-/** Parses a legacy fixed-offset timezone ({@code UTC+9}, {@code +09:00}, …) into seconds, or null for IANA names. */
-export function fixedOffsetSeconds(timezone: string): number | null {
-    if (/^(?:Z|UTC|GMT|UT)$/i.test(timezone)) return 0;
-    const match = /^(?:(?:UTC|GMT|UT))?([+-])(\d{1,2})(?::?(\d{2}))?(?::?(\d{2}))?$/i.exec(timezone);
-    if (!match) return null;
-    const hours = Number(match[2]);
-    const minutes = Number(match[3] ?? '0');
-    const seconds = Number(match[4] ?? '0');
-    if (
-        hours > 18
-        || minutes > 59
-        || seconds > 59
-        || (hours === 18 && (minutes !== 0 || seconds !== 0))
-    ) return null;
-    const total = hours * 3600 + minutes * 60 + seconds;
-    return match[1] === '-' ? -total : total;
-}
-
 /** Resolves the calendar year and month for a timestamp in an IANA or legacy fixed-offset timezone. */
 export function yearMonthInTimezone(timestamp: number, timezone: string): CalendarYearMonth {
     const offsetSeconds = fixedOffsetSeconds(timezone);
@@ -595,7 +641,7 @@ export function yearMonthInTimezone(timestamp: number, timezone: string): Calend
         return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
     }
     try {
-        const parts = new Intl.DateTimeFormat('en-US', {
+        const parts = getDateTimeFormatter('en-US', {
             timeZone: timezone,
             year: 'numeric',
             month: 'numeric',

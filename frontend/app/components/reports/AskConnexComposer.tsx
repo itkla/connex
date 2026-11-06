@@ -1,5 +1,6 @@
 'use client';
 
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormatter, useTranslations } from 'next-intl';
@@ -100,7 +101,7 @@ export default function AskConnexComposer() {
                         <div className="flex size-11 items-center justify-center rounded-xl bg-brand text-brand-foreground">
                             <SparklesIcon className="size-5" />
                         </div>
-                        <p className="mt-5 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
+                        <p className="mt-5 text-xs font-medium uppercase tracking-[0.12em] text-brand-text">
                             {t('eyebrow')}
                         </p>
                         <h2 id="ask-connex-title" className="mt-2 text-2xl font-bold tracking-tight text-foreground">
@@ -231,7 +232,7 @@ export default function AskConnexComposer() {
                                 <p className="text-xs text-muted-foreground">
                                     {t('freshness', {
                                         date: preview.generatedAt
-                                            ? format.dateTime(new Date(preview.generatedAt), {
+                                            ? format.dateTime(new Date(parseMysqlDateTime(preview.generatedAt)), {
                                                 dateStyle: 'medium',
                                                 timeStyle: 'short',
                                             })

@@ -31,8 +31,47 @@ close/reopen/move paths cannot clobber a freshly reconciled amount with a stale 
 before touching a line. After every currency-consistent line write the deal value is recomputed and persisted, and
 `value_source` is set to `line_items`.
 
-Deleting the **last** line reverts `value_source` to `manual` and **retains the last derived
-total** — the number does not reset to zero, it simply becomes editable again.
+New ad-hoc and catalog lines start as local, unsaved drafts. Add line alone makes no request and
+changes no persisted figure. Saving a priced draft first uses `previewOnly: true` on the existing
+line create/update endpoint: the server validates and calculates the proposed totals under the
+parent lock without writing lines, deal values, versions, audit records or value-change events.
+The preview includes `manualValueToReplace` when a nonzero manual amount would be replaced.
+The UI names the previous amount and exact new **tax-inclusive** total before seeking consent.
+Cancel leaves both the saved deal and the local draft unchanged.
+
+A write taking over a nonzero manual amount requires `confirmValueReplacement: true`; absent or
+false means HTTP 409, including old clients. `expectedManualValue`, when supplied by the client,
+must still match the locked manual amount and manual source; `expectedCurrency` must match its
+currency, or the write also conflicts. The confirmation UI sends both expected fields. Line-derived edits do not
+require repeated confirmation. The guard runs before line writes and again at reconciliation.
+Missing consent returns `DEAL_LINE_VALUE_CONSENT_REQUIRED`; changed reviewed state returns
+`DEAL_LINE_VALUE_CONSENT_STALE`. Both are HTTP 409. The client retains the draft and asks for a new
+review without reloading the page.
+
+Drafts capture their workspace when composed. Preview, persistence, confirmation, removal, and
+retries carry that explicit workspace pin. Workspace selection, account revocation, route changes,
+and unmount invalidate the pending write chain before any later request or stale UI update.
+
+From V243 onward, the manual amount (including zero) is stored prospectively in
+`deal.prior_manual_value` when line items take over. Deleting the **last** line automatically
+restores that amount, sets `value_source` to `manual`, and clears the fallback in the same transaction.
+The UI explains restoration before removal. This deliberately replaces the former last-derived-total
+rule: removing all lines abandons the line-based quote, so the original manual estimate returns
+without a second potentially destructive decision. Intermediate removals retain the fallback.
+Historical deals without a stored fallback retain their last derived total and become editable.
+Previously overwritten manual amounts cannot be reconstructed and are not backfilled.
+
+These writes use the existing parent deal lock and targeted value statements. A deal edit-version
+trigger introduced by #2276 advances on each parent write, including fallback capture/clear; clients must refresh
+after a line mutation and must never replay a broad deal update using a pre-confirmation version.
+The confirmation writes only to the line-item endpoints and carries no parent deal version; it
+pins the previewed manual amount and currency instead. Fallback writes correctly advance the
+parent's version through that trigger without making the confirmation request stale.
+Only current booking value changes; the existing realized-value resolver and win-time freeze remain
+unchanged. Old clients can read the additive response fields but cannot take over a nonzero manual
+value without the new flag. Earlier serving binaries bypass that guard and restoration, so V243 is
+the serving rollback floor; leave the nullable column in place and roll forward with a compatible
+binary rather than rolling back to an unsafe writer.
 
 ### Incremental repair of historical currency mismatches
 
@@ -43,7 +82,8 @@ and `actual_value` stay frozen; no value-change signal is emitted. The line resp
 currency, with an explanation that editing it uses the deal currency without FX conversion.
 
 The final repair resumes normal reconciliation. If lines remain, their consistent total becomes
-the derived value; deleting the final line returns to manual while retaining the frozen value.
+the derived value; deleting the final line restores a stored manual fallback when present, otherwise
+returns to manual while retaining the frozen value.
 Realized value remains the win-time snapshot. Canonical line-value reads, winning, reopening, and
 new document generation refuse mismatches with HTTP 409. Closing lost remains permitted and zeroes
 `actual_value` without deriving a line total.
@@ -53,6 +93,17 @@ new document generation refuse mismatches with HTTP 409. Closing lost remains pe
 New document generation locks authorization roots before the deal row and revalidates permissions.
 It freezes the parent currency and line items from that one locked snapshot and explicitly checks
 that every line uses that currency. It cannot combine an earlier parent currency with later totals.
+
+New documents resolve `{{total}}` using the template locale and frozen deal currency, with grouped
+digits, localized currency symbols and `HALF_UP` rounding to the currency's minor unit (zero decimal
+places for JPY and KRW). This is display formatting only: the numeric totals remain scale 2, and
+reading or generating another version never reformats a previously generated snapshot. Historical
+non-ISO currency codes retain their existing code-and-amount representation.
+
+Document tables, including the print and recipient views, format money with the frozen document
+locale independently of the viewer's UI language. Generated-date values use that same frozen locale
+with the shared display-zone rules in [the date/time contract](frontend/DATES_AND_TIME_ZONES.md).
+Reconciliation of independently rounded rows and totals is a separate accounting decision tracked in [#2288](https://github.com/itkla/connex/issues/2288).
 
 Documents generated without line items persist zero totals in that locked parent deal's currency.
 Before draft or approved finalization, the frozen deal, every line, and totals must agree with the
@@ -75,6 +126,9 @@ sum, expressed as a nonnegative percentage rounded to three decimals. It does no
 configured discount percentage. Thus `0.01 × 1` with `20%` configured rounds to subtotal `0.01`,
 giving `0%` effective discount and matching no positive discount threshold. Total-based policies
 continue to compare the frozen grand total in the document's currency.
+Percentage discounts are validated in the request boundary and line arithmetic as at most 100%.
+Fixed-amount discounts retain the money-column bounds. The phone editor groups each line's
+operands, total, and Remove action in a stacked layout without a horizontally scrolling table.
 
 ### Line-item guards apply to CSV import too
 
@@ -88,17 +142,25 @@ not at all — no partial column writes. Import never silently drops a `value` c
 ### Winning or losing a deal — every path
 
 Realized value (`actual_value`) is resolved the same way on **every** outcome transition, not just
-the close dialog. `DealValueService.reconcileRealizedValue` is the single owner of that resolution,
-and every route calls it immediately after the broad update statement:
+the close action. `DealValueService.reconcileRealizedValue` is the single owner of that resolution,
+and every existing-deal route calls it through `DealOutcomeWriter` immediately after the row update:
 
 | Route | Entry point |
 | --- | --- |
-| Close dialog | `POST /api/deals/{id}/close` → `DealService.close` |
+| Mark won/lost | `POST /api/deals/{id}/close` → `DealService.close` |
 | Form edit | `PUT /api/deals/{id}` → `DealService.update` |
 | Kanban drag | `POST /api/deals/{id}/move` → `DealService.moveInternal` |
 | Bulk stage change | `POST /api/deals/bulk/stage` → `BulkOperationService.changeStageForDeals` |
 | Rule action | workflow `change_stage` → `RuleActionExecutor` |
-| CSV import | `POST /api/import/deals` → `ImportService.applyDealUpdate` |
+| Create (quick create, calendar, company and mobile) | legacy `POST /api/deals` → `DealService.createReviewed` |
+| Guided create | guided-cutover `POST /api/deals` → `GuidedRecordCreationService.createDeal` → `DealService.createReviewed` |
+| Assistant create/stage change | reviewed create → `DealService.createReviewed`; prepared stage change → `DealService.changeStage(LockedStageChange)` |
+| CSV create/update | `POST /api/import/deals` → `ImportService.commitDeals` → `DealOutcomeWriter.createBatch` / `ImportService.applyDealUpdate` |
+| Explicit reopen | `POST /api/deals/{id}/reopen` → `DealService.reopen` → outcome-only writer |
+
+Outcomes remain stage-independent. Mark won/lost keeps the current stage. Moving onto a terminal
+stage forces its outcome; moving away does not clear it. Reopening is an explicit operation with
+the existing reopen semantics.
 
 The reconciliation resolves these cases:
 
@@ -107,30 +169,54 @@ The reconciliation resolves these cases:
   lost stage still lands on zero instead of failing. `CloseDealRequest.actualValue` additionally
   rejects negatives.
 - **Freshly won deals with line items:** `actual_value` is derived from the line-item total on
-  whichever path wins the deal. Through the close dialog, supplying a value that differs from the
-  derived total is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409); the drag, edit, bulk, rule and
-  import paths carry no value input and simply take the derived total. So the same ¥5M line-item
+  whichever path wins the deal. Supplying a value that differs from the derived total and is not an echo of the
+  stored realized value is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409); the drag, bulk, rule and import paths carry no amount input.
+  Edit forms omit untouched amounts and derive the total, while retaining the existing echo rule for
+  clients that submit the whole record. So the same ¥5M line-item
   deal reports ¥5M realized however it was won — the figure never depends on the route.
-- **Freshly won deals without line items:** realized value keeps the amount entered in the close
-  dialog, or the deal's existing `actual_value` (zero for a deal that was open) when none is given.
+- **Freshly won deals without line items:** realized value records an explicitly submitted amount,
+  including **zero**, or defaults to the current `deal.value` when the amount is omitted. It never
+  inherits a previous win's realized amount. A submitted zero is not treated as omission.
 - **Already-won and still-open deals:** realized value stays frozen (see below) and only an explicit
   operator edit moves it.
 
 A deal **created** already closed goes through `resolveRealizedValueForNewDeal` instead, because it
-has no line items yet: created won it keeps the supplied amount, created lost or open it records
-zero. A client therefore cannot seed reported revenue by posting `actualValue` alongside a lost
+has no line items yet: created won it keeps an explicitly supplied amount (including zero) or defaults to
+`deal.value` when omitted; created lost or open it records zero. A client therefore cannot seed reported revenue by posting `actualValue` alongside a lost
 stage.
 
-The lost-deal rule exists because the deal-browser `closed_revenue` figure sums `actual_value`
-across **all** closed deals, not just won ones. Deriving — or retaining — the booking value on a
-lost deal would inflate reported revenue by the full value of every deal the business failed to
-win. A lost deal records zero realized revenue; its booking value remains visible through
-`deal.value` and its line items.
+A lost deal records zero realized revenue; its booking value remains visible through `deal.value`
+and its line items. The deal-browser `closed_revenue` and `closed_forecast` fields sum actual and
+projected value on **won deals only**, respectively. Their ratio is forecast accuracy, so lost deals
+contribute to neither amount, including historical lost rows with nonzero actual value. The
+`closed_count` field still counts both won and lost deals.
 
-Two architecture tests keep this closed. `updateActualValue` is callable only from `DealMapper` and
-`DealValueService`, and any main-source file that writes a deal outcome through the broad
-`dealMapper.update` statement must also call `reconcileRealizedValue` — so a new route cannot
-silently opt out of the contract.
+`DealDto.actualValue` and `CloseDealRequest.actualValue` are nullable `BigDecimal`, so absent/null
+and explicit zero are distinguishable at the API boundary. A bean carrying zero is treated as an
+explicit amount; adapters with no amount input must preserve null. Create forms carry no actual-value input
+and omit it. `GuidedDealRecordDto.toBean` also explicitly preserves omission as null rather than
+using the deal bean's default zero; this covers guided and assistant-created deals. Edit forms omit an untouched amount, show the deal value for a fresh win, and submit
+zero only when it is entered explicitly (or the outcome is lost). This avoids mistaking an open
+deal's echoed zero for the operator's chosen revenue.
+
+`DealOutcomeWriter` captures an immutable outcome transition alongside reconciliation. Callers
+publish it through the writer after domain and audit writes, in the same transaction, preserving
+the existing audit-before-workflow-intake order. It publishes `deal.won` / `deal.lost` only when the
+outcome changes into that state. This includes creation in a terminal state and CSV
+batch creation. Repeated closes, reorders and edits of an already-won deal emit no further won event;
+reopening and winning again emits one new event. An edit that changes both stage and outcome also emits
+`deal.stage_changed`, but never a second outcome event. The existing `AutomationScope` guard still
+suppresses recursive workflow intake during workflow execution.
+
+**Existing wins at zero are not automatically backfilled.** Some zeros are intentional, and a
+revenue rewrite is not reversible. Operators may review candidates in one authorized workspace:
+`SELECT id, currency, value, actual_value FROM deal WHERE workspace_id = :workspace_id AND won = TRUE AND actual_value = 0 AND value > 0;`
+Only individually confirmed amounts should be corrected. No migration accompanies this change.
+
+Architecture tests keep the write boundary closed. Only `DealValueService` can write canonical or
+realized amounts, and only `DealOutcomeWriter` can insert/update outcome rows (apart from the
+explicitly checked demo seeder). A new route cannot bypass reconciliation. `DealOutcomeRoutesTest`
+checks each route's stored value and outcome-event count.
 
 ### Realized value is frozen at the win
 
@@ -203,6 +289,17 @@ the same data. Those differences are **declared**, not accidental:
 posture, sharing posture, period basis and owner basis, and `FigureReconciliationArchTest`
 re-derives every claim from the mapper SQL, failing loudly when SQL and declaration drift apart.
 
+### Report display precision
+
+Report tables, totals, legends, chart tooltips, the data appendix, and source citations show monetary
+amounts in standard notation, using the currency's minor-unit precision from `Intl.NumberFormat`
+(whole yen for JPY) and omitting trailing zeros. Monetary chart axes use compact notation with up to
+two decimal places. PNG and print/PDF exports use the same rendered document; CSV retains the
+underlying amounts and currency codes. A mixed-currency chart
+remains a currency-partitioned table with an explanation, without conversion or a combined axis.
+Count tooltips use standard locale-aware number notation so nearby counts remain distinguishable,
+even when chart axes abbreviate them.
+
 ### Declared divergences — do not "fix" these
 
 1. **Archived accounts.** The deal browser buckets a deal whose company is archived as
@@ -223,6 +320,16 @@ shares.
 
 Note also that the Home pipeline chart mixes bases within one row: won value is period-bounded
 while open value is unbounded.
+
+### Forecast and historical comparison series
+
+Dashboard Projections totals the full open pipeline in its displayed currency, including undated
+and out-of-chart deals. Its monthly chart requests `openOnly=true` on `revenue-timeseries`, which
+restricts the expected-close series to `won IS NULL` without changing the realized series.
+Analytics and Deals retain all outcomes in their expected-close comparison series and label it
+**All deal value** / **全案件の金額**. This preserves the comparison against realized amounts in
+past periods. Forecast accuracy and its two summary amounts use won deals only in both filtered
+and unfiltered browser metrics.
 
 ### Owner scope is not an authorization boundary
 

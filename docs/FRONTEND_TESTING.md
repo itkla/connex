@@ -5,6 +5,12 @@ The frontend has two test layers, both living in `frontend/`:
 - **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
 - **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving sixteen critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
 
+The frontend CI job uses Node 22. Reproduce runtime-sensitive failures on that major before relying
+on a passing Node 24 run. Response-body readiness assertions should await an observable decision or
+request completion: a fixed number of `Promise.resolve()` turns is not portable across Node's
+response decoders. Keep delayed replies under test control so ordering assertions still exercise
+an older response arriving after the newer decision.
+
 ## Running locally
 
 **Node floor:** `^22.13.0 || >=24.0.0`, declared in `frontend/package.json` `engines` — the intersection of pinned pnpm 11.9's range (`>=22.13`), the locked Vite 8/rolldown range (`^20.19.0 || >=22.12.0`), Vitest 4's (`^20.0.0 || ^22.0.0 || >=24.0.0`), and the lint toolchain's `eslint-visitor-keys` range (`^20.19.0 || ^22.13.0 || >=24`). Node 20.x, 21.x, 22.0–22.12 and 23.x fall outside it. The `engines` field documents the floor; `frontend/test/unit/engines.test.ts` enforces the pinned package-manager version and fails when a dependency bump moves the locked floors away from the declared range. When it does, `frontend/package.json`, [`AGENTS.md`](../AGENTS.md) and this file have to be updated together.
@@ -33,6 +39,17 @@ The e2e suite expects the frontend at `http://localhost:3000` (override with `E2
 First run only: `node_modules/.bin/playwright install chromium` — Chromium is the only browser the suite needs, desktop and phone projects alike.
 
 Useful selections: `playwright test --project=mobile-chromium` (phone viewport only), `playwright test --grep @mobile`, `playwright test locale-ja.spec.ts`.
+
+CSV contacts and interaction-history imports share `app/lib/import.ts`: decode bytes with fatal
+UTF-8 first (including BOM), then fatal Shift-JIS using the browser's Windows-932 mapping.
+Reject replacement characters before mapping or review. Both dialogs show the detected encoding
+before commit. Successful fallback does not identify the source encoding: on Shift-JIS fallback,
+also refuse a CJK unified ideograph flanked by ASCII letters or halfwidth katakana adjacent to
+an ASCII letter as suspected Western mojibake. This heuristic can refuse genuine mixed-script
+Shift-JIS and cannot identify every unsupported encoding; the refusal directs users to CSV UTF-8.
+`test/unit/csvEncoding.test.ts` covers real bytes, including Windows-only ㈱, ordinary Japanese
+business names, Japanese headers, and rejected Western input. CI runs
+`test/e2e/csv-encoding.spec.ts` to exercise the upload flow and refusal without writes.
 
 `connected-capture.spec.ts` can run without the backend or auth bootstrap. Its test-only fixture
 starts the real Next.js app against a stub API; a per-test `e2e_capture` cookie switches the
@@ -66,6 +83,11 @@ The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` a
 4. Seeded ids/names go into `test/e2e/.artifacts/{desktop,mobile}/run.json`, which specs select from `testInfo.project.name` via `test/e2e/support/fixtures.ts`.
 
 Because each browser project registers a **fresh user and workspace**, desktop and phone runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).
+
+`campaign-metrics.spec.ts` registers a separate user and workspace for each case with empty storage
+state. Its extra contacts must stay outside the shared project workspace: adding contacts there
+can move another spec's seeded contact off its sorted first page, even when the new contacts have
+unique names. The campaign flow asserts that its active workspace differs from the project fixture.
 
 Playwright applies the active project's `use` options when a spec calls `browser.newContext()` through the built-in `browser` fixture. A spec that provisions a different identity must therefore pass `storageState: { cookies: [], origins: [] }`. Its `context.request` shares the context's cookies, so omitting that override would reuse the project JSESSIONID and replace the authenticated principal for every spec sharing that saved session.
 
@@ -173,13 +195,26 @@ Three specs pin how the app router and the address bar stay in step, the contrac
 | `owned-url-params.spec.ts` | each of the seven `writeOwnedParamsToUrl` browsers (files, documents, activities, tasks, Radar, analytics, pipelines), signed in: a deep link with an owned param, its owned-param writes and peek drawer, a router refresh, a reload and Back/Forward keep the params, no write drives a non-prefetch RSC request and every write lets the router settle, and no segment falls back to its error boundary. Each browser's router refresh starts from an address only a heard write could have given the router — its owned params differ from the deep link the document loaded at, which the helper asserts — so the refresh fails if that browser's writes go unheard again. Radar's client feed refresh is rewritten to report one family unavailable, because an empty tenant hides Radar's filters |
 | `error-boundary-retry.spec.ts` | a render-phase throw inside the `(app)` shell, forced by answering the Files library's page request once with a malformed body, falls back to the `library` boundary; "Try again" issues exactly one RSC re-fetch, of the URL the page holds including its shallow-written search and sort, and the page recovers with both intact |
 
-Ask Connex coverage splits by tenant, because provider readiness is per organization. The seeded project tenants have no `ai_provider_config` row, so `AiFeatureGate` refuses every turn for them — but only at *turn start*. Session create/list/read, presence, and participants need `AI_USE` and workspace membership alone, which the registered owner has. `ask-connex.spec.ts` and `ask-connex-command-center.spec.ts` therefore run every surface, context, navigation, width, rail, deep-link, locale, and provider-less refusal assertion against those tenants and never ask a question.
+Ask Connex coverage splits by tenant, because provider readiness is per organization. The seeded project tenants have no `ai_provider_config` row, so `AiFeatureGate` refuses every turn for them — but only at *turn start*. Session create/list/read, presence, and participants need `AI_USE` and workspace membership alone, which the registered owner has. `ask-connex.spec.ts` and `ask-connex-command-center.spec.ts` therefore exercise surfaces, context, navigation, width, rail, deep links and locale against those tenants and never ask a question. The dual-surface spec overrides the chat-readiness hint for its interaction-only cases. `background-permission-noise.spec.ts` keeps real provider-less readiness, proves the unavailable state accepts no question, and covers first-load member/confinement noise; its confinement fixture fixes standing because CI deliberately disables enforcement for the wider suite.
 
 `ask-connex-trajectory.spec.ts` is the one spec that asks. CI boots the backend with the `ai-scripted-provider` test seam, which replaces the `openai_compatible` adapter with a server-side, fixture-driven provider reading `frontend/test/e2e/fixtures/ai-scripted/`. The spec registers its own tenant in its own browser context, enrols a passkey (saving a provider needs recent authentication), saves that organization's provider row through `PUT /api/ai/provider`, and drives send → tools → answer. It never touches a project tenant, so the seeded tenants keep refusing, and the provider-less assertions in the other two specs passing in the same run is this mode's merge gate. The seam's activation gates, fixture format, and settings are in [`backend/AI_SECURITY.md`](backend/AI_SECURITY.md#scripted-provider-test-seam); how the browser mode relates to the backend trajectory goldens is in [`AI_EVALUATION.md`](AI_EVALUATION.md#the-browser-mode).
 
 Known scope cut: evidence peek and write-tool approval are still not driven from a browser. Extend the scripted fixture for them rather than faking a provider client-side, because the masking and citation behaviour under test *is* the server round trip.
 
-Known scope cut: the notifications flow asserts the inbox/read-state surface but does not exercise *mark as read on a real notification* — generating one deterministically requires a second workspace member (mention flow), which is deferred until the volume-seeder workstream lands. Documented here so nobody mistakes it for coverage.
+`note-persistence.spec.ts` covers contact mentions in both note editors after typing and on
+an immediate save, saved link preservation, response-driven header links, explicit removal
+through the dialog selectors, and unchanged body bytes during metadata edits. Its notification
+case registers two isolated accounts, completes the owner's passkey step-up, adds and accepts
+the second workspace member, then verifies a real `note.mention` notification after saving a
+member mention. The ordinary notifications spec still does not mark a real notification as read.
+
+`recentRecordsHydration.test.tsx` pauses a consumer's Suspense hydration while the real recents
+provider loads stored history or records a view. Consumers must hydrate from the stable empty
+server snapshot, then display the scoped cache without a recoverable hydration error. Scope-switch
+cases retain the previous `record` callback and reject its writes; `staleAccountStorageWriters.test.tsx`
+keeps account revocation synchronous and checks failed-logout recovery. The browser note cases keep
+the contact-page entry point and their zero-page-error assertion. In the note edit drawer, Tab leaves
+a cleared selector; Escape requests dismissal and correctly invokes the unsaved-changes guard.
 
 The document-acceptance spec creates frozen documents both without and with a real deal line item,
 then sends their deliveries with the authenticated request context. CI configures the backend's
@@ -200,6 +235,10 @@ in for persistence proof.
 
 ## Flake policy
 
+- Specs that register their own accounts must start with empty `storageState` or a fresh context.
+  Registering through a project-seeded session replaces that session on the server and signs out
+  every test that inherited it. The shared `registerUser` helper refuses an authenticated or
+  indeterminate context before posting; `e2eRegistrationIsolation.test.ts` covers this boundary.
 - **No sleeps.** Waits are Playwright auto-retrying assertions (`toBeVisible`, `toHaveURL`, …). Animations are neutralized with `reducedMotion: "reduce"`; locale/timezone are pinned (`en-US`/UTC).
 - Specs only touch **records seeded for that spec** (distinct contacts per flow), and desktop/phone projects own separate tenants and fixture files, so the default 2 workers never race each other.
 - CI runs with `retries: 2` and uploads **traces + screenshots + the HTML report** on failure; locally retries are 0 so flake is visible, not hidden.

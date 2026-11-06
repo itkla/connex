@@ -3,11 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import type { Page, PageParams } from '@/app/lib/types';
+import { ApiError } from '@/app/lib/api';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl, type SortDir } from '@/app/hooks/listStateUrl';
 
 export type { SortDir };
 export { SERVER_RECORDS_URL_KEYS } from '@/app/hooks/listStateUrl';
+
+type RecordsState<T> = Page<T> & {
+    workspaceId: number | null;
+    loading: boolean;
+    error: Error | null;
+};
 
 /**
  * Server-side pagination hook. When `urlSync` is true, its query/sort/page/size are seeded from and
@@ -21,6 +28,9 @@ export { SERVER_RECORDS_URL_KEYS } from '@/app/hooks/listStateUrl';
  * values land. That path is for browsers whose `sort` value space conflicts with the records-browser
  * `sort`/`dir` pair — they write pagination through their own owned-params writer instead of
  * enabling full `urlSync`.
+ * Retryable failures retain the last successful page in the same workspace and expose `error` until a successful retry.
+ * Authentication and permission failures discard that page so later outages cannot reveal denied rows again.
+ * Consumers must handle expired sessions and access denials separately, never showing empty-state copy for a failure.
  *
  * @param fetcher - loads a page of results for the given params
  * @param extraParams - non-paging params merged into every fetch
@@ -47,9 +57,14 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const seededPageParam = (urlSync ? seed?.get('page') : seedPage) ?? null;
     const seededSizeParam = (urlSync ? seed?.get('size') : seedSize) ?? null;
 
-    const [items, setItems] = useState<T[]>([]);
-    const [total, setTotal] = useState(0);
-    const [loading, setLoading] = useState(true);
+    const [records, setRecords] = useState<RecordsState<T>>({
+        workspaceId: activeWorkspaceId, items: [], total: 0, loading: true, error: null,
+    });
+    const currentWorkspace = records.workspaceId === activeWorkspaceId;
+    const items = currentWorkspace ? records.items : [];
+    const total = currentWorkspace ? records.total : 0;
+    const loading = !currentWorkspace || records.loading;
+    const error = currentWorkspace ? records.error : null;
     const [page, setPage] = useState(() => parseListInt(seededPageParam, 1));
     const [size, setSize] = useState(() => parseListInt(seededSizeParam, defaultSize, Math.max(defaultSize, MAX_URL_PAGE_SIZE)));
     const [query, setQuery] = useState(seededQuery);
@@ -94,19 +109,28 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
 
     const load = useCallback(() => {
         let active = true;
-        setLoading(true);
+        setRecords((previous) => previous.workspaceId === activeWorkspaceId
+            ? { ...previous, loading: true }
+            : { workspaceId: activeWorkspaceId, items: [], total: 0, loading: true, error: null });
         fetcher({ page, size, q: debouncedQuery || undefined, sort: sortKey ?? undefined, dir: sortDirection, ...JSON.parse(extraKey) } as P)
             .then((res) => {
                 if (!active) return;
-                setItems(res.items);
-                setTotal(res.total);
+                setRecords({ ...res, workspaceId: activeWorkspaceId, loading: false, error: null });
                 const maxPage = Math.max(1, Math.ceil(res.total / size));
                 if (page > maxPage) setPage(maxPage);
             })
-            .catch(() => { if (active) { setItems([]); setTotal(0); } })
-            .finally(() => { if (active) setLoading(false); });
+            .catch((failure: unknown) => {
+                const denied = failure instanceof ApiError && (failure.status === 401 || failure.status === 403);
+                if (active) setRecords((previous) => ({
+                    ...previous,
+                    items: denied ? [] : previous.items,
+                    total: denied ? 0 : previous.total,
+                    error: failure instanceof Error ? failure : new Error('Record list request failed'),
+                }));
+            })
+            .finally(() => { if (active) setRecords((previous) => ({ ...previous, loading: false })); });
         return () => { active = false; };
-    }, [fetcher, page, size, debouncedQuery, sortKey, sortDirection, extraKey]);
+    }, [fetcher, page, size, debouncedQuery, sortKey, sortDirection, extraKey, activeWorkspaceId]);
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     useEffect(() => load(), [load, revision]);
@@ -114,8 +138,25 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const reload = useCallback(() => setRevision((value) => value + 1), []);
 
     const patchItem = useCallback((id: number, partial: Partial<T>) => {
-        setItems((prev) => prev.map((item) => ((item as { id?: number }).id === id ? { ...item, ...partial } : item)));
-    }, []);
+        setRecords((previous) => previous.workspaceId !== activeWorkspaceId ? previous : {
+            ...previous,
+            items: previous.items.map((item) => (
+                typeof item === 'object' && item !== null && 'id' in item && item.id === id
+                    ? { ...item, ...partial }
+                    : item
+            )),
+        });
+    }, [activeWorkspaceId]);
+
+    /** Replaces a complete server snapshot so omitted nullable fields cannot survive an acknowledged save. */
+    const replaceItem = useCallback((id: number, saved: T) => {
+        setRecords((previous) => previous.workspaceId !== activeWorkspaceId ? previous : {
+            ...previous,
+            items: previous.items.map((item) => (
+                typeof item === 'object' && item !== null && 'id' in item && item.id === id ? saved : item
+            )),
+        });
+    }, [activeWorkspaceId]);
 
     const changeSize = useCallback((next: number) => { setSize(next); setPage(1); }, []);
 
@@ -138,11 +179,11 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     }, []);
 
     return {
-        items, total, loading,
+        items, total, loading, error,
         page, setPage,
         size, setSize: changeSize,
         query, setQuery, applyQuery,
         sortKey, sortDirection, onSortChange, applySort,
-        revision, reload, patchItem,
+        revision, reload, patchItem, replaceItem,
     };
 }

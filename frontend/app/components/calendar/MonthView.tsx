@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { useCallback, useMemo, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
@@ -57,7 +58,7 @@ interface MonthViewProps {
     onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
     onReschedule: (event: CalendarEvent, dayKey: string) => void;
     /** Fine-pointer create in the desktop day pane: click an empty slot to add at that time. */
-    onSlotCreate?: (startMs: number) => void;
+    onSlotCreate?: (civilValue: string) => void;
 }
 
 export default function MonthView({
@@ -81,12 +82,12 @@ export default function MonthView({
     const cells = useMemo(() => monthGridCells(monthStart, WEEK_STARTS_ON), [monthStart]);
 
     const weekdayLabels = useMemo(() => {
-        const fmt = new Intl.DateTimeFormat(locale, { weekday: 'short' });
+        const fmt = getDateTimeFormatter(locale, { weekday: 'short' });
         return Array.from({ length: 7 }, (_, i) => fmt.format(cells[i]));
     }, [locale, cells]);
 
     const selectedTitle = useMemo(
-        () => new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }).format(selectedDay),
+        () => getDateTimeFormatter(locale, { weekday: 'long', month: 'long', day: 'numeric' }).format(selectedDay),
         [locale, selectedDay],
     );
 
@@ -102,7 +103,7 @@ export default function MonthView({
     );
 
     const dropDateLabel = useMemo(() => {
-        const fmt = new Intl.DateTimeFormat(locale, { month: 'long', day: 'numeric' });
+        const fmt = getDateTimeFormatter(locale, { month: 'long', day: 'numeric' });
         return (id: UniqueIdentifier) => {
             const raw = String(id);
             if (!raw.startsWith(DAY_DROP_PREFIX)) return raw;
@@ -288,7 +289,7 @@ function MonthCell({
                                 isSelected
                                     ? 'font-semibold text-brand-foreground'
                                     : isToday
-                                      ? 'font-semibold text-brand-dark'
+                                      ? 'font-semibold text-brand-text'
                                       : inMonth
                                         ? 'text-foreground'
                                         : 'text-muted-foreground/60',

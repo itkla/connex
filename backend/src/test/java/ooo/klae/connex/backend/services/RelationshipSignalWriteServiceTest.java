@@ -22,6 +22,33 @@ import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 
 class RelationshipSignalWriteServiceTest {
     @Test
+    void modelChangeRebasesActorDecisionsOnceAfterLockingTheSignal() {
+        RelationshipSignalMapper mapper = mock(RelationshipSignalMapper.class);
+        RelationshipSignalWriteService service = new RelationshipSignalWriteService(mapper);
+        LocalDateTime at = LocalDateTime.of(2026, 8, 8, 13, 0);
+        when(mapper.lockFamilyState(9, "relationship_decay")).thenReturn(familyState(at.minusMinutes(1)));
+        RelationshipSignal previous = new RelationshipSignal();
+        previous.setId(41);
+        previous.setSourceModelVersion("warmth-v1");
+        previous.setSourceStateHash("previous");
+        RelationshipSignal current = new RelationshipSignal();
+        current.setDedupeKey("relationship_decay:person:7");
+        current.setSourceStateHash("current");
+        when(mapper.lockByDedupeKey(9, current.getDedupeKey())).thenReturn(previous);
+
+        service.replaceFamily(9, "relationship_decay", "generation", List.of(current), at, at);
+
+        var order = org.mockito.Mockito.inOrder(mapper);
+        order.verify(mapper).lockByDedupeKey(9, current.getDedupeKey());
+        order.verify(mapper).upsertSignal(current);
+        order.verify(mapper).rebaseModelState(9, 41, "previous", "current");
+        org.mockito.Mockito.clearInvocations(mapper);
+        previous.setSourceModelVersion(current.getSourceModelVersion());
+        service.replaceFamily(9, "relationship_decay", "next", List.of(current), at.plusMinutes(1), at);
+        verify(mapper, never()).rebaseModelState(anyInt(), org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString());
+    }
+
+    @Test
     void olderSuccessfulAttemptCannotReplaceNewerFamilyState() {
         RelationshipSignalMapper mapper = mock(RelationshipSignalMapper.class);
         RelationshipSignalWriteService service = new RelationshipSignalWriteService(mapper);

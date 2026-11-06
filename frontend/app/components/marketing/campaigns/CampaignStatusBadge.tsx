@@ -4,7 +4,7 @@ import { type CampaignStatus } from "@/app/lib/types";
 
 const STATUS_CLASS: Record<CampaignStatus, string> = {
     draft: "bg-muted text-muted-foreground ring-border",
-    scheduled: "bg-brand-light text-brand-dark ring-brand/30",
+    scheduled: "bg-brand-light text-brand-text ring-brand/30",
     active: "bg-brand text-brand-foreground ring-brand",
     paused: "bg-risk-medium/15 text-risk-medium ring-risk-medium/30",
     completed: "bg-secondary text-secondary-foreground ring-border",

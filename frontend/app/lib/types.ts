@@ -177,6 +177,14 @@ export type DealDuplicatePreflightRequest = {
     reviewToken?: string;
 };
 
+export type DealImportDateReview = {
+    closedAt?: string | null;
+    createdAt?: string | null;
+    timezone: string;
+    usesImportTime: boolean;
+    futureClosedAt: boolean;
+};
+
 export type ImportRowAnalysis = {
     rowIndex: number;
     status: ImportRowStatus;
@@ -186,6 +194,7 @@ export type ImportRowAnalysis = {
     mergedRowCount?: number | null;
     errors?: string[] | null;
     candidates?: DuplicateCandidate[] | null;
+    dealDates?: DealImportDateReview | null;
 };
 
 export type ImportPreviewResult = {
@@ -876,7 +885,8 @@ export type PrivilegedMembership = {
     orgId: number;
     orgName: string;
     orgRole: OrgRole | null;
-    workspaces: Array<{ workspaceId: number; workspaceName: string }>;
+    lastOwner?: boolean;
+    workspaces: Array<{ workspaceId: number; workspaceName: string; lastOwner?: boolean }>;
 };
 
 export type PasskeyRegistrationRequirements = {
@@ -1239,6 +1249,7 @@ export type UpdateCompanyPayload = {
 
 export type Contact = {
     id: number;
+    version?: number;
     workspaceId?: number;
     ownerId?: number | null;
     name: string;
@@ -1341,6 +1352,7 @@ export type ContactDisqualificationReason = string;
  * transition rules, so the client renders `allowedTransitions` rather than recomputing them.
  */
 export type ContactLifecycle = {
+    version?: number;
     personId: number | null;
     stage: ContactLifecycleStage | null;
     changedAt: string | null;
@@ -1425,11 +1437,11 @@ export type QualificationCriterionPayload = {
 export type DisqualificationReason = {
     id: number;
     code: string;
-    label: string | null;
+    label?: string | null;
     requiresNote: boolean;
     position: number;
     builtIn: boolean;
-    archivedAt: string | null;
+    archivedAt?: string | null;
 };
 
 /** Editable fields for a disqualification reason. Codes remain immutable after creation. */
@@ -1515,6 +1527,8 @@ export type DataSubjectRequestBody = {
 
 export type Deal = {
     id: number;
+    /** Database-owned token for conditional edits. */
+    version?: number;
     name: string;
     value: number;
     actualValue: number;
@@ -1568,7 +1582,7 @@ export type UpdateDealEvaluationPayload = {
 export type CreateDealPayload = {
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number | null;
     stage: number | null;
@@ -1582,9 +1596,11 @@ export type CreateDealPayload = {
 };
 
 export type UpdateDealPayload = {
+    /** Token from the form's base snapshot; omission retains legacy write behavior. */
+    expectedVersion?: number;
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number;
     stage: number;
@@ -1775,9 +1791,15 @@ export type DealLineItemsResponse = {
     items: DealLineItem[];
     /** Unavailable until every remaining line uses the deal currency. */
     totals: DealLineItemTotals | null;
+    manualValueToReplace?: number | null;
+    restorableManualValue?: number | null;
 };
 
 export type DealLineItemPayload = {
+    previewOnly?: boolean;
+    confirmValueReplacement?: boolean;
+    expectedManualValue?: number;
+    expectedCurrency?: string;
     productId?: number | null;
     name?: string;
     sku?: string | null;
@@ -2573,10 +2595,13 @@ export type CampaignSendPayload = {
     purpose?: string | null;
 };
 
-/** Per-channel delivery tally within a campaign's engagement rollup. */
+/** Prepared send recipients, dispatch evidence, and receipt-backed outcomes for one channel. */
 export type CampaignChannelStat = {
     channel: string;
-    deliveries: number;
+    preparedRecipients: number;
+    dispatched: number;
+    delivered: number;
+    deliveryReceiptsAvailable: boolean;
 };
 
 /** Delivery-outcome rollup for a single send within a campaign's engagement view. */
@@ -2584,7 +2609,7 @@ export type CampaignSendEngagement = {
     sendId: number;
     status: string;
     channel: string;
-    totalRecipients: number;
+    preparedRecipients: number;
     dispatched: number;
     delivered: number;
     bounced: number;
@@ -2607,7 +2632,7 @@ export type CampaignSendEngagement = {
  */
 export type CampaignEngagement = {
     campaignId: number;
-    totalRecipients: number;
+    preparedRecipients: number;
     dispatched: number;
     delivered: number;
     bounced: number;
@@ -2643,6 +2668,8 @@ export type CampaignRecipient = {
     reasonCode: CampaignDeliveryFailureReason | null;
     createdAt?: string;
     updatedAt?: string;
+    messageName?: string;
+    sendNumber?: number;
 };
 
 export type CampaignDeliveryFailureReason =
@@ -2670,6 +2697,7 @@ export type CampaignRecipientsPageParams = PageParams & {
     sendId?: number;
     status?: string[];
     event?: string;
+    submitted?: boolean;
 };
 
 /**
@@ -3255,8 +3283,8 @@ export type AiChatMessage = {
     sessionId: number;
     seq: number;
     authorKind: string;
-    authorUserId: number | null;
-    authorDisplayName: string | null;
+    authorUserId?: number | null;
+    authorDisplayName?: string | null;
     content: string;
     contentWithheld?: boolean;
     historySummarized?: boolean;
@@ -3975,6 +4003,7 @@ export type ReportGoal = ReportGoalInput & {
 };
 
 export type UpdateContactPayload = {
+    expectedVersion?: number;
     name?: string;
     email?: string;
     phone?: string;
@@ -4184,14 +4213,14 @@ export type RecordCommentAuthor = {
 export type RecordComment = {
     id: number;
     threadId: number;
-    /** Null when the author's account has been permanently erased. */
-    author: RecordCommentAuthor | null;
-    /** Null once the comment has been redacted; the row survives as a tombstone. */
-    content: string | null;
+    /** Absent or null when the author's account has been permanently erased. */
+    author?: RecordCommentAuthor | null;
+    /** Absent or null once the comment has been redacted; the row survives as a tombstone. */
+    content?: string | null;
     createdAt: string;
     /** Set when the author edited the comment within the edit window. */
     editedAt?: string | null;
-    deletedAt: string | null;
+    deletedAt?: string | null;
     deletedByUserId?: number | null;
     /** Server-authorized @/# references resolved from the content tokens. */
     references?: NoteReference[];
@@ -4953,21 +4982,23 @@ export type WorkflowCanvas = {
 export type WorkflowDto = {
     id: number;
     name: string;
-    description: string | null;
+    description?: string | null;
     enabled: boolean;
     runtimeOwner: WorkflowRuntimeOwner;
-    archivedAt: string | null;
-    intakePausedAt: string | null;
-    intakePausedById: number | null;
+    executionAvailable: boolean;
+    executionUnavailableReason?: string | null;
+    archivedAt?: string | null;
+    intakePausedAt?: string | null;
+    intakePausedById?: number | null;
     draftRevision: number;
-    recordType: string | null;
+    recordType?: string | null;
     executionMode: WorkflowExecutionMode;
-    runAsUserId: number | null;
+    runAsUserId?: number | null;
     definition: WorkflowDefinition;
     canvas: WorkflowCanvas;
-    activeVersionId: number | null;
-    createdById: number | null;
-    updatedById: number | null;
+    activeVersionId?: number | null;
+    createdById?: number | null;
+    updatedById?: number | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -4984,7 +5015,7 @@ export type WorkflowRunStatus =
 
 export type WorkflowRunWireStatus = WorkflowRunStatus | "partial";
 
-export type WorkflowListItem = Omit<WorkflowDto, "definition" | "canvas" | "activeVersionId"> & {
+export type WorkflowListItem = Required<Omit<WorkflowDto, "definition" | "canvas" | "activeVersionId">> & {
     activeVersion: {
         id: number;
         number: number;
@@ -5248,6 +5279,7 @@ export type WorkflowIntervention = {
 export type WorkflowOperationsSummary = {
     workflowCount: number;
     healthyCount: number;
+    unavailableCount: number;
     pausedCount: number;
     disabledCount: number;
     interventionRequiredCount: number;
@@ -5298,9 +5330,9 @@ export type WorkflowOperationsDetail = {
         id: number;
         name: string;
         enabled: boolean;
-        archivedAt: string | null;
-        intakePausedAt: string | null;
-        intakePausedById: number | null;
+        archivedAt?: string | null;
+        intakePausedAt?: string | null;
+        intakePausedById?: number | null;
         runtimeOwner: WorkflowRuntimeOwner;
     };
     health: {
@@ -5539,13 +5571,13 @@ export type InviteLinkPreview = {
 export type AuditLogEntry = {
     id: number;
     action: string;
-    entityType: string | null;
-    entityId: number | null;
-    actorId: number | null;
-    actorLabel: string | null;
-    targetLabel: string | null;
-    outcome: string | null;
-    summary: string | null;
+    entityType?: string | null;
+    entityId?: number | null;
+    actorId?: number | null;
+    actorLabel?: string | null;
+    targetLabel?: string | null;
+    outcome?: string | null;
+    summary?: string | null;
     changes?: Record<string, unknown> | null;
     context?: Record<string, unknown> | null;
     ipAddress?: string | null;
@@ -6284,6 +6316,8 @@ export type AiWatchPayload = {
 
 /** Everything the Ask Connex command centre renders, in one authorized read. */
 export type AiCommandCenter = {
+    /** Full ASSISTANT_CHAT readiness, independent of the brief skill catalog. */
+    chatAvailable: boolean;
     schedule: AiBriefSchedule;
     latestBriefSessionId: number | null;
     latestBriefKind: AiBriefKind | null;

@@ -298,6 +298,14 @@ public interface NotificationMapper {
         @Param("dedupeKey") String dedupeKey
     );
 
+    /** Marks a task recipient's existing assignment notice resolved within its workspace. */
+    int resolveTaskAssignment(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("taskId") int taskId,
+        @Param("resolvedAt") String resolvedAt
+    );
+
     List<Notification> findReminderNotifications(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId
@@ -421,5 +429,14 @@ public interface NotificationMapper {
     /** Erases an offer notice under its offer X lock, including already resolved history. */
     int deleteOwnershipOffer(@Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId, @Param("offerId") String offerId);
+
+    /** Returns the last successful warmth notification model for this workspace. */
+    String getWarmthModelVersion(@Param("workspaceId") int workspaceId);
+
+    /** Records a successful model baseline under the existing organization reconciliation mutex. */
+    int setWarmthModelVersion(@Param("workspaceId") int workspaceId, @Param("modelVersion") String modelVersion);
+
+    /** Removes only obsolete relationship-derived baselines during the model cutover. */
+    int deletePreviousWarmthBaselines(@Param("workspaceId") int workspaceId, @Param("modelVersion") String modelVersion);
 
 }

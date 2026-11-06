@@ -203,15 +203,15 @@ function ScopedTaskDialog({
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={() => {
+                        clearDraft?.();
+                        guard.confirm.onDiscard();
+                    }}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={() => {
-                    clearDraft?.();
-                    guard.confirm.onDiscard();
-                }}
-            />
         </>
     );
 }
@@ -426,7 +426,7 @@ export function TaskDialogForm({
             <div className="px-6 pb-6">
                 <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                             <ClipboardDocumentCheckIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
@@ -501,13 +501,13 @@ export function TaskDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t('noUserFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noUserFound')}</ComboboxEmpty>
-                                        {users.map((u) => (
+                                        {(u: (typeof users)[number]) => (
                                             <ComboboxItem key={u.id} value={u}>
                                                 {u.displayName || u.username}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -533,13 +533,13 @@ export function TaskDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
-                                        {persons.map((p) => (
+                                        {(p: (typeof persons)[number]) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -563,13 +563,13 @@ export function TaskDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
-                                        {deals.map((d) => (
+                                        {(d: (typeof deals)[number]) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

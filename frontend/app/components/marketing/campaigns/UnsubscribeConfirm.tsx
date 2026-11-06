@@ -44,7 +44,7 @@ export default function UnsubscribeConfirm({
             >
                 <span
                     aria-hidden
-                    className="grid size-12 place-items-center rounded-full bg-brand-light text-brand-dark"
+                    className="grid size-12 place-items-center rounded-full bg-brand-light text-brand-text"
                 >
                     <CheckCircleIcon className="size-6" />
                 </span>

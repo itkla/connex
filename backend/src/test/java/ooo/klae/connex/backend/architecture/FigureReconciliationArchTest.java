@@ -70,6 +70,7 @@ class FigureReconciliationArchTest {
         Figure.DEAL_BROWSER_METRICS_UNSCOPED,
         Figure.PIPELINE_BOARD,
         Figure.HOME_PIPELINE_CHART,
+        Figure.REALIZED_REVENUE_CHARTS,
         Figure.REPORT_WON_REVENUE,
         Figure.REPORT_OPEN_PIPELINE_VALUE,
         Figure.REPORT_FORECAST_WEIGHTED);
@@ -199,7 +200,9 @@ class FigureReconciliationArchTest {
                     requireContains(definition, evidence, posture,
                         "CASE WHEN d.won IS NULL THEN d.value END", sql, violations);
                     requireContains(definition, evidence, posture,
-                        "CASE WHEN d.won IS NOT NULL THEN d.actual_value END", sql, violations);
+                        "CASE WHEN d.won = TRUE THEN d.value END", sql, violations);
+                    requireContains(definition, evidence, posture,
+                        "CASE WHEN d.won = TRUE THEN d.actual_value END", sql, violations);
                 }
             }
             case CLAMPED_CANONICAL_VALUE_TIMES_WIN_RATE -> {
@@ -369,6 +372,14 @@ class FigureReconciliationArchTest {
                     "#{query.endUtc}", sql, violations);
                 requireContainsInEvidence(definition, evidence, posture,
                     "d.won = TRUE", measureSql, sql, violations);
+            }
+            case CLOSED_AT_CALENDAR_BUCKETS -> {
+                requireContains(definition, evidence, posture,
+                    "d.closed_at >= boundary.start_utc", sql, violations);
+                requireContains(definition, evidence, posture,
+                    "d.closed_at < boundary.end_utc", sql, violations);
+                requireContains(definition, evidence, posture, "d.won = TRUE", sql, violations);
+                requireAbsent(definition, evidence, posture, "d.expected_close_date", sql, violations);
             }
             case EXPECTED_CLOSE_DATE_HALF_OPEN -> {
                 requireExpectedCloseWindow(

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requestCookies = vi.hoisted(() => vi.fn());
 
+vi.mock("@/app/lib/requestTimeZone", () => ({ requestTimeZone: () => Promise.resolve("Asia/Tokyo") }));
+
 vi.mock("next/headers", () => ({
     cookies: requestCookies,
 }));
@@ -27,6 +29,7 @@ describe("next-intl request locale", () => {
         });
 
         expect(config.locale).toBe("ja");
+        expect(config.timeZone).toBe("Asia/Tokyo");
         expect(JSON.stringify(config.messages)).toContain("ドキュメントの確認");
         expect(requestCookies).not.toHaveBeenCalled();
     });

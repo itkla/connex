@@ -35,6 +35,8 @@ Do not turn record details into dense multi-panel consoles or promote aggregate 
 
 ## Loading, empty, error, and permission states
 
+Client collections using `useServerRecords` wrap their list content in `RecordListState`, keeping search and filter controls outside it so members can change or clear a failed filter. Failed loads show the shared alert and Retry, suppress empty and onboarding copy, and preserve the last successful rows only within the same workspace. A pending retry keeps its error visible with a disabled busy control; success clears the error. Expired sessions use the shared sign-in redirect and suppress collection content. Authentication and permission failures discard the cached page until a successful load; permission refusals use access guidance. API support references appear when available.
+
 Every collection/list surface distinguishes all four states:
 
 - Loading: shape-matched `loading.tsx` skeletons, not a centered spinner over content.
@@ -65,6 +67,17 @@ Follow `docs/PRODUCT.md` for the product law. The normal implementation mapping 
 Per-surface deviations are product decisions, not precedent for inventing a new mapping.
 
 ## Signed-off adaptations
+
+### Map capacity
+
+The relationship map loads the workspace as a whole, including when a record is focused. Keep its
+2,000 combined contacts/companies/deals and 4,000 combined activities/tasks/notes limits. A capacity
+refusal explains both limits and links to the ordinary record lists; a valid focused-record link also
+offers that record's detail page. Fetch failures use the shared segment error and retry state.
+Record action bars preserve available, over-capacity and unknown results from bounded first-page reads.
+Only confirmed capacity limits hide focused-map navigation. Failed checks keep navigation available;
+the map page handles any continuing fetch failure through its error boundary and retry. The bounded
+neighbourhood map and scalable rendering remain deferred under [#2262](https://github.com/itkla/connex/issues/2262).
 
 ### Campaigns
 
@@ -201,6 +214,8 @@ Any dialog/drawer that accumulates meaningful input participates in the shared u
 
 Use the shared record delete confirmation for ordinary record deletion. Organization-level permanent deletion may use stronger typed confirmation. A surface contributes its object label and consequence details; it does not rewrite the common destructive grammar.
 
+When a row menu opens a delete confirmation, cancellation returns keyboard focus to that row's action button.
+
 ## Buttons and controls
 
 `frontend/components/ui` owns control shape and behavior.
@@ -223,6 +238,23 @@ Create and edit surfaces validate fixable field problems inline. Controls expose
 Motion follows `docs/frontend/MOTION.md`. Repeated chrome such as `PageShell` and `PageHeader` does not animate independently when page arrival already owns the transition.
 
 Use semantic design tokens for color. Relationship warmth, charts, success/warning/destructive, ranking, and other semantic palettes communicate meaning consistently. Never rely on color alone.
+
+Brand fills and decorative marks keep `brand`. Green text, links, active navigation, and labels use
+`brand-text`, which adapts to light and dark surfaces; `brand-dark` remains a palette shade, not a text
+contrast guarantee. Muted labels must also meet 4.5:1 on their surface, including filled inputs.
+Forced-light and print surfaces set the light `brand-text` value even under a dark theme.
+`test/unit/colorContrast.test.ts` calculates WCAG AA ratios from the shipped tokens for both themes.
+Feedback uses paired surface/foreground tokens, and Sonner descriptions inherit the toast foreground.
+The feedback aliases are static theme variables because inline styles consume them without utilities.
+
+The authenticated shell puts a localized skip link first. After route changes, it focuses main
+without scrolling only when focus is on the body or a removed element; destination autofocus wins.
+Its closed mobile sidebar is inert; opening it moves focus into the drawer and makes the page inert,
+and dismissing it restores the opener (or the toolbar trigger when the bottom-bar opener unmounts).
+Settings and organization row menus share `rowActionTrigger` from `SettingsListPrimitives`: hover
+reveals actions on mouse devices, while `(hover: none)` or `(any-pointer: coarse)` shows them
+without interaction on touch, including hybrid devices that also support hover.
+
 
 ## New page/redesign checklist
 

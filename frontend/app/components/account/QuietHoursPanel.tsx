@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { MoonIcon } from "@heroicons/react/24/outline";
 
 import type { QuietHours, QuietHoursConfig, QuietHoursDay } from "@/app/lib/types";
@@ -49,6 +49,7 @@ function toConfig(data: QuietHours): QuietHoursConfig {
  * reverts on failure.
  */
 export default function QuietHoursPanel() {
+    const timeZone = useTimeZone();
     const t = useTranslations("AccountQuietHours");
     const locale = useLocale();
     const [data, setData] = useState<QuietHours | null>(null);
@@ -143,7 +144,7 @@ export default function QuietHoursPanel() {
                             {data.activeNow || data.nextTransitionAt ? (
                                 <div className="flex flex-wrap items-center gap-2">
                                     {data.activeNow ? (
-                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-2 py-0.5 text-xs font-medium text-brand-dark">
+                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-2 py-0.5 text-xs font-medium text-brand-text">
                                             <span className="size-1.5 rounded-full bg-brand-dark" />
                                             {t("activeNow")}
                                         </span>
@@ -151,7 +152,7 @@ export default function QuietHoursPanel() {
                                     {data.nextTransitionAt ? (
                                         <span className="text-xs text-muted-foreground">
                                             {t(data.activeNow ? "resumesAt" : "nextStartsAt", {
-                                                time: formatDateTime(data.nextTransitionAt, locale),
+                                                time: formatDateTime(data.nextTransitionAt, locale, timeZone),
                                             })}
                                         </span>
                                     ) : null}

@@ -27,6 +27,7 @@ import NewContactDialog from '@/app/components/records/contacts/NewContactDialog
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
 import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
@@ -46,7 +47,6 @@ function emptyDealPayload(companyId: number): CreateDealPayload {
     return {
         name: '',
         value: 0,
-        actualValue: 0,
         currency: 'USD',
         pipeline: 0,
         stage: 0,
@@ -57,8 +57,10 @@ function emptyDealPayload(companyId: number): CreateDealPayload {
 
 export default function CompanyActionsMenu({
     company,
+    mapAvailability = 'unknown',
 }: {
     company: Company;
+    mapAvailability?: RelationshipMapAvailability;
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
@@ -249,7 +251,7 @@ export default function CompanyActionsMenu({
                 ...newDealPayload,
                 name: newDealPayload.name.trim(),
                 value: Number.isFinite(newDealPayload.value) ? newDealPayload.value : 0,
-                actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : 0,
+                actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : undefined,
                 currency: newDealPayload.currency.trim() || 'USD',
                 pipeline: newDealPayload.pipeline || null,
                 stage: newDealPayload.stage || null,
@@ -281,14 +283,16 @@ export default function CompanyActionsMenu({
                     <PencilSquareIcon className="size-4" />
                     {t('edit')}
                 </Button>
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    onClick={() => router.push(`/intelligence/map?companyId=${company.id}`)}
-                >
-                    <EyeIcon className="size-4" />
-                    {t('viewInMap')}
-                </Button>
+                {mapAvailability !== 'overCapacity' && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={() => router.push(`/intelligence/map?companyId=${company.id}`)}
+                    >
+                        <EyeIcon className="size-4" />
+                        {t('viewInMap')}
+                    </Button>
+                )}
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 <Button

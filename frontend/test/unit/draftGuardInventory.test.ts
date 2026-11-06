@@ -36,7 +36,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next-intl", () => ({
-    useLocale: () => "en",
+    useTimeZone: () => "UTC", useLocale: () => "en",
     useTranslations: () => (key: string) => key,
 }));
 
@@ -1048,6 +1048,7 @@ const delegationScenarios: Record<string, OwnerScenario> = {
                 },
             });
             return createElement(QuickEditDealSheet, {
+                timezone: "UTC",
                 open: true,
                 onOpenChange: onClose,
                 selectedIds: new Set([deal.id]),

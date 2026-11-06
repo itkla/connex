@@ -99,9 +99,15 @@ class PasskeyApprovalMetadataHttpIntegrationTest {
         assertEquals(org.getId(), membership.path("orgId").asInt());
         assertEquals(org.getName(), membership.path("orgName").asString());
         assertTrue(membership.has("orgRole")); assertTrue(membership.path("orgRole").isNull());
+        assertTrue(membership.has("lastOwner")); assertFalse(membership.path("lastOwner").asBoolean());
         assertEquals(workspace.getId(), membership.path("workspaces").get(0).path("workspaceId").asInt());
         assertEquals(workspace.getName(), membership.path("workspaces").get(0).path("workspaceName").asString());
+        assertFalse(membership.path("workspaces").get(0).path("lastOwner").asBoolean());
         assertEquals(401, request("GET", "/api/auth/webauthn/register/requirements", null).statusCode());
+        JsonNode ownerRequirements = json.readTree(request("GET", "/api/auth/webauthn/register/requirements", ownerSession).body());
+        JsonNode ownerMembership = ownerRequirements.path("privilegedMemberships").get(0);
+        assertTrue(ownerMembership.path("lastOwner").asBoolean());
+        assertTrue(ownerMembership.path("workspaces").get(0).path("lastOwner").asBoolean());
         workspaces.updateMemberRole(workspace.getId(), target.getId(), "member");
         result = json.readTree(request("GET", "/api/auth/webauthn/register/requirements", targetSession).body());
         assertEquals(0, result.path("privilegedMemberships").size());

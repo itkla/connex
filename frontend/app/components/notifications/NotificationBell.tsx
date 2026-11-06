@@ -4,7 +4,7 @@ import { BellIcon, CheckCircleIcon, CheckIcon, EyeIcon, XMarkIcon } from "@heroi
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
 import { motion, useReducedMotion } from "motion/react";
 
@@ -35,6 +35,7 @@ import {
 import { instant, springJiggle } from "@/app/lib/motion";
 
 export default function NotificationBell() {
+    const timeZone = useTimeZone();
     const t = useTranslations("Notifications");
     const locale = useLocale();
     const now = useLiveNow();
@@ -200,7 +201,7 @@ export default function NotificationBell() {
                             <button
                                 type="button"
                                 onClick={() => void readAll()}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:text-brand-dark"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:text-brand-text"
                             >
                                 <CheckCheck className="size-3.5" />
                                 {t("markAllRead")}
@@ -260,7 +261,7 @@ export default function NotificationBell() {
                                             </div>
                                             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{content.body}</p>
                                             <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                                                {formatRelativeTime(item.triggeredAt, locale, now)}
+                                                {formatRelativeTime(item.triggeredAt, locale, now, timeZone)}
                                                 {item.workspaceName ? (
                                                     <span className="rounded-full bg-muted px-1.5 py-0.5 font-medium">
                                                         {item.workspaceName}
@@ -288,7 +289,7 @@ export default function NotificationBell() {
                                                     type="button"
                                                     aria-label={t("markRead")}
                                                     onClick={() => void resolve(item)}
-                                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-brand"
+                                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-brand-text"
                                                 >
                                                     <CheckIcon className="size-4" />
                                                 </button>
@@ -312,7 +313,7 @@ export default function NotificationBell() {
                         <DropdownMenu.Item asChild>
                             <Link
                                 href="/notifications"
-                                className="flex items-center justify-center gap-2 rounded-md py-2 text-sm font-medium text-brand outline-none transition-colors hover:bg-muted"
+                                className="flex items-center justify-center gap-2 rounded-md py-2 text-sm font-medium text-brand-text outline-none transition-colors hover:bg-muted"
                             >
                                 <EyeIcon className="size-4" />
                                 {t("viewAll")}

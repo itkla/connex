@@ -141,15 +141,11 @@ public interface DealMapper {
         @Param("boundaries") List<DealRevenueMonthBoundary> boundaries,
         @Param("memberScope") MemberScope memberScope
     );
-    List<DealMonthDecimalTotalDto> revenueScheduledClosedByMonth(
-        @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency,
-        @Param("memberScope") MemberScope memberScope
-    );
     List<DealMonthDecimalTotalDto> revenueProjectedByMonth(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("memberScope") MemberScope memberScope
+        @Param("memberScope") MemberScope memberScope,
+        @Param("openOnly") boolean openOnly
     );
     List<DealStageDistributionDto> stageDistribution(
         @Param("workspaceId") int workspaceId,
@@ -224,14 +220,6 @@ public interface DealMapper {
         @Param("currency") String currency,
         @Param("startUtc") LocalDateTime startUtc,
         @Param("endUtc") LocalDateTime endUtc,
-        @Param("periods") List<AnalyticsPeriod> periods,
-        @Param("memberScope") MemberScope memberScope
-    );
-    List<DealPeriodDecimalTotalDto> revenueScheduledClosedByPeriods(
-        @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency,
-        @Param("startDate") LocalDate startDate,
-        @Param("endDate") LocalDate endDate,
         @Param("periods") List<AnalyticsPeriod> periods,
         @Param("memberScope") MemberScope memberScope
     );
@@ -378,6 +366,12 @@ public interface DealMapper {
         @Param("positions") List<BoardPositionUpdate> positions
     );
 
+    /** Stores a historical creation timestamp only from the locked CSV import path. */
+    int updateImportedCreatedAt(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId,
+        @Param("createdAt") String createdAt
+    );
     /** Sets only a deal's expected close date, scoped to the workspace. */
     int updateExpectedCloseDate(
         @Param("workspaceId") int workspaceId,

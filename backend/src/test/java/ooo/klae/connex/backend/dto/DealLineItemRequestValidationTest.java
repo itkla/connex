@@ -17,8 +17,38 @@ import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 
 class DealLineItemRequestValidationTest {
+    @Test
+    void jacksonDefaultsOldClientsToUnconfirmedAndReadsExplicitPreviewConsent() throws Exception {
+        tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+        DealLineItemRequest oldClient = mapper.readValue("{\"quantity\":1}", DealLineItemRequest.class);
+        org.junit.jupiter.api.Assertions.assertFalse(oldClient.isConfirmValueReplacement());
+        org.junit.jupiter.api.Assertions.assertFalse(oldClient.isPreviewOnly());
+        DealLineItemRequest confirmed = mapper.readValue(
+            "{\"quantity\":1,\"previewOnly\":true,\"confirmValueReplacement\":true,\"expectedManualValue\":114200}",
+            DealLineItemRequest.class);
+        assertTrue(confirmed.isConfirmValueReplacement());
+        assertTrue(confirmed.isPreviewOnly());
+        assertEquals(0, new BigDecimal("114200").compareTo(confirmed.getExpectedManualValue()));
+    }
     private static final ValidatorFactory FACTORY = Validation.buildDefaultValidatorFactory();
     private static final Validator VALIDATOR = FACTORY.getValidator();
+
+    @Test
+    void percentageDiscountsAreBoundedButFixedAmountsCanExceedOneHundred() {
+        DealLineItemRequest request = new DealLineItemRequest();
+        request.setQuantity(BigDecimal.ONE);
+        request.setDiscountType("percent");
+        for (String value : List.of("100.01", "200")) {
+            request.setDiscountValue(new BigDecimal(value));
+            assertTrue(VALIDATOR.validate(request).stream().anyMatch(violation ->
+                "percentageDiscountValid".equals(violation.getPropertyPath().toString())));
+        }
+        request.setDiscountValue(new BigDecimal("100"));
+        assertTrue(VALIDATOR.validate(request).isEmpty());
+        request.setDiscountType("amount");
+        request.setDiscountValue(new BigDecimal("200"));
+        assertTrue(VALIDATOR.validate(request).isEmpty());
+    }
 
     @AfterAll
     static void closeValidatorFactory() {

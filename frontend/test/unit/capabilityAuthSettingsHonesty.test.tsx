@@ -85,7 +85,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => {
 });
 
 vi.mock("next-intl", () => ({
-    useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
+    useTimeZone: () => "UTC", useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
 }));
 
 vi.mock("next-intl/server", () => ({

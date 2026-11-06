@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import PrivilegedMfaRouteGate from "@/app/components/account/PrivilegedMfaRouteGate";
 import GlobalSearch from "@/app/components/GlobalSearch";
 import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import MobileBottomBar from "@/app/components/MobileBottomBar";
@@ -15,6 +16,17 @@ import { instant, springSmooth } from "@/app/lib/motion";
 import { useTranslations } from "next-intl";
 
 const ASK_CONNEX_PUSH_QUERY = "(min-width: 1024px)";
+const DESKTOP_SIDEBAR_QUERY = "(min-width: 768px)";
+
+function subscribeDesktopSidebar(onChange: () => void): () => void {
+    const mediaQuery = window.matchMedia(DESKTOP_SIDEBAR_QUERY);
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
+}
+
+function getDesktopSidebarSnapshot(): boolean {
+    return window.matchMedia(DESKTOP_SIDEBAR_QUERY).matches;
+}
 
 function subscribeAskConnexPush(onChange: () => void): () => void {
     const mediaQuery = window.matchMedia(ASK_CONNEX_PUSH_QUERY);
@@ -53,7 +65,12 @@ export default function ContentShell({
     );
     const reduceMotion = useReducedMotion() ?? false;
     const [mobileOpen, setMobileOpen] = useState(false);
+    const sidebarRef = useRef<HTMLDivElement>(null);
+    const mobileTriggerRef = useRef<HTMLButtonElement>(null);
+    const mainRef = useRef<HTMLElement>(null);
+    const desktopSidebar = useSyncExternalStore(subscribeDesktopSidebar, getDesktopSidebarSnapshot, () => false);
     const pathname = usePathname();
+    const lastFocusedPathname = useRef(pathname);
     const t = useTranslations("CommonContentShell");
 
     const [prevPathname, setPrevPathname] = useState(pathname);
@@ -63,13 +80,22 @@ export default function ContentShell({
     }
 
     useEffect(() => {
-        const mql = window.matchMedia("(min-width: 768px)");
+        const mql = window.matchMedia(DESKTOP_SIDEBAR_QUERY);
         const onChange = (e: MediaQueryListEvent) => {
             if (e.matches) setMobileOpen(false);
         };
         mql.addEventListener("change", onChange);
         return () => mql.removeEventListener("change", onChange);
     }, []);
+
+    useEffect(() => {
+        if (lastFocusedPathname.current === pathname) return;
+        lastFocusedPathname.current = pathname;
+        const focused = document.activeElement;
+        if (!focused || focused === document.body || !focused.isConnected) {
+            mainRef.current?.focus({ preventScroll: true });
+        }
+    }, [pathname]);
 
     useEffect(() => {
         const html = document.documentElement;
@@ -82,8 +108,12 @@ export default function ContentShell({
 
     useEffect(() => {
         if (!mobileOpen) return;
+        const opener = document.activeElement;
+        const sidebar = sidebarRef.current;
+        const toolbarTrigger = mobileTriggerRef.current;
+        sidebar?.focus();
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") setMobileOpen(false);
+            if (e.key === "Escape" && !e.defaultPrevented) setMobileOpen(false);
         };
         document.addEventListener("keydown", onKeyDown);
         const previousOverflow = document.body.style.overflow;
@@ -91,11 +121,26 @@ export default function ContentShell({
         return () => {
             document.removeEventListener("keydown", onKeyDown);
             document.body.style.overflow = previousOverflow;
+            if (window.matchMedia(DESKTOP_SIDEBAR_QUERY).matches) return;
+            const focused = document.activeElement;
+            if (focused && focused !== document.body && focused.isConnected && !sidebar?.contains(focused)) return;
+            if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) opener.focus();
+            else toolbarTrigger?.focus();
         };
     }, [mobileOpen]);
 
     return (
         <div data-app-shell className="flex h-dvh overflow-hidden">
+            <Button
+                asChild
+                variant="brand"
+                size="inline"
+                className="sr-only focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            >
+                <a href="#app-main" inert={mobileOpen} onClick={() => mainRef.current?.focus()}>
+                    {t("skipToContent")}
+                </a>
+            </Button>
             <div
                 aria-hidden
                 onClick={() => setMobileOpen(false)}
@@ -106,6 +151,9 @@ export default function ContentShell({
 
             <div
                 id="app-sidebar"
+                ref={sidebarRef}
+                tabIndex={-1}
+                inert={!desktopSidebar && !mobileOpen}
                 className={`fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-out motion-reduce:transition-none md:static md:z-auto md:ml-0 md:translate-x-0 ${
                     mobileOpen ? "translate-x-0" : "-translate-x-full"
                 }`}
@@ -114,6 +162,7 @@ export default function ContentShell({
             </div>
 
             <motion.div
+                inert={!desktopSidebar && mobileOpen}
                 className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_0rem] grid-rows-[minmax(0,1fr)]"
                 initial={false}
                 animate={{
@@ -133,6 +182,7 @@ export default function ContentShell({
                                 className="relative flex w-full shrink-0 items-center gap-3 p-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,36rem)_minmax(0,1fr)] md:gap-0"
                             >
                                 <Button
+                                    ref={mobileTriggerRef}
                                     type="button"
                                     variant="ghost"
                                     size="icon"
@@ -179,12 +229,15 @@ export default function ContentShell({
                     ) : null}
 
                     <main
+                        id="app-main"
+                        ref={mainRef}
+                        tabIndex={-1}
                         data-app-main
                         className={askConnex.workspace
                             ? "min-h-0 flex-1 overflow-hidden"
                             : "flex-1 overflow-x-hidden overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6"}
                     >
-                        {children}
+                        <PrivilegedMfaRouteGate>{children}</PrivilegedMfaRouteGate>
                     </main>
                 </div>
 

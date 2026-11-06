@@ -1,9 +1,11 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import Link from 'next/link';
 import { type ComponentType, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArrowPathIcon,
     ArrowRightIcon,
@@ -81,6 +83,7 @@ export default function ReportsBoard({
     const t = useTranslations('Reports');
     const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const router = useRouter();
     const { activeWorkspace } = useWorkspace();
     const canDeleteReports = effectivePermissions.includes('REPORT_DELETE');
@@ -201,7 +204,7 @@ export default function ReportsBoard({
                                         key={template.key}
                                         className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-[border-color,box-shadow] duration-200 ease-out hover:border-brand/40 hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.22)] dark:hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.6)]"
                                     >
-                                        <div className="flex size-10 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                                        <div className="flex size-10 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                                             <Icon className="size-5" />
                                         </div>
                                         <h4 className="mt-4 text-base font-semibold text-foreground">
@@ -311,12 +314,12 @@ export default function ReportsBoard({
                                                     key={report.id}
                                                     className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/40"
                                                 >
-                                                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-light/60 text-brand-dark">
+                                                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-light/60 text-brand-text">
                                                         <Icon className="size-5" />
                                                     </div>
                                                     <Link href={`/insights/reports/${report.id}`} className="min-w-0 flex-1">
                                                         <div className="flex min-w-0 items-center gap-2">
-                                                            <p className="min-w-0 truncate font-medium text-foreground group-hover:text-brand-dark">
+                                                            <p className="min-w-0 truncate font-medium text-foreground group-hover:text-brand-text">
                                                                 {report.name}
                                                             </p>
                                                             <Badge variant="secondary" className="shrink-0 font-normal">
@@ -329,7 +332,7 @@ export default function ReportsBoard({
                                                     </Link>
                                                     <p className="hidden shrink-0 text-xs text-muted-foreground sm:block">
                                                         {t('landing.updated', {
-                                                            date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(report.updatedAt)),
+                                                            date: getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone }).format(parseMysqlDateTime(report.updatedAt)),
                                                         })}
                                                     </p>
                                                     <DropdownMenu>

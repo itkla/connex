@@ -64,6 +64,14 @@ Numbered and testable. Cite them by number in reviews.
 
 9. **Customize the business, not the software.** Configuration models the customer's world — their pipeline stages, fields, lifecycle, workflows — never the mechanics of Connex itself. Users tune what they sell and how, not runtimes, engines, or internals. *Test: does this setting map to a business decision the customer already makes?*
 
+### Deal amount comparisons
+
+Dashboard Projections totals all open deals in its currency, including undated deals and dates outside the visible chart. Its chart groups dated open deals by expected close month. Analytics and Deals revenue comparisons retain the value of all deals, including won and lost deals, by expected close date; label that comparison **All deal value** / **全案件の金額**, rather than a forecast of open deals. Forecast accuracy compares actual value with projected value on won deals only; lost deals affect neither amount. The Win rate card remains count-based; its Won amount is realized revenue and its Lost amount is the value of lost deals.
+
+Deals and Dashboard show the selected currency before their monetary totals and charts, count deals in other currencies excluded from that view, and offer a currency picker. Dashboard record counts and individual-deal lists still cover all currencies; each record retains its own currency. Its currency-scoped link opens that currency's Deals list. Currency selections survive reloads through the URL; this is a view choice, not a workspace default. Monetary widgets identify their currency and never combine or convert currencies.
+
+Currency links resolve against existing workspace currency buckets before any monetary query. Blank or unrecognized selections fall back to a known currency; known currencies stay selected even when the current filters match no deals. Dashboard explains that its deal count includes all currencies.
+
 ## 4. Vocabulary
 
 **This section is the canonical glossary — the single source of truth for product terms.** There is no other glossary file. The CI banned-terms lint over the product's message catalogs (EN and JA patterns) is **generated from this section**: edit here, and the gate follows. (The generator is `frontend/lint/vocabulary.mjs`, which writes the checked-in pattern set; the gate is the `frontend/test/unit/vocabularyLint.test.ts` suite, which scans both message catalogs against it in error mode over a baseline that only shrinks. Editing this section without regenerating fails the generator test.) Labels, columns, titles, and buttons use these terms verbatim; prose may vary naturally around them. "Never say" applies to product surfaces — code, schema, logs, and engineering docs keep their own names.
@@ -200,7 +208,7 @@ The top-level IA contract. **This section is normative target state** — the st
 **The sidebar:**
 
 1. **Dashboard** — "your workspace today", the one home. No second surface claims "at a glance".
-2. **My Work** — your tasks, your relationships, your follow-ups: the personal page beside the workspace home. The user menu offers "My Work" and "Account settings" as distinct entries — neither is called "Profile".
+2. **My Work** — your tasks, your relationships, your follow-ups: the personal page beside the workspace home. The user menu offers "My Work" and "Account settings" as distinct entries — neither is called "Profile". Personal deal KPIs at `/me` use Analytics' currency selection and 90-day calendar window in the workspace reporting timezone. Money tiles name their currency; mixed-currency owners can switch between their currencies. Totals, comparisons, and trends always stay within the selected currency.
 3. **Intelligence** — Radar, Introductions, Map: the differentiator, grouped and celebrated, never buried in a grab-bag. Radar is the signature surface — visual-first exploration that answers what no other page can (portfolio-wide warmth, where attention is bleeding, clusters at risk, unknown paths), with every signal offering one action; the rest of the app quotes its visual vocabulary in miniature, so Radar reads as the source of the intelligence.
 4. **Records** — the nouns: Companies, Contacts, Deals, Pipelines, Products. Every Records noun has a working destination: full detail pages for Companies, Contacts, and Deals; Pipelines and Products are managed in place through their edit sheet/dialog and have no detail route. Nothing anywhere links to a route that doesn't exist.
 5. **Activity** — the verbs: Activities, Tasks, Notes, Calendar.

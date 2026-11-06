@@ -1,13 +1,16 @@
 "use client";
 
+import { formatDate, parseMysqlDateTime } from "@/app/lib/utils";
+
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { EllipsisVerticalIcon, ArrowDownTrayIcon, PencilSquareIcon, PlusIcon } from "@heroicons/react/24/outline";
 
 import type { DataSubjectRequest, DataSubjectRequestStatus } from "@/app/lib/types";
 import { ApiError, assembleDataSubjectDisclosure, getDataSubjectRequests } from "@/app/lib/api";
 import { toastSuccess } from "@/app/lib/toast";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,17 +56,11 @@ const STATUS_VARIANT: Record<DataSubjectRequestStatus, "default" | "secondary" |
     closed: "secondary",
 };
 
-function formatDate(iso: string | null | undefined, locale: string) {
-    if (!iso) return null;
-    const date = new Date(iso.includes("T") ? iso : `${iso.replace(" ", "T")}`);
-    if (Number.isNaN(date.getTime())) return iso;
-    return date.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
-}
 
-function isOverdue(request: DataSubjectRequest) {
+function isOverdue(request: DataSubjectRequest, now: number) {
     if (!request.dueAt || request.respondedAt || request.closedAt) return false;
-    const due = new Date(request.dueAt);
-    return !Number.isNaN(due.getTime()) && due.getTime() < Date.now();
+    const due = new Date(parseMysqlDateTime(request.dueAt));
+    return !Number.isNaN(due.getTime()) && due.getTime() < now;
 }
 
 /**
@@ -85,6 +82,8 @@ export default function DataRequestsPanel({
     const t = useTranslations("OrgDataRequests");
     const showApiError = useApiErrorToast("OrgDataRequests");
     const locale = useLocale();
+    const now = useLiveNow();
+    const timeZone = useTimeZone();
     const { activeWorkspace, switching } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
 
@@ -240,9 +239,9 @@ export default function DataRequestsPanel({
                 <>
                     <ListCard>
                         {requests.map((request) => {
-                            const overdue = isOverdue(request);
-                            const received = formatDate(request.receivedAt, locale);
-                            const due = formatDate(request.dueAt, locale);
+                            const overdue = isOverdue(request, now);
+                            const received = formatDate(request.receivedAt ?? undefined, locale, timeZone);
+                            const due = formatDate(request.dueAt ?? undefined, locale, timeZone);
                             return (
                                 <li key={request.id} className="group flex items-center gap-4 px-4 py-3">
                                     <div className="min-w-0 flex-1">

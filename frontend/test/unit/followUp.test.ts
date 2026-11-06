@@ -4,14 +4,12 @@ import { followUpDueDate } from "@/app/lib/followUp";
 
 const DAY_MS = 86_400_000;
 
-/** A fixed local noon, so a due date can never straddle a day boundary by a few hours. */
-const NOW = new Date(2026, 5, 10, 12, 0, 0).getTime();
+/** A fixed UTC noon, so a due date can never straddle a day boundary by a few hours. */
+const NOW = Date.UTC(2026, 5, 10, 12);
 
-/** The `YYYY-MM-DD` the helper produces, read back in local time like the composer does. */
+/** The `YYYY-MM-DD` the helper produces, read on the stable UTC calendar. */
 function localDate(at: number): string {
-    const date = new Date(at);
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    return new Date(at).toISOString().slice(0, 10);
 }
 
 /** A MySQL-shaped UTC datetime `days` from {@link NOW}, the form warmth reports a cold date in. */
@@ -49,7 +47,7 @@ describe("the follow-up a cooling signal schedules", () => {
     });
 
     it("emits a zero-padded calendar date the task composer accepts", () => {
-        const early = new Date(2026, 0, 2, 12, 0, 0).getTime();
+        const early = Date.UTC(2026, 0, 2, 12);
 
         expect(followUpDueDate(null, early)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
         expect(followUpDueDate(null, early)).toBe("2026-01-05");

@@ -102,6 +102,7 @@ beforeEach(() => {
                     : [],
             });
         }
+        if (url.endsWith("/api/capabilities")) return json({ privilegedMfaEnforced: true });
         return json({});
     }));
 });

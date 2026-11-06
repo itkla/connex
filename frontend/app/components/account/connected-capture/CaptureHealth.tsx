@@ -5,7 +5,7 @@ import {
     ClockIcon,
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import {
     captureProgress,
@@ -73,6 +73,7 @@ function StatusIcon({ status }: { status: CaptureHealthStatus }) {
  * Displays provider stream health with semantic progress and actionable error context.
  */
 export default function CaptureHealth({ streams }: { streams: CaptureStreamState[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AccountCaptureHealth');
     const locale = useLocale();
     const now = useLiveNow();
@@ -104,7 +105,7 @@ export default function CaptureHealth({ streams }: { streams: CaptureStreamState
                             {stream.lastSuccessAt ? (
                                 <span className="shrink-0 text-xs text-muted-foreground">
                                     {t('lastSuccess', {
-                                        time: formatRelativeTime(stream.lastSuccessAt, locale, now),
+                                        time: formatRelativeTime(stream.lastSuccessAt, locale, now, timeZone),
                                     })}
                                 </span>
                             ) : null}
@@ -147,7 +148,7 @@ export default function CaptureHealth({ streams }: { streams: CaptureStreamState
                         {stream.nextAttemptAt ? (
                             <p className="mt-1 text-xs text-muted-foreground">
                                 {t('nextRetry', {
-                                    time: formatRelativeTime(stream.nextAttemptAt, locale, now),
+                                    time: formatRelativeTime(stream.nextAttemptAt, locale, now, timeZone),
                                 })}
                             </p>
                         ) : null}

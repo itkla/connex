@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     CalendarIcon,
     BuildingOffice2Icon,
@@ -12,6 +12,7 @@ import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import { type Company, type Deal, type DealRisk, type Pipeline, type Stage } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
+import DealCloseDate from './DealCloseDate';
 import DealRiskPill from './DealRiskPill';
 import { Suspense, type KeyboardEvent } from 'react';
 import {
@@ -24,6 +25,7 @@ import { usePermission } from '@/app/hooks/usePermissions';
 
 interface DealCardProps {
     deal: Deal;
+    timezone: string;
     company?: Company;
     pipeline?: Pipeline;
     stage?: Stage;
@@ -40,6 +42,7 @@ function dealStatus(deal: Deal): 'open' | 'closed' {
 
 export default function DealCard({
     deal,
+    timezone,
     company,
     pipeline,
     stage,
@@ -49,6 +52,7 @@ export default function DealCard({
     menu,
     returnSelection,
 }: DealCardProps) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const canUpdate = usePermission('DEAL_UPDATE');
     const canDelete = usePermission('DEAL_DELETE');
@@ -104,7 +108,7 @@ export default function DealCard({
                         className={
                             status === 'closed'
                                 ? 'shrink-0 rounded-full bg-neutral-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600 dark:bg-neutral-800 dark:text-neutral-200'
-                                : 'shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark'
+                                : 'shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text'
                         }
                     >
                         {statusLabel}
@@ -130,10 +134,11 @@ export default function DealCard({
                     {deal.expectedCloseDate && (
                         <span className="inline-flex items-center gap-1">
                             <CalendarIcon className="size-3.5" />
-                            {formatShortDate(deal.expectedCloseDate, locale)}
+                            {formatShortDate(deal.expectedCloseDate, locale, timeZone)}
                         </span>
                     )}
                 </div>
+                <DealCloseDate deal={deal} timezone={timezone} />
             </div>
 
             <div className="text-right">

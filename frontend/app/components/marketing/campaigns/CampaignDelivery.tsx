@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import { InformationCircleIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
@@ -81,6 +81,7 @@ export default function CampaignDelivery({
     access: CampaignAccess;
     deliveryAvailability: CapabilityAvailability;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("CampaignMessages");
     const st = useTranslations("CampaignSends");
     const tCapability = useTranslations("CapabilityUnavailable");
@@ -542,7 +543,7 @@ export default function CampaignDelivery({
                                                         </span>
                                                     </div>
                                                     <span className="shrink-0 text-xs text-muted-foreground">
-                                                        {formatDate(rev.createdAt, locale)}
+                                                        {formatDate(rev.createdAt, locale, timeZone)}
                                                     </span>
                                                 </li>
                                             ))}
@@ -682,7 +683,7 @@ export default function CampaignDelivery({
                                     <span className="text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
                                         {st("eligible")}
                                     </span>
-                                    <span className="tabular-nums text-sm font-semibold text-brand-hover">
+                                    <span className="tabular-nums text-sm font-semibold text-brand-text">
                                         {st("eligibleIncluded", {
                                             count: chosenSnapshot.estimatedIncluded.toLocaleString(locale),
                                         })}
@@ -752,7 +753,7 @@ export default function CampaignDelivery({
                                                 </span>
                                             </div>
                                             <span className="shrink-0 text-xs text-muted-foreground">
-                                                {formatDate(send.createdAt, locale)}
+                                                {formatDate(send.createdAt, locale, timeZone)}
                                             </span>
                                         </div>
 

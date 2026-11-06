@@ -112,7 +112,7 @@ vi.mock('next/dynamic', async () => {
 });
 
 vi.mock('next-intl', () => ({
-    useTranslations: () => translate,
+    useTimeZone: () => "UTC", useTranslations: () => translate,
 }));
 
 vi.mock('motion/react', async () => {
@@ -788,6 +788,7 @@ describe('deal draft persistence', () => {
             name: 'Won renewal',
             duplicateReviewToken: 'review-token',
         }), {});
+        expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({ actualValue: undefined }), {});
         expect(readDealDraft()).toBeNull();
         await mounted.unmount();
     });

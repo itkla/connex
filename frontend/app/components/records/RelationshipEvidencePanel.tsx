@@ -1,5 +1,6 @@
 'use client';
 
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import {
     BoltIcon,
     CheckCircleIcon,
@@ -8,7 +9,7 @@ import {
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { useMemo, type ReactNode } from 'react';
 
 import WarmthPill from '@/app/components/records/WarmthPill';
@@ -75,10 +76,11 @@ export default function RelationshipEvidencePanel({
     variant?: 'page' | 'dialog';
     actions?: ReactNode;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('RelationshipEvidence');
     const locale = useLocale();
     const number = useMemo(
-        () => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }),
+        () => getNumberFormatter(locale, { maximumFractionDigits: 2 }),
         [locale],
     );
     const isDialog = variant === 'dialog';
@@ -140,7 +142,7 @@ export default function RelationshipEvidencePanel({
                         <div className="bg-card px-5 py-4">
                             <dt className="text-xs text-muted-foreground">{t('lastTouch')}</dt>
                             <dd className="mt-1 text-sm font-medium text-foreground">
-                                {formatDateTime(temperature.lastTouchAt ?? undefined, locale)}
+                                {formatDateTime(temperature.lastTouchAt ?? undefined, locale, timeZone)}
                             </dd>
                         </div>
                         <div className="bg-card px-5 py-4">
@@ -154,7 +156,7 @@ export default function RelationshipEvidencePanel({
                             <dd className="mt-1 text-sm font-medium text-foreground">
                                 {temperature.goesColdAt
                                     ? t('goesColdAt', {
-                                        date: formatDateTime(temperature.goesColdAt, locale),
+                                        date: formatDateTime(temperature.goesColdAt, locale, timeZone),
                                     })
                                     : t('noDecayDate')}
                             </dd>
@@ -178,7 +180,7 @@ export default function RelationshipEvidencePanel({
                                                     {contributorLabel(contributor, t)}
                                                 </p>
                                                 <p className="text-xs text-muted-foreground">
-                                                    {formatDateTime(contributor.occurredAt, locale)}
+                                                    {formatDateTime(contributor.occurredAt, locale, timeZone)}
                                                 </p>
                                                 {contributor.captureEvidence ? (
                                                     <ProviderCaptureEvidence
@@ -228,8 +230,7 @@ export default function RelationshipEvidencePanel({
                 <p className="mt-1 flex items-start gap-2 text-xs text-muted-foreground">
                     <ClockIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                     {t('asOf', {
-                        date: formatDateTime(evidence.asOf, locale),
-                        version: temperature.modelVersion ?? t('unknownModel'),
+                        date: formatDateTime(evidence.asOf, locale, timeZone),
                     })}
                 </p>
             </div>

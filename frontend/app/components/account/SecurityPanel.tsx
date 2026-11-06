@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import {
     DevicePhoneMobileIcon,
     EllipsisHorizontalIcon,
@@ -53,15 +53,13 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import PasskeyApprovalDialog from "@/app/components/account/PasskeyApprovalDialog";
 import PrivilegedMfaConfinementCard from "@/app/components/account/PrivilegedMfaConfinementCard";
 import PasskeyEnrollmentPasswordDialog from "@/app/components/account/PasskeyEnrollmentPasswordDialog";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
-
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 function isRoaming(passkey: Passkey): boolean {
     return passkey.transports.some((t) => t === "usb" || t === "nfc" || t === "ble");
@@ -80,6 +78,7 @@ function PasskeyIcon({ passkey }: { passkey: Passkey }) {
 }
 
 export default function SecurityPanel() {
+    const timeZone = useTimeZone();
     const t = useTranslations("AccountSecurity");
     const locale = useLocale();
     const now = useLiveNow();
@@ -96,6 +95,7 @@ export default function SecurityPanel() {
         requirements,
         status: standingStatus,
         reason: confinementReason,
+        confined,
         refresh: refreshStanding,
     } = usePrivilegedMfaStanding();
 
@@ -265,7 +265,7 @@ export default function SecurityPanel() {
         }, () => undefined);
     };
 
-    const cardReason = approvalPending
+    const cardReason = !confined ? null : approvalPending
         ? "attestation"
         : standing === "ENROLLMENT_REQUIRED" || confinementReason === "enrollment" ? "enrollment" : null;
 
@@ -393,12 +393,12 @@ export default function SecurityPanel() {
                                         </span>
                                         <span className="block truncate text-xs text-muted-foreground">
                                             {t("addedOn", {
-                                                date: formatRelativeTime(passkey.createdAt, locale, now),
+                                                date: formatRelativeTime(passkey.createdAt, locale, now, timeZone),
                                             })}
                                             {" · "}
                                             {passkey.lastUsedAt
                                                 ? t("lastUsed", {
-                                                      date: formatRelativeTime(passkey.lastUsedAt, locale, now),
+                                                      date: formatRelativeTime(passkey.lastUsedAt, locale, now, timeZone),
                                                   })
                                                 : t("neverUsed")}
                                         </span>
@@ -434,7 +434,7 @@ export default function SecurityPanel() {
                         </ul>
                     ))}
 
-                {supported && !loading && !error && passkeys.length > 0 && !approvalPending && (
+                {supported && !loading && !error && passkeys.length > 0 && cardReason !== "attestation" && (
                     <div className="rounded-2xl border border-border bg-card px-5 py-4">
                         <h3 className="text-sm font-medium text-foreground">{t("approvalTitle")}</h3>
                         <p className="mt-1 max-w-prose text-sm text-muted-foreground">

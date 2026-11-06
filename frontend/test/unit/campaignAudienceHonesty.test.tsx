@@ -1,7 +1,8 @@
-import { act, type PropsWithChildren, type ReactNode } from "react";
+import { act, type PropsWithChildren, type ReactNode, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type EditCampaignSheet from "@/app/components/marketing/campaigns/EditCampaignSheet";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
 import CampaignDetail from "@/app/components/marketing/campaigns/CampaignDetail";
@@ -12,6 +13,7 @@ import type {
     CampaignAudienceEstimate,
     CampaignAudienceExport,
     CampaignAudienceSnapshotSummary,
+    CampaignEngagement,
     CampaignMessage,
 } from "@/app/lib/types";
 import enCampaigns from "@/messages/en/campaigns.json";
@@ -21,8 +23,11 @@ import {
     type InteractiveElement,
 } from "@/test/unit/helpers/interactiveDocument";
 
-const { localeState, reconcileCampaignExportMock, setCampaignAudienceMock } = vi.hoisted(() => ({
-    localeState: { locale: "en" as "en" | "ja" },
+const localeState = vi.hoisted<{ locale: "en" | "ja"; zone: string }>(() => ({ locale: "en", zone: "UTC" }));
+const editor = vi.hoisted<{ current: ComponentProps<typeof EditCampaignSheet> | null }>(() => ({ current: null }));
+
+const { reconcileCampaignExportMock, setCampaignAudienceMock, updateCampaignMock } = vi.hoisted(() => ({
+    updateCampaignMock: vi.fn(),
     reconcileCampaignExportMock: vi.fn(async (): Promise<unknown> => undefined),
     setCampaignAudienceMock: vi.fn(async () => {}),
 }));
@@ -42,7 +47,7 @@ vi.mock("next-intl", async () => {
     ]);
     const catalogs = { en, ja };
     return {
-        useLocale: () => localeState.locale,
+        useTimeZone: () => localeState.zone, useLocale: () => localeState.locale,
         useTranslations: (namespace: string) => (
             key: string,
             values?: Record<string, string | number>,
@@ -76,6 +81,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => {
         getSegmentFields: vi.fn(async () => ({ industries: [], tags: [] })),
         reconcileCampaignExport: reconcileCampaignExportMock,
         setCampaignAudience: setCampaignAudienceMock,
+        updateCampaign: updateCampaignMock,
     };
 });
 
@@ -178,7 +184,7 @@ vi.mock("@/app/components/records/SegmentBuilder", () => ({
 
 vi.mock("@/app/components/marketing/campaigns/NewMessageDialog", () => ({ default: () => null }));
 vi.mock("@/app/components/marketing/campaigns/CampaignEngagement", () => ({ default: () => null }));
-vi.mock("@/app/components/marketing/campaigns/EditCampaignSheet", () => ({ default: () => null }));
+vi.mock("@/app/components/marketing/campaigns/EditCampaignSheet", () => ({ default: (props: ComponentProps<typeof EditCampaignSheet>) => { editor.current = props; return null; } }));
 vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
 vi.mock("@/app/components/marketing/campaigns/CampaignStatusBadge", () => ({ default: () => null }));
 vi.mock("@/app/components/dashboard/CountUp", () => ({
@@ -281,6 +287,7 @@ const COMPLETED_EXPORT = {
 function detailHtml(
     audienceUnavailable: boolean,
     snapshots: CampaignAudienceSnapshotSummary[] = [SNAPSHOT],
+    engagement: CampaignEngagement | null = null,
 ): string {
     return renderToStaticMarkup(
         <CampaignDetail
@@ -291,7 +298,7 @@ function detailHtml(
             initialMessages={[]}
             initialSends={[]}
             initialExports={[]}
-            initialEngagement={null}
+            initialEngagement={engagement}
             access={{ manage: true, send: true, consent: true }}
             snapshotsRestricted={false}
             deliveryAvailability="enabled"
@@ -315,7 +322,67 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+describe("campaign date inputs", () => {
+    it.each([
+        { zone: "Asia/Tokyo", original: "2026-11-05T14:30:27", civil: "2026-11-05T23:30", edited: "2026-11-05T22:30", utc: "2026-11-05T13:30:00" },
+        { zone: "America/New_York", original: "2026-11-01T06:30:27", civil: "2026-11-01T01:30", edited: "2026-11-01T02:30", utc: "2026-11-01T07:30:00" },
+    ])("round-trips campaign windows in $zone without double conversion", async ({ zone, original, civil, edited, utc }) => {
+        localeState.zone = zone;
+        const campaign = { ...CAMPAIGN, startAt: original, endAt: original };
+        updateCampaignMock.mockResolvedValue(campaign);
+        const interactive = installInteractiveDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        try {
+            await act(async () => root.render(<CampaignDetail campaign={campaign} initialAudience={null}
+                audienceUnavailable={false} initialSnapshots={[]} initialMessages={[]} initialSends={[]}
+                initialExports={[]} initialEngagement={null} access={{ manage: true, send: true, consent: true }}
+                snapshotsRestricted={false} deliveryAvailability="enabled" />));
+            const edit = requiredElement(interactive.elements, (element) => element.tagName === "BUTTON"
+                && element.textContent === enCampaigns.CampaignDetail.edit, "Edit campaign");
+            await act(async () => interactive.dispatch("click", edit));
+            const initial = editor.current;
+            if (!initial) throw new Error("Campaign editor was not rendered");
+            expect(initial.payload.startAt).toBe(civil);
+            expect(initial.payload.endAt).toBe(civil);
+            await act(async () => initial.onSubmit());
+            expect(updateCampaignMock).toHaveBeenLastCalledWith(campaign.id, expect.objectContaining({ startAt: original, endAt: original }));
+            await act(async () => initial.setPayload((value) => ({ ...value, startAt: edited, endAt: edited })));
+            const changed = editor.current;
+            if (!changed) throw new Error("Campaign editor was not rendered");
+            await act(async () => changed.onSubmit());
+            expect(updateCampaignMock).toHaveBeenLastCalledWith(campaign.id, expect.objectContaining({ startAt: utc, endAt: utc }));
+        } finally {
+            await act(async () => root.unmount());
+            localeState.zone = "UTC";
+            updateCampaignMock.mockClear();
+        }
+    });
+});
+
 describe("campaign audience labels and unavailable state", () => {
+    it("labels draft send membership as prepared recipients in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const counts = {
+                preparedRecipients: 6, dispatched: 0, delivered: 0, bounced: 0, complained: 0,
+                unsubscribed: 0, failed: 0, skipped: 0, skipReasons: {}, eventCounts: {},
+                deliveryReceiptsAvailable: false, deliveryRate: null, bounceRate: null, complaintRate: null,
+            };
+            const html = detailHtml(false, [SNAPSHOT], {
+                ...counts,
+                campaignId: CAMPAIGN.id,
+                channels: [],
+                sends: [{ ...counts, sendId: 11, status: "draft", channel: "email" }],
+            });
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+
+            expect(html).toMatch(new RegExp(`${catalog.CampaignDetail.preparedRecipients}</span><span[^>]*>6</span>`));
+            expect(html).toContain(catalog.CampaignDetail.preparedRecipientsHint);
+            expect(html).not.toContain(locale === "en" ? "Recipients reached" : ">到達数<");
+        }
+    });
+
     it("labels a custom-purpose estimate with its channel and exact purpose", () => {
         const estimate = {
             channel: "email",

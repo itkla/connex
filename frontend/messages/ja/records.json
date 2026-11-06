@@ -1,4 +1,24 @@
 {
+  "DealCurrencyScope": {
+    "title": "表示通貨",
+    "dashboardBasis": "金額の集計・グラフは{currency}の案件のみが対象です",
+    "dealsBasis": "{currency}の案件と集計値を表示しています",
+    "widgetBasis": "{currency}の案件のみ",
+    "recordCountsBasis": "案件数の表示には、すべての通貨の案件が含まれます。",
+    "dashboardExcluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は金額の集計・グラフの対象外です。通貨を切り替えると確認できます。}}",
+    "excluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は表示・集計の対象外です。通貨を切り替えると確認できます。}}",
+    "viewDeals": "{currency}の案件を表示"
+  },
+  "RecordListState": {
+    "title": "一覧を読み込めませんでした",
+    "body": "保存済みのデータは変更されていません。もう一度お試しください。",
+    "refreshBody": "前回読み込んだ内容を表示しています。最新の内容を読み込むには、もう一度お試しください。",
+    "deniedTitle": "この一覧を表示する権限がありません",
+    "deniedBody": "ワークスペースの管理者にアクセス権を依頼してから、もう一度お試しください。",
+    "retry": "再試行",
+    "retrying": "再試行中…",
+    "reference": "参照番号: {id}"
+  },
   "EngineEvaluation": {
     "title": "インサイト",
     "contactRiskLabel": "リスク・関係低下シグナル",
@@ -414,8 +434,7 @@
     "omitted": "ほか{count}件の対象ソースもスコアに含まれています。",
     "limited": "根拠が限定的です。信頼度の高い評価には{minimum}件以上の対象ソースが必要です。",
     "privateNotesExcluded": "あなたの非公開メモ{count}件はこのスコアから除外されています。",
-    "asOf": "{date}時点、モデル{version}で計算。",
-    "unknownModel": "不明",
+    "asOf": "{date}時点で計算。",
     "actionsTitle": "次にできること",
     "actionLogInteraction": "やり取りを記録",
     "actionScheduleFollowUp": "フォローアップを設定",
@@ -429,6 +448,7 @@
     "evaluationHeading": "レーダーの監視設定"
   },
   "RecordPeek": {
+    "closedAt": "決着日",
     "type_company": "会社",
     "type_person": "連絡先",
     "type_deal": "案件",

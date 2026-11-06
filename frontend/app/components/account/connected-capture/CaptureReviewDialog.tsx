@@ -8,7 +8,7 @@ import {
     NoSymbolIcon,
     UserPlusIcon,
 } from '@heroicons/react/24/outline';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
 import type {
@@ -63,6 +63,7 @@ export default function CaptureReviewDialog({
     onApprove: () => Promise<boolean>;
     onPreflight: (request: PersonDuplicatePreflightRequest, init?: RequestInit) => Promise<DuplicatePreflightResponse>;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AccountCaptureReviews');
     const tConnections = useTranslations('AccountConnections');
     const locale = useLocale();
@@ -141,7 +142,7 @@ export default function CaptureReviewDialog({
                 <dl className="grid gap-1 text-xs text-muted-foreground">
                     <div className="flex flex-wrap gap-1">
                         <dt>{t('occurredAt')}</dt>
-                        <dd>{formatDateTime(review.occurredAt, locale)}</dd>
+                        <dd>{formatDateTime(review.occurredAt, locale, timeZone)}</dd>
                     </div>
                     <div className="flex min-w-0 flex-wrap gap-1">
                         <dt>{t('sourceId')}</dt>

@@ -6,7 +6,7 @@ import {
     ClockIcon,
     XCircleIcon,
 } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import DocumentView from "@/app/components/records/documents/DocumentView";
 import {
@@ -44,6 +44,7 @@ export default function DocumentAcceptance({
     initialPreview: DocumentAcceptancePreview;
     onSettled?: () => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("DocumentAcceptance");
     const locale = useLocale();
     const viewRequested = useRef(false);
@@ -188,6 +189,7 @@ export default function DocumentAcceptance({
                     <DocumentView
                         content={preview.content}
                         type={preview.documentType}
+                        documentLocale={preview.documentLocale}
                         title={documentTitle}
                         status="final"
                         version={preview.documentVersion}
@@ -204,7 +206,7 @@ export default function DocumentAcceptance({
                         <Detail
                             label={t("expiresLabel")}
                             value={preview.expiresAt
-                                ? formatDateTime(preview.expiresAt, locale)
+                                ? formatDateTime(preview.expiresAt, locale, timeZone)
                                 : t("noExpiry")}
                         />
                     </dl>
@@ -289,7 +291,7 @@ function DecisionPanel({
             <div aria-live="polite">
                 <Icon
                     aria-hidden="true"
-                    className={accepted ? "size-9 text-brand-dark" : "size-9 text-destructive"}
+                    className={accepted ? "size-9 text-brand-text" : "size-9 text-destructive"}
                 />
                 <h2 className="mt-4 text-lg font-semibold text-foreground">
                     {accepted ? t("acceptedTitle") : t("declinedTitle")}
