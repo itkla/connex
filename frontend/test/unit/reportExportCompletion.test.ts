@@ -122,9 +122,23 @@ describe('report PNG release evidence', () => {
             attempts += 1;
             return attempts === 1 ? json({ code: 'RECENT_AUTHENTICATION_REQUIRED' }, 403) : new Response(null, { status: 204 });
         });
-        await api.exportReportPng(14, async () => new Blob(['image']));
+        const prepare = vi.fn(async () => new Blob(['image']));
+        await api.exportReportPng(14, prepare);
+        expect(prepare).toHaveBeenCalledOnce();
         expect(authenticate).toHaveBeenCalledOnce();
         expect(sent.filter(({ path }) => path.endsWith('/export-completion')).map(({ body }) => body)).toEqual([{ format: 'png' }, { format: 'png' }]);
         expect(click).toHaveBeenCalledOnce();
+    });
+
+    it('does not release an image when the required passkey step-up is cancelled', async () => {
+        const { api, sent, click } = await browser(({ path }) => path.endsWith('/options')
+            ? json({ challenge: 'challenge' }) : json({ code: 'RECENT_AUTHENTICATION_REQUIRED' }, 403));
+        authenticate.mockRejectedValueOnce(new DOMException('Passkey cancelled', 'NotAllowedError'));
+        const prepare = vi.fn(async () => new Blob(['image']));
+        await expect(api.exportReportPng(14, prepare)).rejects.toMatchObject({ code: 'PASSKEY_STEP_UP_CANCELED' });
+        expect(prepare).toHaveBeenCalledOnce();
+        expect(authenticate).toHaveBeenCalledOnce();
+        expect(sent.filter(({ path }) => path.endsWith('/export-completion'))).toHaveLength(1);
+        expect(click).not.toHaveBeenCalled();
     });
 });
