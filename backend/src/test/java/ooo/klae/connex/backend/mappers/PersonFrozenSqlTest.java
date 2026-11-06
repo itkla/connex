@@ -38,10 +38,13 @@ class PersonFrozenSqlTest {
         List<String> statements = PersonVisibilityParity.STATEMENTS;
         assertEquals(29, statements.size());
         for (String statement : statements) {
-            for (boolean filtered : List.of(false, true)) {
+            for (String query : List.of("", "%employer%", "%09096846208%", "%96846208%")) {
                 for (String sort : List.of("name", "email", "phone", "title", "company", "createdAt", "updatedAt", "warmth")) {
                     for (String direction : List.of("asc", "desc")) {
-                        Map<String, Object> parameters = parameters(filtered);
+                        Map<String, Object> parameters = parameters(!query.isEmpty());
+                        if (!query.isEmpty()) {
+                            parameters.put("query", query);
+                        }
                         parameters.put("sort", sort);
                         parameters.put("dir", direction);
                         String id = "ooo.klae.connex.backend.mappers.PersonMapper." + statement;
@@ -74,7 +77,7 @@ class PersonFrozenSqlTest {
 
     private static String normalize(String sql) {
         return sql.replaceAll("\\s+", " ").trim()
-            .replaceAll("JOIN workspace vws ON vws.id = (?:cs|ps|filtered_ps)\\.workspace_id "
+            .replaceAll("JOIN workspace vws ON vws.id = (?:cs|ps|filtered_ps|search_shared)\\.workspace_id "
                 + "JOIN workspace ows ON ows.id = (\\w+)\\.workspace_id AND ows.org_id = vws.org_id", "ORG_SCOPE($1)")
             .replaceAll("JOIN JSON_TABLE\\(\\?, '\\$\\[\\*\\]' COLUMNS\\(id INT PATH '\\$'\\)\\) "
                 + "org_workspace ON org_workspace.id = (\\w+)\\.workspace_id", "ORG_SCOPE($1)");

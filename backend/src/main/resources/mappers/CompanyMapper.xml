@@ -547,11 +547,67 @@
     </if>
   </sql>
 
+  <sql id="searchSource">
+    <choose>
+      <when test="query != null">
+        <bind name="searchCandidatePhone" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
+        <bind name="searchCandidateName" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
+        FROM (
+          <choose>
+            <when test="searchCandidatePhone != null">
+              SELECT search_phone_owned.id
+              FROM company search_phone_owned FORCE INDEX (idx_company_workspace_search_phone)
+              WHERE search_phone_owned.workspace_id = #{workspaceId}
+                AND search_phone_owned.search_phone = #{searchCandidatePhone}
+              UNION
+            SELECT c.id
+            FROM company c FORCE INDEX (idx_company_workspace)
+            WHERE c.workspace_id = #{workspaceId}
+              AND (c.search_phone IS NULL OR c.search_phone &lt;&gt; #{searchCandidatePhone})
+              AND (c.name LIKE #{query} OR c.search_name LIKE #{searchCandidateName}
+                OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
+                OR c.phone LIKE #{query})
+            </when>
+            <otherwise>
+              SELECT search_owned.id
+              FROM company search_owned FORCE INDEX (idx_company_workspace)
+              WHERE search_owned.workspace_id = #{workspaceId}
+            </otherwise>
+          </choose>
+          UNION
+          SELECT search_shared.company_id AS id
+          FROM company_share search_shared FORCE INDEX (idx_company_share_workspace)
+          STRAIGHT_JOIN company search_share_owner FORCE INDEX (PRIMARY)
+            ON search_share_owner.id = search_shared.company_id
+          STRAIGHT_JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = search_share_owner.workspace_id
+          WHERE search_shared.workspace_id = #{workspaceId}
+        ) search_scope
+        STRAIGHT_JOIN company c FORCE INDEX (PRIMARY) ON c.id = search_scope.id
+      </when>
+      <otherwise>FROM company c</otherwise>
+    </choose>
+  </sql>
+
   <sql id="searchKeys">
     <bind name="searchNameQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@namePattern(query)"/>
     <bind name="searchPhoneQuery" value="@ooo.klae.connex.backend.util.SearchNormalizer@phonePattern(query)"/>
     OR c.search_name LIKE #{searchNameQuery,jdbcType=VARCHAR}
-    OR c.search_phone LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+    <bind name="searchPhoneExact" value="@ooo.klae.connex.backend.util.SearchNormalizer@phoneExact(query)"/>
+    <include refid="searchPhonePredicate"/>
+  </sql>
+
+  <sql id="searchPhonePredicate">
+    <choose>
+      <when test="searchPhoneExact != null">
+        OR c.search_phone = #{searchPhoneExact,jdbcType=VARCHAR}
+        OR c.phone LIKE #{query}
+      </when>
+      <otherwise>
+        OR c.search_phone LIKE #{searchPhoneQuery,jdbcType=VARCHAR}
+        OR c.phone LIKE #{query}
+      </otherwise>
+    </choose>
   </sql>
 
   <sql id="pageWhere">
@@ -563,7 +619,7 @@
       <include refid="warmthWhere"/>
       <if test="query != null">
         AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
-          OR c.phone LIKE #{query} OR c.address LIKE #{query}
+          OR c.address LIKE #{query}
           <include refid="searchKeys"/>)
       </if>
       <if test="(industry != null and industry.size() > 0) or noIndustry">
@@ -624,7 +680,7 @@
       <include refid="warmthWhere"/>
       <if test="query != null">
         AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
-          OR c.phone LIKE #{query} OR c.address LIKE #{query}
+          OR c.address LIKE #{query}
           <include refid="searchKeys"/>)
       </if>
       <if test="(industry != null and industry.size() > 0) or noIndustry">
@@ -643,7 +699,7 @@
 
   <select id="getCompaniesPage" resultType="Company">
     SELECT <include refid="qualifiedCompanyColumns"/>
-    FROM company c
+    <include refid="searchSource"/>
     <include refid="warmthJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
@@ -653,7 +709,7 @@
 
   <select id="countCompanies" resultType="long">
     SELECT COUNT(*)
-    FROM company c
+    <include refid="searchSource"/>
     <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
@@ -796,7 +852,7 @@
 
   <select id="getSegmentCompaniesPage" resultType="Company">
     SELECT <include refid="qualifiedCompanyColumns"/>
-    FROM company c
+    <include refid="searchSource"/>
     JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
       ON segment_ids.id = c.id
     <include refid="warmthJoin"/>
@@ -808,7 +864,7 @@
 
   <select id="countSegmentCompanies" resultType="long">
     SELECT COUNT(*)
-    FROM company c
+    <include refid="searchSource"/>
     JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
       ON segment_ids.id = c.id
     <include refid="warmthFilterJoin"/>
@@ -818,7 +874,7 @@
 
   <select id="getSegmentCompanyIdsFiltered" resultType="int">
     SELECT c.id
-    FROM company c
+    <include refid="searchSource"/>
     JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
       ON segment_ids.id = c.id
     <include refid="warmthFilterJoin"/>
@@ -830,7 +886,7 @@
 
   <select id="getCompanyIdsFiltered" resultType="int">
     SELECT c.id
-    FROM company c
+    <include refid="searchSource"/>
     <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
@@ -840,7 +896,7 @@
 
   <select id="getCompaniesFiltered" resultType="Company">
     SELECT <include refid="qualifiedCompanyColumns"/>
-    FROM company c
+    <include refid="searchSource"/>
     <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
@@ -967,9 +1023,9 @@
   </select>
 
   <select id="search" resultType="Company">
-    SELECT <include refid="qualifiedCompanyColumns"/> FROM company c
+    SELECT <include refid="qualifiedCompanyColumns"/> <include refid="searchSource"/>
     WHERE <include refid="visible"/>
-      AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query}
+      AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.address LIKE #{query}
           <include refid="searchKeys"/>)
     ORDER BY c.name, c.id
     LIMIT 10

@@ -97,6 +97,9 @@ public interface WorkspaceMapper {
     List<Integer> findWorkspaceIds();
     List<Integer> findWorkspaceIdsPage(
         @Param("afterId") int afterId, @Param("limit") int limit);
+    Integer findLastWorkspaceId();
+    List<Integer> findWorkspaceIdsThroughPage(
+        @Param("afterId") int afterId, @Param("throughId") int throughId, @Param("limit") int limit);
     List<Integer> findWorkspaceIdsLifecyclePage(
         @Param("afterId") int afterId, @Param("limit") int limit);
     /**

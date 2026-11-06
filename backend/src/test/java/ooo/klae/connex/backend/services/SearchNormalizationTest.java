@@ -3,20 +3,14 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Set;
 
-import org.flywaydb.core.api.MigrationInfo;
-import org.flywaydb.core.api.MigrationVersion;
-import org.flywaydb.core.api.callback.Context;
-import org.flywaydb.core.api.callback.Event;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,11 +18,13 @@ import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Workspace;
-import ooo.klae.connex.backend.config.RecordSearchV244MigrationCallback;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.util.SearchNormalizer;
+import ooo.klae.connex.backend.mappers.RecordSearchMapper;
+import ooo.klae.connex.backend.mappers.RecordSearchMapper.Kind;
 
 @Transactional(isolation = Isolation.READ_COMMITTED)
 class SearchNormalizationTest extends AbstractServiceTest {
@@ -36,6 +32,7 @@ class SearchNormalizationTest extends AbstractServiceTest {
     @Autowired private PersonService personService;
     @Autowired private CompanyService companyService;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private RecordSearchMapper recordSearchMapper;
 
     @Test
     void listAndGlobalSearchFoldStoredAndQueriedJapaneseNames() {
@@ -73,6 +70,58 @@ class SearchNormalizationTest extends AbstractServiceTest {
     }
 
     @Test
+    void phoneSeparatorsSpacesAndExtensionsMatchBidirectionally() {
+        Person person = person("Equivalent phone contact", "09096846208");
+        Company company = company("Equivalent phone company", "09096846208");
+        List<String> variants = List.of("090-9684-6208", "+81 90 9684 6208", "090・9684・6208",
+            "090ー9684ー6208", "090\t9684\t6208", "090-9684-6208 ext. 123", "090-9684-6208x123",
+            "090\u00a09684\u20076208", "+81\u202f(0)90\u30009684\u20096208",
+            "０９０－９６８４－６２０８ 内線１２３", "+81(0)90-9684-6208;ext=123");
+        for (String stored : variants) {
+            person.setPhone(stored);
+            personMapper.update(person);
+            company.setPhone(stored);
+            companyMapper.update(company);
+            for (String query : List.of("09096846208", "+81-90-9684-6208")) {
+                assertPersonMatch(query, person.getId());
+                assertCompanyMatch(query, company.getId());
+            }
+            assertPersonMatch("96846208", person.getId());
+            assertCompanyMatch("96846208", company.getId());
+        }
+        person.setPhone("+81-90-9684-6208");
+        personMapper.update(person);
+        company.setPhone("+81-90-9684-6208");
+        companyMapper.update(company);
+        for (String query : variants) {
+            assertPersonMatch(query, person.getId());
+            assertCompanyMatch(query, company.getId());
+        }
+    }
+
+    @Test
+    void wholePhoneQueriesRetainDisplayFallbacksAndOtherFieldMatches() {
+        Person legacy = person("Legacy phone contact", "090-9684-6208");
+        Company legacyCompany = company("Legacy phone company", "090-9684-6208");
+        jdbc.update("UPDATE person SET search_phone = NULL WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), legacy.getId());
+        jdbc.update("UPDATE company SET search_phone = NULL WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), legacyCompany.getId());
+        assertPersonMatch("090-9684-6208", legacy.getId());
+        assertCompanyMatch("090-9684-6208", legacyCompany.getId());
+        Person named = person("Reference 09096846208", null);
+        Company namedCompany = company("Reference 09096846208", null);
+        assertPersonMatch("09096846208", named.getId());
+        assertCompanyMatch("09096846208", namedCompany.getId());
+        Person display = person("Multiple display phones", "090-9684-6208/080-1111-2222");
+        Company displayCompany = company("Multiple display phones", "090-9684-6208/080-1111-2222");
+        assertNotNull(jdbc.queryForObject("SELECT search_phone FROM person WHERE id = ?", String.class, display.getId()));
+        assertNotNull(jdbc.queryForObject("SELECT search_phone FROM company WHERE id = ?", String.class, displayCompany.getId()));
+        assertPersonMatch("090-9684-6208", display.getId());
+        assertCompanyMatch("090-9684-6208", displayCompany.getId());
+    }
+
+    @Test
     void normalizedPredicatesCannotMatchOtherTenantRows() {
         Workspace foreign = new Workspace();
         foreign.setName("Other search workspace");
@@ -83,6 +132,8 @@ class SearchNormalizationTest extends AbstractServiceTest {
         Company hiddenCompany = company("Foreign ｱﾏｿﾞﾝ ABC", "090-1111-2222");
         jdbc.update("UPDATE person SET workspace_id = ? WHERE id = ?", foreign.getId(), hidden.getId());
         jdbc.update("UPDATE company SET workspace_id = ? WHERE id = ?", foreign.getId(), hiddenCompany.getId());
+        jdbc.update("INSERT INTO person_share (person_id, workspace_id) VALUES (?, ?)", hidden.getId(), workspace.getId());
+        jdbc.update("INSERT INTO company_share (company_id, workspace_id) VALUES (?, ?)", hiddenCompany.getId(), workspace.getId());
         for (String query : List.of("Foreign山田太郎", "09096846208", "96846208")) {
             assertTrue(people(query).items().isEmpty());
             assertEquals(0, people(query).total());
@@ -130,6 +181,8 @@ class SearchNormalizationTest extends AbstractServiceTest {
         assertNull(jdbc.queryForObject("SELECT search_name FROM person WHERE id = ?", String.class, person.getId()));
         assertNull(jdbc.queryForObject("SELECT search_phone FROM company WHERE id = ?", String.class, company.getId()));
         assertTrue(people("山田太郎").items().isEmpty());
+        assertPersonMatch("Legacy Name", person.getId());
+        assertPersonMatch("090-9684-6208", person.getId());
         backfill();
         assertPersonMatch("LegacyName", person.getId());
         assertPersonMatch("09096846208", person.getId());
@@ -171,17 +224,15 @@ class SearchNormalizationTest extends AbstractServiceTest {
     }
 
     private void backfill() {
-        jdbc.execute((ConnectionCallback<Void>) connection -> {
-            Context context = mock(Context.class);
-            MigrationInfo migration = mock(MigrationInfo.class);
-            when(context.getConnection()).thenReturn(connection);
-            when(context.getMigrationInfo()).thenReturn(migration);
-            when(migration.getVersion()).thenReturn(MigrationVersion.fromVersion("244"));
-            var callback = new RecordSearchV244MigrationCallback();
-            callback.handle(Event.AFTER_EACH_MIGRATE, context);
-            callback.handle(Event.AFTER_EACH_MIGRATE, context);
-            return null;
-        });
+        for (Kind kind : Kind.values()) {
+            Integer throughId = recordSearchMapper.maxId(workspace.getId(), kind);
+            if (throughId != null) {
+                for (var row : recordSearchMapper.findMissing(workspace.getId(), kind, 0, throughId, 500)) {
+                    recordSearchMapper.reconcile(workspace.getId(), kind, row,
+                        SearchNormalizer.name(row.name()), SearchNormalizer.phone(row.phone()));
+                }
+            }
+        }
     }
 
     private void assertPersonMatch(String query, int id) {

@@ -77,18 +77,36 @@ for (const locale of ['en', 'ja'] as const) {
         });
 
         test('command palette keeps IME confirmation and cancellation inside the input', async ({ page }) => {
+            const workspaceId = await activeWorkspaceId(page.request);
+            const seed = seeder(page.request, workspaceId, await csrfBootstrap(page.request));
+            const name = '山田太郎';
+            const contact = await seed.post('/api/persons', { name });
+            const contactId = contact.id;
+            if (typeof contactId !== 'number') throw new Error('Seeded contact has no numeric id');
             await page.goto('/dashboard');
-            await page.evaluate(() => window.dispatchEvent(new Event('connex:open-search')));
             const dialog = page.getByRole('dialog');
+            await expect.poll(async () => {
+                await page.evaluate(() => window.dispatchEvent(new Event('connex:open-search')));
+                return dialog.isVisible();
+            }).toBe(true);
             const input = dialog.getByRole('combobox');
+            const result = dialog.getByRole('option').filter({ hasText: name });
             await expect(input).toBeFocused();
+            await input.fill('山田');
+            await expect(result).toHaveAttribute('aria-selected', 'true');
             const initialUrl = page.url();
             const queries: string[] = [];
             page.on('request', request => {
-                if (new URL(request.url()).pathname === '/api/search') queries.push(request.url());
+                const url = new URL(request.url());
+                if (url.pathname === '/api/search') queries.push(url.searchParams.get('query') ?? '');
             });
+            await input.dispatchEvent('keydown', { key: 'Enter', keyCode: 13, isComposing: true });
+            await input.dispatchEvent('keydown', { key: 'Enter', keyCode: 229 });
+            await expect(result).toHaveAttribute('aria-selected', 'true');
+            await expect(dialog).toBeVisible();
+            expect(page.url()).toBe(initialUrl);
             await input.dispatchEvent('compositionstart');
-            await input.fill('山田');
+            await input.fill('山田 太郎');
             await input.press('Enter');
             await input.press('Escape');
             await input.press('Tab');
@@ -97,11 +115,25 @@ for (const locale of ['en', 'ja'] as const) {
             expect(queries).toEqual([]);
             await expect(dialog).toBeVisible();
             expect(page.url()).toBe(initialUrl);
-            await input.dispatchEvent('compositionend');
+            const committedResponse = page.waitForResponse(response => {
+                const url = new URL(response.url());
+                return url.pathname === '/api/search' && url.searchParams.get('query') === '山田 太郎';
+            });
+            await input.dispatchEvent('compositionend', { data: '山田 太郎' });
+            expect((await committedResponse).ok()).toBe(true);
+            await expect(result).toHaveAttribute('aria-selected', 'true');
+            await input.dispatchEvent('keydown', { key: 'Enter', keyCode: 229 });
             await input.dispatchEvent('keydown', { key: 'Escape', keyCode: 229 });
             await expect(dialog).toBeVisible();
+            expect(page.url()).toBe(initialUrl);
+            await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 400)));
+            expect(queries).toEqual(['山田 太郎']);
             await input.press('Escape');
             await expect(dialog).toBeHidden();
+            await page.keyboard.press('ControlOrMeta+k');
+            await expect(result).toHaveAttribute('aria-selected', 'true');
+            await input.press('Enter');
+            await expect(page).toHaveURL(new RegExp(`/records/contacts/${contactId}$`));
         });
     });
 }

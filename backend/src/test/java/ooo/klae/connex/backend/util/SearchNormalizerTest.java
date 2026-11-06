@@ -36,10 +36,39 @@ class SearchNormalizerTest {
     }
 
     @Test
+    void normalizesAcceptedSeparatorsAndUnicodeSpacesBeforeParsing() {
+        for (String form : new String[] {"090・9684・6208", "090ー9684ー6208", "090−9684−6208",
+                "090/9684/6208", "090\t9684\t6208", "090\u00a09684\u20076208", "+81\u202f(0)90\u30009684\u20096208"}) {
+            assertEquals("819096846208", SearchNormalizer.phone(form), form);
+            assertEquals("819096846208", SearchNormalizer.phoneExact(LikePattern.containing(form)), form);
+        }
+    }
+
+    @Test
+    void separatesExtensionsFromTheSearchableBase() {
+        for (String form : new String[] {"090-9684-6208 x123", "+81 90 9684 6208 ext. 123",
+                "+81(0)90-9684-6208;ext=123", "０９０－９６８４－６２０８ 内線１２３", "09096846208#123"}) {
+            assertEquals("819096846208", SearchNormalizer.phone(form), form);
+            assertEquals("819096846208", SearchNormalizer.phoneExact(LikePattern.containing(form)), form);
+        }
+        assertEquals("96846208", SearchNormalizer.phone("96846208 x123"));
+    }
+
+    @Test
+    void wholeNumbersCanSeekAndFragmentsKeepContainsMatching() {
+        assertEquals("819096846208", SearchNormalizer.phoneExact(LikePattern.containing("09096846208")));
+        assertEquals("19096846208", SearchNormalizer.phoneExact(LikePattern.containing("+1 (909) 684-6208")));
+        assertNull(SearchNormalizer.phoneExact(LikePattern.containing("9096846208")));
+        assertNull(SearchNormalizer.phoneExact(LikePattern.containing("96846208")));
+        assertEquals("%96846208%", SearchNormalizer.phonePattern(LikePattern.containing("9684 6208")));
+    }
+
+    @Test
     void literalWildcardsCannotBecomeUnrestrictedPatterns() {
         assertEquals("%a\\%\\_\\\\b%", SearchNormalizer.namePattern(LikePattern.containing("Ａ % _ \\ Ｂ")));
         assertNull(SearchNormalizer.phonePattern(LikePattern.containing("%")));
         assertNull(SearchNormalizer.phonePattern(LikePattern.containing("call 09011112222")));
+        assertNull(SearchNormalizer.phonePattern(LikePattern.containing("090+96846208")));
         assertNull(SearchNormalizer.namePattern(LikePattern.containing("\u3000")));
         assertEquals("", SearchNormalizer.phone(null));
     }

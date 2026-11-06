@@ -12,12 +12,10 @@ ALTER TABLE company
     ALGORITHM=INSTANT;
 
 ALTER TABLE person
-    ADD INDEX idx_person_workspace_search_name (workspace_id, search_name(191), id),
     ADD INDEX idx_person_workspace_search_phone (workspace_id, search_phone, id),
     ALGORITHM=INPLACE, LOCK=NONE;
 
 ALTER TABLE company
-    ADD INDEX idx_company_workspace_search_name (workspace_id, search_name(191), id),
     ADD INDEX idx_company_workspace_search_phone (workspace_id, search_phone, id),
     ALGORITHM=INPLACE, LOCK=NONE;
 
