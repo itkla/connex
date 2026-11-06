@@ -114,6 +114,11 @@ duplicate mutex and person lock. The effective merged flags drive sharing revoca
 withdrawal, identity visibility and AI invalidation. A stale sharing-only update therefore cannot
 clear a concurrently added processing hold. The frontend submits only flags changed by the member.
 
+The contact-scoped suppression read resolves only an owned, unarchived contact, matching ordinary
+contact detail visibility. An archived subject returns 404 rather than an empty restriction list.
+Archiving does not delete its suppression entries: workspace-level administration retains them,
+and restoring the contact makes its person-linked and canonical-address matches visible again.
+
 The historical `fk_person_company` is ON DELETE SET NULL, whose automatic action bypasses UPDATE
 triggers. `trg_company_delete_person_edit_version` explicitly detaches those exact indexed company
 references before the existing FK action. The V241 company→deal trigger remains intact and runs

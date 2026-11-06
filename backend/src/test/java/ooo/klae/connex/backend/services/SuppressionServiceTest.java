@@ -21,6 +21,29 @@ class SuppressionServiceTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
+    void contactListingHidesArchivedSubjectsAndRestoresTheirRetainedSuppressions() {
+        Person person = newPerson(newCompany());
+        var sticky = suppressionService.add(new SuppressionEntryRequest(
+                "workspace", "email", "previous@example.test", person.getId(), "do_not_contact", null));
+        var addressOnly = suppressionService.add(new SuppressionEntryRequest(
+                "workspace", "email", person.getEmail(), null, "unsubscribe", null));
+        var expectedIds = java.util.List.of(sticky.id(), addressOnly.id());
+        assertEquals(expectedIds, suppressionService.listForPerson(person.getId(), 0)
+                .items().stream().map(entry -> entry.id()).toList());
+
+        assertEquals(1, personMapper.archive(workspace.getId(), person.getId()));
+
+        assertThrows(ResourceNotFoundException.class,
+                () -> suppressionService.listForPerson(person.getId(), 0));
+        assertTrue(suppressionService.list().stream().map(SuppressionEntryDto::id).toList()
+                .containsAll(expectedIds));
+
+        assertEquals(1, personMapper.restore(workspace.getId(), person.getId()));
+        assertEquals(expectedIds, suppressionService.listForPerson(person.getId(), 0)
+                .items().stream().map(entry -> entry.id()).toList());
+    }
+
+    @Test
     void contactListingMinimizesAndBoundsPersonStickyAndCanonicalAddressMatches() {
         Person person = newPerson(newCompany());
         person.setEmail("matching@example.test");

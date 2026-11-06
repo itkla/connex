@@ -6,6 +6,7 @@
   <select id="getOwnedPersonAddresses" resultType="Person">
     SELECT id, email, phone FROM person
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND archived_at IS NULL
   </select>
 
   <resultMap id="PersonResult" type="Person">
