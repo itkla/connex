@@ -114,7 +114,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
     @Test
     void approveMembership_reAppliesTheOrgCeilingAtActivation() {
         User outsider = register("pending-" + unique() + "@other.com");
-        inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member");
+        workspaceService.addPendingMember(workspaceId, currentUser, outsider, "member");
 
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
 

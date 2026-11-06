@@ -3,9 +3,11 @@ package ooo.klae.connex.backend.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -17,12 +19,14 @@ import java.util.Map;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
+import jakarta.servlet.http.Cookie;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -40,12 +44,14 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.InviteEmailService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -94,30 +100,28 @@ class IdentityInvitationWithoutVerificationIntegrationTest {
     }
 
     @Test
-    void inviteByEmailStillReachesAnUnverifiedAccountInApp() throws Exception {
-        User legacy = unverifiedUser();
+    void inviteByEmailUsesATokenForAnUnverifiedAccount() throws Exception {
+        assertTokenInvitation("invites");
+    }
 
-        invite("invites", legacy.getEmail())
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.invite").doesNotExist())
-            .andExpect(jsonPath("$.member.id").value(legacy.getId()));
-        verifyNoInteractions(inviteEmail);
+    @Test
+    void membersEndpointUsesATokenForAnUnverifiedAccount() throws Exception {
+        assertTokenInvitation("members");
+    }
+
+    @Test
+    void legacyPendingMembershipStillAcceptsWithoutGlobalVerification() throws Exception {
+        User legacy = unverifiedUser();
+        workspaceMapper.addPendingMember(target.getId(), legacy.getId(), "member");
 
         mockMvc.perform(post("/api/workspaces/{id}/accept", target.getId())
                 .session(login(legacy)).with(csrf().asHeader()))
             .andExpect(status().isOk());
+
         assertTrue(workspaceMapper.isMember(target.getId(), legacy.getId()));
-    }
-
-    @Test
-    void membersEndpointStillAddsAnUnverifiedAccount() throws Exception {
-        User legacy = unverifiedUser();
-
-        invite("members", legacy.getEmail())
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.id").value(legacy.getId()));
-
-        assertEquals("pending", workspaceMapper.getMember(target.getId(), legacy.getId()).getStatus());
+        User accepted = userMapper.getUserById(legacy.getId());
+        assertNotNull(accepted);
+        assertFalse(accepted.isEmailVerified());
     }
 
     @Test
@@ -132,6 +136,67 @@ class IdentityInvitationWithoutVerificationIntegrationTest {
                 .content(objectMapper.writeValueAsString(Map.of("orgRole", "admin", "acknowledgeConfinement", true))))
             .andExpect(status().isNoContent());
         assertEquals("admin", orgMemberMapper.getRole(target.getOrgId(), legacy.getId()));
+    }
+
+    private void assertTokenInvitation(String path) throws Exception {
+        User legacy = unverifiedUser();
+        MvcResult invitation = invite(path, legacy.getEmail())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.id").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(legacy.getEmail()))
+            .andExpect(jsonPath("$.invite.token").isString())
+            .andReturn();
+        String token = objectMapper.readTree(invitation.getResponse().getContentAsString())
+            .get("invite").get("token").asString();
+        verify(inviteEmail).sendInvite(
+            target.getId(), target.getName(), legacy.getEmail(), manager.getDisplayName(), "member", token);
+        assertFalse(workspaceMapper.isMemberIncludingPending(target.getId(), legacy.getId()));
+        MockHttpSession recipientSession = login(legacy);
+        assertCrmDenied(recipientSession);
+        mockMvc.perform(post("/api/workspaces/{id}/accept", target.getId())
+                .session(recipientSession).with(csrf().asHeader()))
+            .andExpect(status().isNotFound());
+
+        MvcResult bootstrap = mockMvc.perform(get("/api/auth/csrf").session(recipientSession))
+            .andExpect(status().isOk()).andReturn();
+        Cookie binding = responseCookie(bootstrap, OneTimeLinkFlowService.BROWSER_BINDING_COOKIE);
+        MvcResult exchanged = mockMvc.perform(post("/api/invites/exchange")
+                .session(recipientSession).cookie(binding).with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("token", token))))
+            .andExpect(status().isSeeOther()).andReturn();
+        Cookie grant = responseCookie(exchanged, OneTimeLinkFlowCookie.WORKSPACE_INVITE);
+        MvcResult preview = mockMvc.perform(get("/api/invites")
+                .session(recipientSession).cookie(binding, grant))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.flowId").isString()).andReturn();
+        String flowId = objectMapper.readTree(preview.getResponse().getContentAsString()).get("flowId").asString();
+        assertFalse(workspaceMapper.isMemberIncludingPending(target.getId(), legacy.getId()));
+        assertCrmDenied(recipientSession);
+
+        mockMvc.perform(post("/api/invites/accept")
+                .session(recipientSession).cookie(binding, grant).with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("flowId", flowId))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(target.getId()));
+        assertTrue(workspaceMapper.isMember(target.getId(), legacy.getId()));
+        User accepted = userMapper.getUserById(legacy.getId());
+        assertNotNull(accepted);
+        assertFalse(accepted.isEmailVerified());
+    }
+
+    private void assertCrmDenied(MockHttpSession session) throws Exception {
+        mockMvc.perform(get("/api/companies/page").session(session)
+                .header("X-Workspace-Id", target.getId()))
+            .andExpect(status().isForbidden());
+    }
+
+    private static Cookie responseCookie(MvcResult result, String name) {
+        String header = result.getResponse().getHeaders(HttpHeaders.SET_COOKIE).stream()
+            .filter(value -> value.startsWith(name + "=")).findFirst().orElseThrow();
+        return new Cookie(name, header.substring(name.length() + 1, header.indexOf(';')));
     }
 
     private ResultActions invite(String path, String address) throws Exception {

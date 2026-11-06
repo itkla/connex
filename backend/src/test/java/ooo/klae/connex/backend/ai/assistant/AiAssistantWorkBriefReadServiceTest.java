@@ -76,7 +76,7 @@ class AiAssistantWorkBriefReadServiceTest {
         when(personMapper.getByIds(eq(7), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(person));
         when(dealMapper.getByIds(eq(7), anyList())).thenReturn(List.of(deal));
         ReferenceService references = mock(ReferenceService.class);
-        when(references.hydrateTasks(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
+        when(references.hydrateTasksForMasking(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         service = new AiAssistantWorkBriefReadService(
                 taskMapper, activityMapper, personMapper, mock(CompanyMapper.class), dealMapper,
                 mock(ScoringService.class), workspaceService, workspaceScope,

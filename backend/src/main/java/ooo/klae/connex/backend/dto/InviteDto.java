@@ -4,13 +4,14 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * A pending workspace invite as shown to workspace admins. Carries the token so
- * the admin can re-copy the acceptance link.
+ * An address-only invitation for workspace administrators. The opaque id identifies an
+ * invitation, never an account. A raw token is available only at creation. Historical pending
+ * membership invitations have no expiry.
  */
 @Data
 @NoArgsConstructor
 public class InviteDto {
-    private int id;
+    private String id;
     private String email;
     private String role;
     private String status;

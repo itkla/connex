@@ -201,9 +201,20 @@ Stored prose can name a member who has renamed themselves or is still pending. N
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
-labels, including both authored HTML-entity spellings and decoded labels. Both member provenance
-and reader visibility now use the pure `ReferenceContentReader` shared by `ReferenceService`.
-It parses original source with pinned CommonMark Java 0.30.1, the GFM tables extension and the
+labels, including both authored HTML-entity spellings and decoded labels.
+
+Assistant reads use `hydrateForMasking`, `hydrateTasksForMasking` and
+`hydrateActivitiesForMasking` only after authorizing the containing record. These internal paths
+retain authored labels for scoped active or pending membership IDs without resolving account profiles.
+Ordinary hydration and write-response reference projection remain active-only; internal mention
+persistence retains pending grants so queued notifications can surface after acceptance.
+Masking hydration is restricted to history, scope and work-brief provider projections. Reader-facing
+tool cards use ordinary hydration even though their reader service lives in the assistant package;
+pending references must not survive in REST target labels. An architecture allowlist guards these
+distinct consumers.
+
+Both member provenance and reader visibility use the pure `ReferenceContentReader` shared by
+`ReferenceService`. It parses original source with pinned CommonMark Java 0.30.1, the GFM tables extension and the
 footnotes extension, with block and inline source spans. It does not globally decode the document
 before parsing. Resolved links, images and all link-reference definitions (including unused and
 duplicate definitions) contribute internal targets; HTML `href` attributes do not, matching
@@ -591,9 +602,12 @@ and short names must not corrupt ordinary words. Exact replacements such as `x{{
 precise member provenance, including through echoed write arguments, independently of these raw-text
 rules. At queue time, the shared member-reference collector reads labels and user targets from
 the original text. Distinct target ids are checked in workspace-scoped batches of at most 500 against
-active or pending membership. An authored or decoded label is registered when any of its possible
-targets is visible, preserving conservative masking for ambiguous keys. The combined identifier
-budget still refuses excess labels with `identifier_limit_exceeded`. An unrelated invisible target
+active or pending membership through the ID-only `memberIdsForMasking` boundary. An authored or decoded
+label is registered when any of its possible targets belongs to that exact workspace, preserving
+conservative masking for ambiguous keys without exposing a pending profile. Admission counts every
+distinct authored member-reference label before membership lookup, including labels with invisible
+targets, so `identifier_limit_exceeded` cannot reveal pending membership. The combined identifier
+budget remains 20. An unrelated invisible target
 that collapses the reader-redacted body cannot suppress an authorized member label. Invisible user
 targets contribute no reference labels. These labels are
 persisted in user-message `memberIdentifiers`, deduplicated with directory mentions within the
@@ -622,8 +636,9 @@ when those labels enter the MEMBER boundary above; unrelated P1.1 scope is uncha
 `complete_task` and `reschedule_task` also declare every authored member-reference label in their
 stored description snapshots. The task delegates hydrate those descriptions through the existing
 reader-visibility boundary before storing the outcome. Fresh projection and replay register the
-labels as candidates before masking, including labels authored before a rename and references to
-pending members. MEMBER identifiers carried by tool results register as candidates without eager
+labels as candidates before masking, including labels authored before a rename whose references
+remain visible to the reader. Historical authored provenance retains the separate replay rules above.
+MEMBER identifiers carried by tool results register as candidates without eager
 allocation; actual dispatch exposure remains required for demasking. This adds no directory lookup,
 mutation, outcome field or token kind.
 

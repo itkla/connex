@@ -226,7 +226,7 @@ function MembersWorkspacePanel({
     const [removeTarget, setRemoveTarget] = useState<WorkspaceMember | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
     const [approvalTarget, setApprovalTarget] = useState<WorkspaceMember | null>(null);
-    const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
+    const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
 
     const [inviteLinks, setInviteLinks] = useState<WorkspaceInviteLink[]>([]);
     const [linkRole, setLinkRole] = useState<WorkspaceRole>("member");
@@ -451,19 +451,13 @@ function MembersWorkspacePanel({
         try {
             const result = await createWorkspaceInvite(workspaceId, inviteEmail.trim(), inviteRole);
             setInviteEmail("");
-            if (result.member) {
-                const member = result.member;
-                membersRefresh.current += 1;
-                setMembers((prev) => [...prev.filter((m) => m.id !== member.id), member]);
-                ownershipOffers.refresh();
-                toastSuccess(t("memberInvited"));
-            } else if (result.invite) {
+            if (result.invite) {
                 const invite = result.invite;
                 setInvites((prev) => [invite, ...prev.filter((i) => i.email !== invite.email)]);
                 if (invite.token) {
                     await copyInviteLink(invite.token, true);
                 }
-                toastSuccess(t("inviteCreated"));
+                toastSuccess(t("invitationCreated"));
             } else {
                 toastError(t("inviteFailed"));
             }
@@ -476,7 +470,7 @@ function MembersWorkspacePanel({
         }
     };
 
-    const revoke = async (inviteId: number) => {
+    const revoke = async (inviteId: string) => {
         if (!workspaceId) return;
         setBusyInviteId(inviteId);
         try {
@@ -937,7 +931,9 @@ function MembersWorkspacePanel({
                                                                 />
                                                             </div>
                                                             <p className="text-xs text-muted-foreground">
-                                                                {t("expires", { date: invite.expiresAt.slice(0, 10) })}
+                                                                {invite.expiresAt
+                                                                    ? t("expires", { date: invite.expiresAt.slice(0, 10) })
+                                                                    : t("inviteNoExpiry")}
                                                             </p>
                                                         </div>
                                                         {busy ? (
