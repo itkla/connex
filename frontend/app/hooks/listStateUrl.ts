@@ -24,6 +24,9 @@ export const ACTIVITY_URL_KEY = 'activity';
 /** URL query key that deep-links one record comment, read by the record comments section. */
 export const COMMENT_URL_KEY = 'comment';
 
+/** URL query key that opens an authorized notification in its workspace. */
+export const NOTIFICATION_OPEN_URL_KEY = 'open';
+
 /** URL query key that opens one pipeline in the pipelines browser's edit sheet. */
 export const PIPELINE_EDIT_URL_KEY = 'edit';
 
@@ -35,6 +38,7 @@ export const PIPELINE_EDIT_URL_KEY = 'edit';
  * fail loudly when a producer and its consumer drift apart (#1338).
  */
 export const DEEP_LINK_URL_KEYS = {
+    notification: NOTIFICATION_OPEN_URL_KEY,
     task: TASK_URL_KEY,
     note: NOTE_URL_KEY,
     activity: ACTIVITY_URL_KEY,

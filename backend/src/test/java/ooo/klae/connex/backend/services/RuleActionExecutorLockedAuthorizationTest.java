@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
 
 class RuleActionExecutorLockedAuthorizationTest {
@@ -30,11 +29,12 @@ class RuleActionExecutorLockedAuthorizationTest {
             mock(LeadResponseSlaService.class),
             mock(DealService.class),
             mock(NoteService.class),
-            mock(NotificationDelivery.class),
+            mock(WorkflowNotificationDeliveryService.class),
             mock(TagMapper.class),
             mock(DealDocumentMapper.class),
             triggeredSendService,
-            mock(WorkspaceService.class));
+            mock(WorkspaceService.class),
+            mock(UserCalendarService.class));
         RuleAction action = new RuleAction();
         action.setType("send_message");
         action.setCampaignMessageId(31);

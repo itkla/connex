@@ -20,7 +20,6 @@ import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.notifications.NotificationDelivery;
 
 /**
  * Performs a single rule {@link RuleAction} within an already-established automation context (the
@@ -41,11 +40,12 @@ public class RuleActionExecutor {
     private final LeadResponseSlaService leadResponseSlaService;
     private final DealService dealService;
     private final NoteService noteService;
-    private final NotificationDelivery notificationDelivery;
+    private final WorkflowNotificationDeliveryService notificationDelivery;
     private final TagMapper tagMapper;
     private final DealDocumentMapper documentMapper;
     private final CampaignTriggeredSendService campaignTriggeredSendService;
     private final WorkspaceService workspaceService;
+    private final UserCalendarService userCalendarService;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -115,7 +115,7 @@ public class RuleActionExecutor {
         if (dueDays < 0 || dueDays > 365) {
             throw new BadRequestException("Task due days must be between 0 and 365");
         }
-        task.setDueDate(LocalDateTime.now().toLocalDate().plusDays(dueDays).format(DATE));
+        task.setDueDate(userCalendarService.today().plusDays(dueDays).format(DATE));
         User assignee = new User();
         assignee.setId(followUpRecipient(action, ctx));
         task.setAssignedTo(assignee);
@@ -196,7 +196,7 @@ public class RuleActionExecutor {
             + (action.getBody() == null || action.getBody().isBlank() ? "" : "\n" + action.getBody()));
         notification.setDedupeKey(ctx.notificationDedupeKey());
         notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
-        notificationDelivery.deliver(notification);
+        notificationDelivery.deliver(notification, ctx.targetUserId());
     }
 
     private int followUpRecipient(RuleAction action, AutomationActionContext ctx) {

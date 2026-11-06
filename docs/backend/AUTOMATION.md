@@ -269,13 +269,17 @@ Schema-v1 `create_task` and `notify` actions use the existing optional `targetUs
 specific active member of the same workspace. An absent target retains the run-as attribution member.
 Authoring and execution refuse invalid or unavailable explicit members rather than redirecting work
 to the actor. Task creation continues through `TaskService` and its locked assignment checks;
-notification delivery retains the recipient/source access filters and workspace-aware navigation.
+notification effects retain attribution and recipient memberships through the write using the existing
+actor/workspace prefix and ordered NOWAIT membership union. Missing or contended membership refuses
+the action instead of completing an invisible notification. Recipient/source access filters remain in place.
 No action field or persisted definition shape is added, so canonical bytes and hashes stay stable.
 Dynamic record-owner, launch-input, and action-output recipient bindings require schema-v2 in #1604;
 schema-v1 authoring refuses those configurations through its strict unknown-field/type validation.
 
 For task actions, an absent `dueInDays` retains the three-day default; zero means today, and explicit
-values must be integers from 0 through 365. Recipe parameters and the builder use the same range.
+values must be integers from 0 through 365. Today uses `UserCalendarService`, the same persisted
+execution-profile calendar used by Tasks, with UTC as the existing fallback. Recipe parameters and
+the builder use the same range.
 
 Workflow notifications snapshot the permitted source name into `sourceLabel` and the message body,
 retain the configured title/message, and link contacts, companies, deals, and tasks to their existing
@@ -283,6 +287,13 @@ record destinations. Document triggers use the `deal_document` notification sour
 deal-scoped document print route. Names are resolved through workspace-scoped reads; a missing
 source fails the action instead of producing a dead link. Inbox and realtime reads retain their
 current source-access checks, and opening a notification selects its workspace before navigating.
+
+Notification emails enter `/notifications?open=<notificationId>`. The authenticated page marks and
+resolves that notification through the existing recipient-authorized endpoint, then reuses the same
+workspace-selection navigation as the bell and inbox before opening the returned record URL.
+Workspace and destination are taken from the authorized notification, not link parameters. An invalid
+id, inaccessible notification, or refused workspace selection offers the inbox without navigating to
+an unrelated record. Existing direct record URLs remain the in-app notification destination.
 
 ## Legacy rules are a compatibility projection
 

@@ -57,6 +57,13 @@ for (const locale of ["en", "ja"] as const) {
             await expect(page.getByRole("heading", { name: contactName, exact: true }).first()).toBeVisible();
             await seed.post(`/api/notifications/${notificationId}/unread`, {});
             await page.goto("/dashboard");
+            if (testInfo.project.use.isMobile) {
+                const sidebarTrigger = page.getByRole("button", {
+                    name: message(locale, "common", "CommonContentShell.showSidebar"), exact: true,
+                });
+                await sidebarTrigger.click();
+                await expect(page.locator("#app-sidebar")).not.toHaveAttribute("inert", "");
+            }
             await page.getByRole("button", { name: new RegExp(message(locale, "notifications", "Notifications.bellLabel")) }).click();
             const bellAlert = page.getByRole("menuitem").filter({ hasText: notificationTitle });
             await expect(bellAlert).toContainText(contactName);

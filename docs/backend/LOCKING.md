@@ -773,6 +773,18 @@ legacy compatibility execution path; `send_message` enrollment consumes that sna
 reacquire authorization after the outbox/workflow locks. This order is shared with canonical step
 execution and prevents offboarding's user-before-workflow order from forming a cycle.
 
+Workflow notification effects join the existing `READ_COMMITTED` effect transaction, or open one
+for non-durable dispatch. `WorkflowNotificationDeliveryService` reuses
+`lockedMemberPermissionsAndMemberships`: attribution account S → active workspace S → attribution
+and recipient memberships in ascending user-id order using the existing additional-member NOWAIT
+probe → actor role/permissions → notification rows → deferred notification-state tail. Durable
+outbox and canonical step execution already retain the attribution prefix before their workflow/run
+roots; re-entering that prefix adds no new blocking root. No target account root is acquired after
+a workflow/run root. The new recipient membership never waits behind departure or membership-first
+writes: contention propagates as a refusal. The exact active membership check and notification upsert
+share one transaction, so departure either wins before that check or follows delivery's commit.
+Task effects continue through `TaskService` and its existing retained assignee membership.
+
 ## Task board mutations
 
 Task creation/full update lock the requested active membership first. Mutations that can change board positions run at `READ_COMMITTED` and acquire the exact tenant-plane `task_board_lock` workspace root through the atomic insert-or-update mapper statement.

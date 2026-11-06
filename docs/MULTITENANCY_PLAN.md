@@ -97,6 +97,11 @@ The inbox/bell is **recipient-scoped across every workspace the user belongs to*
 nothing is missed while viewing another workspace; each notification is labeled with its source
 workspace. Delivery prefs stay per-user-global. (The reminder *generation* jobs still run per-workspace.)
 
+Notification email record links enter the authenticated notifications page with only a notification
+id. The existing recipient-authorized read-state endpoint supplies its current workspace and record
+URL; the client selects that workspace through the same helper as inbox/bell navigation before opening
+the record. Link parameters do not authorize a workspace or supply a record destination.
+
 Task creation and reassignment emit `task.assigned` through the existing preference and delivery
 machinery, only to the locked active assignee in that workspace and never to the acting user.
 Unchanged assignments emit nothing. Like mentions, the dedupe key identifies one task and recipient;

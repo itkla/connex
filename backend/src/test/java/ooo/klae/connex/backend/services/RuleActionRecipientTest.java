@@ -3,17 +3,24 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -30,7 +37,6 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.notifications.NotificationDelivery;
 
 /** Exercises the recipient and source boundary shared by both workflow runtimes. */
 @ExtendWith(MockitoExtension.class)
@@ -42,12 +48,40 @@ class RuleActionRecipientTest {
     @Mock private LeadResponseSlaService leadResponseSlaService;
     @Mock private DealService dealService;
     @Mock private NoteService noteService;
-    @Mock private NotificationDelivery notificationDelivery;
+    @Mock private WorkflowNotificationDeliveryService notificationDelivery;
     @Mock private TagMapper tagMapper;
     @Mock private DealDocumentMapper documentMapper;
     @Mock private CampaignTriggeredSendService campaignTriggeredSendService;
     @Mock private WorkspaceService workspaceService;
+    @Mock private UserCalendarService userCalendarService;
     @InjectMocks private RuleActionExecutor executor;
+
+    @BeforeEach
+    void defaults() {
+        lenient().when(userCalendarService.today()).thenReturn(LocalDate.of(2026, 11, 6));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"Asia/Tokyo,2026-11-07", "UTC,2026-11-06"})
+    void zeroUsesTheExecutionProfilesCalendarAcrossMidnight(String timezone, String expectedDate) {
+        AuthService auth = mock(AuthService.class);
+        var actor = new ooo.klae.connex.backend.beans.User();
+        actor.setTimezone(timezone);
+        when(auth.getCurrentUser()).thenReturn(actor);
+        Clock clock = Clock.fixed(Instant.parse("2026-11-06T15:30:00Z"), ZoneOffset.UTC);
+        RuleActionExecutor zonedExecutor = new RuleActionExecutor(taskService, activityService,
+            companyService, personService, leadResponseSlaService, dealService, noteService,
+            notificationDelivery, tagMapper, documentMapper, campaignTriggeredSendService,
+            workspaceService, new UserCalendarService(auth, clock));
+        RuleAction action = action("create_task");
+        action.setDueInDays(0);
+
+        zonedExecutor.execute(action, contexts().getFirst());
+
+        ArgumentCaptor<Task> tasks = ArgumentCaptor.forClass(Task.class);
+        verify(taskService).create(tasks.capture());
+        assertEquals(expectedDate, tasks.getValue().getDueDate());
+    }
 
     @Test
     void explicitMemberReceivesSameDayTaskInBothRuntimes() {
@@ -55,7 +89,7 @@ class RuleActionRecipientTest {
         action.setTargetUserId(23);
         action.setDueInDays(0);
         when(workspaceService.getRole(7, 23)).thenReturn("member");
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.of(2026, 11, 6);
         for (AutomationActionContext context : contexts()) {
             executor.execute(action, context);
         }
@@ -74,7 +108,7 @@ class RuleActionRecipientTest {
         ArgumentCaptor<Task> tasks = ArgumentCaptor.forClass(Task.class);
         verify(taskService).create(tasks.capture());
         assertEquals(17, tasks.getValue().getAssignedTo().getId());
-        assertEquals(LocalDate.now().plusDays(3).toString(), tasks.getValue().getDueDate());
+        assertEquals(LocalDate.of(2026, 11, 9).toString(), tasks.getValue().getDueDate());
     }
 
     @Test
@@ -88,7 +122,7 @@ class RuleActionRecipientTest {
         when(personService.getPersonById(19)).thenReturn(person);
         executor.execute(action, contexts().getFirst());
         ArgumentCaptor<Notification> notices = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationDelivery).deliver(notices.capture());
+        verify(notificationDelivery).deliver(notices.capture(), org.mockito.ArgumentMatchers.eq(17));
         Notification notice = notices.getValue();
         assertEquals(23, notice.getRecipientId());
         assertEquals(7, notice.getWorkspaceId());
@@ -124,7 +158,7 @@ class RuleActionRecipientTest {
         }
         executor.execute(action("notify"), new WorkflowActionContext(7, 13, "action", recordType, 19, 17));
         ArgumentCaptor<Notification> notices = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationDelivery).deliver(notices.capture());
+        verify(notificationDelivery).deliver(notices.capture(), org.mockito.ArgumentMatchers.eq(17));
         assertEquals("Source record", notices.getValue().getSourceLabel());
         assertEquals(expectedUrl, notices.getValue().getActionUrl());
     }
@@ -136,7 +170,7 @@ class RuleActionRecipientTest {
         when(taskService.getTaskById(19)).thenReturn(task);
         executor.execute(action("notify"), new WorkflowActionContext(7, 13, "action", "task", 19, 17));
         ArgumentCaptor<Notification> notices = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationDelivery).deliver(notices.capture());
+        verify(notificationDelivery).deliver(notices.capture(), org.mockito.ArgumentMatchers.eq(17));
         assertEquals("📞".repeat(255), notices.getValue().getSourceLabel());
     }
 
@@ -176,7 +210,7 @@ class RuleActionRecipientTest {
         when(documentMapper.getById(7, 19)).thenReturn(document);
         executor.execute(action("notify"), new RuleFireContext(7, 11, "document", 19, 17, "event"));
         ArgumentCaptor<Notification> notices = ArgumentCaptor.forClass(Notification.class);
-        verify(notificationDelivery).deliver(notices.capture());
+        verify(notificationDelivery).deliver(notices.capture(), org.mockito.ArgumentMatchers.eq(17));
         assertEquals("deal_document", notices.getValue().getSourceType());
         assertEquals("Source document", notices.getValue().getSourceLabel());
         assertEquals("/records/deals/31/documents/19/print", notices.getValue().getActionUrl());
