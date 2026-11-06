@@ -76,13 +76,29 @@ export function defaultPersonNameOrder(headers: string[], locale: string): Perso
 const SYNONYMS: Record<string, readonly string[]> = {
     givenName: ['firstname', 'givenname', '名'],
     familyName: ['lastname', 'familyname', 'surname', '姓'],
-    email: ['email', 'emailaddress', 'mail', 'メール', 'メールアドレス', 'eメール', 'eメールアドレス'],
-    phone: ['phone', 'tel', 'telephone', 'mobile', 'cell', 'phonenumber', '電話', '電話番号', '携帯電話', '携帯電話番号'],
-    title: ['title', 'jobtitle', 'position', '役職', '肩書'],
+    email: [
+        'email', 'emailaddress', 'mail', 'primaryemail', 'workemail', 'businessemail', 'personalemail', 'otheremail',
+        'メール', 'メールアドレス', 'eメール', 'eメールアドレス',
+    ],
+    phone: [
+        'phone', 'tel', 'telephone', 'mobile', 'cell', 'phonenumber', 'telephonenumber',
+        'mobilephone', 'mobilephonenumber', 'mobilenumber', 'homephone', 'otherphone',
+        'businessphone', 'workphone', 'officephone', 'primaryphone', 'cellphone', 'cellphonenumber',
+        'mainphone', 'corporatephone', 'companyphone', 'companyphonenumber',
+        '電話', '電話番号', '携帯電話', '携帯電話番号',
+    ],
+    title: ['title', 'jobtitle', 'position', 'role', 'businesstitle', 'jobrole', 'jobposition', '役職', '肩書'],
     company: ['company', 'companyname', 'organization', 'organisation', 'account', 'accountname', 'employer', '会社', '会社名', '企業名'],
-    website: ['website', 'url', 'domain', 'companydomainname', 'homepage', 'ウェブサイト', 'ホームページ', 'ドメイン'],
-    industry: ['industry', 'sector', '業種'],
-    address: ['address', '住所', '所在地'],
+    website: [
+        'website', 'url', 'domain', 'companydomainname', 'homepage', 'web', 'site', 'websiteurl',
+        'webaddress', 'companywebsite', 'companywebsiteurl', 'companydomain', 'domainname',
+        'ウェブサイト', 'ホームページ', 'ドメイン',
+    ],
+    industry: ['industry', 'sector', 'vertical', 'industrysector', 'businesssector', 'businessvertical', '業種'],
+    address: [
+        'address', 'streetaddress', 'billingaddress', 'shippingaddress', 'mailingaddress',
+        'companyaddress', 'officeaddress', 'businessaddress', 'location', '住所', '所在地',
+    ],
     tags: ['tags', 'tag', 'labels', 'label', 'タグ', 'ラベル'],
     value: ['value', 'amount', 'dealvalue', '金額', '案件金額'],
     currency: ['currency', 'ccy', '通貨'],
@@ -95,8 +111,8 @@ const SYNONYMS: Record<string, readonly string[]> = {
 };
 
 const NAME_SYNONYMS: Record<ImportEntity, readonly string[]> = {
-    persons: ['name', 'fullname', 'contactname', '氏名', '名前', '姓名', 'フルネーム'],
-    companies: ['name', 'company', 'companyname', 'organizationname', 'organisationname', 'accountname', '会社', '会社名', '企業名'],
+    persons: ['name', 'fullname', 'contact', 'contactname', 'contactfullname', 'displayname', '氏名', '名前', '姓名', 'フルネーム'],
+    companies: ['name', 'fullname', 'displayname', 'company', 'companyname', 'organizationname', 'organisationname', 'accountname', '会社', '会社名', '企業名'],
     deals: ['name', 'dealname', 'opportunityname', '案件名'],
 };
 
@@ -182,7 +198,10 @@ export function prepareImport(
     const ordered = order === 'family_given' ? [...family, ...given] : [...given, ...family];
     const rows = parsed.rows.map((row) => ({
         ...row,
-        [nameColumn]: ordered.map(({ column }) => (row[column] ?? '').trim()).filter(Boolean).join(' '),
+        [nameColumn]: ordered.flatMap(({ column }) => {
+            const part = (row[column] ?? '').trim();
+            return part ? [part] : [];
+        }).join(' '),
     }));
     return {
         rows,
