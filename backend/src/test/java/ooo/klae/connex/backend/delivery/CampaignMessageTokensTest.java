@@ -75,6 +75,8 @@ class CampaignMessageTokensTest {
             "<!--[if mso]><p>&#123;&#123;first_name&#125;&#125;</p><![endif]-->",
             "<!--[IF (gte mso 9)|(IE)]><p>{<span>{first_name}</span>}</p><![endif]-->",
             "<!--[if mso]><a href='&#123;&#123;unsubscribe_url&#125;&#125;'>Stop</a><![endif]-->",
+            "<table><tr><!--[if mso]><td title='&#123;&#123;first_name&#125;&#125;'>Hello</td><![endif]--></tr></table>",
+            "<table><!--[if mso]><tr title='&#123;&#123;unsubscribe_url&#125;&#125;'><td>Hello</td></tr><![endif]--></table>",
             "<!--[if !mso]><!--><p>&#123;&#123;first_name&#125;&#125;</p><!--<![endif]-->",
             "<![if !mso]><p>&#123;&#123;first_name&#125;&#125;</p><![endif]>",
             "<p>{<!--[if mso]><span>&#123;first_name}</span><![endif]-->}</p>",
@@ -94,7 +96,9 @@ class CampaignMessageTokensTest {
             "<div>{<base href='https://example.invalid/'>{first_name}}</div>",
             "<div>{<noframes>x</noframes>{first_name}}</div>",
             "<div>{<noembed>x</noembed>{first_name}}</div>",
-            "<style>div { display:inline }</style><div>{</div><div>{first_name}}</div>"})
+            "<style>div { display:inline }</style><div>{</div><div>{first_name}}</div>",
+            "<style>.inline { display:inline }</style><div class='inline'>{</div><div class='inline'>{first_name}}</div>",
+            "<style>#hidden { display:none }</style><p>{<br id='hidden'>{first_name}}</p>"})
     void refusesConditionalAndStyledInlineBranches(String html) {
         CampaignMessageRevision revision = revision(null);
         revision.setBodyHtml(html);
@@ -106,6 +110,12 @@ class CampaignMessageTokensTest {
     @ValueSource(strings = {
             "<pre>int[][] values = {<br>{1, 2},<br>{3, 4}<br>};</pre>",
             "<pre>int[][] values = {\n{1, 2},\n{3, 4}\n};</pre>",
+            "<style>p{color:blue}</style><pre>int[][] values = {<br>{1, 2},<br>{3, 4}<br>};</pre>",
+            "<style>p{display:none}</style><pre>int[][] values = {<br>{1, 2},<br>{3, 4}<br>};</pre>",
+            "<style>*{color:blue}</style><pre>int[][] values = {\n{1, 2},\n{3, 4}\n};</pre>",
+            "<style>.inline{display:inline}</style><div>{</div><div>{1, 2}</div>",
+            "<style>br{display:inline}</style><pre>{<br>{1, 2}<br>}</pre>",
+            "<style>pre{color:blue}</style><pre>{<br>{1, 2}<br>}</pre>",
             "<div>{</div><div>{1, 2}</div>",
             "<p>{</p><p>{1, 2}</p>",
             "<table><tr><td>{</td><td>{1, 2}</td></tr></table>",
@@ -120,11 +130,43 @@ class CampaignMessageTokensTest {
     }
 
     @Test
-    void conditionalReparsingHasALinearAggregateBudget() {
+    void scansDeepConditionalPrefixesWithoutFragmentReparsing() {
         CampaignMessageRevision revision = revision(null);
         String html = "<!--[if mso]>".repeat(2_000) + "Hello<![endif]-->";
         revision.setBodyHtml(html);
-        assertThrows(UnsupportedCampaignTokenException.class, () -> CampaignMessageTokens.validate(revision));
+        assertDoesNotThrow(() -> CampaignMessageTokens.validate(revision));
+        assertEquals(html, revision.getBodyHtml());
+    }
+
+    @Test
+    void acceptsStyledMessageWithCodeAndLiteralOptOutWithoutChangingSource() {
+        String html = "<style>p{color:blue}pre{font-family:monospace}</style><p>Example:</p>"
+                + "<pre>int[][] values = {<br>{1, 2},<br>{3, 4}<br>};</pre>"
+                + "<p><a href='{{unsubscribe_url}}'>Unsubscribe</a></p>";
+        CampaignMessageRevision revision = revision(null);
+        revision.setBodyHtml(html);
+        assertDoesNotThrow(() -> CampaignMessageTokens.validate(revision));
+        assertEquals(html, revision.getBodyHtml());
+    }
+
+    @Test
+    void acceptsLongMalformedStylesheetWithoutBacktrackingAcrossWhitespace() {
+        String html = "<style>" + " ".repeat(200_000) + "selector-without-a-rule</style>"
+                + "<pre>{<br>{1, 2}<br>}</pre>";
+        CampaignMessageRevision revision = revision(null);
+        revision.setBodyHtml(html);
+        assertDoesNotThrow(() -> CampaignMessageTokens.validate(revision));
+        assertEquals(html, revision.getBodyHtml());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "inline"})
+    void preservesBoundariesWithLongMalformedDisplayDeclarations(String display) {
+        String html = "<style>br{display:" + display + " ".repeat(200_000) + "x}</style>"
+                + "<pre>{<br>{1, 2}<br>}</pre>";
+        CampaignMessageRevision revision = revision(null);
+        revision.setBodyHtml(html);
+        assertDoesNotThrow(() -> CampaignMessageTokens.validate(revision));
         assertEquals(html, revision.getBodyHtml());
     }
 

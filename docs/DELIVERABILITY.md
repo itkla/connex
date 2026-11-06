@@ -806,15 +806,18 @@ Ordinary closing CSS braces remain literal content, so nested email stylesheet r
 HTML validation uses the pinned jsoup HTML5 parser on an analysis-only copy: entity-decoded text
 is joined across inline elements, while `<br>`, block boundaries, and literal newlines break adjacency.
 Decoded attribute values are checked too. Outlook conditional comments, including downlevel-revealed
-variants, have their embedded HTML parsed through the same decoder. Both inclusion and omission of
-conditional branches are considered when checking adjacent braces; ordinary comments remain inert.
-The traversal uses an explicit stack, including conditional fragments, and limits total parsed
-characters to eight times the original source length to bound malformed nested-comment work.
-Stylesheets and styled/hidden elements are handled conservatively: inferred boundaries are not
-trusted and affected subtrees may be omitted when checking adjacency. Inactive/fallback containers and
-non-visible metadata use the same treatment; structural block classification alone does not imply a
-visible line break. Literal newlines in visible
-text remain boundaries. This may refuse ambiguous styled content; use literal line breaks for code.
+variants, are checked as raw inner source after entity decoding, before any markup is removed. This
+preserves attributes on table elements that body-context fragment parsing would discard. A separate
+lexical pass joins inline fragments and preserves block/`<br>` boundaries without reparsing HTML.
+Both inclusion and omission of conditional branches are considered when checking adjacent braces;
+ordinary comments remain inert. The document traversal uses an explicit stack, and conditional
+contents are scanned without recursive fragment parsing.
+Stylesheets never globally disable structural boundaries. Only explicit `display:none` or inline
+display declarations, in a local style or a matching simple tag, class, ID or universal stylesheet
+selector, affect the corresponding elements. A visible `<br>` still breaks adjacency with inline
+display. Other styling preserves block and line boundaries, including literal newlines in `<pre>`.
+Hidden/inactive content and non-visible metadata may be omitted when checking adjacency. This
+conservative check is not a CSS rendering engine and may refuse ambiguous conditional/styled source.
 No CSS is executed or externally loaded. Exact literal supported markers are masked before parsing; encoded or tag-split spellings are refused even for
 `unsubscribe_url`, since dispatch cannot substitute those spellings. HTML is decoded once, so escaped
 literal entity text is not double-decoded. Original saved HTML, subject, and plain-text source remain

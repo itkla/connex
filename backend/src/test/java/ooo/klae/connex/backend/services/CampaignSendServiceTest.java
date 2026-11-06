@@ -677,7 +677,8 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"<p>&#123;&#123;first_name&#125;&#125;</p>", "<p>{<span>{first_name}</span>}</p>"})
+    @ValueSource(strings = {"<p>&#123;&#123;first_name&#125;&#125;</p>", "<p>{<span>{first_name}</span>}</p>",
+            "<table><tr><!--[if mso]><td title='&#123;&#123;first_name&#125;&#125;'>Hello</td><![endif]--></tr></table>"})
     void decodedHtmlPersonalizationCannotBeSaved(String html) {
         String prefix = "html-tokens-" + unique();
         CampaignDto campaign = campaignService.create(new CampaignRequest(
@@ -687,6 +688,22 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertThrows(UnsupportedCampaignTokenException.class, () -> campaignSendService.addRevision(
                 campaign.id(), message.id(), new CampaignMessageRevisionRequest("en", "Hello", html, null)));
         assertTrue(campaignSendService.getMessage(campaign.id(), message.id()).revisions().isEmpty());
+    }
+
+    @Test
+    void styledCodeSampleCanBeSavedWithoutChangingItsSource() {
+        String prefix = "html-code-" + unique();
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                prefix, null, "email", null, currentUser.getId(), null, null, null, null, null));
+        CampaignMessageDto message = campaignSendService.createMessage(campaign.id(),
+                new CampaignMessageRequest(prefix, "email"));
+        String html = "<style>p{color:blue}</style><pre>int[][] values = {<br>{1, 2},<br>{3, 4}<br>};</pre>"
+                + "<p><a href='{{unsubscribe_url}}'>Unsubscribe</a></p>";
+
+        campaignSendService.addRevision(campaign.id(), message.id(),
+                new CampaignMessageRevisionRequest("en", "Example", html, null));
+
+        assertEquals(html, campaignSendService.getMessage(campaign.id(), message.id()).revisions().getFirst().bodyHtml());
     }
 
     @Test
