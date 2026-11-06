@@ -13,6 +13,9 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import java.sql.SQLException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -24,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -40,6 +44,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
+import ooo.klae.connex.backend.delivery.CampaignContentRefusalService;
 import ooo.klae.connex.backend.delivery.DeliveryCapabilities;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
@@ -65,6 +70,7 @@ import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.UnsupportedCampaignTokenException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
@@ -80,6 +86,7 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
     @Autowired private ConsentService consentService;
     @Autowired private SuppressionService suppressionService;
     @Autowired private CampaignDispatchService campaignDispatchService;
+    @Autowired private CampaignContentRefusalService contentRefusalService;
     @Autowired private DeliveryUnsubscribeService deliveryUnsubscribeService;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
     @Autowired private CampaignSendMapper campaignSendMapper;
@@ -628,6 +635,201 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals("Just text", saved.revisions().getFirst().bodyText());
         assertNull(saved.revisions().getFirst().subject());
         assertNull(saved.revisions().getFirst().bodyHtml());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"subject", "html", "text", "sms"})
+    void unsupportedTokensAreRefusedBeforeSavingARevision(String field) {
+        String prefix = "tokens-" + unique();
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                prefix, null, "email", null, currentUser.getId(), null, null, null, null, null));
+        CampaignMessageDto message = campaignSendService.createMessage(campaign.id(),
+                new CampaignMessageRequest(prefix, "sms".equals(field) ? "sms" : "email"));
+        CampaignMessageRevisionRequest request = new CampaignMessageRevisionRequest(
+                "ja", "subject".equals(field) ? "{{first_name}}" : "Subject",
+                "html".equals(field) ? "<p>{{first_name}}</p>" : "<p>本文</p>",
+                Set.of("text", "sms").contains(field) ? "{{first_name}}" : "本文");
+
+        assertThrows(UnsupportedCampaignTokenException.class,
+                () -> campaignSendService.addRevision(campaign.id(), message.id(), request));
+
+        assertTrue(campaignSendService.getMessage(campaign.id(), message.id()).revisions().isEmpty());
+    }
+
+    @Test
+    void legacyInvalidContentCannotCreateOrQueueASendAndRemainsInspectable() {
+        CampaignSendDto send = readySend("legacy-tokens-" + unique());
+        jdbcTemplate.update("UPDATE campaign_message_revision SET body_html = ? "
+                        + "WHERE workspace_id = ? AND message_id = ? AND version = ?",
+                "<p>{{first_name}}</p>", workspace.getId(), send.messageId(), send.messageVersion());
+
+        assertThrows(UnsupportedCampaignTokenException.class,
+                () -> campaignSendService.createSend(send.campaignId(),
+                        new CampaignSendRequest(1, send.messageId(), send.messageVersion(), null, null)));
+        assertThrows(UnsupportedCampaignTokenException.class,
+                () -> campaignSendService.queueSend(send.campaignId(), send.id()));
+
+        assertEquals("draft", campaignSendService.getSend(send.campaignId(), send.id()).status());
+        assertEquals(1, campaignSendService.listSends(send.campaignId()).size());
+        assertEquals("<p>{{first_name}}</p>", campaignSendService.getMessage(
+                send.campaignId(), send.messageId()).revisions().getFirst().bodyHtml());
+        assertEquals(0, fakeDispatcher.count());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"<p>&#123;&#123;first_name&#125;&#125;</p>", "<p>{<span>{first_name}</span>}</p>",
+            "<table><tr><!--[if mso]><td title='&#123;&#123;first_name&#125;&#125;'>Hello</td><![endif]--></tr></table>"})
+    void decodedHtmlPersonalizationCannotBeSaved(String html) {
+        String prefix = "html-tokens-" + unique();
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                prefix, null, "email", null, currentUser.getId(), null, null, null, null, null));
+        CampaignMessageDto message = campaignSendService.createMessage(campaign.id(),
+                new CampaignMessageRequest(prefix, "email"));
+        assertThrows(UnsupportedCampaignTokenException.class, () -> campaignSendService.addRevision(
+                campaign.id(), message.id(), new CampaignMessageRevisionRequest("en", "Hello", html, null)));
+        assertTrue(campaignSendService.getMessage(campaign.id(), message.id()).revisions().isEmpty());
+    }
+
+    @Test
+    void styledCodeSampleCanBeSavedWithoutChangingItsSource() {
+        String prefix = "html-code-" + unique();
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                prefix, null, "email", null, currentUser.getId(), null, null, null, null, null));
+        CampaignMessageDto message = campaignSendService.createMessage(campaign.id(),
+                new CampaignMessageRequest(prefix, "email"));
+        String html = "<style>p{color:blue}</style><pre>int[][] values = {<br>{1, 2},<br>{3, 4}<br>};</pre>"
+                + "<p><a href='{{unsubscribe_url}}'>Unsubscribe</a></p>";
+
+        campaignSendService.addRevision(campaign.id(), message.id(),
+                new CampaignMessageRevisionRequest("en", "Example", html, null));
+
+        assertEquals(html, campaignSendService.getMessage(campaign.id(), message.id()).revisions().getFirst().bodyHtml());
+    }
+
+    @Test
+    void legacyQueueRefusalTerminatesSchedulingAndPreservesExistingAttempts() {
+        String prefix = "legacy-dispatch-" + unique();
+        Company company = newCompany();
+        Person pending = person(company, prefix + "-in-pending", prefix + "-pending@example.invalid");
+        Person completed = person(company, prefix + "-in-completed", prefix + "-completed@example.invalid");
+        Person inflight = person(company, prefix + "-in-inflight", prefix + "-inflight@example.invalid");
+        CampaignSendDto send = readySend(prefix);
+        int pendingId = deliveryIdFor(send.id(), pending.getId());
+        int completedId = deliveryIdFor(send.id(), completed.getId());
+        int inflightId = deliveryIdFor(send.id(), inflight.getId());
+        jdbcTemplate.update("UPDATE campaign_send SET status = 'running' WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), send.id());
+        jdbcTemplate.update("UPDATE campaign_delivery SET status = 'dispatched', attempt_count = 1, "
+                        + "provider_id = 'fake-smtp', provider_message_id = 'already-sent', submitted_at = UTC_TIMESTAMP(6) "
+                        + "WHERE workspace_id = ? AND id = ?", workspace.getId(), completedId);
+        jdbcTemplate.update("UPDATE campaign_delivery SET status = 'dispatching', attempt_count = 1, "
+                        + "audience_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), "
+                        + "frequency_reserved_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) "
+                        + "WHERE workspace_id = ? AND id = ?", workspace.getId(), inflightId);
+        jdbcTemplate.update("INSERT INTO campaign_delivery_event (workspace_id, delivery_id, event_type, detail) "
+                        + "VALUES (?, ?, 'failed', 'CAMPAIGN_UNSUPPORTED_TOKEN')", workspace.getId(), completedId);
+        jdbcTemplate.update("INSERT INTO campaign_delivery_event "
+                        + "(workspace_id, delivery_id, event_type, detail, provider_id, provider_event_id) "
+                        + "VALUES (?, ?, 'failed', 'CAMPAIGN_UNSUPPORTED_TOKEN', 'smtp', ?)",
+                workspace.getId(), completedId, "connex-content-refusal:" + send.id());
+        assertFalse(campaignSendService.getSend(send.campaignId(), send.id()).contentRefused());
+        String source = "<p>{<span>{first_name}</span>}</p>";
+        jdbcTemplate.update("UPDATE campaign_message_revision SET body_html = ? "
+                        + "WHERE workspace_id = ? AND message_id = ? AND version = ?",
+                source, workspace.getId(), send.messageId(), send.messageVersion());
+        var before = jdbcTemplate.queryForList(
+                "SELECT * FROM campaign_delivery WHERE workspace_id = ? AND send_id = ? AND status <> 'pending' ORDER BY id",
+                workspace.getId(), send.id());
+
+        assertFalse(campaignDispatchService.processSend(workspace.getId(), send.id()));
+        assertTrue(campaignDispatchService.processSend(workspace.getId(), send.id()));
+        contentRefusalService.record(workspace.getId(), send.id());
+
+        assertEquals(before, jdbcTemplate.queryForList(
+                "SELECT * FROM campaign_delivery WHERE workspace_id = ? AND send_id = ? AND id <> ? ORDER BY id",
+                workspace.getId(), send.id(), pendingId));
+        assertEquals("skipped", campaignDeliveryMapper.getDelivery(workspace.getId(), pendingId).getStatus());
+        assertEquals("not_dispatchable", campaignDeliveryMapper.getDelivery(workspace.getId(), pendingId).getSkipReason());
+        assertEquals(0, campaignDeliveryMapper.getDelivery(workspace.getId(), pendingId).getAttemptCount());
+        assertFalse(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(send.id()));
+        CampaignSendDto refused = campaignSendService.getSend(send.campaignId(), send.id());
+        assertTrue(refused.contentRefused());
+        assertEquals("failed", refused.status());
+        assertNotNull(refused.completedAt());
+        assertEquals(1, refused.skippedCount());
+        assertEquals(0, fakeDispatcher.count());
+        assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM campaign_delivery_event "
+                        + "WHERE workspace_id = ? AND provider_id IS NULL AND provider_event_id = ? "
+                        + "AND delivery_id = ?", Integer.class, workspace.getId(),
+                "connex-content-refusal:" + send.id(), pendingId));
+        assertEquals(source, campaignSendService.getMessage(send.campaignId(), send.messageId())
+                .revisions().getFirst().bodyHtml());
+        CampaignActorWorkspace other = newCampaignWorkspaceActor();
+        authenticateAs(other.actor(), other.workspace().getId());
+        contentRefusalService.record(other.workspace().getId(), send.id());
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM campaign_delivery_event "
+                        + "WHERE workspace_id = ? AND provider_event_id = ?", Integer.class,
+                other.workspace().getId(), "connex-content-refusal:" + send.id()));
+    }
+
+    @Test
+    void simultaneousRefusalRecordersAppendExactlyOneMarker() throws Exception {
+        String prefix = "concurrent-refusal-" + unique();
+        person(newCompany(), prefix + "-in", prefix + "@example.invalid");
+        CampaignSendDto send = readySend(prefix);
+        jdbcTemplate.update("UPDATE campaign_send SET status = 'queued' WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), send.id());
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var futures = List.of(1, 2).stream().map(number -> executor.submit(() -> {
+                authenticateAs(currentUser, workspace.getId());
+                try {
+                    ready.countDown();
+                    if (!start.await(30, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Refusal writers did not start");
+                    }
+                    contentRefusalService.record(workspace.getId(), send.id());
+                    return number;
+                } finally {
+                    clearAuthentication();
+                }
+            })).toList();
+            assertTrue(ready.await(30, TimeUnit.SECONDS));
+            start.countDown();
+            for (var future : futures) future.get(30, TimeUnit.SECONDS);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        }
+        assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM campaign_delivery_event "
+                        + "WHERE workspace_id = ? AND provider_id IS NULL AND provider_event_id = ?",
+                Integer.class, workspace.getId(), "connex-content-refusal:" + send.id()));
+        assertTrue(campaignSendService.getSend(send.campaignId(), send.id()).contentRefused());
+    }
+
+    @Test
+    void existingRefusalMarkerIsSettledAndACorrectedRevisionCanQueue() {
+        String prefix = "old-refusal-" + unique();
+        person(newCompany(), prefix + "-in", prefix + "@example.invalid");
+        CampaignSendDto send = readySend(prefix);
+        campaignSendService.queueSend(send.campaignId(), send.id());
+        assertEquals(1, campaignDeliveryMapper.insertContentRefusal(workspace.getId(), send.id()));
+        assertTrue(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(send.id()));
+
+        assertTrue(campaignDispatchService.processSend(workspace.getId(), send.id()));
+
+        assertEquals("failed", campaignSendService.getSend(send.campaignId(), send.id()).status());
+        assertEquals(0, campaignDeliveryMapper.countPending(workspace.getId(), send.id()));
+        assertFalse(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(send.id()));
+        campaignSendService.addRevision(send.campaignId(), send.messageId(), new CampaignMessageRevisionRequest(
+                "en", "Corrected", "<p>Corrected <a href='{{unsubscribe_url}}'>Stop</a></p>", null));
+        CampaignSendDto corrected = campaignSendService.createSend(send.campaignId(),
+                new CampaignSendRequest(1, send.messageId(), 2, null, null));
+        assertEquals("queued", campaignSendService.queueSend(send.campaignId(), corrected.id()).status());
+        assertTrue(campaignSendMapper.queuedSendIds(workspace.getId(), true).contains(corrected.id()));
     }
 
     private Person channelPerson(DeliveryChannel channel, String prefix) {

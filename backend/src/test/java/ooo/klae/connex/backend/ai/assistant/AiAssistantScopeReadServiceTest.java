@@ -116,7 +116,7 @@ class AiAssistantScopeReadServiceTest {
                 new OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
                         1, List.of(WORKSPACE_ID), "[" + WORKSPACE_ID + "]"));
         ReferenceService referenceService = mock(ReferenceService.class);
-        when(referenceService.hydrateActivities(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
+        when(referenceService.hydrateActivitiesForMasking(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         service = new AiAssistantScopeReadService(
                 activityMapper, segmentService, segmentMapper, savedViewService,
                 scoringService, dealRiskService, personMapper, companyMapper, dealMapper,

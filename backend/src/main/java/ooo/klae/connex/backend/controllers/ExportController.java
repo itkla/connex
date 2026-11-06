@@ -68,13 +68,14 @@ public class ExportController {
             @RequestParam(defaultValue = "false") boolean noFirstResponse,
             @RequestParam(required = false) List<String> warmthBands,
             @RequestParam(defaultValue = "false") boolean noWarmth,
-            @RequestParam(required = false) Integer goesColdWithinDays) {
+            @RequestParam(required = false) Integer goesColdWithinDays,
+            @RequestParam(required = false) List<Integer> tagIds) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         return csv("contacts.csv", exportService.exportPersons(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
             leadSources, noLeadSource, firstResponseStates, noFirstResponse,
-            warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null)));
+            warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null), tagIds));
     }
 
     /**

@@ -3654,6 +3654,12 @@ public final class LegacyRecordVisibilitySql {
                 <when test="archived">AND p.workspace_id = #{workspaceId} AND p.archived_at IS NOT NULL</when>
                 <otherwise>AND <include refid="visible"/></otherwise>
               </choose>
+              <if test="tagIds != null and tagIds.size() > 0">
+                AND EXISTS (SELECT 1 FROM person_tag pt
+                  JOIN tag t ON t.id = pt.tag_id AND t.workspace_id = #{workspaceId}
+                  WHERE pt.person_id = p.id AND pt.tag_id IN
+                  <foreach item="tagId" collection="tagIds" open="(" separator="," close=")">#{tagId}</foreach>)
+              </if>
               <include refid="warmthWhere"/>
               <if test="query != null">
                 AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}

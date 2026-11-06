@@ -195,24 +195,53 @@ export async function configureScriptedAiProvider(
 /** A seeding client bound to one workspace and CSRF token. */
 export type Seeder = {
     post: (path: string, data: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    postEmpty: (path: string, data: Record<string, unknown>) => Promise<void>;
+};
+
+type SeederApi = {
+    post: (...args: Parameters<APIRequestContext["post"]>) => Promise<Pick<APIResponse, "ok" | "status" | "text">>;
 };
 
 /** Builds a write client that stamps every request with the tenant header and CSRF token. */
-export function seeder(api: APIRequestContext, workspaceId: number, csrf: CsrfBootstrap): Seeder {
+export function seeder(api: SeederApi, workspaceId: number, csrf: CsrfBootstrap): Seeder {
+    async function postResponse(path: string, data: Record<string, unknown>) {
+        const response = await api.post(path, {
+            timeout: 120_000,
+            headers: {
+                "X-Workspace-Id": String(workspaceId),
+                [csrf.headerName]: csrf.token,
+            },
+            data,
+        });
+        const body = await response.text();
+        const diagnostic = `POST ${path} returned HTTP ${response.status()}: ${body.slice(0, 500) || "<empty body>"}`;
+        expect(response.ok(), diagnostic).toBe(true);
+        return { body, diagnostic };
+    }
+
     return {
         async post(path, data) {
-            const response = await api.post(path, {
-                timeout: 120_000,
-                headers: {
-                    "X-Workspace-Id": String(workspaceId),
-                    [csrf.headerName]: csrf.token,
-                },
-                data,
-            });
-            expect(response.status(), `POST ${path}: ${await safeBody(response)}`).toBeLessThan(300);
-            return (await response.json()) as Record<string, unknown>;
+            const { body, diagnostic } = await postResponse(path, data);
+            let record: unknown;
+            try {
+                record = JSON.parse(body);
+            } catch {
+                throw new Error(`Expected a JSON object. ${diagnostic}`);
+            }
+            if (!isJsonObject(record)) {
+                throw new Error(`Expected a JSON object. ${diagnostic}`);
+            }
+            return record;
+        },
+        async postEmpty(path, data) {
+            const { body, diagnostic } = await postResponse(path, data);
+            expect(body.trim(), `Expected an empty response. ${diagnostic}`).toBe("");
         },
     };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function safeBody(response: { text: () => Promise<string> }): Promise<string> {

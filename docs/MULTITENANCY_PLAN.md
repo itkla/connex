@@ -97,6 +97,11 @@ The inbox/bell is **recipient-scoped across every workspace the user belongs to*
 nothing is missed while viewing another workspace; each notification is labeled with its source
 workspace. Delivery prefs stay per-user-global. (The reminder *generation* jobs still run per-workspace.)
 
+Notification email record links enter the authenticated notifications page with only a notification
+id. The existing recipient-authorized read-state endpoint supplies its current workspace and record
+URL; the client selects that workspace through the same helper as inbox/bell navigation before opening
+the record. Link parameters do not authorize a workspace or supply a record destination.
+
 Task creation and reassignment emit `task.assigned` through the existing preference and delivery
 machinery, only to the locked active assignee in that workspace and never to the acting user.
 Unchanged assignments emit nothing. Like mentions, the dedupe key identifies one task and recipient;
@@ -441,9 +446,12 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   unverified until they redeem that instance verification mail. **No path lets local authority assert
   global identity:** admin-created
   accounts (`POST /api/users`) start unverified and are emailed their own verification link, and the
-  in-app grant paths — add-existing (`/members`), invite-by-email's existing-account branch,
-  pending-membership activation, and new org-member grants — refuse an account that has not proven its
-  address, routing it to the emailed token invite instead. The org check covers the grant only: a user
+  in-app grant paths — historical pending-membership activation and new org-member grants —
+  refuse an account that has not proven its address. Both workspace email invitation creation and
+  the compatibility `/members` entry point now use token invitations uniformly, without resolving
+  recipient account existence or verification state. Historical pending grants retain their
+  address-only management and acceptance path; see the
+  [invitation disclosure contract](backend/SECURITY_BOUNDARIES.md#workspace-invitation-disclosure). The org check covers the grant only: a user
   who already holds an `org_member` row can still be re-roled or removed.
   Every one of those refusals is conditioned on registration verification being **enabled**, exactly like
   the link gate: with the feature off no account can obtain proof (no token is issued and resend is a
@@ -791,11 +799,13 @@ membership (unlike `register`) — route through `addMember`, gate `admin`+. `re
 **new owned workspace** (or invite/accept) instead of force-joining `default`; `getDefaultWorkspace()`
 becomes the migration-only backfill target.
 
-> **✅ Invite flows implemented (2026-06-24, #11):** both flows ship. Email-token invites
-> (`workspace_invite`, migration V11) via `InviteService` + `WorkspaceController` `POST/GET/DELETE
-> /api/workspaces/{id}/invites` (admin-gated) and token-addressed `GET /api/invites/{token}` +
-> `POST /api/invites/{token}/accept` (email-bound, expiry-checked). Admin-adds-existing via
-> `POST /api/workspaces/{id}/members`. Member management ships too: `GET /api/workspaces/{id}/members`,
+> **Invite flows:** email-token invites (`workspace_invite`, migration V11) are managed through
+> `POST/GET/DELETE /api/workspaces/{id}/invites`. The compatibility
+> `POST /api/workspaces/{id}/members` route now creates the same invitation-only response for every
+> address. A fragment bearer is exchanged through `POST /api/invites/exchange`; `GET /api/invites`
+> and `POST /api/invites/accept` use the purpose-bound browser flow (email-bound, expiry-checked).
+> Historical pending memberships retain their recipient acceptance path and address-only admin
+> management. Member management ships too: `GET /api/workspaces/{id}/members` (active members),
 > `PATCH .../members/{userId}` (role change, owner-protected + last-owner guard), `DELETE
 > .../members/{userId}`. Per the §12 resolution, V12 makes `task.assigned_to_id` nullable (`SET NULL` FK to
 > `app_user`) so removal unassigns tasks while preserving them; deal ownership is nulled too. **Frontend

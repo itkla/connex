@@ -384,6 +384,57 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
+  <select id="getRiskFilterUpperId" resultType="int">
+    SELECT COALESCE(MAX(id), 0)
+    FROM deal FORCE INDEX (uq_deal_workspace_id)
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="getRiskFilterCandidateIds" resultType="int">
+    <bind name="riskIds" value="null"/>
+    SELECT STRAIGHT_JOIN d.id
+    FROM deal d FORCE INDEX (uq_deal_workspace_id)
+    <include refid="segmentIdsJoin"/>
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+    AND d.id &gt; #{afterId} AND d.id &lt;= #{upperId}
+    <if test="eligibleOnly">
+      AND d.closed_at IS NULL AND d.risk_excluded = FALSE
+    </if>
+    ORDER BY d.id
+    LIMIT #{limit}
+  </select>
+
+  <resultMap id="DealRiskMatchResult" type="ooo.klae.connex.backend.dto.DealRiskMatchDto">
+    <id column="id"/>
+    <result property="sortKey" column="risk_sort_key"/>
+    <association property="deal" resultMap="DealResult"/>
+  </resultMap>
+
+  <!-- Each column's comparison determines whether its trailing spaces are padding. Normalize
+       PAD SPACE values before WEIGHT_STRING, whose output is otherwise deliberately unpadded. -->
+  <select id="getRiskFilterMatches" resultMap="DealRiskMatchResult">
+    SELECT <include refid="qualifiedDealColumns"/>,
+    <choose>
+      <when test="sort == 'name'">WEIGHT_STRING(IF(d.name = CONCAT(d.name, ' '), RTRIM(d.name), d.name))</when>
+      <when test="sort == 'company'">WEIGHT_STRING(IF(c.name = CONCAT(c.name, ' '), RTRIM(c.name), c.name))</when>
+      <when test="sort == 'pipeline'">WEIGHT_STRING(IF(p.name = CONCAT(p.name, ' '), RTRIM(p.name), p.name))</when>
+      <when test="sort == 'stage'">WEIGHT_STRING(IF(s.name = CONCAT(s.name, ' '), RTRIM(s.name), s.name))</when>
+      <otherwise>NULL</otherwise>
+    </choose> AS risk_sort_key
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <select id="getDealsFiltered" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d

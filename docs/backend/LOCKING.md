@@ -279,6 +279,13 @@ Catalog erasure retains the locking membership scan so it waits for matching unc
 
 Invite grants lock creator/known-recipient users ascending, reject deletion reservations, then lock active workspace/organization, memberships ascending, and creator custom role when applicable before testing grantability. Claim paths repeat authorization immediately before the exact claim.
 
+Token-invite creation does not discover or lock arbitrary recipient accounts. A resend first
+looks up only an existing pending invitation for that address in the target workspace. When found,
+it revokes that exact membership generation through the normal removal root order in the same
+READ COMMITTED transaction before persisting the replacement token. Historical pending revocation
+rechecks both generation reference and pending status after removal locks, so acceptance or a new
+generation cannot be removed by a stale invitation handle. Its audit contains no recipient profile.
+
 Token-invite acceptance checks the current address under the recipient root and authorizes only that invitation. It does not write `app_user.email_verified` or emit a global email-verification audit event: the creator receives the token and can control the workspace SMTP sender. Global registration verification requires the separate instance-delivered token consumed by `RegistrationVerificationService`.
 
 Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation. Its mailbox-proof and organization-domain checks read the account through the locked `app_user` row, not the pre-transaction membership projection.
@@ -772,6 +779,29 @@ outbox row → workflow row. The locked principal and exact permission snapshot 
 legacy compatibility execution path; `send_message` enrollment consumes that snapshot and must not
 reacquire authorization after the outbox/workflow locks. This order is shared with canonical step
 execution and prevents offboarding's user-before-workflow order from forming a cycle.
+
+Workflow notification effects join the existing `READ_COMMITTED` effect transaction, or open one
+for non-durable dispatch. `WorkflowNotificationDeliveryService` reuses
+`lockedMemberPermissionsAndMemberships`: attribution account S → active workspace S → attribution
+and recipient memberships in ascending user-id order using the existing additional-member NOWAIT
+probe → actor role/permissions → notification rows → deferred notification-state tail. Durable
+outbox and canonical step execution already retain the attribution prefix before their workflow/run
+roots; re-entering that prefix adds no new blocking root. No target account root is acquired after
+a workflow/run root. The new recipient membership never waits behind departure or membership-first
+writes: contention propagates as a refusal. The exact active membership check and notification upsert
+share one transaction, so departure either wins before that check or follows delivery's commit.
+Workflow task effects join the existing `READ_COMMITTED` effect transaction, or open one for
+non-durable dispatch, through `WorkflowTaskCreationService`. Before delegating to `TaskService`,
+they resolve/bind the existing record-visibility scope, then retain the exact active assignee with
+`lockActiveMemberWithoutWaiting`. This adds no target
+account or broader authorization root. The ordinary task service's blocking assignee read then
+re-enters the retained row before taking its board, linked-record and audit locks. A durable
+delivery may already hold the workspace audit head from an earlier action: if a direct task create
+holds the assignee while waiting for that head, NOWAIT refuses before the workflow can wait on that
+membership or the task board. The helper's exact NOWAIT conflict is exposed as
+`CannotAcquireLockException` so both workflow engines retry in a fresh transaction; missing active
+membership remains `action_target_member_unavailable`. Ordinary task requests keep their existing
+membership-first order.
 
 ## Task board mutations
 
@@ -1620,6 +1650,30 @@ expired shape. This prevents replay on a non-idempotent transport while an obsol
 complete a replacement claim. SMTP is consequently a best-effort campaign transport. Because the
 fence is captured at startup, rollback must follow the quiescence procedure in
 `docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
+
+Campaign content refusal is recorded before provider resolution and before any delivery claim.
+`CampaignContentRefusalService` takes the owning send mutex in a short `READ_COMMITTED` transaction,
+rechecks active/uncompleted state, appends a refusal marker against pending work, settles pending rows,
+refreshes counters, then marks completion. A previous marker-only refusal takes the same settlement
+path. The order is send → child delivery/event; no provider I/O occurs. A fresh marker read after the
+mutex prevents duplicate insertion. All writes roll back together. If no pending marker anchor
+remains, the recorder leaves completed/in-flight evidence alone.
+
+Pending-to-terminal writes use `status='pending'` compare-and-set fencing against claims. Never-
+submitted pending rows become `skipped/not_dispatchable`; possible prior submission becomes `failed`
+with reconciliation required, preserving existing attempt diagnostics and reservations. Refusal does
+not change a completed or dispatching row. Audience sends use terminal `failed`; V201 requires
+triggered storage status `triggered`, so completion time plus the refusal marker is its terminal fence
+and the API projects `failed`. Normal scheduler selection and triggered claims require no completion.
+Enrollment locks and rechecks the send after its existing campaign root and before recipient insertion.
+A late claim release or replay recovery cannot reopen a completed send. Existing in-flight completion
+writes remain valid; expiry discovery remains active, and a replay refused by the completion fence
+falls through to the existing ambiguous-outcome CAS and counter refresh.
+
+The marker uses event_type `failed`, fixed detail `CAMPAIGN_UNSUPPORTED_TOKEN`, a null provider_id,
+and reserved provider_event_id `connex-content-refusal:<sendId>`. This is the one internal-marker
+exception to leaving both provider correlation fields null. Provider diagnostics alone cannot set
+`contentRefused`, and lookup seeks the full workspace/null-provider/send-specific event key.
 
 Audience delivery dispatch claims with a `pending` → `dispatching` compare-and-set that also writes
 the attempt's own lease end time, `audience_lease_until` (#1773), and stores no lease owner or

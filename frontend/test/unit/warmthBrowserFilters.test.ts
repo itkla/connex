@@ -238,6 +238,20 @@ describe("the warmth params every records surface sends", () => {
         vi.unstubAllGlobals();
     });
 
+    it("preserves tag membership alongside warmth on page, matching ids and export", async () => {
+        const { urls } = stubBrowser();
+        const filter: ContactsPageParams = { tagIds: [12, 34], warmthBands: ["warm"] };
+        await getContactsPage(filter);
+        await getContactIds(filter);
+        await exportContactsCsv(filter);
+        expect(urls).toHaveLength(3);
+        for (const url of urls) {
+            const query = new URL(url, "https://example.invalid").searchParams;
+            expect(query.getAll("tagIds")).toEqual(["12", "34"]);
+            expect(query.getAll("warmthBands")).toEqual(["warm"]);
+        }
+    });
+
     it("reach the contacts page, its id read, and its export identically", async () => {
         const { urls } = stubBrowser();
         const filter: ContactsPageParams = {
@@ -370,14 +384,16 @@ describe("the browsers' warmth wiring", () => {
         const browser = source(file);
 
         expect(browser).toContain("const warmthNarrowed = hasWarmthFilter(filterState);");
-        expect(browser).toContain("explicit_selection");
+        expect(browser).toContain(file === CONTACTS_BROWSER ? "contactWorkflowScope({" : "explicit_selection");
         expect(browser).not.toContain("page_selection");
     });
 
     it.each(browsers)("keeps the $name saved-view scope off a warmth-narrowed selection too", ({ file }) => {
-        expect(source(file)).toContain(
-            "allMatchingActive && activeSavedViewId !== null && !warmthNarrowed",
-        );
+        if (file === CONTACTS_BROWSER) {
+            expect(source(file)).toContain('            warmthNarrowed,');
+        } else {
+            expect(source(file)).toContain("allMatchingActive && activeSavedViewId !== null && !warmthNarrowed");
+        }
     });
 
     it.each(browsers)("drops an unhonourable $name horizon before anything can count it", ({ file }) => {
