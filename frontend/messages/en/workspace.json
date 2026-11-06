@@ -724,6 +724,7 @@
             "failureRecovery": "Review the workflow’s settings and the record before running it again. Actions that finished successfully may already have changed the record.",
             "reviewWorkflow": "Review workflow",
             "targetUnavailable": "Record name could not be loaded",
+            "documentTargetUnavailable": "Document unavailable",
             "targetLoading": "Loading record name…",
             "targetNameNotRecorded": "Record name not available in this history",
             "failureTitle": "This run needs attention",

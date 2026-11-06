@@ -321,7 +321,18 @@
         "noCompaniesFound": "会社が見つかりません。",
         "expectedCloseDate": "決着予定日",
         "cancel": "キャンセル",
-        "create": "作成"
+        "create": "作成",
+        "setupPipeline": "パイプラインを作成",
+        "pipelineSetupHint": "パイプラインは、案件が進むステージの並びです。ここで作成してから、案件の入力を続けられます。入力内容は保持されます。",
+        "pipelineSetupAskManager": "このワークスペースのパイプラインを管理できるメンバーに作成を依頼してください。",
+        "starterPipeline": "営業パイプライン",
+        "starterOpen": "新規",
+        "starterWon": "成約",
+        "starterLost": "失注",
+        "pipelineNeedsOpenStage": "すべてのステージに名前を入力し、案件を追加できるように進行中のステージを1つ以上含めてください。",
+        "pipelineTerminalLimit": "成約ステージと失注ステージはそれぞれ1つまでにしてください。",
+        "pipelineSetupFailed": "パイプラインの設定を完了できませんでした",
+        "pipelineSetupRetry": "案件の入力内容は保持されています。もう一度お試しください。"
     },
     "DealsQuickEditSheet": {
         "closedAtInvalid": "下に表示された集計タイムゾーンでは存在しない時刻です。別の時刻を選んでください。",

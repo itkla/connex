@@ -75,7 +75,7 @@
   "PipelinesQuickEditSheet": {
     "titleSingle": "Quick edit pipeline",
     "titleMultiple": "Quick edit {count} pipelines",
-    "description": "Update fields below. Only changed pipelines will be saved. New stages are appended; reordering is not yet supported.",
+    "description": "Update fields below. Only changed pipelines will be saved. Use the arrows to order stages.",
     "name": "Name",
     "stages": "Stages",
     "stageNamePlaceholder": "Stage name",
@@ -96,5 +96,12 @@
     "singleTerminalPerType": "A pipeline can have only one Won stage and one Lost stage",
     "pipelineUpdated": "Pipeline updated",
     "failedToSave": "Couldn't save the pipeline"
+  },
+  "PipelineStageOrder": {
+    "moveUp": "Move stage up",
+    "moveDown": "Move stage down",
+    "stageName": "Stage {position} name",
+    "moved": "{name} moved to position {position} of {count}.",
+    "restored": "Couldn't save the stage order. The previous order has been restored."
   }
 }

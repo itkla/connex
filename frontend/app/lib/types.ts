@@ -127,6 +127,8 @@ export type ImportRequest = {
     onDuplicate?: ImportDuplicateAction;
     links?: Record<number, number>;
     duplicateReviewProof?: string;
+    companyLinks?: Record<number, number>;
+    skippedRows?: number[];
 };
 
 export type ImportRowStatus = 'create' | 'match' | 'skip' | 'invalid';
@@ -198,7 +200,17 @@ export type ImportRowAnalysis = {
     errors?: string[] | null;
     candidates?: DuplicateCandidate[] | null;
     dealDates?: DealImportDateReview | null;
+    problems?: ImportProblem[] | null;
+    companyDependency?: {
+        name: string;
+        key: string;
+        selectedId?: number | null;
+        candidates?: DuplicateCandidate[];
+        truncated: boolean;
+    } | null;
 };
+
+export type ImportProblem = { code: string; field?: string | null };
 
 export type ImportPreviewResult = {
     total: number;
@@ -207,12 +219,14 @@ export type ImportPreviewResult = {
     toSkip: number;
     invalid: number;
     rows: ImportRowAnalysis[];
+    companyCandidates?: Record<string, DuplicateCandidate[]>;
     duplicateReviewProof?: string | null;
 };
 
 export type ImportRowError = {
     rowIndex: number;
     reason: string;
+    problems?: ImportProblem[] | null;
 };
 
 export type ImportResult = {
@@ -1630,9 +1644,10 @@ export type DealStageHistory = {
     achievedAt: string;
 };
 
+/** Pipeline creation draft; stage client ids are editor keys omitted from requests. */
 export type CreatePipelinePayload = {
     name?: string;
-    stages?: { name: string; success?: boolean; failure?: boolean }[];
+    stages?: { name: string; success?: boolean; failure?: boolean; clientId?: string }[];
 };
 
 export type CreateStagePayload = {
@@ -4594,6 +4609,13 @@ export type GeneratedDocumentSummary = {
     generatedAt?: string;
     createdAt?: string;
     updatedAt?: string;
+};
+
+/** Minimal reference returned only when its parent deal is readable in the current workspace. */
+export type GeneratedDocumentTarget = {
+    id: number;
+    dealId: number;
+    title?: string;
 };
 
 /** Filters accepted by the cross-deal generated-document index. */
