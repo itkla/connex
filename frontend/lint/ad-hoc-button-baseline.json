@@ -120,7 +120,6 @@
     "app/components/records/deals/DealLineItems.tsx": 3,
     "app/components/records/deals/DealRationalePanel.tsx": 3,
     "app/components/records/deals/DealTaskList.tsx": 4,
-    "app/components/records/deals/DealsBrowser.tsx": 1,
     "app/components/records/deals/DealsKanban.tsx": 1,
     "app/components/records/pipelines/NewPipelineDialog.tsx": 2,
     "app/components/records/pipelines/PipelineCard.tsx": 2,
