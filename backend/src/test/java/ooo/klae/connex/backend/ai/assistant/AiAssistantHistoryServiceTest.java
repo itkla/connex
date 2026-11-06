@@ -126,13 +126,13 @@ class AiAssistantHistoryServiceTest {
                 .thenReturn(companyTasks);
         when(noteMapper.getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 9, false))
                 .thenReturn(companyNotes);
-        when(referenceService.hydrateActivities(eq(7), same(personActivities))).thenReturn(hydratedPersonActivities);
-        when(referenceService.hydrateActivities(eq(7), same(dealActivities))).thenReturn(hydratedDealActivities);
-        when(referenceService.hydrateActivities(eq(7), same(companyActivities))).thenReturn(hydratedCompanyActivities);
-        when(referenceService.hydrateTasks(eq(7), same(personTasks))).thenReturn(hydratedPersonTasks);
-        when(referenceService.hydrateTasks(eq(7), same(dealTasks))).thenReturn(hydratedDealTasks);
-        when(referenceService.hydrateTasks(eq(7), same(companyTasks))).thenReturn(hydratedCompanyTasks);
-        when(referenceService.hydrate(eq(7), same(companyNotes))).thenReturn(hydratedCompanyNotes);
+        when(referenceService.hydrateActivitiesForMasking(eq(7), same(personActivities))).thenReturn(hydratedPersonActivities);
+        when(referenceService.hydrateActivitiesForMasking(eq(7), same(dealActivities))).thenReturn(hydratedDealActivities);
+        when(referenceService.hydrateActivitiesForMasking(eq(7), same(companyActivities))).thenReturn(hydratedCompanyActivities);
+        when(referenceService.hydrateTasksForMasking(eq(7), same(personTasks))).thenReturn(hydratedPersonTasks);
+        when(referenceService.hydrateTasksForMasking(eq(7), same(dealTasks))).thenReturn(hydratedDealTasks);
+        when(referenceService.hydrateTasksForMasking(eq(7), same(companyTasks))).thenReturn(hydratedCompanyTasks);
+        when(referenceService.hydrateForMasking(eq(7), same(companyNotes))).thenReturn(hydratedCompanyNotes);
 
         assertEquals(hydratedPersonActivities, service.activitiesForPerson(17, null, null, 3));
         assertEquals(hydratedDealActivities, service.activitiesForDeal(8, null, null, 4));
@@ -149,13 +149,13 @@ class AiAssistantHistoryServiceTest {
         verify(taskMapper).getAiAssistantTasksByDealId(7, 8, List.of(7, 9), 6);
         verify(taskMapper).getAiAssistantTasksByCompanyId(7, 5, List.of(7, 9), 8);
         verify(noteMapper).getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 9, false);
-        verify(referenceService).hydrateActivities(eq(7), same(personActivities));
-        verify(referenceService).hydrateActivities(eq(7), same(dealActivities));
-        verify(referenceService).hydrateActivities(eq(7), same(companyActivities));
-        verify(referenceService).hydrateTasks(eq(7), same(personTasks));
-        verify(referenceService).hydrateTasks(eq(7), same(dealTasks));
-        verify(referenceService).hydrateTasks(eq(7), same(companyTasks));
-        verify(referenceService).hydrate(eq(7), same(companyNotes));
+        verify(referenceService).hydrateActivitiesForMasking(eq(7), same(personActivities));
+        verify(referenceService).hydrateActivitiesForMasking(eq(7), same(dealActivities));
+        verify(referenceService).hydrateActivitiesForMasking(eq(7), same(companyActivities));
+        verify(referenceService).hydrateTasksForMasking(eq(7), same(personTasks));
+        verify(referenceService).hydrateTasksForMasking(eq(7), same(dealTasks));
+        verify(referenceService).hydrateTasksForMasking(eq(7), same(companyTasks));
+        verify(referenceService).hydrateForMasking(eq(7), same(companyNotes));
         verify(workspaceScopeControlAccess, times(7)).getForWorkspace(7);
     }
 

@@ -279,6 +279,13 @@ Catalog erasure retains the locking membership scan so it waits for matching unc
 
 Invite grants lock creator/known-recipient users ascending, reject deletion reservations, then lock active workspace/organization, memberships ascending, and creator custom role when applicable before testing grantability. Claim paths repeat authorization immediately before the exact claim.
 
+Token-invite creation does not discover or lock arbitrary recipient accounts. A resend first
+looks up only an existing pending invitation for that address in the target workspace. When found,
+it revokes that exact membership generation through the normal removal root order in the same
+READ COMMITTED transaction before persisting the replacement token. Historical pending revocation
+rechecks both generation reference and pending status after removal locks, so acceptance or a new
+generation cannot be removed by a stale invitation handle. Its audit contains no recipient profile.
+
 Token-invite acceptance checks the current address under the recipient root and authorizes only that invitation. It does not write `app_user.email_verified` or emit a global email-verification audit event: the creator receives the token and can control the workspace SMTP sender. Global registration verification requires the separate instance-delivered token consumed by `RegistrationVerificationService`.
 
 Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation. Its mailbox-proof and organization-domain checks read the account through the locked `app_user` row, not the pre-transaction membership projection.

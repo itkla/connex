@@ -254,6 +254,7 @@ describe("deep-link producers emit the consumers' canonical params", () => {
 
         expect(resolveShippedRoute(href)).toBe("/records/deals");
         expect(queryOf(href).get(DEAL_RISK_FILTER_KEY)).toBe("high");
+        expect(queryOf(href).get(DEAL_STATUS_FILTER_KEY)).toBe("open");
     });
 
     it("links an at-risk total to every flagged severity rather than the whole browser", () => {

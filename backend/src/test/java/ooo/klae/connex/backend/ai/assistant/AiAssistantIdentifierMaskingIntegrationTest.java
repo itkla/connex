@@ -1396,7 +1396,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     void storedTaskOutcomesMaskRenamedAndPendingReferencesOnBothProtocolsAndFreshReplay(
             String tool, boolean nativeProtocol) throws Exception {
         MemberReferenceFixture fixture = memberReferenceFixture();
-        var storedTask = referenceService.hydrateTasks(workspace.getId(),
+        var storedTask = referenceService.hydrateTasksForMasking(workspace.getId(),
                 List.of(taskMapper.getTaskById(workspace.getId(), fixture.task().getId()))).getFirst();
         assertTrue(storedTask.getDescription().contains("[Prior Member Label](user:"));
         assertTrue(storedTask.getDescription().contains("[Pending Member Label](user:"));

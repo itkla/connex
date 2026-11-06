@@ -183,7 +183,8 @@ public class PersonController {
         @RequestParam(required = false) List<String> warmthBands,
         @RequestParam(defaultValue = "false") boolean noWarmth,
         @RequestParam(required = false) Integer goesColdWithinDays,
-        @RequestParam(defaultValue = "false") boolean archived
+        @RequestParam(defaultValue = "false") boolean archived,
+        @RequestParam(required = false) List<Integer> tagIds
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
@@ -193,7 +194,7 @@ public class PersonController {
             warmthBands, noWarmth, goesColdWithinDays, sortKey);
         var result = personService.queryPersonsPage(query, sortKey, dir, companies, titles, noCompany,
             memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, warmth, bounds.size(), bounds.offset());
+            firstResponseStates, noFirstResponse, archived, warmth, bounds.size(), bounds.offset(), tagIds);
         return new PageResponse<>(result.items().stream().map(PersonDto::from).toList(), result.total());
     }
 
@@ -224,13 +225,14 @@ public class PersonController {
         @RequestParam(required = false) List<String> warmthBands,
         @RequestParam(defaultValue = "false") boolean noWarmth,
         @RequestParam(required = false) Integer goesColdWithinDays,
-        @RequestParam(defaultValue = "false") boolean archived
+        @RequestParam(defaultValue = "false") boolean archived,
+        @RequestParam(required = false) List<Integer> tagIds
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         WarmthFilter warmth = warmthFilterResolver.resolve(
             warmthBands, noWarmth, goesColdWithinDays, null);
-        if (!archived
+        if ((tagIds == null || tagIds.isEmpty()) && !archived
             && (warmth == null || !warmth.restrictsRows())
             && query == null
             && (companies == null || companies.isEmpty())
@@ -247,7 +249,7 @@ public class PersonController {
         }
         return personService.getMatchingPersonIds(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, tagIds);
     }
 
     /**

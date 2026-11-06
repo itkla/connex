@@ -22,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 class MembershipLifecycleTest extends AbstractServiceTest {
 
     @Autowired WorkspaceService workspaceService;
-    @Autowired InviteService inviteService;
     @Autowired NotificationMapper notificationMapper;
     @Autowired TeamMapper teamMapper;
 
@@ -33,11 +32,11 @@ class MembershipLifecycleTest extends AbstractServiceTest {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
-    void addExistingMember_createsPendingMembershipWithNoAccess() {
+    void historicalPendingMembershipHasNoAccess() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Pending WS", currentUser.getId());
         User invitee = newUser();
 
-        inviteService.addExistingMember(ws.getId(), currentUser.getId(), invitee.getEmail(), "member");
+        workspaceService.addPendingMember(ws.getId(), currentUser, invitee, "member");
 
         assertFalse(workspaceMapper.isMember(ws.getId(), invitee.getId()));
         assertTrue(workspaceService.pendingMemberships(invitee.getId()).stream().anyMatch(m -> m.getId() == ws.getId()));
@@ -49,7 +48,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     void approveMembership_activatesMember() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Approve WS", currentUser.getId());
         User invitee = newUser();
-        inviteService.addExistingMember(ws.getId(), currentUser.getId(), invitee.getEmail(), "member");
+        workspaceService.addPendingMember(ws.getId(), currentUser, invitee, "member");
 
         workspaceService.approveMembership(ws.getId(), invitee.getId());
 
@@ -62,7 +61,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     void declineMembership_removesPendingRow() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Decline WS", currentUser.getId());
         User invitee = newUser();
-        inviteService.addExistingMember(ws.getId(), currentUser.getId(), invitee.getEmail(), "member");
+        workspaceService.addPendingMember(ws.getId(), currentUser, invitee, "member");
 
         workspaceService.declineMembership(ws.getId(), invitee.getId());
 
@@ -111,7 +110,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     void declineMembership_removesTheInviteNotifications() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Decline Notif WS", currentUser.getId());
         User invitee = newUser();
-        inviteService.addExistingMember(ws.getId(), currentUser.getId(), invitee.getEmail(), "member");
+        workspaceService.addPendingMember(ws.getId(), currentUser, invitee, "member");
         newNotification(ws.getId(), invitee.getId());
 
         workspaceService.declineMembership(ws.getId(), invitee.getId());

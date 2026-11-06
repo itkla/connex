@@ -114,11 +114,21 @@ public class PersonService {
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             boolean archived, WarmthFilter warmth, int limit, int offset) {
+        return queryPersonsPage(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, null);
+    }
+
+    /** Applies workspace tag membership consistently to page rows and their count. */
+    public PageResponse<Person> queryPersonsPage(String query, String sort, String dir, List<String> companies,
+            List<String> titles, boolean noCompany, MemberScope memberScope,
+            List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, int limit, int offset, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope, () -> new PageResponse<>(
-            getPersonsPageWithinPersonScope(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, scope),
-            countPersonsWithinPersonScope(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, scope)));
+            getPersonsPageWithinPersonScope(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, scope, tagIds),
+            countPersonsWithinPersonScope(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, scope, tagIds)));
     }
 
     /** Shares the employer ceiling across every visibility-dependent browser facet. */
@@ -172,7 +182,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope,
-            () -> getPersonsPageWithinPersonScope(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, scope));
+            () -> getPersonsPageWithinPersonScope(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, scope, null));
     }
 
     private List<Person> getPersonsPageWithinPersonScope(String query, String sort, String dir, List<String> companies,
@@ -180,13 +190,13 @@ public class PersonService {
             List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
-            boolean archived, WarmthFilter warmth, int limit, int offset, RecordVisibilityScope scope) {
+            boolean archived, WarmthFilter warmth, int limit, int offset, RecordVisibilityScope scope, List<Integer> tagIds) {
         String personWorkspaceIdsJson = scope.workspaceIdsJson();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return personMapper.getPersonsPage(workspaceId, personWorkspaceIdsJson, query, sort, dir,
             companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
             leadSources, noLeadSource, firstResponseStates, noFirstResponse,
-            archived, warmth, limit, offset);
+            archived, warmth, limit, offset, tagIds);
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
@@ -196,18 +206,18 @@ public class PersonService {
             boolean archived, WarmthFilter warmth) {
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceService.getCurrentWorkspaceId(), scope,
-            () -> countPersonsWithinPersonScope(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, scope));
+            () -> countPersonsWithinPersonScope(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, scope, null));
     }
 
     private long countPersonsWithinPersonScope(String query, List<String> companies, List<String> titles, boolean noCompany,
             MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
-            boolean archived, WarmthFilter warmth, RecordVisibilityScope scope) {
+            boolean archived, WarmthFilter warmth, RecordVisibilityScope scope, List<Integer> tagIds) {
         String personWorkspaceIdsJson = scope.workspaceIdsJson();
         return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson,
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, tagIds);
     }
 
     /** How many contacts the active workspace currently holds archived. */
@@ -225,7 +235,16 @@ public class PersonService {
             boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             boolean archived, WarmthFilter warmth) {
-        if (!archived && (warmth == null || !warmth.restrictsRows()) && !hasMatchingIdFilter(
+        return getMatchingPersonIds(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, null);
+    }
+
+    /** Selects matching contacts with the same workspace tag predicate as the browser. */
+    public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
+            boolean noCompany, MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages,
+            boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, List<Integer> tagIds) {
+        if ((tagIds == null || tagIds.isEmpty()) && !archived && (warmth == null || !warmth.restrictsRows()) && !hasMatchingIdFilter(
                 query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
                 leadSources, noLeadSource, firstResponseStates, noFirstResponse)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
@@ -235,14 +254,14 @@ public class PersonService {
         long total = personMapper.countPersons(
             workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, warmth);
+            firstResponseStates, noFirstResponse, archived, warmth, tagIds);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
         return personMapper.getPersonIdsFiltered(
             workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, warmth, MAX_MATCHING_IDS);
+            firstResponseStates, noFirstResponse, archived, warmth, MAX_MATCHING_IDS, tagIds);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,

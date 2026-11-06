@@ -372,7 +372,8 @@
     "toastDeleted": "タグ「{name}」を削除しました",
     "toastFailedDelete": "タグを削除できませんでした",
     "entityLabel": "タグ",
-    "deleteDetails": "このタグが付いているすべての連絡先・会社・案件からも外れます。"
+    "deleteDetails": "このタグが付いているすべての連絡先・会社・案件からも外れます。",
+    "membersAria": "「{name}」のレコードを表示"
   },
   "ActivityLibraryTagDialog": {
     "titleCreate": "新規タグ",
@@ -578,5 +579,26 @@
     "loading": "メモを読み込み中…",
     "retry": "再試行",
     "failed": "メモを読み込めませんでした。もう一度お試しください。"
+  },
+  "TagMembers": {
+    "title": "「{name}」のレコード",
+    "description": "タグが付いたレコードを確認し、追加や解除ができます。タグを解除してもレコードは削除されません。",
+    "viewContacts": "連絡先一覧で表示",
+    "contacts": "連絡先",
+    "companies": "会社",
+    "deals": "案件",
+    "add": {
+      "contacts": "連絡先を追加",
+      "companies": "会社を追加",
+      "deals": "案件を追加"
+    },
+    "search": "レコードを検索",
+    "empty": "この種類のレコードには、まだタグが付いていません。",
+    "remove": "解除",
+    "removeFor": "{name}のタグを解除",
+    "added": "タグを追加しました",
+    "removed": "タグを解除しました",
+    "changeFailed": "タグを変更できませんでした",
+    "searchFailed": "検索結果を読み込めませんでした。もう一度検索してください。"
   }
 }

@@ -95,16 +95,14 @@ notes), not the person/deal relationship fields. Inline references in audited co
 establish which relationships were set, so those diffs cannot reliably reconstruct detached
 links. No automatic data repair is attempted.
 
-## Contact reference hydration
+## Contact tag filtering
 
-`GET /api/persons/references?ids=...` hydrates selected contacts without loading their linked
-activities, tasks, deals, notes or tags. It accepts 1–100 positive IDs before deduplication and
-returns only `id`, `name` and a visible `companyId`. It excludes contact details, lifecycle and
-qualification fields, provenance, referrers and relationship history. Missing, empty, malformed, nonpositive and
-oversized selections return HTTP 400. Unknown, archived and unreadable IDs are omitted. The
-server-resolved workspace and existing organization sharing ceiling govern contact visibility;
-an unreadable employer remains masked. Client picker hydration splits larger visible selections
-into capped batches and never falls back to the relationship-expanded contact detail route.
+`GET /api/persons/page`, `GET /api/persons/ids`, and `GET /api/exports/persons` accept
+`tagIds` as repeated or comma-separated integer values. Multiple tags match any selected tag;
+other contact filters still intersect that set. Page rows, totals, matching IDs and CSV export
+use the same tag membership predicate. Tags must belong to the resolved workspace, including
+when a contact is visible through sharing. An unknown or another workspace's tag matches no
+records. Existing visibility, matching-ID limits, export restrictions and export step-up apply.
 
 ## Global search group selection
 
@@ -302,31 +300,3 @@ Authentication, CSRF and the pinned workspace remain mandatory. Each item commit
 HTTP 200 batch stop results preserve prior outcomes, including explicit indeterminate status
 when fresh authorized reconciliation cannot establish a failing item's outcome. Safe metadata
 and cancellation remain accessible when content is withheld or schemas are unsupported.
-
-## Bounded activity lists (#2242)
-
-The existing `GET /api/activities/page` and `GET /api/tasks/page` endpoints return one
-`{items,total}` page (default 25, maximum 100) after applying intersecting record and member
-filters. Both accept `personId`, `companyId`, `dealId`, plural `persons`, `companies`, `deals`,
-`members` (at most 50 positive IDs each), and a literal `q` search (at most 200 characters).
-Activities additionally accept `createdById` and normalized `type`; tasks accept `assignedToId`
-and `queue` (`myOpen`, `dueToday`, `overdue`, `unassigned`, `allOpen`, `completed`, `all`).
-Task queue calendar boundaries use the authenticated member's profile timezone. Omitted queue
-preserves the existing all-status page contract. Company context includes visible contacts'
-activities/tasks and activities/tasks linked through the company's deals. The row and count
-queries share a predicate, retain the active workspace anchor, and exclude archived or no-longer
-visible linked contacts. Shared contacts use the trusted organization visibility ceiling.
-
-`GET /api/users/options?q=…` returns at most 50 active members of the resolved workspace for
-searchable pickers. It uses the control-plane read scope and existing session/membership perimeter.
-The activity/task collection pages load one list page and bounded picker searches; they do not traverse all
-workspace records. The URL owns record filters as `persons`, `companies`, and `deals`, importing
-the detail-page aliases `contactId`, `companyId`, and `dealId`. Paging and reload preserve them.
-Member names are searched through the dedicated creator/assignee filter, while general text search
-matches activity subjects and safe note text, task titles, and visible linked contact/deal names.
-The displayed total describes the filtered query; a page is never presented as a workspace-wide
-activity pulse or task summary. Task boards also navigate bounded pages.
-
-The list mappers retain self-contained visibility and reference-search fragments for isolated mapper
-loading. `ActivityListSqlArchTest` pins their parity with the contact/company reader ceilings and
-note-search reference patterns; changes to those authoritative fragments must update the list copies.
