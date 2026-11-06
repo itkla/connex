@@ -107,7 +107,9 @@ public final class RelationshipWarmthModel {
             warmMinimumRawWeight,
             rawWeightForRoundedScore(hotMinimumScore),
             rawWeightForRoundedScore(coolMinimumScore),
-            coldRawWeight
+            coldRawWeight,
+            coolingPriorMinimum,
+            coolingRecentRatio
         );
     }
 
@@ -241,7 +243,9 @@ public final class RelationshipWarmthModel {
         double warmMinimumRawWeight,
         double hotMinimumRawWeight,
         double coolMinimumRawWeight,
-        double coldRawWeight
+        double coldRawWeight,
+        double coolingPriorMinimum,
+        double coolingRecentRatio
     ) {}
 
     private double rawWeightForExactScore(double score) {

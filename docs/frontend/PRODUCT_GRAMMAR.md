@@ -70,6 +70,28 @@ Per-surface deviations are product decisions, not precedent for inventing a new 
 
 ## Signed-off adaptations
 
+### My Work
+
+`/me` is the personal daily surface. Its existing source-owned queue streams independently of
+relationship intelligence, deal KPIs, attention panels, the pulse, and recent history. Every section
+keeps failed, permission-denied, and genuinely empty reads distinct; Retry refreshes the server read,
+and an expired session follows the sign-in flow. Previously loaded values never substitute for a
+failed or denied section.
+
+Supporting reads use `/api/my-work/{relationships,deal-kpis,risks,pulse,history}`. The server resolves
+the active workspace and current actor; callers cannot select another member. Personal relationships
+are active, processable contacts owned by that member and visible in the active workspace, including
+shared-in contacts under the contact list's canonical `scope=me` visibility and organization ceiling.
+Full-corpus warmth counts are aggregated in SQL; only the warmest 18 and the six most urgent cooling
+contacts are hydrated. History loads the latest 25 assigned tasks, 25 authored activities, and 25
+visible authored note previews, with the
+existing note continuation. The 84-day UTC pulse remains complete independently of those previews,
+using activity timestamps, completed-task update timestamps, and visible-note creation timestamps.
+Risk ranking retains the existing 1,000-candidate interactive ceiling; overflow shows unavailable
+guidance instead of an incomplete all-clear. Currency changes re-fetch the personal KPI partition,
+preserve other URL parameters, and acknowledge the pending navigation. The reporting window and
+currency semantics remain those in `PRODUCT.md`.
+
 ### Pipeline setup and order
 
 When New deal has no pipelines, offer pipeline creation in a nested responsive dialog and retain
@@ -105,6 +127,19 @@ the map page handles any continuing fetch failure through its error boundary and
 neighbourhood map and scalable rendering remain deferred under [#2262](https://github.com/itkla/connex/issues/2262).
 
 ### Campaigns
+
+Contact details expose marketing preferences for contacts owned by the rendered workspace. Consent and contact-restriction details and changes require `CONSENT_MANAGE`; privacy holds independently require `PERSON_UPDATE`. Consent updates are explicit manual records, and never remove contact restrictions. Removing a restriction requires separate confirmation explaining the shared-address effect. The panel uses the server marketing-status projection for current blocks and explains the existing opt-out default without promising delivery. Missing or unknown consent alone does not block; explicit revocation, contact restrictions, privacy holds, and final dispatch checks still apply. LINE and WhatsApp preferences are recordable but have no delivery support.
+
+Consent confirmations retain the reviewed mutation version, including explicit row absence. A stale
+write reloads preferences and requires a new action; it never retries automatically. Restriction
+details come from the contact-scoped, cursor-paged endpoint (50 entries per page), matched server-side
+by person link or canonical channel address. The contact panel never downloads the workspace-wide
+restriction list or unrelated addresses, operator notes, creator ids, or person ids. Cancelling a
+confirmation restores focus to the initiating action; confirmed changes return focus to the labeled
+preferences section, including while refreshed data is still pending. Background route refreshes
+revalidate preferences in place, preserving an open confirmation and its captured mutation version.
+Workspace/contact identity changes still replace the controls. Older reads cannot replace a newer post-save result.
+Privacy controls submit only deliberately changed flags.
 
 Campaign creation asks for the minimum facts required by the backend (name and type) before entering the campaign builder. Objective/status/budget/window belong in the builder rather than an oversized create dialog. Campaign settings use the established quick-edit sheet shell.
 

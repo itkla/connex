@@ -329,6 +329,15 @@ public class DealRiskService {
         return new BoundedRiskAssessment(assessDeals(workspaceId, candidates.ids()), false);
     }
 
+    /** Returns a complete personal ranking within the same ceiling as other interactive reads. */
+    public BoundedRiskAssessment assessPersonal(int workspaceId, MemberScope memberScope) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(workspaceId, () -> {
+            RiskCandidateBatch candidates = riskCandidates(workspaceId, memberScope);
+            return candidates.truncated() ? new BoundedRiskAssessment(List.of(), true)
+                : new BoundedRiskAssessment(assessDeals(workspaceId, candidates.ids()), false);
+        });
+    }
+
     /** Returns the highest-risk dashboard deals from a fixed candidate ceiling. */
     public DashboardDealRiskResult assessDashboard(
             int workspaceId,

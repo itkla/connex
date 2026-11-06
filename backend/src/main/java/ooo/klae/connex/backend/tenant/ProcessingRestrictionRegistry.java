@@ -63,6 +63,8 @@ public final class ProcessingRestrictionRegistry {
             "Report person projections exclude suspended people.");
         enroll(entries, "PersonMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Ordinary person reads exclude suspended people while administrative mutations remain reachable.");
+        enroll(entries, "MyWorkReadMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Personal relationship counts and display candidates exclude suspended and provision-ceased people.");
         enroll(entries, "RecordSearchMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
             "Search projection repair excludes suspended and provision-ceased people on both discovery and CAS.");
         enroll(entries, "DataSubjectDisclosureMapper",

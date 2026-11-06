@@ -5102,6 +5102,23 @@ export function getMyWorkResultFromCookie(cookie: string | null) {
     return resultWithCookie<Types.WorkItemPage>((init) => getMyWork({}, init), cookie);
 }
 
+/** A personal section refuses failures distinctly, including expired sessions and access denial. */
+export type MyWorkReadResult<T> = { ok: true; data: T } | { ok: false; status: number };
+
+/** Reads a fixed-size self-only projection; no workspace or user id can widen its scope. */
+export async function getMyWorkReadResultFromCookie<K extends keyof Types.MyWorkReadSections>(
+    section: K, cookie: string | null, currency?: string,
+): Promise<MyWorkReadResult<Types.MyWorkReadSections[K]>> {
+    if (!cookie) return { ok: false, status: 401 };
+    try {
+        const data = await getJson<Types.MyWorkReadSections[K]>(
+            `/api/my-work/${section}${buildQuery({ currency })}`, withCookie(cookie));
+        return { ok: true, data };
+    } catch (error) {
+        return { ok: false, status: error instanceof ApiError ? error.status : 0 };
+    }
+}
+
 export function getMyWorkSummary(init: RequestInit = {}) {
     return getJson<Types.WorkItemSummary>(`/api/my-work/summary`, { cache: 'no-store', ...init });
 }
@@ -5654,7 +5671,7 @@ export function assembleDataSubjectDisclosure(orgId: number, requestId: number) 
 }
 
 /** Sets or clears a contact's APPI processing restrictions (suspend / cease provision). */
-export function updateContactRestrictions(contactId: number, body: { suspended: boolean; provisionCeased: boolean }) {
+export function updateContactRestrictions(contactId: number, body: { suspended?: boolean; provisionCeased?: boolean }) {
     return putJson<Types.Contact>(`/api/persons/${contactId}/restrictions`, body);
 }
 
@@ -7870,6 +7887,11 @@ export function setPersonConsent(personId: number, payload: Types.ContactChannel
 
 export function getSuppressions(init: RequestInit = {}) {
     return getJson<Types.SuppressionEntry[]>(`/api/suppressions`, init);
+}
+
+/** Reads one bounded page of this contact's matching restrictions, without operator metadata. */
+export function getPersonSuppressions(personId: number, afterId = 0, init: RequestInit = {}) {
+    return getJson<Types.ContactSuppressionPage>(`/api/suppressions/persons/${personId}?afterId=${afterId}`, init);
 }
 
 export function getSuppressionsFromCookie(cookie: string | null) {

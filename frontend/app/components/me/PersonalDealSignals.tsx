@@ -1,38 +1,37 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import type { Deal, DealMetrics } from "@/app/lib/types";
-import { useOwnedUrlParams } from "@/app/hooks/useOwnedUrlParams";
+import type { MyWorkReadSections } from "@/app/lib/types";
 import CurrencyControl from "@/app/components/overview/analytics/CurrencyControl";
-import { currencyCountsForDeals, currencyCountsForMetrics, resolveCurrency, toTiles } from "@/app/components/overview/analytics/currencyScope";
-import { resolveAnalyticsWindow } from "@/app/components/overview/analytics/metrics";
-import { personalDealKpis } from "./personalDealKpis";
+import { currencyCountsForMetrics, toTiles } from "@/app/components/overview/analytics/currencyScope";
 import SignalStrip from "./SignalStrip";
 
-/** Personal deal KPIs using Analytics' currency selection and reporting window. */
-export default function PersonalDealSignals({ deals, dealMetrics, timezone }: { deals: Deal[]; dealMetrics: DealMetrics | null; timezone: string }) {
+/** Complete personal KPI aggregates for one currency; navigation re-fetches the selected partition. */
+export default function PersonalDealSignals({ data }: { data: MyWorkReadSections["deal-kpis"] }) {
     const t = useTranslations("MePage");
+    const router = useRouter();
+    const pathname = usePathname();
     const searchParams = useSearchParams();
-    const [selectedCurrency, setSelectedCurrency] = useState(() => searchParams.get("currency"));
-    const counts = useMemo(() => dealMetrics
-        ? currencyCountsForMetrics(dealMetrics) : currencyCountsForDeals(deals), [dealMetrics, deals]);
-    const currency = resolveCurrency(counts, selectedCurrency);
-    const [now] = useState(() => Date.now());
-    const window = useMemo(() => resolveAnalyticsWindow("90d", now, timezone), [now, timezone]);
-    const kpis = useMemo(() => toTiles(personalDealKpis(deals, currency, window, timezone)), [deals, currency, window, timezone]);
+    const [pending, startTransition] = useTransition();
+    const counts = currencyCountsForMetrics(data.metrics);
 
-    useOwnedUrlParams({ currency: selectedCurrency && counts.has(selectedCurrency) ? selectedCurrency : undefined });
+    const selectCurrency = (currency: string) => {
+        if (!counts.has(currency) || (currency === data.currency && !pending)) return;
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("currency", currency);
+        startTransition(() => router.replace(`${pathname}?${params}`, { scroll: false }));
+    };
 
     return (
-        <section aria-label={t("dealSignals")} className="space-y-3">
+        <section aria-label={t("dealSignals")} aria-busy={pending} className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium text-muted-foreground">{t("dealSignals")}</h2>
-                <CurrencyControl counts={counts} currency={currency} hasDeals={dealMetrics ? dealMetrics.totalCount > 0 : deals.length > 0} onChange={setSelectedCurrency} />
+                <h2 className="text-sm font-medium text-muted-foreground">{pending ? t("loadingSignals") : t("dealSignals")}</h2>
+                <CurrencyControl counts={counts} currency={data.currency} hasDeals={data.metrics.totalCount > 0} onChange={selectCurrency} />
             </div>
-            <SignalStrip kpis={kpis} currency={currency} />
+            <SignalStrip kpis={toTiles(data.kpis)} currency={data.currency} />
         </section>
     );
 }

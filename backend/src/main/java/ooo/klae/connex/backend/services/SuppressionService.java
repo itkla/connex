@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Set;
 
@@ -10,10 +11,13 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.SuppressionEntry;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.dto.SuppressionEntryDto;
 import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
+import ooo.klae.connex.backend.dto.ChannelAddressRef;
+import ooo.klae.connex.backend.dto.ContactSuppressionPageDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -46,6 +50,24 @@ public class SuppressionService {
     public List<SuppressionEntryDto> list() {
         return suppressionMapper.getAll(workspaceService.getCurrentWorkspaceId())
                 .stream().map(SuppressionService::toDto).toList();
+    }
+
+    /** Lists only this owned contact's person-sticky and canonical-address matches, 50 at a time. */
+    @RequirePermission(Permission.CONSENT_MANAGE)
+    public ContactSuppressionPageDto listForPerson(int personId, int afterId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (afterId < 0) throw new BadRequestException("Restriction cursor is invalid");
+        Person person = personMapper.getOwnedPersonAddresses(workspaceId, personId);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
+        List<ChannelAddressRef> addresses = new ArrayList<>();
+        for (DeliveryChannel channel : DeliveryChannel.values()) {
+            String address = ChannelAddressNormalizer.addressFor(channel, person);
+            if (address != null) addresses.add(new ChannelAddressRef(channel.token(), address));
+        }
+        var matches = suppressionMapper.findForPerson(workspaceId, personId, addresses, afterId);
+        var items = List.copyOf(matches.subList(0, Math.min(50, matches.size())));
+        Integer nextAfterId = matches.size() > 50 ? items.getLast().id() : null;
+        return new ContactSuppressionPageDto(items, nextAfterId);
     }
 
     /** Adds a normalized suppression entry in the active workspace. */

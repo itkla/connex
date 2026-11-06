@@ -36,6 +36,7 @@ import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import ContactLeadPanel from "@/app/components/records/contacts/ContactLeadPanel";
+import ContactMarketingPreferences from "@/app/components/records/contacts/ContactMarketingPreferences";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordSignalsPanel from "@/app/components/records/RecordSignalsPanel";
 import ContactIntroAskProvider from "@/app/components/records/contacts/ContactIntroAskProvider";
@@ -290,6 +291,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                                 </dl>
                             </div>
+
+                            <ContactMarketingPreferences contact={contact} status={marketingStatus} />
 
                             <ContactEmploymentSection />
                         </RecordDetailSection>
