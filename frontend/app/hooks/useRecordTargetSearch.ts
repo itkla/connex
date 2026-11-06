@@ -12,12 +12,12 @@ import {
     getUserById,
 } from '@/app/lib/api';
 import { createServerPickerSearch, pickerQueryKey } from '@/lib/server-picker-search';
-import type { Contact, Deal, Page, User } from '@/app/lib/types';
+import type { ContactPickerOption, Deal, Page, User } from '@/app/lib/types';
 
 const SEARCH_SIZE = 50;
 const SEARCH_DELAY_MS = 200;
 const EMPTY_IDS: Array<number | null | undefined> = [];
-const EMPTY_CONTACTS: Contact[] = [];
+const EMPTY_CONTACTS: ContactPickerOption[] = [];
 const EMPTY_DEALS: Deal[] = [];
 const EMPTY_USERS: User[] = [];
 
@@ -124,9 +124,9 @@ const loadDealsByIds = (ids: number[], signal: AbortSignal) => loadIndividually(
 export function useContactTargetSearch(
     enabled: boolean,
     ids: Array<number | null | undefined> = EMPTY_IDS,
-    seeds: Contact[] = EMPTY_CONTACTS,
+    seeds: ContactPickerOption[] = EMPTY_CONTACTS,
 ) {
-    const result = useRecordTargetSearch(
+    const result = useRecordTargetSearch<ContactPickerOption>(
         enabled,
         ids,
         seeds,

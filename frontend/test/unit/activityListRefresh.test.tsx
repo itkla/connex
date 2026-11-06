@@ -21,7 +21,8 @@ vi.mock('@/app/lib/api', async (original) => ({
         return fixture.contact;
     }),
     getContactsPage: vi.fn(async () => ({ items: [], total: 0 })),
-    getContactReferences: vi.fn(async (ids: number[]) => fixture.contact && ids.includes(fixture.contact.id) ? [fixture.contact] : []),
+    getContactReferences: vi.fn(async (ids: number[]) => fixture.contact && ids.includes(fixture.contact.id)
+        ? [{ id: fixture.contact.id, name: fixture.contact.name, companyId: fixture.contact.companyId }] : []),
     getActivitiesPage: vi.fn(async () => ({ items: fixture.activities, total: fixture.activities.length })),
     getTasksPage: vi.fn(async (params: TasksPageParams) => {
         const items = fixture.tasks.filter((task) => params.queue === 'unassigned' ? !task.assignedToId : params.queue === 'overdue' ? (task.dueDate ?? '') < '2026-11-05'

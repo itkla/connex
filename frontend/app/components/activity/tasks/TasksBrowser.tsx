@@ -76,7 +76,7 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import { noteSnippet } from '@/app/lib/noteText';
 import { cn } from '@/lib/utils';
-import type { Contact, Deal, Task, User } from '@/app/lib/types';
+import type { ContactPickerOption, Deal, Task, User } from '@/app/lib/types';
 
 type Props = {
     currentUserId: number;
@@ -1001,7 +1001,7 @@ type TaskRowProps = {
     task: Task;
     reduce: boolean;
     checked: boolean;
-    person?: Contact;
+    person?: ContactPickerOption;
     deal?: Deal;
     assignee?: User;
     bucket: Bucket;

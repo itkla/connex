@@ -323,6 +323,23 @@ class ActivityListPagingIntegrationTest {
     }
 
     @Test
+    void contactReferencesExposeOnlyIdentityAndVisibleEmployer() throws Exception {
+        jdbc.update("UPDATE person SET email = 'private@example.test', phone = 'private phone', qualification_notes = 'Private qualification', lead_source = 'REFERRAL', lead_source_detail = 'Private source', referrer_person_id = ? WHERE id = ?",
+            other.getId(), person.getId());
+        sqlSession.clearCache();
+        mvc.perform(get("/api/persons/references").session(login()).header("X-Workspace-Id", workspace.getId())
+                .param("ids", String.valueOf(person.getId())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].length()").value(3))
+            .andExpect(jsonPath("$[0].id").value(person.getId()))
+            .andExpect(jsonPath("$[0].name").value(person.getName()))
+            .andExpect(jsonPath("$[0].companyId").value(company.getId()))
+            .andExpect(jsonPath("$[0].email").doesNotExist()).andExpect(jsonPath("$[0].phone").doesNotExist())
+            .andExpect(jsonPath("$[0].qualificationNotes").doesNotExist()).andExpect(jsonPath("$[0].leadSourceDetail").doesNotExist())
+            .andExpect(jsonPath("$[0].referrerPersonId").doesNotExist()).andExpect(jsonPath("$[0].company").doesNotExist());
+    }
+
+    @Test
     void contactReferenceIdsAreRequiredPositiveAndCappedBeforeDeduplication() throws Exception {
         var session = login();
         mvc.perform(get("/api/persons/references").session(session).header("X-Workspace-Id", workspace.getId()))

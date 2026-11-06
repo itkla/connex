@@ -142,6 +142,8 @@ export type ImportRequest = {
     onDuplicate?: ImportDuplicateAction;
     links?: Record<number, number>;
     duplicateReviewProof?: string;
+    companyLinks?: Record<number, number>;
+    skippedRows?: number[];
 };
 
 export type ImportRowStatus = 'create' | 'match' | 'skip' | 'invalid';
@@ -213,7 +215,17 @@ export type ImportRowAnalysis = {
     errors?: string[] | null;
     candidates?: DuplicateCandidate[] | null;
     dealDates?: DealImportDateReview | null;
+    problems?: ImportProblem[] | null;
+    companyDependency?: {
+        name: string;
+        key: string;
+        selectedId?: number | null;
+        candidates?: DuplicateCandidate[];
+        truncated: boolean;
+    } | null;
 };
+
+export type ImportProblem = { code: string; field?: string | null };
 
 export type ImportPreviewResult = {
     total: number;
@@ -222,12 +234,14 @@ export type ImportPreviewResult = {
     toSkip: number;
     invalid: number;
     rows: ImportRowAnalysis[];
+    companyCandidates?: Record<string, DuplicateCandidate[]>;
     duplicateReviewProof?: string | null;
 };
 
 export type ImportRowError = {
     rowIndex: number;
     reason: string;
+    problems?: ImportProblem[] | null;
 };
 
 export type ImportResult = {
@@ -1264,6 +1278,12 @@ export type UpdateCompanyPayload = {
     phone?: string;
     address?: string;
 };
+
+/** The only fields returned by the bounded contact reference endpoint. */
+export type ContactReference = Pick<Contact, 'id' | 'name' | 'companyId'>;
+
+/** Picker identity, with optional presentation metadata from page results or caller seeds. */
+export type ContactPickerOption = ContactReference & Partial<Pick<Contact, 'workspaceId' | 'imageUrl'>>;
 
 export type Contact = {
     id: number;

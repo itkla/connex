@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.PersonReferenceDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonQualificationDto;
@@ -131,7 +132,7 @@ public class PersonController {
 
     /** Returns bounded visible contact records without relationship-history expansion. */
     @GetMapping("/references")
-    public List<PersonDto> getPersonReferences(@RequestParam(required = false) List<Integer> ids) {
+    public List<PersonReferenceDto> getPersonReferences(@RequestParam(required = false) List<Integer> ids) {
         if (ids == null || ids.isEmpty()) {
             throw new BadRequestException("ids are required for contact references");
         }
@@ -145,7 +146,7 @@ public class PersonController {
             }
             normalized.add(id);
         }
-        return personService.getPersonReferences(List.copyOf(normalized)).stream().map(PersonDto::from).toList();
+        return personService.getPersonReferences(List.copyOf(normalized)).stream().map(PersonReferenceDto::from).toList();
     }
 
     /**

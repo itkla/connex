@@ -63,7 +63,7 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
-import type { Activity, Contact, Deal, User } from '@/app/lib/types';
+import type { Activity, ContactPickerOption, Deal, User } from '@/app/lib/types';
 
 type Props = {
     currentUserId: number;
@@ -554,7 +554,7 @@ type TimelineRowProps = {
     reduce: boolean;
     connectUp: boolean;
     connectDown: boolean;
-    person?: Contact;
+    person?: ContactPickerOption;
     deal?: Deal;
     creator?: User;
     time: string;

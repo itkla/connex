@@ -26,7 +26,7 @@ import {
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useContactIntroAsk } from '@/app/components/records/contacts/introAsk';
 import { INTRODUCTIONS_PATH } from '@/app/components/introductions/introductionLinks';
-import type { Contact, IntroPath, PersonConnection } from '@/app/lib/types';
+import type { ContactPickerOption, IntroPath, PersonConnection } from '@/app/lib/types';
 
 const TYPES = ['knows', 'colleague', 'former_colleague', 'friend'] as const;
 const TYPE_KEYS: Record<string, string> = {
@@ -56,7 +56,7 @@ export default function ContactConnections({
     const tIntro = useTranslations('Introductions');
     const [connections, setConnections] = useState(initialConnections);
     const [introPath, setIntroPath] = useState(initialIntroPath);
-    const [selected, setSelected] = useState<Contact | null>(null);
+    const [selected, setSelected] = useState<ContactPickerOption | null>(null);
     const [type, setType] = useState<string>('knows');
     const [busy, setBusy] = useState(false);
     const [pickerOpen, setPickerOpen] = useState(false);
@@ -202,11 +202,11 @@ export default function ContactConnections({
                     <Combobox
                         items={candidates}
                         serverSearch={contactSearch.serverSearch}
-                        itemToStringLabel={(c: Contact) => c.name}
+                        itemToStringLabel={(c: ContactPickerOption) => c.name}
                         value={selected}
                         onOpenChange={setPickerOpen}
                         onInputValueChange={contactSearch.onInputValueChange}
-                        onValueChange={(c) => setSelected((c as Contact | null) ?? null)}
+                        onValueChange={(c) => setSelected(c)}
                     >
                         <ComboboxInput
                             placeholder={t('addPlaceholder')}

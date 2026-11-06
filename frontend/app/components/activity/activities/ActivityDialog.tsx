@@ -55,7 +55,7 @@ import {
     ActivityTypePicker,
     type ActivityType,
 } from '@/app/components/activity/activities/activityTypes';
-import type { Contact, CreateActivityPayload, Deal } from '@/app/lib/types';
+import type { ContactPickerOption, CreateActivityPayload, Deal } from '@/app/lib/types';
 
 /** The serializable slice of the activity composer persisted as a draft and re-injected on resume. */
 export type ActivityDraftData = {
@@ -69,10 +69,10 @@ export type ActivityDraftData = {
 type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     currentUserId: number;
-    defaultPerson?: Contact | null;
+    defaultPerson?: ContactPickerOption | null;
     defaultDeal?: Deal | null;
     /** Uses the caller's bounded company choices and keeps the originating record fixed. */
     recordScope?: 'person' | 'deal';
@@ -214,10 +214,10 @@ export default function ActivityDialog({
 }
 
 type ActivityDialogFormProps = {
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     currentUserId: number;
-    defaultPerson?: Contact | null;
+    defaultPerson?: ContactPickerOption | null;
     defaultDeal?: Deal | null;
     /** Uses the caller's bounded company choices and keeps the originating record fixed. */
     recordScope?: 'person' | 'deal';
@@ -282,7 +282,7 @@ export function ActivityDialogForm({
     const [subject, setSubject] = useState(() => defaultSubject);
     const [notes, setNotes] = useState(() => defaultNotes);
     const [when, setWhen] = useState(() => defaultTimestamp ?? toDatetimeLocalValue(new Date().toISOString(), timeZone));
-    const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
+    const [selectedPerson, setSelectedPerson] = useState<ContactPickerOption | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const personSearch = useContactTargetSearch(recordScope === undefined, [selectedPerson?.id], persons);
     const dealSearch = useDealTargetSearch(recordScope === undefined, [selectedDeal?.id], deals);
@@ -535,11 +535,11 @@ export function ActivityDialogForm({
                                 disabled={recordScope === 'person'}
                                 serverSearch={recordScope ? undefined : personSearch.serverSearch}
                                 onInputValueChange={recordScope ? undefined : personSearch.onInputValueChange}
-                                itemToStringLabel={(p: Contact) => p.name}
+                                itemToStringLabel={(p: ContactPickerOption) => p.name}
                                 value={selectedPerson}
                                 onValueChange={(p) => {
                                     if (recordScope === 'person') return;
-                                    setSelectedPerson(p as Contact | null);
+                                    setSelectedPerson(p);
                                     setRelationshipTargetMissing(false);
                                 }}
                             >

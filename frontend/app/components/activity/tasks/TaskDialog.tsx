@@ -45,7 +45,7 @@ import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
-import type { Contact, CreateTaskPayload, Deal, User } from '@/app/lib/types';
+import type { ContactPickerOption, CreateTaskPayload, Deal, User } from '@/app/lib/types';
 
 /** The serializable task-composer fields persisted and restored as one workspace-scoped draft. */
 export type TaskDraftData = {
@@ -59,12 +59,12 @@ export type TaskDraftData = {
 type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     users: User[];
     currentUserId: number;
     defaultAssignee?: User | null;
-    defaultPerson?: Contact | null;
+    defaultPerson?: ContactPickerOption | null;
     defaultDeal?: Deal | null;
     /** Uses the caller's bounded company choices and keeps the originating record fixed. */
     recordScope?: 'person' | 'deal';
@@ -224,12 +224,12 @@ function ScopedTaskDialog({
 }
 
 type TaskDialogFormProps = {
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     users: User[];
     currentUserId: number;
     defaultAssignee?: User | null;
-    defaultPerson: Contact | null;
+    defaultPerson: ContactPickerOption | null;
     defaultDeal: Deal | null;
     /** Uses the caller's bounded company choices and keeps the originating record fixed. */
     recordScope?: 'person' | 'deal';
@@ -303,7 +303,7 @@ export function TaskDialogForm({
         defaultAssignee ?? users.find((u) => u.id === currentUserId) ?? null,
     );
     const memberSearch = useMemberTargetSearch(!compact, [assignee?.id, currentUserId], users);
-    const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
+    const [selectedPerson, setSelectedPerson] = useState<ContactPickerOption | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const personSearch = useContactTargetSearch(!compact && !hideLinks && recordScope === undefined, [selectedPerson?.id], persons);
     const dealSearch = useDealTargetSearch(!compact && !hideLinks && recordScope === undefined, [selectedDeal?.id], deals);
@@ -536,9 +536,9 @@ export function TaskDialogForm({
                                 disabled={recordScope === 'person'}
                                 serverSearch={recordScope ? undefined : personSearch.serverSearch}
                                 onInputValueChange={recordScope ? undefined : personSearch.onInputValueChange}
-                                itemToStringLabel={(p: Contact) => p.name}
+                                itemToStringLabel={(p: ContactPickerOption) => p.name}
                                 value={selectedPerson}
-                                onValueChange={(p) => { if (recordScope !== 'person') setSelectedPerson(p as Contact | null); }}
+                                onValueChange={(p) => { if (recordScope !== 'person') setSelectedPerson(p); }}
                             >
                                 <ComboboxInput
                                     id="task-person"

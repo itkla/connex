@@ -1,25 +1,26 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import type { UniqueIdentifier } from '@dnd-kit/core';
 import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/KanbanBoard';
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
-import { taskBoardPosition } from './taskBoardPosition';
+import { taskBoardAfterMove, taskBoardIndex, taskBoardPosition } from './taskBoardPosition';
 import { moveTask } from '@/app/lib/api';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
-import type { Contact, Deal, Task, TaskStatus, User } from '@/app/lib/types';
+import type { ContactPickerOption, Deal, Task, TaskStatus, User } from '@/app/lib/types';
 
 interface TasksKanbanProps {
     tasks: Task[];
-    personById: Map<number, Contact>;
+    personById: Map<number, ContactPickerOption>;
     dealById: Map<number, Deal>;
     userById: Map<number, User>;
     onMoved: () => void;
@@ -70,24 +71,31 @@ export default function TasksKanban({
     );
 
     const tasksById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+    const confirmedTasks = useRef(tasks);
+    useLayoutEffect(() => { confirmedTasks.current = tasks; }, [tasks]);
 
     const renderCard = useCallback(
-        (task: Task) => {
+        (task: Task, dragHandle?: ReactNode) => {
             const person = task.personId != null ? personById.get(task.personId) : undefined;
             const deal = task.dealId != null ? dealById.get(task.dealId) : undefined;
             const assignee = userById.get(task.assignedToId);
             const due = task.status === 'done' ? null : formatDue(task.dueDate, t, locale, now, timeZone);
             return (
                 <div
-                    onClick={() => onOpen(task)}
                     className={cn(
-                        'group flex cursor-pointer flex-col gap-2.5 rounded-xl bg-card p-3.5 ring-1 ring-border transition duration-200 hover:-translate-y-0.5 hover:shadow-md hover:ring-border active:scale-[0.98] active:shadow-sm',
+                        'group relative flex flex-col gap-2.5 rounded-xl bg-card p-3.5 ring-1 ring-border',
                         task.status === 'done' && 'opacity-70',
                     )}
                 >
-                    <p className={cn('text-sm font-medium leading-snug text-foreground line-clamp-3', task.status === 'done' && 'text-muted-foreground line-through')}>
-                        <NoteContent content={task.description} references={task.references} />
-                    </p>
+                    <div className="flex items-start gap-2">
+                        <div className={cn('min-w-0 flex-1 text-sm font-medium leading-snug text-foreground line-clamp-3', task.status === 'done' && 'text-muted-foreground line-through')}>
+                            <NoteContent content={task.description} references={task.references} block={false} />
+                        </div>
+                        <div className="relative z-10 -mt-1">{dragHandle}</div>
+                    </div>
+                    <Button variant="ghost" size="inline" onClick={() => onOpen(task)}>
+                        {t('openTask')}
+                    </Button>
                     {(person || deal) && (
                         <div className="flex flex-wrap items-center gap-1.5">
                             {deal && (
@@ -133,28 +141,32 @@ export default function TasksKanban({
     const onMove = useCallback(
         async (taskId: number, columnId: string, index: number) => {
             try {
-                if (columnId !== 'todo' && columnId !== 'in_progress' && columnId !== 'done') return;
-                await moveTask(taskId, columnId, taskBoardPosition(tasks, taskId, columnId, index));
+                if (columnId !== 'todo' && columnId !== 'in_progress' && columnId !== 'done') return false;
+                const saved = await moveTask(taskId, columnId, taskBoardPosition(confirmedTasks.current, taskId, columnId, index));
+                const visibleIndex = taskBoardIndex(confirmedTasks.current, taskId, saved.status, saved.position);
+                confirmedTasks.current = taskBoardAfterMove(confirmedTasks.current, saved);
+                const announcement = t('a11ySaved', {
+                    name: noteContentToPlainText(saved.description),
+                    column: columns.find((column) => column.id === saved.status)?.label ?? '',
+                    position: saved.position + 1,
+                });
                 onMoved();
+                return { columnId: saved.status, index: visibleIndex, announcement };
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;
             }
         },
-        [onMoved, showApiError, tasks],
+        [columns, onMoved, showApiError, t],
     );
 
     const taskName = useCallback((id: UniqueIdentifier) => noteContentToPlainText(tasksById.get(Number(id))?.description ?? ''), [tasksById]);
     const columnName = useCallback(
-        (id: UniqueIdentifier) => {
-            const s = String(id);
-            const status = s.startsWith('col:') ? s.slice(4) : tasksById.get(Number(id))?.status;
-            return columns.find((c) => c.id === status)?.label ?? '';
-        },
-        [tasksById, columns],
+        (id: string) => columns.find((c) => c.id === id)?.label ?? '',
+        [columns],
     );
 
-    const { announcements, screenReaderInstructions } = useMemo(
+    const { announcements, screenReaderInstructions, moveRestored } = useMemo(
         () => kanbanAccessibility(t, taskName, columnName),
         [t, taskName, columnName],
     );
@@ -167,11 +179,12 @@ export default function TasksKanban({
             getColumnId={taskColumnId}
             getPosition={taskPosition}
             renderCard={renderCard}
+            dragLabel={(task) => t('moveCard', { name: taskName(task.id) })}
             onMove={onMove}
             reduce={reduce}
             emptyHint={t('emptyColumn')}
             countLabel={(count) => t('kanbanCount', { count })}
-            accessibility={{ announcements, screenReaderInstructions }}
+            accessibility={{ announcements, screenReaderInstructions, moveRestored }}
         />
     );
 }

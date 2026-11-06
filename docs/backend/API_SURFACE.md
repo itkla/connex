@@ -99,7 +99,8 @@ links. No automatic data repair is attempted.
 
 `GET /api/persons/references?ids=...` hydrates selected contacts without loading their linked
 activities, tasks, deals, notes or tags. It accepts 1–100 positive IDs before deduplication and
-returns the existing scalar contact representation. Missing, empty, malformed, nonpositive and
+returns only `id`, `name` and a visible `companyId`. It excludes contact details, lifecycle and
+qualification fields, provenance, referrers and relationship history. Missing, empty, malformed, nonpositive and
 oversized selections return HTTP 400. Unknown, archived and unreadable IDs are omitted. The
 server-resolved workspace and existing organization sharing ceiling govern contact visibility;
 an unreadable employer remains masked. Client picker hydration splits larger visible selections

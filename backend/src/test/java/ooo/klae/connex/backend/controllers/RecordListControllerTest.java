@@ -127,7 +127,7 @@ class RecordListControllerTest {
         when(personService.getPersonReferences(List.of(7, 8))).thenReturn(List.of(person));
         var response = controller.getPersonReferences(List.of(7, 8, 7));
         assertEquals(1, response.size());
-        assertEquals(7, response.getFirst().getId());
+        assertEquals(7, response.getFirst().id());
         verify(personService).getPersonReferences(List.of(7, 8));
         verify(personService, never()).getPersonById(anyInt());
     }
