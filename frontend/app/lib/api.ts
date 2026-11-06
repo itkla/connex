@@ -4585,16 +4585,16 @@ export function closeDeal(id: number, payload: { won: boolean; reason?: string |
 }
 
 /** Reopens a closed deal: clears the outcome/close date and moves it off any terminal stage. */
-export function reopenDeal(id: number) {
-    return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {});
+export function reopenDeal(id: number, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {}, init);
 }
 
 /**
  * Moves a deal to a target stage and 0-based position on the Kanban board. The server renumbers
  * the affected stage column(s) so positions stay contiguous.
  */
-export function moveDeal(id: number, stageId: number, position: number) {
-    return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position });
+export function moveDeal(id: number, stageId: number, position: number, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position }, init);
 }
 
 /**

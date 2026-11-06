@@ -128,7 +128,9 @@
         "delete": "Delete",
         "openDealPage": "Open deal page",
         "statusOpen": "open",
-        "statusClosed": "closed"
+        "statusClosed": "closed",
+        "statusWon": "Won",
+        "statusLost": "Lost"
     },
     "DealsLifecycleProgress": {
         "todayDay": "Today · day {daysOpen} of {totalDays}",
@@ -185,7 +187,25 @@
         "a11yLifted": "Picked up deal {name}.",
         "a11yOver": "Deal {name} is over the {column} column.",
         "a11yDropped": "Deal {name} was dropped into the {column} column.",
-        "a11yCancelled": "Moving deal {name} was cancelled."
+        "a11yCancelled": "Moving deal {name} was cancelled.",
+        "moveCard": "Move deal {name}",
+        "outcome": {
+            "open": "Open",
+            "won": "Won",
+            "lost": "Lost"
+        },
+        "confirmTitle": "Move to {column}?",
+        "confirmDescription": "Moving {name} to {column} marks it {outcome} and closes it. Moving it back later keeps this outcome until you choose Reopen.",
+        "cancelMove": "Cancel",
+        "confirmMove": "Move and close",
+        "moved": "{name} is in {column}. Outcome: {outcome}.",
+        "movedRetained": "{name} moved to {column} and is still {outcome}. Moving stages does not reopen a deal.",
+        "moveCancelled": "Move cancelled. {name} is still in {column}. Outcome: {outcome}.",
+        "reopen": "Reopen",
+        "reopenHint": "To open this deal again, choose Reopen.",
+        "reopenFailed": "Couldn't reopen the deal",
+        "a11yConfirmMove": "Move requested for {name} to {column}. Outcome would be {outcome}. Confirm or cancel in the dialog.",
+        "a11yMoveRequested": "Move requested for {name} to {column}. Outcome remains {outcome}."
     },
     "DealsBrowser": {
         "columnClosedAt": "Closed at",

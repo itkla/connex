@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import {
     DndContext,
     DragOverlay,
@@ -26,6 +26,8 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { Bars3Icon } from '@heroicons/react/24/outline';
+import { IconButton } from '@/components/ui/icon-button';
 
 import { useDragScroll } from '@/app/hooks/useDragScroll';
 
@@ -46,9 +48,10 @@ export interface KanbanBoardProps<T> {
     getId: (item: T) => number;
     getColumnId: (item: T) => string;
     getPosition: (item: T) => number;
-    renderCard: (item: T) => ReactNode;
-    /** Persist a move; the board reverts its optimistic state if this rejects. */
-    onMove?: (itemId: number, toColumnId: string, index: number) => Promise<void>;
+    renderCard: (item: T, dragHandle?: ReactNode) => ReactNode;
+    dragLabel: (item: T) => string;
+    /** Persist a move; rejection or an explicit false cancels its optimistic placement. */
+    onMove?: (itemId: number, toColumnId: string, index: number) => Promise<void | boolean>;
     reduce: boolean;
     emptyHint?: string;
     countLabel: (count: number) => string;
@@ -88,7 +91,7 @@ const boardCollisionDetection: CollisionDetection = (args) => {
 };
 
 export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
-    const { columns, items, getId, getColumnId, getPosition, renderCard, onMove, reduce, emptyHint, countLabel, accessibility } = props;
+    const { columns, items, getId, getColumnId, getPosition, renderCard, dragLabel, onMove, reduce, emptyHint, countLabel, accessibility } = props;
 
     const incoming = useMemo(
         () => groupItems(columns, items, getId, getColumnId, getPosition),
@@ -100,6 +103,8 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const snapshotRef = useRef<ColumnItems>(incoming);
     const snapshotColumnByItemIdRef = useRef<Map<number, string>>(new Map());
     const [activeId, setActiveId] = useState<number | null>(null);
+    const [saving, setSaving] = useState(false);
+    const boardRef = useRef<HTMLDivElement>(null);
 
     const [syncedKey, setSyncedKey] = useState(incomingKey);
     if (syncedKey !== incomingKey && activeId == null) {
@@ -119,6 +124,9 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     );
 
     const commit = (next: ColumnItems) => setColumnItems(next);
+    const restoreFocus = (event: DragEndEvent) => {
+        requestAnimationFrame(() => boardRef.current?.querySelector<HTMLButtonElement>(`[data-kanban-drag-handle="${Number(event.active.id)}"]`)?.focus());
+    };
 
     const onDragStart = (event: DragStartEvent) => {
         if (!onMove) return;
@@ -157,6 +165,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         const snapshot = snapshotRef.current;
         if (!over) {
             commit(snapshot);
+            restoreFocus(event);
             return;
         }
         const overStr = String(over.id);
@@ -164,6 +173,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         const toCol = overStr.startsWith(COL_PREFIX) ? overStr.slice(COL_PREFIX.length) : columnByItemId.get(Number(over.id));
         if (!toCol || !current[toCol]) {
             commit(snapshot);
+            restoreFocus(event);
             return;
         }
 
@@ -192,9 +202,16 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
         const originCol = snapshotColumnByItemIdRef.current.get(activeId);
         const originIndex = originCol ? snapshot[originCol].indexOf(activeId) : -1;
-        if (originCol === toCol && originIndex === finalIndex) return;
+        if (originCol === toCol && originIndex === finalIndex) {
+            restoreFocus(event);
+            return;
+        }
 
-        void onMove(activeId, toCol, finalIndex).catch(() => commit(snapshot));
+        setSaving(true);
+        void onMove(activeId, toCol, finalIndex)
+            .then((accepted) => { if (accepted === false) commit(snapshot); })
+            .catch(() => commit(snapshot))
+            .finally(() => { setSaving(false); restoreFocus(event); });
     };
 
     const activeItem = activeId != null ? itemsById.get(activeId) : undefined;
@@ -203,6 +220,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         leftDragSelector: '[data-kanban-board]',
         excludeDragSelector: '[data-kanban-card]',
     });
+    const setBoardRef = useCallback((node: HTMLDivElement | null) => {
+        boardRef.current = node;
+        scrollRef(node);
+    }, [scrollRef]);
 
     return (
         <DndContext
@@ -211,12 +232,12 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDragEnd={onDragEnd}
-            onDragCancel={() => { setActiveId(null); commit(snapshotRef.current); }}
+            onDragCancel={(event) => { setActiveId(null); commit(snapshotRef.current); restoreFocus(event); }}
             accessibility={accessibility}
         >
             <div className="relative">
                 <div
-                    ref={scrollRef}
+                    ref={setBoardRef}
                     data-kanban-board
                     className="flex gap-4 overflow-x-auto pb-2 data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none"
                 >
@@ -227,8 +248,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
                             ids={columnItems[col.id] ?? []}
                             itemsById={itemsById}
                             renderCard={renderCard}
+                            dragLabel={dragLabel}
                             reduce={reduce}
                             draggable={onMove !== undefined}
+                            disabled={saving}
                             emptyHint={emptyHint}
                             countLabel={countLabel}
                         />
@@ -245,7 +268,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             </div>
             <DragOverlay>
                 {activeItem ? (
-                    <div className={reduce ? 'cursor-grabbing' : 'cursor-grabbing scale-[1.02] shadow-2xl'}>
+                    <div aria-hidden inert className={reduce ? 'cursor-grabbing' : 'cursor-grabbing scale-[1.02] shadow-2xl'}>
                         {renderCard(activeItem)}
                     </div>
                 ) : null}
@@ -259,17 +282,21 @@ function KanbanColumn<T>({
     ids,
     itemsById,
     renderCard,
+    dragLabel,
     reduce,
     draggable,
+    disabled,
     emptyHint,
     countLabel,
 }: {
     col: KanbanColumnDef;
     ids: number[];
     itemsById: Map<number, T>;
-    renderCard: (item: T) => ReactNode;
+    renderCard: (item: T, dragHandle?: ReactNode) => ReactNode;
+    dragLabel: (item: T) => string;
     reduce: boolean;
     draggable: boolean;
+    disabled: boolean;
     emptyHint?: string;
     countLabel: (count: number) => string;
 }) {
@@ -285,14 +312,14 @@ function KanbanColumn<T>({
                 ref={setNodeRef}
                 className={`flex-1 rounded-b-2xl transition-colors duration-150 ${isOver ? 'bg-brand/5 ring-2 ring-inset ring-brand/40' : ''}`}
             >
-                <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+                <SortableContext id={COL_PREFIX + col.id} items={ids} strategy={verticalListSortingStrategy}>
                     <ul className="flex min-h-24 flex-col gap-2 p-2">
                         {ids.map((id) => {
                             const item = itemsById.get(id);
                             if (!item) return null;
                             return (
-                                <SortableCard key={id} id={id} reduce={reduce} draggable={draggable}>
-                                    {renderCard(item)}
+                                <SortableCard key={id} id={id} reduce={reduce} draggable={draggable} disabled={disabled} label={dragLabel(item)}>
+                                    {(handle) => renderCard(item, handle)}
                                 </SortableCard>
                             );
                         })}
@@ -309,8 +336,10 @@ function KanbanColumn<T>({
     );
 }
 
-function SortableCard({ id, reduce, draggable, children }: { id: number; reduce: boolean; draggable: boolean; children: ReactNode }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !draggable });
+function SortableCard({ id, reduce, draggable, disabled, label, children }: {
+    id: number; reduce: boolean; draggable: boolean; disabled: boolean; label: string; children: (handle?: ReactNode) => ReactNode;
+}) {
+    const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !draggable || disabled });
     const style = {
         transform: CSS.Transform.toString(transform),
         transition: reduce ? undefined : transition,
@@ -320,11 +349,23 @@ function SortableCard({ id, reduce, draggable, children }: { id: number; reduce:
             ref={setNodeRef}
             style={style}
             data-kanban-card
-            {...(draggable ? attributes : {})}
-            {...(draggable ? listeners : {})}
-            className={`list-none outline-none ${draggable ? 'touch-none' : ''} ${isDragging ? 'opacity-40' : ''}`}
+            className={`list-none rounded-xl focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring forced-colors:focus-within:outline-[Highlight] ${isDragging ? 'opacity-40' : ''}`}
         >
-            {children}
+            {children(draggable ? (
+                <IconButton
+                    ref={setActivatorNodeRef}
+                    {...attributes}
+                    {...listeners}
+                    data-kanban-drag-handle={id}
+                    label={label}
+                    variant="ghost"
+                    size="icon-toolbar"
+                    disabled={disabled}
+                    className="shrink-0 touch-none cursor-grab active:cursor-grabbing"
+                >
+                    <Bars3Icon className="size-4" />
+                </IconButton>
+            ) : undefined)}
         </li>
     );
 }

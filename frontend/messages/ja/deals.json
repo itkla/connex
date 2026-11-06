@@ -128,7 +128,9 @@
         "delete": "削除",
         "openDealPage": "案件ページを開く",
         "statusOpen": "オープン",
-        "statusClosed": "決着"
+        "statusClosed": "決着",
+        "statusWon": "受注",
+        "statusLost": "失注"
     },
     "DealsLifecycleProgress": {
         "todayDay": "本日 · {totalDays} 日中 {daysOpen} 日目",
@@ -185,7 +187,25 @@
         "a11yLifted": "案件「{name}」を持ち上げました。",
         "a11yOver": "案件「{name}」が「{column}」列の上にあります。",
         "a11yDropped": "案件「{name}」を「{column}」列にドロップしました。",
-        "a11yCancelled": "案件「{name}」の移動をキャンセルしました。"
+        "a11yCancelled": "案件「{name}」の移動をキャンセルしました。",
+        "moveCard": "案件「{name}」を移動",
+        "outcome": {
+            "open": "進行中",
+            "won": "受注",
+            "lost": "失注"
+        },
+        "confirmTitle": "「{column}」に移動しますか？",
+        "confirmDescription": "「{name}」を「{column}」に移動すると、結果が「{outcome}」となり、案件が完了します。後で元のステージに戻しても、「再開」を選ぶまでこの結果は変わりません。",
+        "cancelMove": "キャンセル",
+        "confirmMove": "移動して完了",
+        "moved": "「{name}」のステージは「{column}」、結果は「{outcome}」です。",
+        "movedRetained": "「{name}」を「{column}」に移動しました。結果は引き続き「{outcome}」です。ステージを移動しても案件は再開されません。",
+        "moveCancelled": "移動をキャンセルしました。「{name}」のステージは「{column}」、結果は「{outcome}」のままです。",
+        "reopen": "再開",
+        "reopenHint": "案件を進行中に戻すには「再開」を選んでください。",
+        "reopenFailed": "案件を再開できませんでした",
+        "a11yConfirmMove": "「{name}」を「{column}」に移動しようとしています。結果は「{outcome}」になります。ダイアログで確定またはキャンセルしてください。",
+        "a11yMoveRequested": "「{name}」を「{column}」に移動しようとしています。結果は「{outcome}」のままです。"
     },
     "DealsBrowser": {
         "columnClosedAt": "決着日",

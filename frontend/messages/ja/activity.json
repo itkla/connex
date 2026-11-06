@@ -252,7 +252,9 @@
     "toastFailedDelete": "タスクを削除できませんでした",
     "taskUpdatedSuccess": "タスクを更新しました",
     "taskMarkedAsCompleteSuccess": "タスクを完了にしました",
-    "taskMarkedAsIncompleteSuccess": "タスクを未完了にしました"
+    "taskMarkedAsIncompleteSuccess": "タスクを未完了にしました",
+    "moveCard": "タスク「{name}」を移動",
+    "openTask": "タスクを開く"
   },
   "ActivityTasksDialog": {
     "titleCreate": "新しいタスク",

@@ -252,7 +252,9 @@
     "toastFailedDelete": "Couldn't delete the task",
     "taskUpdatedSuccess": "Task updated successfully",
     "taskMarkedAsCompleteSuccess": "Task marked as complete",
-    "taskMarkedAsIncompleteSuccess": "Task marked as incomplete"
+    "taskMarkedAsIncompleteSuccess": "Task marked as incomplete",
+    "moveCard": "Move task {name}",
+    "openTask": "Open task"
   },
   "ActivityTasksDialog": {
     "titleCreate": "New task",

@@ -162,6 +162,11 @@ Outcomes remain stage-independent. Mark won/lost keeps the current stage. Moving
 stage forces its outcome; moving away does not clear it. Reopening is an explicit operation with
 the existing reopen semantics.
 
+The deal board confirms entry into a won/lost stage before sending the move. Its result names the
+saved stage and outcome. Moving a closed deal to an ordinary stage explains that it is still won
+or lost and offers an explicit Reopen action through the existing intent endpoint; no ordinary
+stage move automatically reopens a deal.
+
 The reconciliation resolves these cases:
 
 - **Lost deals:** `actual_value` is **always zero**, on every route. Any client-supplied value is
