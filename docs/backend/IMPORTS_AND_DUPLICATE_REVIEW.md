@@ -35,6 +35,29 @@ matches. Missing current phone evidence is checked per target, so another contac
 does not suppress the selected contact's provenance backfill. Candidate visibility, truncation
 limits and one-use review proofs remain unchanged.
 
+## CSV headers and person names
+
+The CSV wizard suggests only exact known aliases for fields supported by the selected entity,
+after Unicode NFKC, case and space/underscore/hyphen normalization. Japanese headers remain
+Japanese. Company Name means the company link for contacts/deals and the record name for
+companies. Unsupported lifecycle/source fields, phonetic-name headers and uncertain headers stay
+unmapped; fragments never imply Tags. Competing columns for a single-valued target stay unmapped rather
+than choosing a winner by file order. An unambiguous full-name column takes precedence over
+initial split-name suggestions.
+
+Contacts may map one full-name column unchanged, or select one given-name and/or one family-name
+column. The Map step shows the composed sample and offers both orders. Japanese 姓/名 headers or
+the Japanese interface default to family then given; otherwise the default is given then family.
+Trim each selected part, omit empty parts and join with a single space. Keep single-column full
+names intact; do not guess where to split them. A full-name mapping combined with name parts, or
+multiple columns for a name part, blocks progression until the user resolves the conflict.
+
+Composition happens before preview through the existing single `name` target, using a derived
+column that cannot overwrite a source column. The original row values remain present. Preview
+and commit use the exact same derived rows and mapping, so the existing review context and proof
+bind the composed names. Changing name parts or their effective order requires a fresh review.
+The server continues to validate required names and all other imported fields.
+
 ## Review proofs
 
 Preview admission stores only the established hashes/fingerprints plus a random expiring one-use rendered-review proof. Do not persist normalized PII merely to recreate matching later.
