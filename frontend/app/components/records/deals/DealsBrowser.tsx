@@ -1,5 +1,7 @@
 'use client';
 
+import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
+
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -128,7 +130,6 @@ import {
     type SegmentCondition,
     type SegmentFields,
     type RuleBuilderOptions,
-    type Pipeline,
     type Stage,
     type Contact,
     type Tag,
@@ -424,20 +425,20 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const refreshData = useCallback(() => setDataRevision((revision) => revision + 1), []);
 
     const [companies, setCompanies] = useState<Company[]>([]);
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+    const { pipelines, stagesByPipeline, setPipelines, setStagesByPipeline } = usePipelineChoices();
     const [contactByDealId, setContactByDealId] = useState<Map<number, Contact>>(new Map());
     const [riskByDealId, setRiskByDealId] = useState<Map<number, DealRisk>>(new Map());
-    const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
 
     useEffect(() => {
-        getPipelines().then(async (ps) => {
+        const origin = workspacePinnedRequest(activeWorkspaceId);
+        getPipelines(origin).then(async (ps) => {
             setPipelines(ps);
             const entries = await Promise.all(
-                ps.map(async (p) => [p.id, await getStagesByPipelineId(p.id).catch(() => [] as Stage[])] as const),
+                ps.map(async (p) => [p.id, await getStagesByPipelineId(p.id, origin).catch(() => [] as Stage[])] as const),
             );
             setStagesByPipeline(Object.fromEntries(entries));
         }).catch(() => setPipelines([]));
-    }, []);
+    }, [activeWorkspaceId, setPipelines, setStagesByPipeline]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1804,6 +1805,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     setPayload={setNewPayload}
                     pipelines={pipelines}
                     stagesByPipeline={stagesByPipeline}
+                    onPipelineCreated={(pipeline, stages) => {
+                        setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+                        setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+                    }}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
                     isDirty={!isCreating && !creationSucceeded && isDealPayloadDirty(newPayload, EMPTY_DEAL_DRAFT)}

@@ -1,5 +1,7 @@
 "use client";
 
+import { requestGuardedNavigation } from "@/app/hooks/useUnsavedChangesGuard";
+
 import {
     ArrowRightStartOnRectangleIcon,
     ArrowPathIcon,
@@ -800,7 +802,7 @@ export default function Sidebar({
 
     async function handleLogout() {
         try {
-            router.push("/auth/logout");
+            requestGuardedNavigation(() => router.push("/auth/logout"));
         } catch {
             console.error("Failed to logout");
         }
