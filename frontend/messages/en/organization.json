@@ -237,6 +237,11 @@
         "colActor": "By",
         "colWhen": "When",
         "action": {
+            "organization": {
+                "audit": {
+                    "export": "Organization audit log exported"
+                }
+            },
             "appi": {
                 "subject_request": {
                     "create": "Privacy request logged",

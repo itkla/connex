@@ -50,10 +50,13 @@ public class AuditController {
         @RequestParam(required = false) String entityType,
         @RequestParam(required = false) Integer entityId,
         @RequestParam(defaultValue = "10000") int limit,
-        @RequestParam(defaultValue = "0") int offset
+        @RequestParam(defaultValue = "0") int offset,
+        @RequestParam(required = false) List<Integer> ids
     ) {
         workspaceService.requirePermission(Permission.AUDIT_READ);
-        String body = entityType != null && entityId != null
+        String body = ids != null
+            ? auditService.exportSelected(entityType, entityId, ids, limit, offset)
+            : entityType != null && entityId != null
             ? auditService.exportForEntity(entityType, entityId, limit, offset)
             : auditService.exportRecent(limit, offset);
         return csv("audit-log.csv", body);

@@ -237,6 +237,11 @@
         "colActor": "実行者",
         "colWhen": "日時",
         "action": {
+            "organization": {
+                "audit": {
+                    "export": "組織の監査ログをエクスポートしました"
+                }
+            },
             "appi": {
                 "subject_request": {
                     "create": "プライバシー関連の申請を登録しました",

@@ -5,6 +5,7 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import { auditExportSelection, AUDIT_EXPORT_SELECTION_LIMIT } from "@/app/lib/auditExport";
 import {
     adoptBrowserAccount,
     invalidateAccountStorage,
@@ -5420,6 +5421,14 @@ export function deleteAttachment(id: number, init: RequestInit = {}) {
 
 export function getAuditLogs(params: Types.AuditLogParams = {}, init: RequestInit = {}) {
     return getJson<Types.AuditLogEntry[]>(`/api/audit${buildQuery(params)}`, init);
+}
+
+/** Downloads only the selected loaded rows, under the existing audit authority and passkey gate. */
+export function exportAuditRowsCsv(ids: readonly number[], orgId?: number, init: RequestInit = {}) {
+    const selection = auditExportSelection(ids);
+    const path = orgId === undefined ? "/api/audit/export" : `/api/orgs/${orgId}/audit/export`;
+    return downloadCsv(`${path}${buildQuery({ ids: selection, limit: AUDIT_EXPORT_SELECTION_LIMIT, offset: 0 })}`,
+        orgId === undefined ? "audit-log.csv" : "org-audit-log.csv", init);
 }
 
 /*

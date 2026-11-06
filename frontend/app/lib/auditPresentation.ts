@@ -32,7 +32,12 @@ export type AuditMetadataLabelKey =
     | 'metaStopReason'
     | 'metaDemaskWarnings'
     | 'metaParseOutcome'
-    | 'metaReason';
+    | 'metaReason'
+    | 'metaExportRows'
+    | 'metaExportScope'
+    | 'metaExportFiltered'
+    | 'metaExportSegment'
+    | 'metaExportSelected';
 
 export type AuditMetadataRow = {
     key: string;
@@ -257,6 +262,23 @@ const AI_FIELDS: readonly MetadataField[] = [
     { key: 'reason', labelKey: 'metaReason', validate: knownString(AI_REASONS) },
 ];
 
+const CSV_EXPORT_TARGETS = new Map([
+    ['person.export', 'export.person'],
+    ['company.export', 'export.company'],
+    ['deal.export', 'export.deal'],
+    ['product.export', 'export.product'],
+    ['audit.export', 'export.audit'],
+    ['organization.audit.export', 'export.audit'],
+]);
+
+const CSV_EXPORT_FIELDS: readonly MetadataField[] = [
+    { key: 'rowCount', labelKey: 'metaExportRows', validate: nonNegativeInteger },
+    { key: 'scope', labelKey: 'metaExportScope', validate: knownString(new Set(['workspace', 'organization'])) },
+    { key: 'filtered', labelKey: 'metaExportFiltered', validate: booleanValue },
+    { key: 'segment', labelKey: 'metaExportSegment', validate: booleanValue },
+    { key: 'selected', labelKey: 'metaExportSelected', validate: booleanValue },
+];
+
 function metadataRows(
     changes: Record<string, unknown> | null | undefined,
     fields: readonly MetadataField[],
@@ -315,6 +337,8 @@ export function auditOutcome(
 export function auditTargetLabel(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'targetLabel' | 'changes'>,
 ): string | null | undefined {
+    const exportTarget = CSV_EXPORT_TARGETS.get(entry.action);
+    if (exportTarget !== undefined) return exportTarget;
     if (isSecretEntry(entry)) {
         const purpose = knownString(SECRET_PURPOSES)(entry.changes?.purpose);
         if (typeof purpose === 'string') return purpose;
@@ -339,7 +363,7 @@ export function auditTargetLabel(
 export function auditSummary(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'summary'>,
 ): string | null {
-    return isSensitiveAuditEntry(entry) ? null : entry.summary ?? null;
+    return isSensitiveAuditEntry(entry) || CSV_EXPORT_TARGETS.has(entry.action) ? null : entry.summary ?? null;
 }
 
 /** Returns a controlled error category for sensitive audit rows. */
@@ -356,6 +380,15 @@ export function presentAuditEntry(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'entityId' | 'targetLabel' | 'outcome' | 'changes'>,
 ): AuditPresentation {
     const changes = entry.changes;
+    if (CSV_EXPORT_TARGETS.has(entry.action)) {
+        return {
+            diffs: [],
+            metadata: [
+                ...fixedMetadata({ ...entry, targetLabel: auditTargetLabel(entry) }),
+                ...metadataRows(changes, CSV_EXPORT_FIELDS),
+            ],
+        };
+    }
     const secretEntry = isSecretEntry(entry);
     if (secretEntry || isAiEntry(entry)) {
         const result = auditOutcome(entry);

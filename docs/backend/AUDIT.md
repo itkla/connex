@@ -61,3 +61,34 @@ or client receipt. It survives a later serialization/transport failure; committe
 left truncated without an error suffix or closing delimiters. An explicit retry creates another
 event. [LOCKING.md](LOCKING.md) defines suspension, catalog restoration, snapshot resumption and
 the two-connection budget; [API_SURFACE.md](API_SURFACE.md) defines integrity headers and failures.
+
+## CSV export evidence and bounded audit selection (#2260)
+
+A completed CRM CSV assembly appends `<entity>.export` for `person`, `company`, `deal` or
+`product` before returning its CSV. Smart Segment deal exports use the same `deal.export`
+action and identify segment use with a boolean. The actor comes from the authenticated
+principal, and the workspace and organization come from the resolved tenant context. The
+approved metadata is `format`, `rowCount`, `scope`, the canonical `memberScope` mode, and
+`filtered`/`segment` flags. It contains no record values, search text, selected member IDs,
+filter values, segment definitions, or customer labels. Empty successful exports record zero
+rows. Query, rendering and step-up failures create no completed-export event.
+
+Workspace audit CSV assembly appends `audit.export`; organization audit assembly appends
+`organization.audit.export` with explicit null workspace scope and the authorized organization.
+Their metadata contains only the CSV format, actual row count, scope, selection/entity-scope
+flags, and clamped limit/offset. Selected audit IDs are never copied into that event.
+All completion appends are strict: an audit persistence failure prevents returning the CSV.
+The evidence proves successful assembly and an authorized release attempt, not network delivery
+or client receipt. The append follows read-only visibility callbacks; those callbacks remain
+free of writes. Existing access policy, privacy exclusions, CSV redaction/formula guards and
+recent-WebAuthn step-up are unchanged.
+
+The existing workspace and organization `/audit/export` endpoints accept optional comma-separated
+`ids`. A present selection must contain between 1 and 200 positive IDs before deduplication;
+empty, invalid and oversized selections are rejected. SQL intersects IDs with the resolved
+workspace or authorized organization, plus the existing complete workspace entity scope when
+supplied. Organization selection retains the org-plane-only and historical-reference guards;
+workspace events never become organization-plane events merely because a workspace was deleted.
+Without `ids`, the existing export limit (at most 10,000), offset bound and ordering remain in
+place. The audit UI explicitly exports up to 200 currently loaded rows matching its filters,
+using server CSV generation and the existing authority/step-up path.

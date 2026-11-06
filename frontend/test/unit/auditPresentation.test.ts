@@ -27,6 +27,26 @@ function entry(overrides: Partial<AuditLogEntry>): AuditLogEntry {
 }
 
 describe('presentAuditEntry', () => {
+    it.each(['person.export', 'company.export', 'deal.export', 'product.export', 'audit.export', 'organization.audit.export'])(
+        'presents safe counts and scope for %s without copying filter or exported values', (action) => {
+            const exported = entry({
+                action, entityId: null, targetLabel: null, summary: 'CSV export prepared',
+                changes: { rowCount: 0, scope: 'workspace', filtered: true, segment: false,
+                    selected: true, query: 'private filter', values: ['private exported value'] },
+            });
+            const presentation = presentAuditEntry(exported);
+            expect(presentation.diffs).toEqual([]);
+            expect(presentation.metadata).toEqual(expect.arrayContaining([
+                expect.objectContaining({ key: 'rowCount', value: 0 }),
+                expect.objectContaining({ key: 'scope', value: 'workspace' }),
+                expect.objectContaining({ key: 'filtered', value: true }),
+                expect.objectContaining({ key: 'segment', value: false }),
+            ]));
+            expect(JSON.stringify(presentation)).not.toContain('private');
+            expect(auditSummary(exported)).toBeNull();
+        },
+    );
+
     it('renders allowlisted secret metadata instead of treating values as empty diffs', () => {
         const presentation = presentAuditEntry(entry({
             action: 'secret_store.secret.use',

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.dto.ProductFacetFilter;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
@@ -64,12 +66,79 @@ class ExportServiceTest {
     @Mock private TagMapper tagMapper;
     @Mock private CustomFieldDefinitionMapper customFieldDefinitionMapper;
     @Mock private CustomFieldValueService customFieldValueService;
+    @Mock private DisqualificationReasonService disqualificationReasonService;
     @Mock private AuditService auditService;
     @InjectMocks private ExportService exportService;
 
     @BeforeEach
     void scopeCallbacks() {
         ReflectionTestUtils.setField(exportService, "recordVisibilityScopeControlAccess", recordVisibilityScopeControlAccess);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"persons", "companies", "products", "deals", "segmentDeals"})
+    void everySuccessfulExportRecordsItsActualRowCountWithoutValues(String surface) {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
+
+        String csv = exportSurface(surface);
+
+        assertTrue(csv.startsWith("id,"));
+        String entity = switch (surface) {
+            case "persons" -> "person";
+            case "companies" -> "company";
+            case "products" -> "product";
+            default -> "deal";
+        };
+        verify(auditService).recordDataExportCompleted(
+            entity, 0, null, surface.equals("segmentDeals"), surface.equals("segmentDeals"));
+    }
+
+    @Test
+    void queryFailureDoesNotRecordACompletedExport() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
+        when(productMapper.getFiltered(42, null, ProductFacetFilter.none()))
+            .thenThrow(new IllegalStateException("Read failed"));
+
+        assertThrows(IllegalStateException.class, () -> exportService.exportProducts(null, ProductFacetFilter.none()));
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void renderingFailureDoesNotRecordACompletedExport() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
+        Deal deal = new Deal();
+        deal.setId(7);
+        deal.setClosedAt("invalid timestamp");
+        when(dealService.queryDealsForExport(null, null, List.of(), List.of(), List.of(), List.of(),
+            false, List.of(), List.of(), null)).thenReturn(List.of(deal));
+
+        assertThrows(java.time.format.DateTimeParseException.class, () -> exportSurface("deals"));
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void auditPersistenceFailurePreventsTheCompletedCsvFromBeingReturned() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
+        doThrow(new IllegalStateException("Audit unavailable")).when(auditService)
+            .recordDataExportCompleted("product", 0, null, false, false);
+
+        assertThrows(IllegalStateException.class, () -> exportService.exportProducts(null, ProductFacetFilter.none()));
+    }
+
+    private String exportSurface(String surface) {
+        return switch (surface) {
+            case "persons" -> exportService.exportPersons(null, List.of(), List.of(), false,
+                null, List.of(), false, List.of(), false, List.of(), false, null);
+            case "companies" -> exportService.exportCompanies(null, List.of(), false, List.of(), null, null);
+            case "products" -> exportService.exportProducts(null, ProductFacetFilter.none());
+            case "deals" -> exportService.exportDeals(null, null, List.of(), List.of(), List.of(),
+                List.of(), false, List.of(), List.of(), null);
+            case "segmentDeals" -> exportService.exportSegmentDeals(null, null, null, List.of(),
+                List.of(), List.of(), List.of(), false, List.of(), List.of(), null);
+            default -> throw new IllegalArgumentException(surface);
+        };
     }
 
     @ParameterizedTest
@@ -126,6 +195,10 @@ class ExportServiceTest {
                     }
                 });
         verify(auditService).recordExportStepUpRefused();
+        verify(auditService, never()).recordDataExportCompleted(
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.nullable(MemberScope.class),
+            org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean());
         verifyNoInteractions(workspaceService, personMapper, companyMapper,
                 productMapper, dealService, tagMapper, customFieldValueService);
     }
@@ -166,6 +239,7 @@ class ExportServiceTest {
                     ? "7,Renewal,1000,USD,,,,,won,,2025-02-28T15:00:00Z,2025-01-31T15:00:00Z\r\n"
                     : "7,Renewal,1000,USD,,,,,open,,,\r\n"),
             csv);
+        verify(auditService).recordDataExportCompleted("deal", 1, null, false, false);
     }
 
     @ParameterizedTest
@@ -260,5 +334,6 @@ class ExportServiceTest {
                 + "7,'=SKU,\"'\nWidget, \"\"Pro\"\"\",'＋cmd,false,'－seat,1000,'＠JPY,10.5000,'＝recurring,2027-01-02,\r\n",
             csv);
         verify(productMapper).getFiltered(42, "%Widget%", facets);
+        verify(auditService).recordDataExportCompleted("product", 1, null, true, false);
     }
 }

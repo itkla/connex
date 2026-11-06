@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.observability;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +20,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import ooo.klae.connex.backend.beans.AuditLog;
+import ooo.klae.connex.backend.beans.AuditIntegrityHead;
 import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 import ooo.klae.connex.backend.mappers.*;
 import ooo.klae.connex.backend.services.AuditIntegrityService;
@@ -225,12 +228,21 @@ class SecuritySignalMetricsTest {
             AuditLogMapper mapper = mock(AuditLogMapper.class);
             var properties = new AuditIntegrityProperties();
             properties.setHmacSecret("test-alert-integrity-secret-at-least-32-chars");
-            var integrity = new AuditIntegrityService(mapper, mock(AuditIntegrityMapper.class),
-                    mock(UserMapper.class), mock(WorkspaceMapper.class), mock(OrganizationMapper.class),
+            AuditIntegrityMapper heads = mock(AuditIntegrityMapper.class);
+            WorkspaceMapper workspaces = mock(WorkspaceMapper.class);
+            when(workspaces.lockWorkspaceForShare(7)).thenReturn(7);
+            AuditIntegrityHead head = new AuditIntegrityHead();
+            head.setNextChainIndex(1);
+            head.setCurrentHash("0".repeat(64));
+            when(heads.lockHead("workspace", 7)).thenReturn(head);
+            when(heads.advanceHead(eq("workspace"), eq(7), eq(1L), eq(2L), anyString())).thenReturn(1);
+            var integrity = new AuditIntegrityService(mapper, heads,
+                    mock(UserMapper.class), workspaces, mock(OrganizationMapper.class),
                     properties, new ObjectMapper(), Clock.systemUTC(),
                     new SecuritySignalMetrics(failing, Clock.systemUTC()));
             var tenant = mock(ooo.klae.connex.backend.tenant.TenantContext.class);
             when(tenant.getWorkspaceId()).thenReturn(7);
+            when(tenant.getOrgId()).thenReturn(null);
             var service = new ooo.klae.connex.backend.services.AuditService(
                     org.mockito.Mockito.mock(ooo.klae.connex.backend.services.SessionSecurityService.class),
                     mapper, integrity,
@@ -243,7 +255,7 @@ class SecuritySignalMetricsTest {
             invalid.setRowHash("f".repeat(64));
             assertFalse(integrity.hasValidIntegrity(invalid));
             if (export) {
-                when(mapper.findWorkspaceExport(7, 20, 0)).thenReturn(java.util.List.of(invalid));
+                when(mapper.findWorkspaceExport(7, 20, 0, null, null, null)).thenReturn(java.util.List.of(invalid));
                 String csv = assertDoesNotThrow(() -> service.exportRecent(20, 0));
                 assertTrue(csv.contains("retained"));
                 assertFalse(csv.contains("Private"));

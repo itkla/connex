@@ -629,7 +629,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(auditLogMapper.findOrgExport(
             drillOrganization.getId(),
             500,
-            0).stream().noneMatch(
+            0,
+            null).stream().noneMatch(
                 entry -> "test.lifecycle.retained".equals(entry.getAction())));
     }
 
