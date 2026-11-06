@@ -1,5 +1,7 @@
 'use client';
 
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+
 import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
@@ -134,12 +136,15 @@ export default function ActivitiesBrowser({
         userId: currentUserId,
         workspaceId: activeWorkspaceId,
         initialValue: isFilter(urlPreference) ? urlPreference : listFilters.hasRecordContext ? 'all' : null,
-        fallback: 'all',
+        fallback: isFilter(urlPreference) ? urlPreference : 'all',
         isValue: isFilter,
     });
     const records = useServerRecords(getActivitiesPage, { ...listFilters.params, type: filter }, { urlSync: true, retainPreviousData: false });
     const activities = records.items;
-    const { query, setQuery } = records;
+    const { query, setQuery, reload } = records;
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'activity') reload();
+    }), [reload]);
     const personSearch = useContactTargetSearch(true, [...records.items.map((item) => item.personId), ...personFilter].map((id) => id == null ? null : Number(id)));
     const dealSearch = useDealTargetSearch(true, [...records.items.map((item) => item.dealId), ...dealFilter].map((id) => id == null ? null : Number(id)));
     const memberSearch = useMemberTargetSearch(true, [currentUserId, ...records.items.map((item) => item.createdById), ...listFilters.memberFilter].map(Number));
@@ -476,7 +481,7 @@ export default function ActivitiesBrowser({
 
             <ActivityDialog
                 open={creating}
-                onOpenChange={(open) => { setCreating(open); if (!open) records.reload(); }}
+                onOpenChange={setCreating}
                 persons={persons}
                 deals={deals}
                 currentUserId={currentUserId}

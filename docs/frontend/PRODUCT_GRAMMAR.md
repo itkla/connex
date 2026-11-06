@@ -37,6 +37,11 @@ Do not turn record details into dense multi-panel consoles or promote aggregate 
 
 Client collections using `useServerRecords` wrap their list content in `RecordListState`, keeping search and filter controls outside it so members can change or clear a failed filter. Failed loads show the shared alert and Retry, suppress empty and onboarding copy, and preserve the last successful rows only within the same workspace. A pending retry keeps its error visible with a disabled busy control; success clears the error. Expired sessions use the shared sign-in redirect and suppress collection content. Authentication and permission failures discard the cached page until a successful load; permission refusals use access guidance. API support references appear when available.
 
+Client-owned activity/task lists subscribe to the shared record-mutation signal. Canonical composers
+publish after acknowledged creation, including activity follow-up tasks; rejected or aborted writes
+publish nothing. This reloads the current filtered page and total even when Quick Create lives outside
+the list tree. A server-component refresh alone does not invalidate those client-owned pages.
+
 Every collection/list surface distinguishes all four states:
 
 - Loading: shape-matched `loading.tsx` skeletons, not a centered spinner over content.

@@ -1,5 +1,7 @@
 'use client';
 
+import { publishRecordMutation } from '@/app/lib/record-mutation-events';
+
 import { useContactTargetSearch, useDealTargetSearch, useMemberTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
@@ -64,6 +66,8 @@ type Props = {
     defaultAssignee?: User | null;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     /** Prefills the due date (a `YYYY-MM-DD` value), e.g. the day tapped in the calendar. */
     defaultDueDate?: string;
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
@@ -108,6 +112,7 @@ function ScopedTaskDialog({
     defaultAssignee = null,
     defaultPerson = null,
     defaultDeal = null,
+    recordScope,
     defaultDueDate = '',
     defaultDescription = '',
     initialDraftGeneration,
@@ -183,6 +188,7 @@ function ScopedTaskDialog({
                         defaultAssignee={defaultAssignee}
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
+                        recordScope={recordScope}
                         defaultDueDate={defaultDueDate}
                         defaultDescription={defaultDescription}
                         ownsInitialDraft={draftPersistence && initialDraftGeneration !== undefined}
@@ -225,6 +231,8 @@ type TaskDialogFormProps = {
     defaultAssignee?: User | null;
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     defaultDueDate: string;
     defaultDescription: string;
     ownsInitialDraft?: boolean;
@@ -266,6 +274,7 @@ export function TaskDialogForm({
     defaultAssignee = null,
     defaultPerson,
     defaultDeal,
+    recordScope,
     defaultDueDate,
     defaultDescription,
     ownsInitialDraft = false,
@@ -296,8 +305,8 @@ export function TaskDialogForm({
     const memberSearch = useMemberTargetSearch(!compact, [assignee?.id, currentUserId], users);
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
-    const personSearch = useContactTargetSearch(!compact && !hideLinks, [selectedPerson?.id], persons);
-    const dealSearch = useDealTargetSearch(!compact && !hideLinks, [selectedDeal?.id], deals);
+    const personSearch = useContactTargetSearch(!compact && !hideLinks && recordScope === undefined, [selectedPerson?.id], persons);
+    const dealSearch = useDealTargetSearch(!compact && !hideLinks && recordScope === undefined, [selectedDeal?.id], deals);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const ownsDraftRef = useRef(ownsInitialDraft);
@@ -392,6 +401,7 @@ export function TaskDialogForm({
                 origin,
             );
             if (requestInit?.signal?.aborted) return;
+            publishRecordMutation('task');
             onClearDraft?.();
             toastSuccess(t('toastCreated'));
             setSucceeded(true);
@@ -522,15 +532,17 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-person">{t('personLabel')}</Label>
                             <Combobox
-                                items={personSearch.contacts}
-                                serverSearch={personSearch.serverSearch}
-                                onInputValueChange={personSearch.onInputValueChange}
+                                items={recordScope ? persons : personSearch.contacts}
+                                disabled={recordScope === 'person'}
+                                serverSearch={recordScope ? undefined : personSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : personSearch.onInputValueChange}
                                 itemToStringLabel={(p: Contact) => p.name}
                                 value={selectedPerson}
-                                onValueChange={(p) => setSelectedPerson(p as Contact | null)}
+                                onValueChange={(p) => { if (recordScope !== 'person') setSelectedPerson(p as Contact | null); }}
                             >
                                 <ComboboxInput
                                     id="task-person"
+                                    disabled={recordScope === 'person'}
                                     placeholder={t('personPlaceholder')}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
@@ -554,15 +566,17 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-deal">{t('dealLabel')}</Label>
                             <Combobox
-                                items={dealSearch.deals}
-                                serverSearch={dealSearch.serverSearch}
-                                onInputValueChange={dealSearch.onInputValueChange}
+                                items={recordScope ? deals : dealSearch.deals}
+                                disabled={recordScope === 'deal'}
+                                serverSearch={recordScope ? undefined : dealSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : dealSearch.onInputValueChange}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
-                                onValueChange={(d) => setSelectedDeal(d as Deal | null)}
+                                onValueChange={(d) => { if (recordScope !== 'deal') setSelectedDeal(d as Deal | null); }}
                             >
                                 <ComboboxInput
                                     id="task-deal"
+                                    disabled={recordScope === 'deal'}
                                     placeholder={t('dealPlaceholder')}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >

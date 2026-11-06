@@ -67,6 +67,41 @@ for (const locale of ['en', 'ja'] as const) {
             }
         }
 
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        for (const [path, endpoint] of [['all', 'activities'], ['tasks', 'tasks']] as const) {
+            await page.goto(`/activity/${path}?contactId=${id(contact)}`);
+            await expect(page.getByText(descriptions[endpoint === 'tasks' ? 0 : 25], { exact: true })).toBeVisible();
+            const cleared = page.waitForResponse((result) => {
+                const url = new URL(result.url());
+                return url.pathname === `/api/${endpoint}/page` && !url.searchParams.has('persons') && !url.searchParams.has('companies');
+            });
+            await page.locator(`a[href="/activity/${path}"]:visible`).first().click();
+            const response = await cleared;
+            expect(response.ok()).toBe(true);
+            expect(await response.json()).toMatchObject({ total: 27 });
+            await expect.poll(() => new URL(page.url()).searchParams.get('persons')).toBeNull();
+            if (endpoint === 'tasks') {
+                await expect(page.getByRole('button', { name: message(locale, 'activity', 'ActivityList.next'), exact: true })).toBeEnabled();
+                await page.getByRole('button', { name: message(locale, 'activity', 'ActivityList.next'), exact: true }).click();
+            }
+            await expect(page.getByText(unrelatedTitle, { exact: true })).toBeVisible();
+        }
+
+        const contactFilterLabel = message(locale, 'common', 'Filters.contact');
+        const contactFilter = page.getByRole('button', { name: contactFilterLabel, exact: true });
+        await contactFilter.focus();
+        await page.keyboard.press('Enter');
+        const contactSearch = page.getByRole('textbox', { name: contactFilterLabel, exact: true });
+        await expect(contactSearch).toBeFocused();
+        await contactSearch.fill(`List contact ${key}`);
+        await expect(page.getByRole('menuitemcheckbox', { name: `List contact ${key}`, exact: true })).toBeVisible();
+        await page.keyboard.press('ArrowDown');
+        await expect(page.getByRole('menuitemcheckbox', { name: `List contact ${key}`, exact: true })).toBeFocused();
+        await page.keyboard.press('Space');
+        await page.keyboard.press('Tab');
+        await expect(contactSearch).toBeFocused();
+        await page.keyboard.press('Escape');
+
         await page.goto(`/activity/tasks?companyId=${id(company)}`);
         const title = page.locator('li').getByText(descriptions[0], { exact: true });
         await expect(title).toBeVisible();

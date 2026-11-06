@@ -1,4 +1,4 @@
-export type RecordMutationEntity = 'contact' | 'company';
+export type RecordMutationEntity = 'contact' | 'company' | 'task' | 'activity';
 
 const RECORD_MUTATION_EVENT = 'connex:record-mutated';
 

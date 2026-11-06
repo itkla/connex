@@ -1,5 +1,7 @@
 'use client';
 
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+
 import {
     useCallback,
     useEffect,
@@ -184,7 +186,7 @@ export default function TasksBrowser({
         userId: currentUserId,
         workspaceId: activeWorkspaceId,
         initialValue: isQueue(urlPreference) ? urlPreference : listFilters.hasRecordContext ? 'allOpen' : null,
-        fallback: 'myOpen',
+        fallback: isQueue(urlPreference) ? urlPreference : listFilters.hasRecordContext ? 'allOpen' : 'myOpen',
         isValue: isQueue,
     });
     const [view, setView] = useScopedViewPreference<TaskView>({
@@ -198,8 +200,12 @@ export default function TasksBrowser({
     const effectiveView: TaskView = effectiveListView(view, isMobile);
     const records = useServerRecords(getTasksPage, { ...listFilters.params, queue: effectiveView === 'board' ? 'all' : queue }, { urlSync: true, retainPreviousData: false, requestContext: String(today) });
     const tasks = records.items;
-    const { query, setQuery } = records;
-    const personSearch = useContactTargetSearch(true, [...records.items.map((item) => item.personId), ...personFilter].map((id) => id == null ? null : Number(id)));
+    const { query, setQuery, reload } = records;
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'task') reload();
+    }), [reload]);
+    const [editingTask, setEditingTask] = useState<Task | null>(null);
+    const personSearch = useContactTargetSearch(true, [editingTask?.personId, ...records.items.map((item) => item.personId), ...personFilter].map((id) => id == null ? null : Number(id)));
     const dealSearch = useDealTargetSearch(true, [...records.items.map((item) => item.dealId), ...dealFilter].map((id) => id == null ? null : Number(id)));
     const memberSearch = useMemberTargetSearch(true, [currentUserId, ...records.items.map((item) => item.assignedToId), ...listFilters.memberFilter].map(Number));
     const companySearch = useCompanySearch(true, [...companyFilter].map(Number));
@@ -214,7 +220,6 @@ export default function TasksBrowser({
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
-    const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [creating, setCreating] = useState(false);
     const [deletingTask, setDeletingTask] = useState<Task | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -939,7 +944,7 @@ export default function TasksBrowser({
 
             <TaskDialog
                 open={creating}
-                onOpenChange={(open) => { setCreating(open); if (!open) records.reload(); }}
+                onOpenChange={setCreating}
                 persons={persons}
                 deals={deals}
                 users={users}

@@ -1,5 +1,7 @@
 'use client';
 
+import { publishRecordMutation } from '@/app/lib/record-mutation-events';
+
 import { useContactTargetSearch, useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
@@ -72,6 +74,8 @@ type Props = {
     currentUserId: number;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     /** Prefills the timestamp (a `datetime-local` value); defaults to now when omitted. */
     defaultTimestamp?: string;
     /** Prefills the activity type, e.g. carried over from the Quick Create panel. */
@@ -116,6 +120,7 @@ export default function ActivityDialog({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    recordScope,
     defaultTimestamp,
     defaultType,
     defaultSubject = '',
@@ -174,6 +179,7 @@ export default function ActivityDialog({
                         currentUserId={currentUserId}
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
+                        recordScope={recordScope}
                         defaultTimestamp={defaultTimestamp}
                         defaultType={defaultType}
                         defaultSubject={defaultSubject}
@@ -213,6 +219,8 @@ type ActivityDialogFormProps = {
     currentUserId: number;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     defaultTimestamp?: string;
     defaultType?: ActivityType;
     defaultSubject?: string;
@@ -247,6 +255,7 @@ export function ActivityDialogForm({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    recordScope,
     defaultTimestamp,
     defaultType,
     defaultSubject = '',
@@ -275,8 +284,8 @@ export function ActivityDialogForm({
     const [when, setWhen] = useState(() => defaultTimestamp ?? toDatetimeLocalValue(new Date().toISOString(), timeZone));
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
-    const personSearch = useContactTargetSearch(true, [selectedPerson?.id], persons);
-    const dealSearch = useDealTargetSearch(true, [selectedDeal?.id], deals);
+    const personSearch = useContactTargetSearch(recordScope === undefined, [selectedPerson?.id], persons);
+    const dealSearch = useDealTargetSearch(recordScope === undefined, [selectedDeal?.id], deals);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const [followUpEnabled, setFollowUpEnabled] = useState(false);
@@ -369,6 +378,7 @@ export function ActivityDialogForm({
                 );
                 if (requestInit?.signal?.aborted) return;
                 activityCreatedRef.current = true;
+                publishRecordMutation('activity');
                 onClearDraft?.();
             }
             if (followUpEnabled) {
@@ -384,6 +394,7 @@ export function ActivityDialogForm({
                         origin,
                     );
                     if (requestInit?.signal?.aborted) return;
+                    publishRecordMutation('task');
                 } catch (taskErr) {
                     if (requestInit?.signal?.aborted) return;
                     setFollowUpFailed(true);
@@ -520,12 +531,14 @@ export function ActivityDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-person">{t('personLabel')}</Label>
                             <Combobox
-                                items={personSearch.contacts}
-                                serverSearch={personSearch.serverSearch}
-                                onInputValueChange={personSearch.onInputValueChange}
+                                items={recordScope ? persons : personSearch.contacts}
+                                disabled={recordScope === 'person'}
+                                serverSearch={recordScope ? undefined : personSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : personSearch.onInputValueChange}
                                 itemToStringLabel={(p: Contact) => p.name}
                                 value={selectedPerson}
                                 onValueChange={(p) => {
+                                    if (recordScope === 'person') return;
                                     setSelectedPerson(p as Contact | null);
                                     setRelationshipTargetMissing(false);
                                 }}
@@ -533,7 +546,7 @@ export function ActivityDialogForm({
                                 <ComboboxInput
                                     id="activity-person"
                                     placeholder={t('personPlaceholder')}
-                                    disabled={followUpFailed}
+                                    disabled={followUpFailed || recordScope === 'person'}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">
@@ -556,12 +569,14 @@ export function ActivityDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-deal">{t('dealLabel')}</Label>
                             <Combobox
-                                items={dealSearch.deals}
-                                serverSearch={dealSearch.serverSearch}
-                                onInputValueChange={dealSearch.onInputValueChange}
+                                items={recordScope ? deals : dealSearch.deals}
+                                disabled={recordScope === 'deal'}
+                                serverSearch={recordScope ? undefined : dealSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : dealSearch.onInputValueChange}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
                                 onValueChange={(d) => {
+                                    if (recordScope === 'deal') return;
                                     setSelectedDeal(d as Deal | null);
                                     setRelationshipTargetMissing(false);
                                 }}
@@ -569,7 +584,7 @@ export function ActivityDialogForm({
                                 <ComboboxInput
                                     id="activity-deal"
                                     placeholder={t('dealPlaceholder')}
-                                    disabled={followUpFailed}
+                                    disabled={followUpFailed || recordScope === 'deal'}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">

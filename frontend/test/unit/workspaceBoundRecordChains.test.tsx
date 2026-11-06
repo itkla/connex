@@ -640,6 +640,7 @@ describe("record composers preserve one origin", () => {
         const backend = stubBackend(path);
         const props = { anchor: { kind: "person" as const, person: contact, companyId: null }, currentUserId: 7, open: true };
         await render(kind === "task" ? <RecordTaskComposer {...props} /> : <RecordActivityComposer {...props} />);
+        expect(kind === "task" ? get("task").recordScope : get("activity").recordScope).toBe("person");
         await holdAndSwitch(backend, () => {
             if (kind === "task") return get("task").createRequest?.({ description: "Origin task", assignedToId: 7, personId: 41, dealId: 41 });
             return get("activity").createRequest?.({ type: "Call", subject: "Origin activity", createdById: 7, personId: 41, dealId: 41 });
