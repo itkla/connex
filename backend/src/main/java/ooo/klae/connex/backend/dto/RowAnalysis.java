@@ -27,6 +27,20 @@ public class RowAnalysis {
     private List<String> errors;
     private List<DuplicateCandidateDto> candidates;
     private DealImportDateReview dealDates;
+    private ImportCompanyDependency companyDependency;
+
+    public RowAnalysis(
+            int rowIndex, String status, Integer matchedId, String matchedLabel,
+            Integer canonicalRowIndex, Integer mergedRowCount, List<String> errors,
+            List<DuplicateCandidateDto> candidates, DealImportDateReview dealDates) {
+        this(rowIndex, status, matchedId, matchedLabel, canonicalRowIndex, mergedRowCount,
+            errors, candidates, dealDates, null);
+    }
+
+    /** Localizable reasons; errors remains a diagnostic compatibility field. */
+    public List<ImportProblem> getProblems() {
+        return errors == null ? List.of() : errors.stream().map(ImportProblem::fromDiagnostic).toList();
+    }
 
     public RowAnalysis(
             int rowIndex, String status, Integer matchedId, String matchedLabel,

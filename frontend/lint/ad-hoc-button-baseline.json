@@ -48,7 +48,6 @@
     "app/components/diagnostics/MailDeliverabilitySection.tsx": 1,
     "app/components/docs/DocsTopBar.tsx": 4,
     "app/components/filters/SearchField.tsx": 1,
-    "app/components/import/ImportDialog.tsx": 2,
     "app/components/import/InteractionHistoryImportDialog.tsx": 3,
     "app/components/introductions/IntroSuggestionCard.tsx": 2,
     "app/components/introductions/IntroSuggestionRow.tsx": 2,

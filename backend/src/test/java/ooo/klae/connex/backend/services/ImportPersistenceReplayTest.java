@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -182,8 +183,16 @@ class ImportPersistenceReplayTest extends AbstractServiceTest {
 
     private ImportCycle runCycle(ReplayDefinition definition) {
         ImportResult company = reviewAndCommitCompany(definition.companyRequest());
-        ImportResult person = reviewAndCommitPerson(definition.personRequest());
-        ImportResult deal = reviewAndCommitDeal(definition.dealRequest());
+        Integer selectedCompanyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM company WHERE workspace_id = ? AND name = ?", Integer.class,
+            workspace.getId(), definition.companyName());
+        assertNotNull(selectedCompanyId);
+        ImportRequest personRequest = definition.personRequest();
+        personRequest.setCompanyLinks(Map.of(0, selectedCompanyId));
+        ImportRequest dealRequest = definition.dealRequest();
+        dealRequest.setCompanyLinks(Map.of(0, selectedCompanyId));
+        ImportResult person = reviewAndCommitPerson(personRequest);
+        ImportResult deal = reviewAndCommitDeal(dealRequest);
         return new ImportCycle(company, person, deal);
     }
 
