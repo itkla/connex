@@ -65,6 +65,15 @@ async function observeHistory(page: Page) {
     });
 }
 
+/** Waits for the list's deliberate URL canonicalization before capturing or traversing its entry. */
+async function expectDealsRoute(page: Page, query?: string) {
+    await expect.poll(() => {
+        const url = new URL(page.url());
+        return { pathname: url.pathname, view: url.searchParams.get('view'), query: url.searchParams.get('q') };
+    }).toEqual({ pathname: '/records/deals', view: 'table', query: query ?? null });
+    await expect(page.getByRole('heading', { name: message('en', 'deals', 'DealsBrowser.title'), exact: true })).toBeVisible();
+}
+
 for (const locale of ['en', 'ja'] as const) {
     test(`an untouched template returns to Documents without a discard prompt in ${locale} @mobile`, async ({ page }) => {
         await useLocale(page, locale);
@@ -216,13 +225,14 @@ test('Keep editing preserves a known Forward destination and its deal search', a
     await page.goto('/insights/reports');
     await page.locator('a[href="/insights/reports/new"]').first().click();
     await page.locator('a[href="/records/deals"]:visible').first().click();
-    await expect(page).toHaveURL('/records/deals');
+    await expectDealsRoute(page);
     const search = page.getByPlaceholder(message('en', 'deals', 'DealsBrowser.searchPlaceholder'), { exact: true });
     await search.fill('History destination');
-    await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('History destination');
-    const destination = page.url();
+    await expectDealsRoute(page, 'History destination');
+    const destination = new URL(page.url());
     expect(await page.evaluate(() => window.navigation?.currentEntry?.index)).toBeGreaterThanOrEqual(1);
     await page.goBack();
+    await expect(page).toHaveURL('/insights/reports/new');
     const name = page.getByRole('textbox', { name: 'Name', exact: true });
     await name.fill('Preserved Forward draft');
     await page.evaluate(() => window.history.forward());
@@ -234,7 +244,11 @@ test('Keep editing preserves a known Forward destination and its deal search', a
     await page.evaluate(() => window.history.forward());
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Discard changes', exact: true }).click();
-    await expect(page).toHaveURL(destination);
+    await expectDealsRoute(page, 'History destination');
+    await expect.poll(() => {
+        const url = new URL(page.url());
+        return { pathname: url.pathname, search: [...url.searchParams.entries()].sort(), hash: url.hash };
+    }).toEqual({ pathname: destination.pathname, search: [...destination.searchParams.entries()].sort(), hash: destination.hash });
     await expect(search).toHaveValue('History destination');
 });
 
@@ -320,7 +334,7 @@ test(`sidebar and browser Back/Forward retain a report until discard is confirme
     await expect(deals).toBeFocused();
     await deals.click();
     await dialog.getByRole('button', { name: 'Discard changes', exact: true }).click();
-    await expect(page).toHaveURL('/records/deals');
+    await expectDealsRoute(page);
     await page.goBack();
     await expect(input).toBeVisible();
     await input.fill('Report kept after Forward');
@@ -333,12 +347,12 @@ test(`sidebar and browser Back/Forward retain a report until discard is confirme
     await deals.click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Discard changes', exact: true }).click();
-    await expect(page).toHaveURL('/records/deals');
+    await expectDealsRoute(page);
     await page.goBack();
     await input.fill('Report discarded after Forward');
     await page.evaluate(() => window.history.forward());
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Discard changes', exact: true }).click();
-    await expect(page).toHaveURL('/records/deals');
+    await expectDealsRoute(page);
 });
 }
