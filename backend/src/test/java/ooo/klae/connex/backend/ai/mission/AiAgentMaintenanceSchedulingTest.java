@@ -24,6 +24,7 @@ class AiAgentMaintenanceSchedulingTest {
     @CsvSource({
             "AiAgentPrivacyWorker,10,1,false", "AiAgentPrivacyWorker,3600,1,true",
             "AiAgentPrivacyInitializer,60,60,false", "AiAgentPrivacyInitializer,3600,60,true",
+            "AiAgentDsrPurgeService,15,10,false", "AiAgentDsrPurgeService,3600,10,true",
             "AiAgentScheduler,30,5,false", "AiAgentScheduler,3600,5,true"
     })
     void testConfigurationDefersTimersAndPreservesProductionCadence(
