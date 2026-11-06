@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import jakarta.validation.constraints.NotBlank;
@@ -7,6 +8,7 @@ import jakarta.validation.constraints.Size;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import tools.jackson.databind.JsonNode;
 
 /**
  * One THEN action. {@code type} selects the kind ({@code create_task}, {@code log_activity},
@@ -52,6 +54,7 @@ public class RuleAction {
     @Size(max = 16)
     private String severity;
 
+    /** Explicit member for ownership and follow-ups; absent follow-ups use the run-as member. */
     private Integer targetUserId;
 
     private Integer targetStageId;
@@ -63,4 +66,10 @@ public class RuleAction {
     /** Immutable revision selected by a {@code send_message} action. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Integer campaignMessageVersion;
+
+    /** Refuses unsupported bindings even when an HTTP mapper ignores unknown properties. */
+    @JsonAnySetter
+    public void rejectUnknownField(String field, JsonNode value) {
+        throw new IllegalArgumentException("Unsupported action configuration");
+    }
 }

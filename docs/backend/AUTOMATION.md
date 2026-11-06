@@ -263,6 +263,27 @@ A `document` workflow subject is a `deal_document` id, not its parent deal.
 
 Future fenced record types use the same centralized gate instead of scattered checks.
 
+## Follow-up recipients and notification sources
+
+Schema-v1 `create_task` and `notify` actions use the existing optional `targetUserId` for a
+specific active member of the same workspace. An absent target retains the run-as attribution member.
+Authoring and execution refuse invalid or unavailable explicit members rather than redirecting work
+to the actor. Task creation continues through `TaskService` and its locked assignment checks;
+notification delivery retains the recipient/source access filters and workspace-aware navigation.
+No action field or persisted definition shape is added, so canonical bytes and hashes stay stable.
+Dynamic record-owner, launch-input, and action-output recipient bindings require schema-v2 in #1604;
+schema-v1 authoring refuses those configurations through its strict unknown-field/type validation.
+
+For task actions, an absent `dueInDays` retains the three-day default; zero means today, and explicit
+values must be integers from 0 through 365. Recipe parameters and the builder use the same range.
+
+Workflow notifications snapshot the permitted source name into `sourceLabel` and the message body,
+retain the configured title/message, and link contacts, companies, deals, and tasks to their existing
+record destinations. Document triggers use the `deal_document` notification source and the existing
+deal-scoped document print route. Names are resolved through workspace-scoped reads; a missing
+source fails the action instead of producing a dead link. Inbox and realtime reads retain their
+current source-access checks, and opening a notification selects its workspace before navigating.
+
 ## Legacy rules are a compatibility projection
 
 The legacy `/api/rules` surface is not an independent aggregate.

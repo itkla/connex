@@ -527,8 +527,10 @@ public class RuleDefinitionValidator {
                     Map.of("actionType", type, "recordType", recordType));
             }
             switch (type) {
-                case "create_task", "notify" -> requireText(
-                    action.getTitle(), configured.nodeId(), "title");
+                case "create_task", "notify" -> {
+                    requireText(action.getTitle(), configured.nodeId(), "title");
+                    validateFollowUp(configured);
+                }
                 case "log_activity" -> requireText(
                     action.getActivityType(), configured.nodeId(), "activityType");
                 case "create_note" -> requireText(
@@ -569,6 +571,30 @@ public class RuleDefinitionValidator {
                     "Invalid action type: " + action.getType(),
                     configured.nodeId(), "config.type", Map.of());
             }
+        }
+    }
+
+    private void validateFollowUp(Configured<RuleAction> configured) {
+        RuleAction action = configured.value();
+        if ("create_task".equals(normalize(action.getType())) && action.getDueInDays() != null
+                && (action.getDueInDays() < 0 || action.getDueInDays() > 365)) {
+            throw invalid(WorkflowDiagnosticCode.CONFIG_FIELD_INVALID,
+                "Task due days must be between 0 and 365",
+                configured.nodeId(), "config.dueInDays", Map.of());
+        }
+        Integer targetUserId = action.getTargetUserId();
+        if (targetUserId == null) {
+            return;
+        }
+        if (targetUserId < 1) {
+            throw invalid(WorkflowDiagnosticCode.CONFIG_FIELD_INVALID,
+                "A follow-up recipient must be a workspace member",
+                configured.nodeId(), "config.targetUserId", Map.of());
+        }
+        if (workspaceService.getRole(workspaceService.getCurrentWorkspaceId(), targetUserId) == null) {
+            throw invalid(WorkflowDiagnosticCode.ACTION_TARGET_MEMBER_UNAVAILABLE,
+                "The selected follow-up member is no longer available",
+                configured.nodeId(), "config.targetUserId", Map.of());
         }
     }
 

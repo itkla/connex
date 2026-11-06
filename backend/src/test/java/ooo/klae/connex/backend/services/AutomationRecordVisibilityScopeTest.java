@@ -291,7 +291,7 @@ class AutomationRecordVisibilityScopeTest {
             mock(TaskService.class), mock(ActivityService.class), mock(CompanyService.class),
             mock(PersonService.class), mock(LeadResponseSlaService.class), dealService, mock(NoteService.class),
             mock(NotificationDelivery.class), mock(TagMapper.class), mock(DealDocumentMapper.class),
-            mock(CampaignTriggeredSendService.class));
+            mock(CampaignTriggeredSendService.class), mock(WorkspaceService.class));
     }
 
     private static RuleAction changeStage(int stageId) {

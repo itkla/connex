@@ -33,7 +33,8 @@ class RuleActionExecutorLockedAuthorizationTest {
             mock(NotificationDelivery.class),
             mock(TagMapper.class),
             mock(DealDocumentMapper.class),
-            triggeredSendService);
+            triggeredSendService,
+            mock(WorkspaceService.class));
         RuleAction action = new RuleAction();
         action.setType("send_message");
         action.setCampaignMessageId(31);

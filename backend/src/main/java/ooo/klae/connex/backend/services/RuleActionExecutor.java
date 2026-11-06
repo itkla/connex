@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
@@ -44,6 +45,7 @@ public class RuleActionExecutor {
     private final TagMapper tagMapper;
     private final DealDocumentMapper documentMapper;
     private final CampaignTriggeredSendService campaignTriggeredSendService;
+    private final WorkspaceService workspaceService;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -109,10 +111,13 @@ public class RuleActionExecutor {
     private void createTask(RuleAction action, AutomationActionContext ctx) {
         Task task = new Task();
         task.setDescription(action.getTitle());
-        int dueDays = action.getDueInDays() != null && action.getDueInDays() > 0 ? action.getDueInDays() : DEFAULT_DUE_DAYS;
+        int dueDays = action.getDueInDays() == null ? DEFAULT_DUE_DAYS : action.getDueInDays();
+        if (dueDays < 0 || dueDays > 365) {
+            throw new BadRequestException("Task due days must be between 0 and 365");
+        }
         task.setDueDate(LocalDateTime.now().toLocalDate().plusDays(dueDays).format(DATE));
         User assignee = new User();
-        assignee.setId(ctx.targetUserId());
+        assignee.setId(followUpRecipient(action, ctx));
         task.setAssignedTo(assignee);
         if ("person".equals(ctx.recordType())) {
             task.setPerson(person(ctx.entityId()));
@@ -178,18 +183,73 @@ public class RuleActionExecutor {
     private void notify(RuleAction action, AutomationActionContext ctx) {
         Notification notification = new Notification();
         notification.setWorkspaceId(ctx.workspaceId());
-        notification.setRecipientId(ctx.targetUserId());
+        notification.setRecipientId(followUpRecipient(action, ctx));
         notification.setType("rule");
         notification.setCategory(ctx.recordType());
         notification.setSeverity(action.getSeverity() != null && !action.getSeverity().isBlank() ? action.getSeverity() : "info");
         notification.setTitle(action.getTitle());
-        notification.setBody(action.getBody() != null ? action.getBody() : "");
         notification.setActorLabel("Automation");
         notification.setSourceType(ctx.recordType());
         notification.setSourceId(ctx.entityId());
+        notificationSource(notification, ctx);
+        notification.setBody(notification.getSourceLabel()
+            + (action.getBody() == null || action.getBody().isBlank() ? "" : "\n" + action.getBody()));
         notification.setDedupeKey(ctx.notificationDedupeKey());
         notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
         notificationDelivery.deliver(notification);
+    }
+
+    private int followUpRecipient(RuleAction action, AutomationActionContext ctx) {
+        Integer recipient = action.getTargetUserId();
+        if (recipient == null) {
+            return ctx.targetUserId();
+        }
+        if (recipient < 1 || workspaceService.getRole(ctx.workspaceId(), recipient) == null) {
+            throw new WorkflowExecutionException(
+                WorkflowDiagnosticCode.ACTION_TARGET_MEMBER_UNAVAILABLE.value(),
+                "The selected follow-up member is no longer available.", true);
+        }
+        return recipient;
+    }
+
+    private void notificationSource(Notification notification, AutomationActionContext ctx) {
+        String label;
+        switch (ctx.recordType()) {
+            case "person" -> {
+                label = personService.getPersonById(ctx.entityId()).getName();
+                notification.setActionUrl("/records/contacts/" + ctx.entityId());
+            }
+            case "company" -> {
+                label = companyService.getCompanyById(ctx.entityId()).getName();
+                notification.setActionUrl("/records/companies/" + ctx.entityId());
+            }
+            case "deal" -> {
+                label = dealService.getDealById(ctx.entityId()).getName();
+                notification.setActionUrl("/records/deals/" + ctx.entityId());
+            }
+            case "task" -> {
+                label = taskService.getTaskById(ctx.entityId()).getDescription();
+                notification.setActionUrl("/activity/tasks?task=" + ctx.entityId());
+            }
+            case "document" -> {
+                DealDocument document = documentMapper.getById(ctx.workspaceId(), ctx.entityId());
+                if (document == null) {
+                    throw new WorkflowExecutionException("record_unavailable",
+                        "The workflow record is no longer available for automation.", true);
+                }
+                label = document.getTitle();
+                notification.setSourceType("deal_document");
+                notification.setActionUrl("/records/deals/" + document.getDealId()
+                    + "/documents/" + document.getId() + "/print");
+            }
+            default -> throw new BadRequestException("Unsupported notification source");
+        }
+        if (label == null || label.isBlank()) {
+            throw new WorkflowExecutionException("record_unavailable",
+                "The workflow record is no longer available for automation.", true);
+        }
+        int labelEnd = label.offsetByCodePoints(0, Math.min(255, label.codePointCount(0, label.length())));
+        notification.setSourceLabel(label.substring(0, labelEnd));
     }
 
     private static boolean attachesToDeal(AutomationActionContext ctx) {
