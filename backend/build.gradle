@@ -114,6 +114,10 @@ dependencies {
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'
+	constraints {
+		// GHSA-xxph-c9ww-hj94 (high): OpenSAML and Shibboleth declare guava 33.0.0-jre, fixed in 33.7.2.
+		implementation 'com.google.guava:guava:33.7.2-jre'
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {
