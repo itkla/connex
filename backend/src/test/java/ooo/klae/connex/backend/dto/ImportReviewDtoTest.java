@@ -17,6 +17,19 @@ class ImportReviewDtoTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void currencyFailuresRetainRawCompatibilityAndStructuredPresentationCodes() {
+        List<String> errors = List.of("CURRENCY_INVALID", "Invalid deal value: private");
+        List<ImportProblem> problems = errors.stream().map(ImportProblem::fromDiagnostic).toList();
+        assertEquals(List.of(new ImportProblem("CURRENCY_INVALID", null), new ImportProblem("VALUE_INVALID", null)), problems);
+        RowError failure = new RowError(0, String.join("; ", errors), errors, problems);
+        RowError restored = mapper.readValue(mapper.writeValueAsString(failure), RowError.class);
+        assertEquals(errors, restored.getErrors());
+        assertEquals(problems, restored.getProblems());
+        assertFalse(mapper.writeValueAsString(restored.getProblems()).contains("private"));
+        assertEquals(problems, new RowError(0, "legacy reason", problems).getProblems());
+    }
+
+    @Test
     void rowChoicesDeserializeAlongsideTheExactReviewProof() {
         ImportRequest request = mapper.readValue("""
             {"rows":[{"Name":"Example"}],"mapping":[{"column":"Name","field":"name"}],

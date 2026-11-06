@@ -260,6 +260,7 @@ export default function DealDocuments({
 }: Props) {
     const timeZone = useTimeZone();
     const t = useTranslations('DealsDocuments');
+    const tApi = useTranslations();
     const showApiError = useApiErrorToast('DealsDocuments');
     const locale = useLocale();
     const router = useRouter();
@@ -611,7 +612,7 @@ export default function DealDocuments({
     };
 
     const canFinalize = (doc: DealDocument) =>
-        (doc.status === 'draft' && !doc.requiresApproval) || doc.status === 'approved';
+        !doc.approvalConfigurationError && ((doc.status === 'draft' && !doc.requiresApproval) || doc.status === 'approved');
 
     const generateMenu = (
         <DropdownMenu>
@@ -650,6 +651,12 @@ export default function DealDocuments({
                 <SectionHeader title={t('title')} />
                 {documents.length > 0 && generateMenu}
             </div>
+
+            {documents.some((doc) => doc.approvalConfigurationError === 'APPROVAL_POLICY_CURRENCY_INVALID') && (
+                <p role="alert" className="mb-3 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-foreground">
+                    {tApi('ApiErrors.approvalPolicyCurrencyInvalid')}
+                </p>
+            )}
 
             {documents.length === 0 ? (
                 <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
@@ -730,7 +737,7 @@ export default function DealDocuments({
                                                     </Button>
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="end">
-                                                    {doc.status === 'draft' && (
+                                                    {doc.status === 'draft' && !doc.approvalConfigurationError && (
                                                         <DropdownMenuItem onSelect={() => openApprovalDialog(doc, 'request')}>
                                                             <ShieldCheckIcon className="size-4" />{t('requestApproval')}
                                                         </DropdownMenuItem>

@@ -1,5 +1,5 @@
 import { recordDetailPath } from '@/app/lib/recordReturnPath';
-import type { DealBriefCitation, DealBriefCitationKind } from '@/app/lib/types';
+import type { Activity, Contact, Note, Task, DealBriefCitation, DealBriefCitationKind } from '@/app/lib/types';
 
 /** Positional grounding token as emitted into brief prose (`note.0`, `act.1`, …). */
 const SOURCE_TOKEN_RE = /\b(deal|person|act|note|task)\.(\d+)\b/g;
@@ -136,4 +136,39 @@ function tidyProse(value: string): string {
         .replace(/([(\[])[ \t]+/g, '$1')
         .replace(/[ \t]+([)\]])/g, '$1')
         .replace(/[ \t]{2,}/g, ' ');
+}
+
+/** Builds readable citation labels from successfully loaded deal evidence. */
+export function buildDealCitationTitles(
+    dealId: number,
+    dealName: string,
+    people: { person: Contact }[],
+    activities: Activity[],
+    tasks: Task[],
+    notes: Note[],
+): Map<string, string> {
+    const titles = new Map<string, string>();
+    titles.set(citationTitleKey('deal', dealId), clipCitationTitle(dealName));
+    for (const { person } of people) {
+        titles.set(citationTitleKey('person', person.id), clipCitationTitle(person.name));
+    }
+    for (const activity of activities) {
+        const subject = activity.subject?.trim();
+        if (subject) titles.set(citationTitleKey('act', activity.id), clipCitationTitle(subject));
+    }
+    for (const task of tasks) {
+        const description = task.description?.trim();
+        if (description) titles.set(citationTitleKey('task', task.id), clipCitationTitle(description));
+    }
+    for (const note of notes) {
+        const label = note.title?.trim() || note.content?.trim();
+        if (label) titles.set(citationTitleKey('note', note.id), clipCitationTitle(label));
+    }
+    return titles;
+}
+
+function clipCitationTitle(value: string): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= 48) return normalized;
+    return `${normalized.slice(0, 47)}…`;
 }

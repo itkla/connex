@@ -4,6 +4,7 @@ import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type De
 import TimelineContent from "./TimelineContent";
 
 export type TimelineProps = {
+    detailKind?: "company" | "deal" | "contact";
     tasks: Task[];
     activities: Activity[];
     notes: Note[];

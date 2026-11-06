@@ -1,6 +1,6 @@
 /**
- * Common ISO 4217 currency codes offered in catalog/pricing pickers. Not exhaustive — the
- * backend accepts any code up to 8 chars; this is the curated shortlist for the UI.
+ * Common ISO 4217 currency codes offered in pricing and approval pickers. This curated UI
+ * shortlist is not exhaustive; the server owns monetary currency validation.
  */
 export const CURRENCY_CODES = [
     'USD', 'JPY', 'EUR', 'GBP', 'AUD', 'CAD', 'CHF', 'CNY', 'HKD', 'SGD',

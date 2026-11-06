@@ -602,7 +602,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
                     name: dealName,
                     value: 10_000,
                     actualValue: 0,
-                    currency: "USDT",
+                    currency: "EUR",
                     pipeline: pipelineId,
                     stage: stageId,
                     company: null,
@@ -644,7 +644,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             throw new Error("Generated empty document omitted its frozen content");
         }
         expect(contentWithoutItems.lineItems).toHaveLength(0);
-        expect(contentWithoutItems.totals.currency).toBe("USDT");
+        expect(contentWithoutItems.totals.currency).toBe("EUR");
         await jsonObject(await authenticatedApi.put(
             `/api/deals/${dealWithoutItemsId}/documents/${documentWithoutItemsId}/status`,
             { headers: writeHeaders, data: { status: "final" } },
@@ -683,7 +683,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             throw new Error("Generated populated document omitted its frozen content");
         }
         expect(contentWithItems.lineItems.length).toBeGreaterThan(0);
-        expect(contentWithItems.totals.currency).toBe("USDT");
+        expect(contentWithItems.totals.currency).toBe("EUR");
         await jsonObject(await authenticatedApi.put(
             `/api/deals/${dealWithItemsId}/documents/${documentWithItemsId}/status`,
             { headers: writeHeaders, data: { status: "final" } },

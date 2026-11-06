@@ -173,6 +173,11 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
         setDraft((prev) => ({ ...prev, [key]: value }));
 
+    const unchangedCurrency = policy?.currency != null
+        && draft.currency.trim().toUpperCase() === policy.currency.trim().toUpperCase();
+    const invalidCurrency = draft.currency !== '' && !unchangedCurrency
+        && !/^[A-Za-z]{3}$/.test(draft.currency.trim());
+    const legacyCurrency = unchangedCurrency && policy?.currencyValid === false;
     const minTotalNeedsCurrency = draft.minTotal.trim() !== '' && draft.currency.trim() === '';
     const chainIsValid = draft.steps.every(
         (step) =>
@@ -181,13 +186,14 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             && dueIntervalIsValid(step.dueIntervalHours)
             && (step.onExpiry === 'expire' || step.dueIntervalHours.trim() !== ''),
     );
-    const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && chainIsValid && !saving;
+    const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && !invalidCurrency && chainIsValid && !saving;
 
     const buildPayload = (): UpdateApprovalPolicyPayload => ({
         name: draft.name.trim(),
         active: draft.active,
         documentType: isDocumentType(draft.documentType) ? draft.documentType : null,
-        currency: draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
+        currency: unchangedCurrency ? policy?.currency ?? null
+            : draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
         minTotal: draft.minTotal.trim() === '' ? null : Number(draft.minTotal),
         minDiscountPercent: draft.minDiscountPercent.trim() === '' ? null : Number(draft.minDiscountPercent),
         mode: draft.mode,
@@ -363,9 +369,10 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                                 value={draft.currency}
                                 maxLength={8}
                                 placeholder={t('currencyPlaceholder')}
-                                onChange={(e) => set('currency', e.target.value)}
+                                onChange={(event) => set('currency', event.target.value)}
                                 disabled={saving}
-                                aria-invalid={minTotalNeedsCurrency || undefined}
+                                aria-invalid={minTotalNeedsCurrency || invalidCurrency || undefined}
+                                aria-describedby="policy-currency-hint"
                             />
                         </div>
                     </div>
@@ -398,10 +405,14 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                             />
                         </div>
                     </div>
-                    {minTotalNeedsCurrency ? (
-                        <p className="text-xs text-destructive">{t('currencyRequired')}</p>
+                    {invalidCurrency || legacyCurrency ? (
+                        <p id="policy-currency-hint" role="alert" className="text-xs text-destructive">
+                            {t(legacyCurrency ? 'currencyLegacy' : 'currencyInvalid', { currency: draft.currency })}
+                        </p>
+                    ) : minTotalNeedsCurrency ? (
+                        <p id="policy-currency-hint" className="text-xs text-destructive">{t('currencyRequired')}</p>
                     ) : (
-                        <p className="text-xs text-muted-foreground">{t('thresholdHint')}</p>
+                        <p id="policy-currency-hint" className="text-xs text-muted-foreground">{t('currencyCodeHint')} {t('thresholdHint')}</p>
                     )}
                     <div className="space-y-3 border-t border-border pt-4">
                         <p className="text-sm font-medium">{t('chainTitle')}</p>

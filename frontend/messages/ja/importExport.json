@@ -320,11 +320,13 @@
       "ROW_INVALID": "割り当てた値を確認・修正するか、この行をスキップして再確認してください。",
       "CUSTOM_REQUIRED": "必須項目「{field}」に値を入力するか、この行をスキップしてください。",
       "CUSTOM_OPTION": "「{field}」に設定済みの選択肢を入力するか、任意項目であれば空欄にするか、この行をスキップしてください。",
-      "COMPANY_VARIANT_CHOICE_REQUIRED": "似た名前の会社が登録されています。対象の会社を選んで再確認するか、この行をスキップしてください。"
+      "COMPANY_VARIANT_CHOICE_REQUIRED": "似た名前の会社が登録されています。対象の会社を選んで再確認するか、この行をスキップしてください。",
+      "CURRENCY_INVALID": "対応していない通貨です。JPYやUSDなどの対応する3文字の通貨コードに修正して再確認するか、この行をスキップしてください。"
     },
     "refreshCustomFields": "項目を再読み込み",
     "refreshingCustomFields": "項目を読み込み中…",
     "unavailableCustomField": "利用できない項目",
-    "unavailableCustomFieldHint": "この項目は現在利用できません。有効な項目を選ぶか、この列を「無視する」にしてください。"
+    "unavailableCustomFieldHint": "この項目は現在利用できません。有効な項目を選ぶか、この列を「無視する」にしてください。",
+    "currencyInvalid": "対応していない通貨です。JPYやUSDなどの3文字の通貨コードに修正して、ファイルを再度取り込んでください。"
   }
 }
