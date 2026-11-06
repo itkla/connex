@@ -5,6 +5,9 @@ import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
+import { loadDetailSection } from "@/app/lib/loadDetailSection";
+import { detailSectionFailure } from "@/app/lib/detailSectionResult";
+import DetailSectionState from "@/app/components/records/DetailSectionState";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
@@ -30,7 +33,7 @@ import {
     getUserReferences,
     getRelationshipMapAvailability,
 } from "@/app/lib/api";
-import { type Company, type Contact, type Deal, type Tag } from "@/app/lib/types";
+import { type Company, type Tag } from "@/app/lib/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 
 import Rise from "@/app/components/motion/Rise";
@@ -78,8 +81,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         locale,
         companyAccess,
         allTags,
-        people,
-        deals,
+        peopleResult,
+        dealsResult,
         companyTags,
         engagement,
         timeline,
@@ -94,8 +97,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getLocale(),
         loadRecord<Company>(() => getCompanyById(id, init)),
         getTags(init).catch(() => [] as Tag[]),
-        getCompanyPeople(id, init).catch(() => [] as Contact[]),
-        getCompanyDeals(id, init).catch(() => [] as Deal[]),
+        loadDetailSection(() => getCompanyPeople(id, init)),
+        loadDetailSection(() => getCompanyDeals(id, init)),
         getCompanyTags(id, init).catch(() => [] as Tag[]),
         getCompanyEngagement(id, init),
         getCompanyTimeline(id, 100, init),
@@ -116,6 +119,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     const company = companyAccess.record;
     const websiteUrl = company.website ? (/^https?:\/\//i.test(company.website) ? company.website : `https://${company.website}`) : undefined;
 
+    const people = peopleResult.kind === "loaded" ? peopleResult.data : [];
+    const deals = dealsResult.kind === "loaded" ? dealsResult.data : [];
     const { activities, tasks, notes } = timeline;
     const relatedUserIds = new Set<number>([
         ...engagement.relatedUserIds,
@@ -263,13 +268,17 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         </RecordDetailSection>
 
                         <RecordDetailSection recordKind="company" section="activity">
-                            <PipelineCard deals={deals} render="active" />
+                            <DetailSectionState title={t("deals")} failure={detailSectionFailure(dealsResult)}>
+                                {dealsResult.kind === "loaded" ? <PipelineCard deals={dealsResult.data} render="active" /> : null}
+                            </DetailSectionState>
                         </RecordDetailSection>
 
                         <RecordDetailSection recordKind="company" section="related">
-                            <Suspense fallback={<Skeleton className="h-40 w-full rounded-2xl" />}>
-                                <ContactsGrid contacts={people} company={company} allTags={allTags} />
-                            </Suspense>
+                            <DetailSectionState title={(await getTranslations("CompaniesContactsGrid"))("contacts")} failure={detailSectionFailure(peopleResult)}>
+                                {peopleResult.kind === "loaded" ? <Suspense fallback={<Skeleton className="h-40 w-full rounded-2xl" />}>
+                                    <ContactsGrid contacts={people} company={company} allTags={allTags} />
+                                </Suspense> : null}
+                            </DetailSectionState>
                         </RecordDetailSection>
                     </Rise>
                 </div>
@@ -303,17 +312,19 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         <div>
                             <SectionHeader title={t("timeline")} />
                             <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                <Timeline
-                                    tasks={tasks}
-                                    activities={activities}
-                                    notes={notes}
-                                    users={relatedUsers}
-                                    persons={people}
-                                    deals={deals}
-                                    comments={commentsFromThreads(commentThreads)}
-                                    currentUserId={currentUser.id}
-                                    companyId={company.id}
-                                />
+                                <DetailSectionState title={t("timeline")} failure={detailSectionFailure(peopleResult, dealsResult)}>
+                                    <Timeline
+                                        tasks={tasks}
+                                        activities={activities}
+                                        notes={notes}
+                                        users={relatedUsers}
+                                        persons={people}
+                                        deals={deals}
+                                        comments={commentsFromThreads(commentThreads)}
+                                        currentUserId={currentUser.id}
+                                        companyId={company.id}
+                                    />
+                                </DetailSectionState>
                             </div>
                         </div>
                     </RecordDetailSection>

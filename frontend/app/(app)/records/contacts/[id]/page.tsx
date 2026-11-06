@@ -3,10 +3,13 @@ import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
+import { loadDetailSection } from "@/app/lib/loadDetailSection";
+import { detailSectionFailure } from "@/app/lib/detailSectionResult";
+import DetailSectionState from "@/app/components/records/DetailSectionState";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
-import { type Tag, type Contact, type IntroPath, type PersonCampaignTouch, type PersonConnection, type PersonEmployment } from "@/app/lib/types";
+import { type Tag, type Contact, type PersonCampaignTouch } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { UserIcon } from "@heroicons/react/24/outline";
@@ -64,7 +67,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
     }
 
     const permissionsPromise = getEffectivePermissionsFromCookie(cookie);
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus, campaignTouches, mapAvailability] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employmentResult, connectionsResult, introPathResult, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistoryResult, qualification, commentThreads, marketingStatus, campaignTouches, mapAvailability] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -76,14 +79,14 @@ export default async function ContactPage({ params }: ContactPageProps) {
             stateVersion: 0,
             asOf: "1970-01-01T00:00:00Z",
         })),
-        getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
-        getContactConnections(id, init).catch(() => [] as PersonConnection[]),
-        getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
+        loadDetailSection(() => getContactEmployment(id, init)),
+        loadDetailSection(() => getContactConnections(id, init)),
+        loadDetailSection(() => getContactIntroPath(id, init)),
         getEntityCustomFieldsFromCookie("person", id, cookie),
         getContactEvidence(id, init).catch(() => null),
         permissionsPromise,
         getContactLifecycle(id, init).catch(() => null),
-        getContactLifecycleHistory(id, init).catch(() => []),
+        loadDetailSection(() => getContactLifecycleHistory(id, init)),
         getContactQualification(id, init).then(
             (loaded) => ({ loaded }),
             () => ({ failed: true as const }),
@@ -109,6 +112,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         ? await getContactById(contact.referrerPersonId, init).catch(() => null)
         : null;
 
+    const lifecycleHistory = lifecycleHistoryResult.kind === "loaded" ? lifecycleHistoryResult.data : [];
     const tasks = contact.tasks ?? [];
     const activities = contact.activities ?? [];
     const notes = contact.notes ?? [];
@@ -204,7 +208,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     {t("relations")}
                                 </span>
                                 {interactionUsers.length === 0 ? (
-                                    <span className="text-xs text-muted-foreground">{t("noRecordedInteractions")}</span>
+                                    <span className="text-xs text-muted-foreground">{lifecycleHistoryResult.kind === "loaded" ? t("noRecordedInteractions") : null}</span>
                                 ) : (
                                     <AvatarGroup>
                                         {interactionUsers.map((user) => (
@@ -286,42 +290,44 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 </dl>
                             </div>
 
-                            {employment.length > 0 ? (
-                                <div>
-                                    <SectionHeader title={t("employmentHistory")} />
-                                    <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                        {employment.map((stint) => (
-                                            <li key={stint.id} className="px-6 py-4 xl:px-4">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    {stint.companyId ? (
-                                                        <Link
-                                                            href={`/records/companies/${stint.companyId}`}
-                                                            className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
-                                                        >
-                                                            {stint.companyName ?? t("unknownCompany")}
-                                                        </Link>
-                                                    ) : (
-                                                        <span className="truncate text-sm font-medium text-foreground">
-                                                            {stint.companyName ?? t("unknownCompany")}
-                                                        </span>
-                                                    )}
-                                                    {stint.current ? (
-                                                        <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
-                                                            {t("current")}
-                                                        </span>
+                            <DetailSectionState title={t("employmentHistory")} failure={detailSectionFailure(employmentResult)}>
+                                {employmentResult.kind === "loaded" && employmentResult.data.length > 0 ? (
+                                    <div>
+                                        <SectionHeader title={t("employmentHistory")} />
+                                        <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                            {employmentResult.data.map((stint) => (
+                                                <li key={stint.id} className="px-6 py-4 xl:px-4">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        {stint.companyId ? (
+                                                            <Link
+                                                                href={`/records/companies/${stint.companyId}`}
+                                                                className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
+                                                            >
+                                                                {stint.companyName ?? t("unknownCompany")}
+                                                            </Link>
+                                                        ) : (
+                                                            <span className="truncate text-sm font-medium text-foreground">
+                                                                {stint.companyName ?? t("unknownCompany")}
+                                                            </span>
+                                                        )}
+                                                        {stint.current ? (
+                                                            <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
+                                                                {t("current")}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                    {stint.title ? (
+                                                        <p className="mt-0.5 text-xs text-muted-foreground">{stint.title}</p>
                                                     ) : null}
-                                                </div>
-                                                {stint.title ? (
-                                                    <p className="mt-0.5 text-xs text-muted-foreground">{stint.title}</p>
-                                                ) : null}
-                                                <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                                                    {formatShortDate(stint.startedAt ?? undefined, locale, timeZone)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale, timeZone) : t("present")}
-                                                </p>
-                                            </li>
-                                        ))}
-                                    </ol>
-                                </div>
-                            ) : null}
+                                                    <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                                                        {formatShortDate(stint.startedAt ?? undefined, locale, timeZone)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale, timeZone) : t("present")}
+                                                    </p>
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </div>
+                                ) : null}
+                            </DetailSectionState>
                         </RecordDetailSection>
 
                         {ownsContact && lifecycle ? (
@@ -431,12 +437,14 @@ export default async function ContactPage({ params }: ContactPageProps) {
 
                         <RecordDetailSection recordKind="contact" section="related">
                             <SectionHeader title={t("connections")} />
-                            <ContactConnections
-                                contactId={contact.id}
-                                contactName={contact.name}
-                                initialConnections={connections}
-                                initialIntroPath={introPath}
-                            />
+                            <DetailSectionState title={t("connections")} failure={detailSectionFailure(connectionsResult, introPathResult)}>
+                                {connectionsResult.kind === "loaded" && introPathResult.kind === "loaded" ? <ContactConnections
+                                    contactId={contact.id}
+                                    contactName={contact.name}
+                                    initialConnections={connectionsResult.data}
+                                    initialIntroPath={introPathResult.data}
+                                /> : null}
+                            </DetailSectionState>
                         </RecordDetailSection>
                     </Rise>
                 </div>
@@ -468,20 +476,22 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     <RecordDetailSection recordKind="contact" section="history">
                         <SectionHeader title={t("timeline")} />
                         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                            <Timeline
-                                tasks={tasks}
-                                activities={activities}
-                                notes={notes}
-                                noteTarget={{ type: "person", id: contact.id }}
-                                users={interactionUsers}
-                                persons={[contact]}
-                                deals={deals}
-                                lifecycleHistory={ownsContact ? lifecycleHistory : []}
-                                comments={commentsFromThreads(commentThreads)}
-                                campaignTouches={campaignTouches}
-                                currentUserId={currentUser.id}
-                                companyId={contact.companyId ?? contact.company?.id ?? null}
-                            />
+                            <DetailSectionState title={t("timeline")} failure={ownsContact ? detailSectionFailure(lifecycleHistoryResult) : null}>
+                                <Timeline
+                                    tasks={tasks}
+                                    activities={activities}
+                                    notes={notes}
+                                    noteTarget={{ type: "person", id: contact.id }}
+                                    users={interactionUsers}
+                                    persons={[contact]}
+                                    deals={deals}
+                                    lifecycleHistory={ownsContact ? lifecycleHistory : []}
+                                    comments={commentsFromThreads(commentThreads)}
+                                    campaignTouches={campaignTouches}
+                                    currentUserId={currentUser.id}
+                                    companyId={contact.companyId ?? contact.company?.id ?? null}
+                                />
+                            </DetailSectionState>
                         </div>
                     </RecordDetailSection>
                 </Rise>

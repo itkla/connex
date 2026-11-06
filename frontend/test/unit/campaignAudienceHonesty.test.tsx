@@ -18,6 +18,8 @@ import type {
 } from "@/app/lib/types";
 import enCampaigns from "@/messages/en/campaigns.json";
 import jaCampaigns from "@/messages/ja/campaigns.json";
+import enRecords from "@/messages/en/records.json";
+import jaRecords from "@/messages/ja/records.json";
 import {
     installInteractiveDocument,
     type InteractiveElement,
@@ -45,7 +47,10 @@ vi.mock("next-intl", async () => {
         import("@/messages/en/campaigns.json"),
         import("@/messages/ja/campaigns.json"),
     ]);
-    const catalogs = { en, ja };
+    const [{ default: enRecords }, { default: jaRecords }] = await Promise.all([
+        import("@/messages/en/records.json"), import("@/messages/ja/records.json"),
+    ]);
+    const catalogs = { en: { ...en, ...enRecords }, ja: { ...ja, ...jaRecords } };
     return {
         useTimeZone: () => localeState.zone, useLocale: () => localeState.locale,
         useTranslations: (namespace: string) => (
@@ -288,9 +293,11 @@ function detailHtml(
     audienceUnavailable: boolean,
     snapshots: CampaignAudienceSnapshotSummary[] = [SNAPSHOT],
     engagement: CampaignEngagement | null = null,
+    failures: Pick<ComponentProps<typeof CampaignDetail>, "deliveryFailure" | "exportsFailure"> = {},
 ): string {
     return renderToStaticMarkup(
         <CampaignDetail
+            {...failures}
             campaign={CAMPAIGN}
             initialAudience={null}
             audienceUnavailable={audienceUnavailable}
@@ -361,6 +368,27 @@ describe("campaign date inputs", () => {
 });
 
 describe("campaign audience labels and unavailable state", () => {
+    it("hides failed delivery and export collections instead of showing empty states in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+            const records = locale === "en" ? enRecords : jaRecords;
+            const html = detailHtml(false, [], null, {
+                deliveryFailure: { kind: "failed", status: 503 },
+                exportsFailure: { kind: "failed", status: 403 },
+            });
+            const failedTitle = records.RecordListState.sectionTitle.replace("{section}", catalog.CampaignDetail.tabDelivery);
+            const deniedTitle = records.RecordListState.sectionDeniedTitle.replace("{section}", catalog.CampaignDetail.tabExports);
+            expect(html).toContain(failedTitle.replaceAll("'", "&#x27;"));
+            expect(html).toContain(deniedTitle.replaceAll("'", "&#x27;"));
+            expect(html).not.toContain(catalog.CampaignMessages.empty);
+            expect(html).not.toContain(catalog.CampaignExports.empty);
+            const recovered = detailHtml(false, []);
+            expect(recovered).toContain(catalog.CampaignMessages.empty);
+            expect(recovered).toContain(catalog.CampaignExports.empty);
+        }
+    });
+
     it("labels draft send membership as prepared recipients in both locales", () => {
         for (const locale of ["en", "ja"] as const) {
             localeState.locale = locale;

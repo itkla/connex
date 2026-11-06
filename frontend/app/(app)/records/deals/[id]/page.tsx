@@ -4,6 +4,9 @@ import { notFound, redirect } from 'next/navigation';
 import AccessDeniedPage from '@/app/components/AccessDeniedPage';
 import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import { loadRecord } from '@/app/lib/recordAccess';
+import { loadDetailSection } from '@/app/lib/loadDetailSection';
+import { detailSectionFailure } from '@/app/lib/detailSectionResult';
+import DetailSectionState from '@/app/components/records/DetailSectionState';
 import { CrumbLabel } from '@/app/hooks/useNavTrail';
 import RecentRecordBridge from '@/app/components/actions/RecentRecordBridge';
 import ActionRecordBridge from '@/app/components/actions/ActionRecordBridge';
@@ -24,8 +27,8 @@ import {
     getEntityCustomFieldsFromCookie,
     getContextNotifications,
     getDealById,
-    getDealLineItemsFromCookie,
-    getDealDocumentsFromCookie,
+    getDealLineItems,
+    getDealDocuments,
     getEffectivePermissionsFromCookie,
     getDealCollaborators,
     getDealPeople,
@@ -119,9 +122,9 @@ export default async function DealPage({ params }: DealPageProps) {
         t,
         locale,
         dealAccess,
-        activities,
-        notes,
-        tasks,
+        activitiesResult,
+        notesResult,
+        tasksResult,
         tags,
         peopleRefs,
         attachments,
@@ -136,9 +139,9 @@ export default async function DealPage({ params }: DealPageProps) {
             getTranslations('DealsPage'),
             getLocale(),
             loadRecord(() => getDealById(id, init)),
-            getActivitiesForDeal(id, init).catch(() => [] as Activity[]),
-            getNotesForDeal(id, {}, init).catch(() => [] as Note[]),
-            getTasksForDeal(id, init).catch(() => [] as Task[]),
+            loadDetailSection(() => getActivitiesForDeal(id, init)),
+            loadDetailSection(() => getNotesForDeal(id, {}, init)),
+            loadDetailSection(() => getTasksForDeal(id, init)),
             getTagsForDeal(id, init).catch(() => [] as Tag[]),
             getDealPeople(id, init).catch(() => [] as DealPerson[]),
             getAttachmentsFromCookie("deal", id, cookie),
@@ -159,10 +162,9 @@ export default async function DealPage({ params }: DealPageProps) {
     if (dealAccess.kind === 'missing') notFound();
     const deal = dealAccess.record;
 
-    const [lineItems, documents, effectivePermissions, company, dealContacts, pipeline, stages, commentThreads] = await Promise.all([
-        getDealLineItemsFromCookie(deal.id, cookie)
-            .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } })),
-        getDealDocumentsFromCookie(deal.id, cookie).catch(() => []),
+    const [lineItemsResult, documentsResult, effectivePermissions, company, dealContacts, pipeline, stages, commentThreads] = await Promise.all([
+        loadDetailSection(() => getDealLineItems(deal.id, init)),
+        loadDetailSection(() => getDealDocuments(deal.id, init)),
         getEffectivePermissionsFromCookie(cookie),
         deal.company != null
             ? getCompanyById(deal.company, init).catch(() => null)
@@ -176,6 +178,10 @@ export default async function DealPage({ params }: DealPageProps) {
             : Promise.resolve([] as Stage[]),
         getCommentThreads('deal', id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
     ]);
+    const activities = activitiesResult.kind === 'loaded' ? activitiesResult.data : [];
+    const notes = notesResult.kind === 'loaded' ? notesResult.data : [];
+    const tasks = tasksResult.kind === 'loaded' ? tasksResult.data : [];
+    const historyFailure = detailSectionFailure(activitiesResult, notesResult, tasksResult);
     const roleByPersonId = new Map(peopleRefs.map((ref) => [ref.person, ref.role]));
     const dealPeople: ResolvedDealPerson[] = dealContacts.map((person) => ({
         person,
@@ -526,9 +532,13 @@ export default async function DealPage({ params }: DealPageProps) {
                             </RecordDetailSection>
 
                             <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-8">
-                                <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
+                                <DetailSectionState title={t('openTasks')} failure={detailSectionFailure(tasksResult)}>
+                                    {tasksResult.kind === 'loaded' ? <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasksResult.data} deals={dealSeeds} /> : null}
+                                </DetailSectionState>
 
-                                <DealLineItems key={`${deal.workspaceId}:${deal.id}`} dealId={deal.id} dealWorkspaceId={deal.workspaceId ?? null} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
+                                <DetailSectionState title={(await getTranslations('DealsLineItems'))('title')} failure={detailSectionFailure(lineItemsResult)}>
+                                    {lineItemsResult.kind === 'loaded' ? <DealLineItems key={`${deal.workspaceId}:${deal.id}`} dealId={deal.id} dealWorkspaceId={deal.workspaceId ?? null} dealCurrency={deal.currency ?? 'USD'} initial={lineItemsResult.data} /> : null}
+                                </DetailSectionState>
                             </RecordDetailSection>
                         </Rise>
                     </div>
@@ -552,14 +562,16 @@ export default async function DealPage({ params }: DealPageProps) {
                         section="files"
                         className="grid grid-cols-1 gap-8 xl:grid-cols-2 xl:items-start"
                     >
-                        <DealDocuments
-                            dealId={deal.id}
-                            initial={documents}
-                            canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
-                            canManageApprovals={effectivePermissions.includes('DOCUMENT_MANAGE')}
-                            canDeleteDocuments={effectivePermissions.includes('DEAL_UPDATE')}
-                            currentUserId={currentUser.id}
-                        />
+                        <DetailSectionState title={(await getTranslations('DealsDocuments'))('title')} failure={detailSectionFailure(documentsResult)}>
+                            {documentsResult.kind === 'loaded' ? <DealDocuments
+                                dealId={deal.id}
+                                initial={documentsResult.data}
+                                canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
+                                canManageApprovals={effectivePermissions.includes('DOCUMENT_MANAGE')}
+                                canDeleteDocuments={effectivePermissions.includes('DEAL_UPDATE')}
+                                currentUserId={currentUser.id}
+                            /> : null}
+                        </DetailSectionState>
                         <Attachments
                             entityType="deal"
                             entityId={deal.id}
@@ -570,51 +582,55 @@ export default async function DealPage({ params }: DealPageProps) {
 
                 <Rise delay={0.16}>
                     <RecordDetailSection recordKind="deal" section="history" className="flex flex-col gap-8">
-                        <div>
-                            <SectionLabelWithTooltip
-                                title={t('engagement')}
-                                tooltip={
-                                    <div className="flex flex-col gap-2">
-                                        <h2 className="text-sm font-medium">{t('engagement')}</h2>
-                                        <p className="text-xs text-muted-foreground">
-                                            {t('engagementTooltip')}
-                                        </p>
-                                    </div>
-                                }
-                            />
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                <EngagementSparkline data={weeklyEngagement} />
-                                <DealActivityBreakdown activities={activities} />
-                            </div>
-                        </div>
-
-                        <div>
-                            <SectionLabelWithTooltip
-                                title={t('timeline')}
-                                tooltip={
-                                    <div className="flex flex-col gap-2">
-                                        <h2 className="text-sm font-medium">{t('timeline')}</h2>
-                                        <p className="text-xs text-muted-foreground">
-                                            {t('timelineTooltip')}
-                                        </p>
-                                    </div>
-                                }
-                            />
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                <Timeline
-                                    tasks={tasks}
-                                    activities={activities}
-                                    notes={notes}
-                                    noteTarget={{ type: "deal", id: deal.id }}
-                                    users={relatedUsers}
-                                    persons={personSeeds}
-                                    deals={dealSeeds}
-                                    comments={commentsFromThreads(commentThreads)}
-                                    currentUserId={currentUser.id}
-                                    companyId={deal.company ?? null}
+                        <DetailSectionState title={t('timeline')} failure={historyFailure}>
+                            {!historyFailure ? <>
+                            <div>
+                                <SectionLabelWithTooltip
+                                    title={t('engagement')}
+                                    tooltip={
+                                        <div className="flex flex-col gap-2">
+                                            <h2 className="text-sm font-medium">{t('engagement')}</h2>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('engagementTooltip')}
+                                            </p>
+                                        </div>
+                                    }
                                 />
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                    <EngagementSparkline data={weeklyEngagement} />
+                                    <DealActivityBreakdown activities={activities} />
+                                </div>
                             </div>
-                        </div>
+
+                            <div>
+                                <SectionLabelWithTooltip
+                                    title={t('timeline')}
+                                    tooltip={
+                                        <div className="flex flex-col gap-2">
+                                            <h2 className="text-sm font-medium">{t('timeline')}</h2>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('timelineTooltip')}
+                                            </p>
+                                        </div>
+                                    }
+                                />
+                                <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                    <Timeline
+                                        tasks={tasks}
+                                        activities={activities}
+                                        notes={notes}
+                                        noteTarget={{ type: "deal", id: deal.id }}
+                                        users={relatedUsers}
+                                        persons={personSeeds}
+                                        deals={dealSeeds}
+                                        comments={commentsFromThreads(commentThreads)}
+                                        currentUserId={currentUser.id}
+                                        companyId={deal.company ?? null}
+                                    />
+                                </div>
+                            </div>
+                            </> : null}
+                        </DetailSectionState>
                     </RecordDetailSection>
                 </Rise>
         </PageShell>

@@ -10,6 +10,9 @@
     "viewDeals": "View {currency} deals"
   },
   "RecordListState": {
+    "sectionTitle": "Couldn't load {section}",
+    "sectionDeniedTitle": "You don't have permission to view {section}",
+
     "title": "Couldn't load the list",
     "body": "Your records haven't been changed. Try again.",
     "refreshBody": "Showing the last loaded records. Try again to refresh the list.",

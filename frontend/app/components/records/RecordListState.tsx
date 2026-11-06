@@ -15,12 +15,14 @@ export function RecordListState({
     loading,
     hasRecords,
     onRetry,
+    sectionTitle,
     children,
 }: {
     error: Error | null;
     loading: boolean;
     hasRecords: boolean;
     onRetry: () => void;
+    sectionTitle?: string;
     children: ReactNode;
 }) {
     const t = useTranslations('RecordListState');
@@ -40,7 +42,9 @@ export function RecordListState({
             {error ? (
                 <Alert className={showRecords ? 'mb-4' : undefined}>
                     <ExclamationTriangleIcon aria-hidden />
-                    <AlertTitle className="line-clamp-none">{t(denied ? 'deniedTitle' : 'title')}</AlertTitle>
+                    <AlertTitle className="line-clamp-none">{sectionTitle
+                        ? t(denied ? 'sectionDeniedTitle' : 'sectionTitle', { section: sectionTitle })
+                        : t(denied ? 'deniedTitle' : 'title')}</AlertTitle>
                     <AlertDescription>
                         <p>{t(denied ? 'deniedBody' : hasRecords ? 'refreshBody' : 'body')}</p>
                         {reference ? <p className="break-all font-mono text-xs select-all">{t('reference', { id: reference })}</p> : null}

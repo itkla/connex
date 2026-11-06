@@ -37,6 +37,8 @@ Do not turn record details into dense multi-panel consoles or promote aggregate 
 
 Client collections using `useServerRecords` wrap their list content in `RecordListState`, keeping search and filter controls outside it so members can change or clear a failed filter. Failed loads show the shared alert and Retry, suppress empty and onboarding copy, and preserve the last successful rows only within the same workspace. A pending retry keeps its error visible with a disabled busy control; success clears the error. Expired sessions use the shared sign-in redirect and suppress collection content. Authentication and permission failures discard the cached page until a successful load; permission refusals use access guidance. API support references appear when available.
 
+Server-loaded detail collections use `loadDetailSection` and `DetailSectionState`, which reuse that alert with the section's name and refresh the route on Retry. Failed sections hide their content, including dependent totals, combined timelines and introduction-path claims; successful empty responses keep their ordinary empty treatment. Permission denials take precedence when a section depends on several loads, and expired sessions follow the existing sign-in flow. No previous result is cached by the section wrapper.
+
 Every collection/list surface distinguishes all four states:
 
 - Loading: shape-matched `loading.tsx` skeletons, not a centered spinner over content.
