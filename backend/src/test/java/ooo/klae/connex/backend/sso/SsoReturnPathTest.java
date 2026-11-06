@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.sso;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -61,38 +60,10 @@ class SsoReturnPathTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/api/oauth2/authorization/org-7", "/api/oauth2/authorization/google", "/saml2/authenticate/org-7",
-            "/api/%6fauth2/authorization/google", "/saml2/authenticate;source=invite/org-7"})
-    void capturesOnlyTheValidatedStartDestination(String start) throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", start);
-        request.addParameter("redirect", "/records/../invite-link");
-
-        new AuthenticationReturnPathFilter().doFilter(request, new MockHttpServletResponse(), (incoming, response) -> { });
-        AuthenticationReturnPathSession.capture(request);
-
-        assertEquals("/invite-link", AuthenticationReturnPathSession.captured(request));
-        AuthenticationReturnPathSession.capture(request);
-        assertNull(AuthenticationReturnPathSession.captured(request));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"https://app.example/invite", "//host", "/%2f%2fhost", "/%5chost", "/in\nvite", "/invite\u0000"})
-    void unsafeStartDestinationsNeverBecomeAuthenticationReturnState(String destination) throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/oauth2/authorization/google");
-        request.addParameter("redirect", destination);
-
-        new AuthenticationReturnPathFilter().doFilter(request, new MockHttpServletResponse(), (incoming, response) -> { });
-        AuthenticationReturnPathSession.capture(request);
-
-        assertNull(AuthenticationReturnPathSession.captured(request));
-    }
-
-    @ParameterizedTest
     @ValueSource(strings = {"org-7", "google"})
     void successfulEnterpriseOrSocialLoginReturnsToTheInvitationAfterSessionReplacement(String provider) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/oauth2/authorization/" + provider);
-        request.addParameter("redirect", "/invite-link");
-        AuthenticationReturnPathSession.remember(request);
+        matchedOAuth(request, provider, "/invite-link");
         MockHttpServletResponse response = new MockHttpServletResponse();
         User account = new User();
         account.setId(19);
@@ -128,8 +99,7 @@ class SsoReturnPathTest {
     @Test
     void successfulSamlLoginReturnsToTheValidatedInvitation() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/saml2/authenticate/org-7");
-        request.addParameter("redirect", "/invite");
-        AuthenticationReturnPathSession.remember(request);
+        matchedSaml(request, "/invite");
         MockHttpServletResponse response = new MockHttpServletResponse();
         var authentication = mock(org.springframework.security.saml2.provider.service.authentication.Saml2AssertionAuthentication.class);
         var assertion = mock(org.springframework.security.saml2.provider.service.authentication.Saml2ResponseAssertionAccessor.class);
@@ -158,9 +128,78 @@ class SsoReturnPathTest {
     @Test
     void failureRetainsOnlyTheValidatedLocalDestination() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addParameter("redirect", "/invite");
-        AuthenticationReturnPathSession.remember(request);
+        matchedOAuth(request, "google", "/invite");
 
         assertEquals("/auth/login?sso_error=1&redirect=%2Finvite", AuthenticationReturnPathSession.failurePath(request));
+    }
+    @Test
+    void interleavedCrossSiteDisabledSamlStartCannotChangeTheGoogleCallbackLandingPage() throws Exception {
+        var registrations = mock(CompositeClientRegistrationRepository.class);
+        var samlRegistrations = mock(org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository.class);
+        when(registrations.findByRegistrationId("google")).thenReturn(mock(org.springframework.security.oauth2.client.registration.ClientRegistration.class));
+        var filter = new AuthenticationReturnPathFilter(false, registrations, samlRegistrations);
+        var repository = new OAuthAuthenticationAttemptRepository();
+        var start = new MockHttpServletRequest("GET", "/api/oauth2/authorization/google");
+        start.addParameter("redirect", "/invite");
+        start.addHeader("Sec-Fetch-Site", "same-origin");
+        var authorization = SsoAttemptRepositoryTest.oauth("google", "original-state");
+        filter.doFilter(start, new MockHttpServletResponse(), (incoming, outgoing) ->
+                repository.saveAuthorizationRequest(authorization, start, new MockHttpServletResponse()));
+        var injected = new MockHttpServletRequest("GET", "/saml2/authenticate/org-0");
+        injected.setSession(start.getSession(false));
+        injected.addHeader("Sec-Fetch-Site", "cross-site");
+        injected.addParameter("redirect", "/settings/personal/security");
+        var refused = new MockHttpServletResponse();
+        filter.doFilter(injected, refused, (incoming, outgoing) -> {
+            throw new AssertionError("Disabled SAML cannot begin");
+        });
+        assertEquals(403, refused.getStatus());
+        var callback = new MockHttpServletRequest("GET", "/api/login/oauth2/code/google");
+        callback.setSession(start.getSession(false));
+        callback.addParameter("state", authorization.getState());
+        assertEquals(authorization, repository.removeAuthorizationRequest(callback, new MockHttpServletResponse()));
+        User account = new User();
+        account.setId(19);
+        account.setDisplayName("Member");
+        var response = new MockHttpServletResponse();
+        when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example");
+        when(oidcUser.getEmail()).thenReturn("member@example.com");
+        when(oidcUser.getEmailVerified()).thenReturn(true);
+        when(oidcUser.getFullName()).thenReturn("Member");
+        when(oidcUser.getIssuer()).thenReturn(URI.create("https://issuer.example").toURL());
+        when(oidcUser.getSubject()).thenReturn("subject");
+        when(socialLoginService.resolve("google", "https://issuer.example", "subject", "member@example.com", true, "Member"))
+                .thenReturn(new SsoLoginResult.Login(account));
+        when(authService.establishAuthenticatedSession(account, callback, response)).thenReturn(account);
+
+        handler.onAuthenticationSuccess(callback, response, new OAuth2AuthenticationToken(oidcUser, List.of(), "google"));
+
+        assertEquals("https://app.example/invite", response.getRedirectedUrl());
+        verifyNoInteractions(samlRegistrations, workspaceMapper);
+    }
+
+    static void matchedOAuth(MockHttpServletRequest request, String provider, String destination) {
+        request.addParameter("redirect", destination);
+        AuthenticationReturnPathSession.prepareStart(request);
+        var authorization = org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest.authorizationCode()
+                .authorizationUri("https://issuer.example/authorize").clientId("client")
+                .redirectUri("https://app.example/api/login/oauth2/code/" + provider)
+                .state("handler-state").attributes(Map.of("registration_id", provider)).build();
+        var repository = new OAuthAuthenticationAttemptRepository();
+        repository.saveAuthorizationRequest(authorization, request, new MockHttpServletResponse());
+        request.setRequestURI("/api/login/oauth2/code/" + provider);
+        request.addParameter("state", authorization.getState());
+        repository.removeAuthorizationRequest(request, new MockHttpServletResponse());
+    }
+
+    private static void matchedSaml(MockHttpServletRequest request, String destination) {
+        request.addParameter("redirect", destination);
+        AuthenticationReturnPathSession.prepareStart(request);
+        var authorization = SsoAttemptRepositoryTest.saml("org-7", "saml-request-id", "saml-relay-state");
+        var repository = new SamlAuthenticationAttemptRepository();
+        repository.saveAuthenticationRequest(authorization, request, new MockHttpServletResponse());
+        request.setRequestURI("/api/login/saml2/sso/org-7");
+        request.addParameter("RelayState", authorization.getRelayState());
+        repository.removeAuthenticationRequest(request, new MockHttpServletResponse());
     }
 }

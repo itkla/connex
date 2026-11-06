@@ -63,7 +63,7 @@ import org.springframework.security.oauth2.client.authentication.OAuth2LoginAuth
 import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
-import org.springframework.security.oauth2.client.web.HttpSessionOAuth2AuthorizationRequestRepository;
+import ooo.klae.connex.backend.sso.OAuthAuthenticationAttemptRepository;
 import org.springframework.security.oauth2.client.web.OAuth2LoginAuthenticationFilter;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
@@ -477,7 +477,7 @@ class SecurityConfigOAuthTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpSession session = new MockHttpSession();
         request.setSession(session);
-        new HttpSessionOAuth2AuthorizationRequestRepository().saveAuthorizationRequest(
+        new OAuthAuthenticationAttemptRepository().saveAuthorizationRequest(
                 authorization(id), request, new MockHttpServletResponse());
         return session;
     }

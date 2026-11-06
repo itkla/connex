@@ -58,8 +58,7 @@ class SsoLinkAuthenticationSuccessHandlerTest {
     void linkRequiredResultClearsAuthenticationBeforeIssuingFlow(String destination) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
         if (!destination.isEmpty()) {
-            request.addParameter("redirect", destination);
-            AuthenticationReturnPathSession.remember(request);
+            SsoReturnPathTest.matchedOAuth(request, "org-7", destination);
         }
         MockHttpServletResponse response = new MockHttpServletResponse();
         OAuth2AuthenticationToken authentication = new OAuth2AuthenticationToken(

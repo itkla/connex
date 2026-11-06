@@ -80,7 +80,6 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
             Authentication authentication) throws IOException {
         String frontendBase = mailProperties.getAppBaseUrl();
-        AuthenticationReturnPathSession.capture(request);
         try {
             if (authentication instanceof OAuth2AuthenticationToken token
                     && token.getPrincipal() instanceof OidcUser user) {

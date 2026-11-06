@@ -67,10 +67,25 @@ the returned link or explicitly replace the invitation after a failed submission
 routes the target workspace, and SMTP starts after sender-resolution locks are released.
 
 Authentication return destinations use the same strict relative-path contract on the frontend
-and server. OAuth2/social and SAML start endpoints capture only one validated `redirect` query
-value. Completion consumes it before a session can be replaced; successful login, linking and
-failure continuations use only that captured value. An absent or invalid destination keeps the
-existing dashboard/onboarding fallback. No caller-supplied origin can become the redirect origin.
+and backend. Starts carrying `redirect` require exactly `Sec-Fetch-Site: same-origin`; absent,
+`none`, same-site and cross-site metadata are refused before registration/configuration reads.
+Only enabled OAuth registrations and enabled SAML ceremonies can admit a destination. A disabled
+SAML start cannot mutate an OAuth attempt, including on a social-only deployment.
+
+Full authorization requests and their destinations are saved together in separate session
+attributes keyed by OAuth state or SAML RelayState. SAML records retain the AuthnRequest id for
+framework response correlation. Matching also checks the callback's registration. Unknown,
+duplicate or mismatched callback state does not remove another attempt or produce navigation.
+Only matching repository removal publishes request-local navigation before session replacement;
+success, linking and failure handlers never read a last-destination session slot.
+
+Attempts expire after ten minutes. Starts refuse duplicate identities and an observed count of
+four live attempts rather than evicting an in-flight request. Distinct attribute keys avoid the
+lost updates of a shared map under Spring Session attribute deltas. Concurrent detached session
+snapshots can observe spare capacity simultaneously and exceed the count by concurrent starts;
+the bound is observational, while identity/destination association remains exact and fail-closed.
+Legacy singleton return state is not adopted. Missing or invalid destinations retain the existing
+dashboard/onboarding fallback, and no caller-supplied origin becomes the redirect origin.
 
 Self-service registration accepts `skipInitialWorkspace` to suppress optional personal workspace
 creation while returning to invitation acceptance. This preference grants no workspace membership

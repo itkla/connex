@@ -88,12 +88,18 @@ queue is used; an unsuccessful submission is visible alongside the recoverable i
 The response and sending path never depend on whether the recipient has a Connex account;
 pending profiles stay withheld.
 
-OAuth2 enterprise/social and SAML start endpoints accept an optional `redirect` query parameter.
-Only a single validated, normalized relative path is kept for the browser's next ceremony.
-Authentication completion consumes it before session rotation and redirects to the configured
-frontend origin plus that path. A link-required result carries the same validated path into its
-confirmation page. Absolute URLs, controls, backslashes and encoded separators/controls are
-rejected before parsing and after one strict UTF-8 decode, matching the frontend's shared vectors.
+OAuth2 enterprise/social and SAML start endpoints accept an optional `redirect` query parameter
+only for enabled registrations/ceremonies. Destination-setting starts require browser Fetch
+Metadata exactly `Sec-Fetch-Site: same-origin`; missing/cross-site metadata returns 403 without
+changing authentication attempt state. The saved complete authorization request and normalized
+relative destination are bound to that attempt's OAuth state or SAML RelayState, registration,
+and (for SAML) AuthnRequest id. A later start creates fresh state or is refused; it never replaces
+a live attempt's destination. Callback handlers use only navigation published by matching saved
+request removal, including linking and failure continuations across session replacement.
+Absolute URLs, controls, backslashes and encoded separators/controls remain refused under the
+shared frontend/backend validation vectors. There is no singleton last-destination fallback.
+Attempts have a ten-minute lifetime and an observed four-live-attempt limit with no live eviction;
+concurrent Spring Session snapshots can exceed the observed count without aliasing identities.
 
 Self-service registration accepts an optional `skipInitialWorkspace` boolean, defaulting to false.
 It suppresses only the optional personal workspace, so invitation entry can continue without
