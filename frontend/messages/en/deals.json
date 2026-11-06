@@ -634,5 +634,28 @@
             "won": "Outcome",
             "riskExcluded": "Deal risk evaluation"
         }
+    },
+    "DealStakeholders": {
+        "title": "Stakeholders",
+        "add": "Add contact",
+        "empty": "No stakeholders yet. Add the contacts involved in this deal.",
+        "editRole": "Edit role",
+        "editRoleFor": "Edit role for {name}",
+        "remove": "Remove",
+        "removeFor": "Remove {name} from this deal",
+        "description": "Choose a contact and describe their role in this deal.",
+        "contact": "Contact",
+        "chooseContact": "Search contacts",
+        "role": "Role (optional)",
+        "rolePlaceholder": "For example, Champion or Buyer",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saved": "Stakeholder saved",
+        "removed": "Stakeholder removed",
+        "saveFailed": "Couldn't save the stakeholder",
+        "removeFailed": "Couldn't remove the stakeholder",
+        "searchFailed": "Couldn’t load contacts. Search again to retry.",
+        "warmthUnavailable": "Warmth unavailable",
+        "contactRequired": "Choose a contact to add."
     }
 }

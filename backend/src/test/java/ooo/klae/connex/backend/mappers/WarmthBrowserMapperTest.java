@@ -86,7 +86,7 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
                 facet.getCount(),
                 personMapper.countPersons(ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(),
                     null, false, null, false, null, false, false,
-                    filter(reference, noWarmth ? List.of() : List.of(facet.getKey()), noWarmth, null)),
+                    filter(reference, noWarmth ? List.of() : List.of(facet.getKey()), noWarmth, null), null),
                 "count for facet " + facet.getKey());
         }
     }
@@ -372,11 +372,11 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
 
         List<Integer> exported = personMapper.getPersonsFiltered(
                 ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
-                null, false, false, warmth)
+                null, false, false, warmth, null)
             .stream().map(Person::getId).toList();
         List<Integer> selected = personMapper.getPersonIdsFiltered(
             ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, warmth, 100);
+            null, false, false, warmth, 100, null);
 
         assertEquals(List.of(hot.getId()), exported);
         assertEquals(List.of(hot.getId()), selected);
@@ -450,14 +450,14 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
 
         List<Integer> exported = personMapper.getPersonsFiltered(
                 ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
-                null, false, false, warmth)
+                null, false, false, warmth, null)
             .stream().map(Person::getId).toList();
         List<Integer> selected = personMapper.getPersonIdsFiltered(
             ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, warmth, 100);
+            null, false, false, warmth, 100, null);
         long counted = personMapper.countPersons(
             ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, warmth);
+            null, false, false, warmth, null);
 
         assertEquals(List.of(cool.getId()), exported);
         assertEquals(List.of(cool.getId()), selected);
@@ -498,13 +498,13 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
             Workspace ws, Instant reference, List<String> bands, boolean noWarmth) {
         return personMapper.getPersonIdsFiltered(
             ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, filter(reference, bands, noWarmth, null), 100);
+            null, false, false, filter(reference, bands, noWarmth, null), 100, null);
     }
 
     private List<Integer> horizonContactIds(Workspace ws, Instant reference, int days) {
         return personMapper.getPersonIdsFiltered(
             ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, filter(reference, List.of(), false, days), 100);
+            null, false, false, filter(reference, List.of(), false, days), 100, null);
     }
 
     private List<Integer> companyIdsInBands(
@@ -517,7 +517,7 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
     private List<Integer> sortedContactIds(Workspace ws, Instant reference, String dir) {
         return personMapper.getPersonsPage(
                 ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, "warmth", dir, null, null, false, MemberScope.allTeam(), null,
-                false, null, false, null, false, false, scoringFilter(reference), 100, 0)
+                false, null, false, null, false, false, scoringFilter(reference), 100, 0, null)
             .stream().map(Person::getId).toList();
     }
 

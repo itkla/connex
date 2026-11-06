@@ -23,6 +23,7 @@ export type PageParams = {
 };
 
 export type ContactsPageParams = PageParams & MemberScopeParams & {
+    tagIds?: number[];
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;

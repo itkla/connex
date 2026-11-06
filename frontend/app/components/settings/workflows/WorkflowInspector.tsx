@@ -181,6 +181,7 @@ export default function WorkflowInspector({
                         recordType={document.recordType ?? "deal"}
                         options={options}
                         advanced
+                        context="workflow"
                         triggerProps={fieldProps("config")}
                         focusPath={focusFieldPath}
                         focusDescriptionId={focusFieldPath ? describedBy(focusFieldPath) : undefined}
