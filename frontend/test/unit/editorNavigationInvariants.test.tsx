@@ -102,9 +102,70 @@ beforeEach(() => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
     vi.stubGlobal('matchMedia', (media: string) => ({ media, matches: true, addEventListener() {}, removeEventListener() {} }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('editor navigation invariants', () => {
+    it.each([
+        { direction: 'Back', native: false, index: 0 },
+        { direction: 'Back', native: true, index: 0 },
+        { direction: 'Forward', native: false, index: 2 },
+        { direction: 'Forward', native: true, index: 2 },
+    ])('leaves clean $direction traversal to Next without touching history (Navigation API: $native)', ({ native, index }) => {
+        vi.stubGlobal('navigation', native ? {
+            get currentEntry() {
+                return window.location.pathname === '/editor'
+                    ? { key: 'editor-entry', index: 1 }
+                    : { key: 'record-list-entry', index };
+            },
+        } : undefined);
+        mount('/editor');
+        const destination = '/records/deals?view=table&q=Saved+selection';
+        const state = { ...nextState, connexRecordReturn: 'saved-selection-navigation' };
+        window.history.replaceState(state, '', destination);
+        const pushState = vi.spyOn(window.History.prototype, 'pushState');
+        const replaceState = vi.spyOn(window.History.prototype, 'replaceState');
+        const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+        const event = new PopStateEvent('popstate', { state });
+        const stop = vi.spyOn(event, 'stopImmediatePropagation');
+        act(() => { window.dispatchEvent(event); });
+        expect(stop).not.toHaveBeenCalled();
+        expect(go).not.toHaveBeenCalled();
+        expect(pushState).not.toHaveBeenCalled();
+        expect(replaceState).not.toHaveBeenCalled();
+        expect(router.push).not.toHaveBeenCalled();
+        expect(router.replace).not.toHaveBeenCalled();
+        expect(window.history.state).toEqual(state);
+        expect(window.location.pathname + window.location.search).toBe(destination);
+        expect(screen.getByRole('heading', { name: 'Destination page' })).toBeTruthy();
+        expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('finishes a guarded traversal if the editor becomes clean while restoring its position', () => {
+        vi.stubGlobal('navigation', {
+            get currentEntry() {
+                return window.location.pathname === '/editor'
+                    ? { key: 'editor-entry', index: 1 }
+                    : { key: 'list-entry', index: 0 };
+            },
+        });
+        mount('/editor');
+        dirty();
+        const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+        window.history.replaceState(nextState, '', '/list');
+        act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: nextState })); });
+        expect(go).toHaveBeenNthCalledWith(1, 1);
+        window.history.replaceState(nextState, '', '/editor');
+        fireEvent.change(screen.getByRole('textbox', { name: 'Draft' }), { target: { value: '' } });
+        act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: nextState })); });
+        expect(go).toHaveBeenNthCalledWith(2, -1);
+        expect(router.replace).not.toHaveBeenCalled();
+        window.history.replaceState(null, '', '/list');
+        act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: null })); });
+        expect(router.replace).toHaveBeenCalledExactlyOnceWith('/list');
+        expect(screen.getByRole('heading', { name: 'Destination page' })).toBeTruthy();
+        expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
     it.each(['popstate', 'shell', 'beforeunload'])('protects committed edits before passive effects at the %s boundary', async (boundary) => {
         mount('/editor');
         let unload: Event | undefined;

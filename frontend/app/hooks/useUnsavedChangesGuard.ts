@@ -206,6 +206,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
             requestNavigation(() => push(url.pathname + url.search + url.hash));
         };
         const onPopState = (event: PopStateEvent) => {
+            if (!hasUnsavedChanges() && !restoringTraversal.current && !acceptedTraversal.current) return;
             const entry = editorEntry.current;
             if (!entry || !replace) return;
             const destination = new URL(window.location.href);

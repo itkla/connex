@@ -250,6 +250,15 @@ test(`sidebar and browser Back/Forward retain a report until discard is confirme
     await page.locator('a[href="/insights/reports/new"]').first().click();
     const input = page.getByRole('textbox', { name: 'Name', exact: true });
     const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    await expect(page).toHaveURL('/insights/reports/new');
+    await expect(input).toHaveValue('');
+    await page.goBack();
+    await expect(page).toHaveURL('/insights/reports');
+    await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await page.goForward();
+    await expect(page).toHaveURL('/insights/reports/new');
+    await expect(input).toHaveValue('');
     await input.fill('Report kept after Back');
     await page.evaluate(() => window.history.back());
     await expect(dialog).toBeVisible();
