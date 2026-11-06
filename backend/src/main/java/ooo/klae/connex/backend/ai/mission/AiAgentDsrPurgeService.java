@@ -79,7 +79,8 @@ public class AiAgentDsrPurgeService {
      * An exhausted keyset wraps once within the same invocation so changed receipts behind the
      * cursor are retried without an empty scheduled pass; at most twenty receipts are processed.
      */
-    @Scheduled(fixedDelayString = "${connex.ai.mission-dsr-recovery-delay:10s}", initialDelay = 15000)
+    @Scheduled(fixedDelayString = "${connex.ai.mission-dsr-recovery-delay:10s}",
+            initialDelayString = "${connex.ai.mission-dsr-recovery-initial-delay:15s}")
     public void recoverAccepted() {
         int afterId = recoveryCursor.get();
         List<AuditLog> receipts = tenantWorkScope.unroutedRead(
