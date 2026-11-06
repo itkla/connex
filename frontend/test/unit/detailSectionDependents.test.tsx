@@ -18,10 +18,12 @@ import { DealEngagementSection } from '@/app/components/records/DetailCollection
 
 const people = vi.hoisted(() => vi.fn());
 const activities = vi.hoisted(() => vi.fn());
-vi.mock('@/app/lib/api', async (original) => ({ ...await original<typeof import('@/app/lib/api')>(), getCompanyPeople: people, getActivitiesForDeal: activities }));
+const authors = vi.hoisted(() => vi.fn(async () => []));
+const report = vi.hoisted(() => vi.fn());
+vi.mock('@/app/lib/api', async (original) => ({ ...await original<typeof import('@/app/lib/api')>(), getCompanyPeople: people, getActivitiesForDeal: activities, getUserReferences: authors }));
 vi.mock('@/app/lib/renderedWorkspace', async (original) => ({ ...await original<typeof import('@/app/lib/renderedWorkspace')>(), renderedWorkspaceId: () => 1 }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 1, switching: false }) }));
-vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => vi.fn() }));
+vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => report }));
 vi.mock('@/app/components/me/TimelineDeepLinkFallback', () => ({ default: () => null }));
 vi.mock('@/app/components/me/TimelineRow', () => ({ default: ({ entry, persons, personsUnavailable }: ComponentProps<typeof TimelineRow>) => <li>
     <p>{entry.kind === 'activity' ? entry.activity.subject : entry.kind}</p>

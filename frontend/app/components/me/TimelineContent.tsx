@@ -12,6 +12,7 @@ import TimelineDeepLinkFallback from "./TimelineDeepLinkFallback";
 import TimelineRow from "./TimelineRow";
 import type { Contact, ContactLifecycleHistoryEntry, Deal, NotePageCursor, PersonCampaignTouch, RecordComment, UserReference } from "@/app/lib/types";
 import { useDetailSections } from "@/app/hooks/useDetailSections";
+import { useDetailTimelineUsers } from "@/app/hooks/useDetailTimelineUsers";
 import DetailSectionState from "@/app/components/records/DetailSectionState";
 import type { TimelineProps } from "./Timeline";
 
@@ -33,13 +34,14 @@ function DetailTimelineContent(props: TimelineProps & { originWorkspaceId: numbe
     const sections = useDetailSections();
     const t = useTranslations(props.detailKind === "deal" ? "DealsPage" : props.detailKind === "company" ? "CompaniesDetail" : "ContactsPage");
     const result = sections?.results;
+    const users = useDetailTimelineUsers(props.detailKind, props.users ?? EMPTY_USERS, props.originWorkspaceId);
     const activities = props.detailKind === "deal" && result?.dealActivities?.kind === "loaded" ? result.dealActivities.data : props.activities;
     const tasks = props.detailKind === "deal" && result?.dealTasks?.kind === "loaded" ? result.dealTasks.data : props.tasks;
     const notes = props.detailKind === "deal" && result?.dealNotes?.kind === "loaded" ? result.dealNotes.data : props.notes;
     const lifecycleHistory = props.detailKind === "contact" && result?.contactHistory?.kind === "loaded" ? result.contactHistory.data : props.lifecycleHistory;
     const persons = props.detailKind === "company" ? (result?.companyPeople?.kind === "loaded" ? result.companyPeople.data : []) : props.persons;
     const deals = props.detailKind === "company" ? (result?.companyDeals?.kind === "loaded" ? result.companyDeals.data : []) : props.deals;
-    const content = <ScopedTimelineContent {...props} activities={activities} tasks={tasks} notes={notes} lifecycleHistory={lifecycleHistory} persons={persons} deals={deals}
+    const content = <ScopedTimelineContent {...props} users={users} activities={activities} tasks={tasks} notes={notes} lifecycleHistory={lifecycleHistory} persons={persons} deals={deals}
         personsUnavailable={props.detailKind === "company" && result?.companyPeople?.kind === "failed"}
         dealsUnavailable={props.detailKind === "company" && result?.companyDeals?.kind === "failed"}
     />;

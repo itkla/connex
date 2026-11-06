@@ -47,6 +47,7 @@ const loaders: { [K in DetailSectionKey]: (id: number, init: RequestInit) => Pro
 };
 
 type DetailSectionsContextValue = {
+    initial: DetailSectionResults;
     results: DetailSectionResults;
     pending: ReadonlySet<DetailSectionKey>;
     retry: (keys: readonly DetailSectionKey[]) => Promise<boolean>;
@@ -115,7 +116,7 @@ export function DetailSectionsProvider({ recordId, workspaceId: requestedWorkspa
         return recovered.every(Boolean);
     }, [initial, recordId, results, workspaceId]);
 
-    const value = useMemo(() => ({ results, pending, retry }), [results, pending, retry]);
+    const value = useMemo(() => ({ initial, results, pending, retry }), [initial, results, pending, retry]);
 
     if (workspace.switching || workspace.activeWorkspaceId !== workspaceId) return null;
     return <DetailSectionsContext.Provider value={value}>{children}</DetailSectionsContext.Provider>;
