@@ -157,7 +157,7 @@ export default function WorkflowRunsDialog({
                             title={t("runs.errorTitle")}
                             body={t("runs.errorBody")}
                             action={(
-                                <Button variant="outline" size="sm" onClick={() => setAttempt((current) => current + 1)}>
+                                <Button variant="outline" size="toolbar" onClick={() => setAttempt((current) => current + 1)}>
                                     {t("runs.retry")}
                                 </Button>
                             )}
@@ -172,7 +172,7 @@ export default function WorkflowRunsDialog({
                                     ? "runs.scheduledTarget"
                                     : !["person", "company", "deal", "task"].includes(run.trigger?.recordType ?? "")
                                         ? "runs.targetNameNotRecorded"
-                                        : targets.loading ? "runs.targetLoading" : "runs.targetUnavailable";
+                                        : targets.pending.has(runTargetKey(run)) ? "runs.targetLoading" : "runs.targetUnavailable";
                                 return (
                                     <li key={run.runKey} className="space-y-3 px-6 py-4">
                                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -214,14 +214,14 @@ export default function WorkflowRunsDialog({
                                         {run.failure ? (
                                             <div className="space-y-2">
                                                 <WorkflowRunFailure failure={run.failure} />
-                                                <Button variant="outline" size="sm" asChild>
+                                                <Button variant="outline" size="toolbar" asChild>
                                                     <Link href={`/workflows/${workflowId}`} onClick={() => onOpenChange(false)}>{t("runs.reviewWorkflow")}</Link>
                                                 </Button>
                                             </div>
                                         ) : null}
                                         <Button
                                             variant="ghost"
-                                            size="sm"
+                                            size="toolbar"
                                             disabled={!run.stepDetailAvailable || detailLoading}
                                             onClick={() => void loadDetail(run)}
                                         >
@@ -232,7 +232,7 @@ export default function WorkflowRunsDialog({
                             })}
                             {nextCursor ? (
                                 <li className="px-6 py-4">
-                                    <Button variant="outline" size="sm" disabled={moreLoading} onClick={() => void loadMore()}>
+                                    <Button variant="outline" size="toolbar" disabled={moreLoading} onClick={() => void loadMore()}>
                                         {t("runs.loadMore")}
                                     </Button>
                                 </li>
@@ -278,7 +278,7 @@ function RunDetail({
                     {formatWorkflowRunDateTime(run.startedAt, locale, timeZone)}
                 </time>
                 {onOverlay && run.version ? (
-                    <Button className="ml-auto" variant="outline" size="sm" onClick={() => onOverlay(run)}>
+                    <Button className="ml-auto" variant="outline" size="toolbar" onClick={() => onOverlay(run)}>
                         {t("runs.showOverlay")}
                     </Button>
                 ) : null}

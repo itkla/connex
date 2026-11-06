@@ -307,7 +307,10 @@ summary-only failures remain unknown rather than having steps or versions inferr
 Run history and Operations expose the safe first-failure evidence and link to workflow review as the
 owner investigation path. They do not offer summary-only runs a step retry: completed actions may
 already have changed records. History resolves contact, company, deal, and task names through the
-viewer's existing workspace-pinned record APIs, with no name/link when access is refused. Document
+viewer's existing workspace-pinned record APIs, with no name/link when access is refused. Target
+lookups retain settled results only within the current workspace, fetch each new distinct target
+once, and run at most four requests concurrently. Each result appears independently; switching
+workspaces aborts pending reads and discards the cache. Document
 names cannot be resolved from a document-only history id by the existing deal-scoped read API;
 that case explicitly says the name is unavailable in this history, without claiming deletion or
 lack of permission. Run-number sequences identify the execution ledger, never whether a run was
