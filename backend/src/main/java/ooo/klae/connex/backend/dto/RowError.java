@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.List;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -11,4 +13,9 @@ import lombok.NoArgsConstructor;
 public class RowError {
     private int rowIndex;
     private String reason;
+    private List<ImportProblem> problems;
+
+    public RowError(int rowIndex, String reason) {
+        this(rowIndex, reason, null);
+    }
 }

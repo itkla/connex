@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     DndContext,
     DragOverlay,
@@ -16,20 +16,29 @@ import {
     type DragEndEvent,
     type DragOverEvent,
     type DragStartEvent,
+    type KeyboardCoordinateGetter,
     type ScreenReaderInstructions,
 } from '@dnd-kit/core';
 import {
     SortableContext,
     arrayMove,
-    sortableKeyboardCoordinates,
     useSortable,
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { Bars3Icon } from '@heroicons/react/24/outline';
+import { IconButton } from '@/components/ui/icon-button';
 
 import { useDragScroll } from '@/app/hooks/useDragScroll';
+import { kanbanKeyboardCoordinates } from '@/app/components/kanban/kanbanKeyboardCoordinates';
 
 const COL_PREFIX = 'col:';
+const silentAnnouncements: Announcements = {
+    onDragStart: () => undefined,
+    onDragOver: () => undefined,
+    onDragEnd: () => undefined,
+    onDragCancel: () => undefined,
+};
 
 export interface KanbanColumnDef {
     id: string;
@@ -46,13 +55,31 @@ export interface KanbanBoardProps<T> {
     getId: (item: T) => number;
     getColumnId: (item: T) => string;
     getPosition: (item: T) => number;
-    renderCard: (item: T) => ReactNode;
-    /** Persist a move; the board reverts its optimistic state if this rejects. */
-    onMove?: (itemId: number, toColumnId: string, index: number) => Promise<void>;
+    renderCard: (item: T, dragHandle?: ReactNode) => ReactNode;
+    dragLabel: (item: T) => string;
+    /** Seek consent with the source placement visible; false cancels before persistence. */
+    onBeforeMove?: (itemId: number, toColumnId: string, index: number) => Promise<boolean>;
+    /** Persist a move and optionally return its saved placement within the visible board. */
+    onMove?: (itemId: number, toColumnId: string, index: number) => Promise<void | boolean | KanbanMoveResult>;
     reduce: boolean;
     emptyHint?: string;
     countLabel: (count: number) => string;
-    accessibility?: { announcements?: Announcements; screenReaderInstructions?: ScreenReaderInstructions };
+    accessibility?: {
+        announcements?: Announcements;
+        screenReaderInstructions?: ScreenReaderInstructions;
+        moveRestored?: (itemId: number, columnId: string, position: number) => string;
+        /** Routes the complete announcement lifecycle to a surface-owned live region. */
+        onAnnouncement?: (message: string) => void;
+    };
+}
+
+/** The server-confirmed visible placement of a persisted move. */
+export interface KanbanMoveResult {
+    columnId: string;
+    /** Visible index after saving, or -1 when the saved item no longer matches the board. */
+    index: number;
+    /** Final localized feedback, including the saved stage, position, and outcome where applicable. */
+    announcement?: string;
 }
 
 type ColumnItems = Record<string, number[]>;
@@ -82,13 +109,19 @@ function indexColumns(map: ColumnItems): Map<number, string> {
     return index;
 }
 
+function placeItem(current: ColumnItems, itemId: number, saved: KanbanMoveResult): ColumnItems {
+    const next = Object.fromEntries(Object.entries(current).map(([column, ids]) => [column, ids.filter((id) => id !== itemId)]));
+    if (saved.index >= 0 && next[saved.columnId]) next[saved.columnId].splice(Math.min(saved.index, next[saved.columnId].length), 0, itemId);
+    return next;
+}
+
 const boardCollisionDetection: CollisionDetection = (args) => {
     const pointerCollisions = pointerWithin(args);
     return pointerCollisions.length > 0 ? pointerCollisions : closestCorners(args);
 };
 
 export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
-    const { columns, items, getId, getColumnId, getPosition, renderCard, onMove, reduce, emptyHint, countLabel, accessibility } = props;
+    const { columns, items, getId, getColumnId, getPosition, renderCard, dragLabel, onBeforeMove, onMove, reduce, emptyHint, countLabel, accessibility } = props;
 
     const incoming = useMemo(
         () => groupItems(columns, items, getId, getColumnId, getPosition),
@@ -99,10 +132,22 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const [columnItems, setColumnItems] = useState<ColumnItems>(incoming);
     const snapshotRef = useRef<ColumnItems>(incoming);
     const snapshotColumnByItemIdRef = useRef<Map<number, string>>(new Map());
+    const snapshotIncomingKeyRef = useRef(incomingKey);
     const [activeId, setActiveId] = useState<number | null>(null);
+    const [saving, setSaving] = useState(false);
+    const boardRef = useRef<HTMLDivElement>(null);
+    const [moveAnnouncement, setMoveAnnouncement] = useState('');
+    const focusRestoreIdRef = useRef<number | null>(null);
+
+    useLayoutEffect(() => {
+        const focusRestoreId = focusRestoreIdRef.current;
+        if (focusRestoreId === null || saving || activeId !== null) return;
+        boardRef.current?.querySelector<HTMLButtonElement>(`[data-kanban-drag-handle="${focusRestoreId}"]`)?.focus();
+        focusRestoreIdRef.current = null;
+    }, [activeId, columnItems, saving]);
 
     const [syncedKey, setSyncedKey] = useState(incomingKey);
-    if (syncedKey !== incomingKey && activeId == null) {
+    if (syncedKey !== incomingKey && activeId == null && !saving) {
         setSyncedKey(incomingKey);
         setColumnItems(incoming);
     }
@@ -112,23 +157,46 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         [items, getId],
     );
     const columnByItemId = useMemo(() => indexColumns(columnItems), [columnItems]);
+    const keyboardLayoutRef = useRef({ columnIds: columns.map((column) => column.id), columnByItemId });
+    useLayoutEffect(() => {
+        keyboardLayoutRef.current = { columnIds: columns.map((column) => column.id), columnByItemId };
+    }, [columnByItemId, columns]);
+    const keyboardCoordinates = useCallback<KeyboardCoordinateGetter>(
+        (event, args) => kanbanKeyboardCoordinates(event, args, keyboardLayoutRef.current),
+        [],
+    );
+    const latestIncomingRef = useRef({ columns: incoming, key: incomingKey });
+    useLayoutEffect(() => {
+        latestIncomingRef.current = { columns: incoming, key: incomingKey };
+    }, [incoming, incomingKey]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+        useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates, scrollBehavior: 'auto' }),
     );
 
     const commit = (next: ColumnItems) => setColumnItems(next);
+    const announce = (message: string | undefined) => {
+        if (message === undefined) return;
+        if (accessibility?.onAnnouncement) accessibility.onAnnouncement(message);
+        else setMoveAnnouncement(message);
+    };
+    const restoreFocus = (event: DragEndEvent) => {
+        focusRestoreIdRef.current = Number(event.active.id);
+    };
 
     const onDragStart = (event: DragStartEvent) => {
         if (!onMove) return;
+        announce(accessibility?.announcements?.onDragStart(event) ?? '');
         snapshotRef.current = columnItems;
         snapshotColumnByItemIdRef.current = columnByItemId;
+        snapshotIncomingKeyRef.current = incomingKey;
         setActiveId(Number(event.active.id));
     };
 
     const onDragOver = (event: DragOverEvent) => {
         if (!onMove) return;
+        announce(accessibility?.announcements?.onDragOver?.(event));
         const { active, over } = event;
         if (!over) return;
         const activeId = Number(active.id);
@@ -151,12 +219,14 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
     const onDragEnd = (event: DragEndEvent) => {
         if (!onMove) return;
+        announce(accessibility?.announcements?.onDragEnd(event));
         const { active, over } = event;
         setActiveId(null);
         const activeId = Number(active.id);
         const snapshot = snapshotRef.current;
         if (!over) {
             commit(snapshot);
+            restoreFocus(event);
             return;
         }
         const overStr = String(over.id);
@@ -164,9 +234,11 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         const toCol = overStr.startsWith(COL_PREFIX) ? overStr.slice(COL_PREFIX.length) : columnByItemId.get(Number(over.id));
         if (!toCol || !current[toCol]) {
             commit(snapshot);
+            restoreFocus(event);
             return;
         }
 
+        let next = current;
         let toIds = current[toCol];
         const oldIndex = toIds.indexOf(activeId);
         if (oldIndex < 0) {
@@ -175,26 +247,60 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
                 ? toIds.length
                 : Math.max(0, toIds.indexOf(Number(over.id)));
             toIds = [...toIds.slice(0, insertAt), activeId, ...toIds.slice(insertAt)];
-            const next = { ...current, [toCol]: toIds };
+            next = { ...current, [toCol]: toIds };
             if (fromCol && fromCol !== toCol) {
                 next[fromCol] = current[fromCol].filter((id) => id !== activeId);
             }
-            commit(next);
         } else {
             let newIndex = overStr.startsWith(COL_PREFIX) ? toIds.length - 1 : toIds.indexOf(Number(over.id));
             if (newIndex < 0) newIndex = toIds.length - 1;
             if (oldIndex !== newIndex) {
                 toIds = arrayMove(toIds, oldIndex, newIndex);
-                commit({ ...current, [toCol]: toIds });
+                next = { ...current, [toCol]: toIds };
             }
         }
         const finalIndex = toIds.indexOf(activeId);
 
         const originCol = snapshotColumnByItemIdRef.current.get(activeId);
         const originIndex = originCol ? snapshot[originCol].indexOf(activeId) : -1;
-        if (originCol === toCol && originIndex === finalIndex) return;
+        const restorePlacement = () => {
+            const latest = latestIncomingRef.current;
+            const restored = latest.key === snapshotIncomingKeyRef.current ? snapshot : latest.columns;
+            commit(restored);
+            setSyncedKey(latest.key);
+            const column = indexColumns(restored).get(activeId);
+            if (column) announce(accessibility?.moveRestored?.(activeId, column, restored[column].indexOf(activeId)) ?? '');
+        };
+        if (originCol === toCol && originIndex === finalIndex) {
+            restorePlacement();
+            restoreFocus(event);
+            return;
+        }
 
-        void onMove(activeId, toCol, finalIndex).catch(() => commit(snapshot));
+        setSaving(true);
+        if (onBeforeMove) commit(snapshot);
+        else commit(next);
+        const persist = async () => {
+            if (onBeforeMove) {
+                if (!await onBeforeMove(activeId, toCol, finalIndex)) {
+                    restorePlacement();
+                    return;
+                }
+                commit(next);
+            }
+            const saved = await onMove(activeId, toCol, finalIndex);
+            if (saved === false) restorePlacement();
+            else {
+                const latest = latestIncomingRef.current;
+                const placement = saved && typeof saved === 'object' ? saved : { columnId: toCol, index: finalIndex };
+                setSyncedKey(latest.key);
+                setColumnItems((current) => placeItem(latest.key === snapshotIncomingKeyRef.current ? current : latest.columns, activeId, placement));
+                announce(saved && typeof saved === 'object' ? saved.announcement ?? '' : '');
+            }
+        };
+        void persist()
+            .catch(restorePlacement)
+            .finally(() => { restoreFocus(event); setSaving(false); });
     };
 
     const activeItem = activeId != null ? itemsById.get(activeId) : undefined;
@@ -203,6 +309,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         leftDragSelector: '[data-kanban-board]',
         excludeDragSelector: '[data-kanban-card]',
     });
+    const setBoardRef = useCallback((node: HTMLDivElement | null) => {
+        boardRef.current = node;
+        scrollRef(node);
+    }, [scrollRef]);
 
     return (
         <DndContext
@@ -211,12 +321,13 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDragEnd={onDragEnd}
-            onDragCancel={() => { setActiveId(null); commit(snapshotRef.current); }}
-            accessibility={accessibility}
+            onDragCancel={(event) => { announce(accessibility?.announcements?.onDragCancel(event)); setActiveId(null); commit(snapshotRef.current); restoreFocus(event); }}
+            accessibility={{ announcements: silentAnnouncements, screenReaderInstructions: accessibility?.screenReaderInstructions, restoreFocus: false }}
         >
+            {!accessibility?.onAnnouncement && <div data-kanban-announcement role="status" aria-live="polite" aria-atomic="true" className="sr-only">{moveAnnouncement}</div>}
             <div className="relative">
                 <div
-                    ref={scrollRef}
+                    ref={setBoardRef}
                     data-kanban-board
                     className="flex gap-4 overflow-x-auto pb-2 data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none"
                 >
@@ -227,8 +338,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
                             ids={columnItems[col.id] ?? []}
                             itemsById={itemsById}
                             renderCard={renderCard}
+                            dragLabel={dragLabel}
                             reduce={reduce}
                             draggable={onMove !== undefined}
+                            disabled={saving}
                             emptyHint={emptyHint}
                             countLabel={countLabel}
                         />
@@ -245,7 +358,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             </div>
             <DragOverlay>
                 {activeItem ? (
-                    <div className={reduce ? 'cursor-grabbing' : 'cursor-grabbing scale-[1.02] shadow-2xl'}>
+                    <div aria-hidden inert className={reduce ? 'cursor-grabbing' : 'cursor-grabbing scale-[1.02] shadow-2xl'}>
                         {renderCard(activeItem)}
                     </div>
                 ) : null}
@@ -259,17 +372,21 @@ function KanbanColumn<T>({
     ids,
     itemsById,
     renderCard,
+    dragLabel,
     reduce,
     draggable,
+    disabled,
     emptyHint,
     countLabel,
 }: {
     col: KanbanColumnDef;
     ids: number[];
     itemsById: Map<number, T>;
-    renderCard: (item: T) => ReactNode;
+    renderCard: (item: T, dragHandle?: ReactNode) => ReactNode;
+    dragLabel: (item: T) => string;
     reduce: boolean;
     draggable: boolean;
+    disabled: boolean;
     emptyHint?: string;
     countLabel: (count: number) => string;
 }) {
@@ -285,14 +402,14 @@ function KanbanColumn<T>({
                 ref={setNodeRef}
                 className={`flex-1 rounded-b-2xl transition-colors duration-150 ${isOver ? 'bg-brand/5 ring-2 ring-inset ring-brand/40' : ''}`}
             >
-                <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+                <SortableContext id={COL_PREFIX + col.id} items={ids} strategy={verticalListSortingStrategy}>
                     <ul className="flex min-h-24 flex-col gap-2 p-2">
                         {ids.map((id) => {
                             const item = itemsById.get(id);
                             if (!item) return null;
                             return (
-                                <SortableCard key={id} id={id} reduce={reduce} draggable={draggable}>
-                                    {renderCard(item)}
+                                <SortableCard key={id} id={id} reduce={reduce} draggable={draggable} disabled={disabled} label={dragLabel(item)}>
+                                    {(handle) => renderCard(item, handle)}
                                 </SortableCard>
                             );
                         })}
@@ -309,8 +426,10 @@ function KanbanColumn<T>({
     );
 }
 
-function SortableCard({ id, reduce, draggable, children }: { id: number; reduce: boolean; draggable: boolean; children: ReactNode }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !draggable });
+function SortableCard({ id, reduce, draggable, disabled, label, children }: {
+    id: number; reduce: boolean; draggable: boolean; disabled: boolean; label: string; children: (handle?: ReactNode) => ReactNode;
+}) {
+    const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !draggable || disabled });
     const style = {
         transform: CSS.Transform.toString(transform),
         transition: reduce ? undefined : transition,
@@ -320,11 +439,23 @@ function SortableCard({ id, reduce, draggable, children }: { id: number; reduce:
             ref={setNodeRef}
             style={style}
             data-kanban-card
-            {...(draggable ? attributes : {})}
-            {...(draggable ? listeners : {})}
-            className={`list-none outline-none ${draggable ? 'touch-none' : ''} ${isDragging ? 'opacity-40' : ''}`}
+            className={`list-none rounded-xl focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring forced-colors:focus-within:outline-[Highlight] ${isDragging ? 'opacity-40' : ''}`}
         >
-            {children}
+            {children(draggable ? (
+                <IconButton
+                    ref={setActivatorNodeRef}
+                    {...attributes}
+                    {...listeners}
+                    data-kanban-drag-handle={id}
+                    label={label}
+                    variant="ghost"
+                    size="icon-toolbar"
+                    disabled={disabled}
+                    className="shrink-0 touch-none cursor-grab active:cursor-grabbing"
+                >
+                    <Bars3Icon className="size-4" />
+                </IconButton>
+            ) : undefined)}
         </li>
     );
 }
