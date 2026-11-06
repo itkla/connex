@@ -16,12 +16,12 @@ import {
     type DragEndEvent,
     type DragOverEvent,
     type DragStartEvent,
+    type KeyboardCoordinateGetter,
     type ScreenReaderInstructions,
 } from '@dnd-kit/core';
 import {
     SortableContext,
     arrayMove,
-    sortableKeyboardCoordinates,
     useSortable,
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
@@ -30,6 +30,7 @@ import { Bars3Icon } from '@heroicons/react/24/outline';
 import { IconButton } from '@/components/ui/icon-button';
 
 import { useDragScroll } from '@/app/hooks/useDragScroll';
+import { kanbanKeyboardCoordinates } from '@/app/components/kanban/kanbanKeyboardCoordinates';
 
 const COL_PREFIX = 'col:';
 const silentAnnouncements: Announcements = {
@@ -159,6 +160,14 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         [items, getId],
     );
     const columnByItemId = useMemo(() => indexColumns(columnItems), [columnItems]);
+    const keyboardLayoutRef = useRef({ columnIds: columns.map((column) => column.id), columnByItemId });
+    useLayoutEffect(() => {
+        keyboardLayoutRef.current = { columnIds: columns.map((column) => column.id), columnByItemId };
+    }, [columnByItemId, columns]);
+    const keyboardCoordinates = useCallback<KeyboardCoordinateGetter>(
+        (event, args) => kanbanKeyboardCoordinates(event, args, keyboardLayoutRef.current),
+        [],
+    );
     const latestIncomingRef = useRef({ columns: incoming, key: incomingKey, itemsById });
     useLayoutEffect(() => {
         latestIncomingRef.current = { columns: incoming, key: incomingKey, itemsById };
@@ -169,7 +178,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+        useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates, scrollBehavior: 'auto' }),
     );
 
     const commit = (next: ColumnItems) => setColumnItems(next);

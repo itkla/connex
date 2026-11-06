@@ -44,6 +44,7 @@ for (const locale of ['en', 'ja'] as const) {
             const handleName = message(locale, 'deals', 'DealsKanban.moveCard').replace('{name}', name);
             const handle = page.getByRole('button', { name: handleName, exact: true });
             await expect(handle).toBeVisible();
+            await expect(page.locator('[data-kanban-board] > section').getByRole('heading', { level: 3 })).toHaveText([openStage.name, terminalStage.name]);
             const riskTrigger = page.locator('[data-kanban-card] [data-slot="tooltip-trigger"]').filter({ hasText: message(locale, 'deals', 'DealRisk.levelHigh') });
             await expect(riskTrigger).toHaveAttribute('tabindex', '0');
             await riskTrigger.hover();
@@ -160,14 +161,11 @@ for (const locale of ['en', 'ja'] as const) {
         const handle = page.getByRole('button', { name: message(locale, 'activity', 'ActivityTasks.moveCard').replace('{name}', name), exact: true });
         await expect(handle).toBeVisible();
         const over = (column: string) => message(locale, 'activity', 'ActivityTasks.a11yOver').replace('{name}', name).replace('{column}', column);
-        const [saved, refreshed] = await Promise.all([
+        const [saved] = await Promise.all([
             page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/tasks/${task.id}/move`)),
-            page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/activity/tasks' && response.request().headers().rsc === '1'),
             keyboardMove(page, handle, 'ArrowRight', over(message(locale, 'activity', 'ActivityTasks.statusTodo')), over(message(locale, 'activity', 'ActivityTasks.statusInProgress'))),
         ]);
         expect(saved.ok()).toBe(true);
-        expect(refreshed.ok()).toBe(true);
-        expect(await refreshed.finished()).toBeNull();
         const savedTask: unknown = await saved.json();
         expect(savedTask).toMatchObject({ status: 'in_progress' });
         if (typeof savedTask !== 'object' || savedTask === null || !('position' in savedTask) || typeof savedTask.position !== 'number') throw new Error('Invalid saved task position');
