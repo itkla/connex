@@ -34,7 +34,7 @@ for (const [locale, theme] of [['en', 'light'], ['ja', 'dark']] as const) {
             name: `Risk deal ${suffix}`, value: 100, currency: 'JPY', pipeline, stage,
             duplicateReviewToken: review.reviewToken,
         }));
-        await seed.post(`/api/deals/${dealId}/people/${personId}?role=Champion`, {});
+        await seed.postEmpty(`/api/deals/${dealId}/people/${personId}?role=Champion`, {});
         const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
         await seed.post('/api/activities', {
             type: 'Meeting', subject: 'First meeting planned', personId, dealId, timestamp: tomorrow,

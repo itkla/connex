@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.dto.DealRiskMatchDto;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -184,21 +185,22 @@ class DealRiskPagingTest extends AbstractServiceTest {
             null, true, MemberScope.fromRequest("unassigned", null, currentUser.getId()), 0, foreign.getId(), 250)).isEmpty();
     }
 
+    /** Each simulated request gets its own synchronization scope and MyBatis local cache. */
     @Test
     void renameAndInsertBetweenBatchesPreserveTheWatermarkedCohortWithoutATestSnapshot() {
         TransactionTemplate outside = new TransactionTemplate(transactionManager);
         outside.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
-        outside.executeWithoutResult(ignored -> {
-            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-            Pipeline pipeline = new Pipeline();
-            pipeline.setWorkspaceId(workspace.getId());
-            pipeline.setName("Cohort " + unique());
-            Stage stage = new Stage();
-            String prefix = "Cohort " + unique();
-            List<Deal> cohort = new ArrayList<>();
-            TransactionTemplate write = new TransactionTemplate(transactionManager);
-            AtomicReference<Deal> inserted = new AtomicReference<>();
-            try {
+        Pipeline pipeline = new Pipeline();
+        pipeline.setWorkspaceId(workspace.getId());
+        pipeline.setName("Cohort " + unique());
+        Stage stage = new Stage();
+        String prefix = "Cohort " + unique();
+        List<Deal> cohort = new ArrayList<>();
+        TransactionTemplate write = new TransactionTemplate(transactionManager);
+        AtomicReference<Deal> inserted = new AtomicReference<>();
+        try {
+            outside.executeWithoutResult(ignored -> {
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
                 write.executeWithoutResult(status -> {
                     pipelineMapper.insertPipeline(pipeline);
                     stage.setWorkspaceId(workspace.getId());
@@ -243,20 +245,25 @@ class DealRiskPagingTest extends AbstractServiceTest {
                 assertThat(assessed).doesNotContain(inserted.get().getId());
                 assertThat(page.items()).extracting(Deal::getId)
                     .containsExactlyElementsOf(cohort.subList(1, 26).stream().map(Deal::getId).toList());
+            });
+            outside.executeWithoutResult(ignored -> {
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
                 var nextRequest = service.queryDealsPage(null, "name", "desc", "JPY", List.of(pipeline.getId()),
                     null, null, null, false, null, List.of("high"), MemberScope.allTeam(), 25, 0);
                 assertThat(nextRequest.total()).isEqualTo(500);
                 assertThat(nextRequest.items().getFirst().getId()).isEqualTo(cohort.getFirst().getId());
-            } finally {
-                if (pipeline.getId() > 0) {
+            });
+        } finally {
+            if (pipeline.getId() > 0) {
+                outside.executeWithoutResult(ignored -> {
                     write.executeWithoutResult(status -> {
                         jdbc.update("DELETE FROM deal WHERE workspace_id = ? AND pipeline_id = ?", workspace.getId(), pipeline.getId());
                         jdbc.update("DELETE FROM stage WHERE workspace_id = ? AND pipeline_id = ?", workspace.getId(), pipeline.getId());
                         jdbc.update("DELETE FROM pipeline WHERE workspace_id = ? AND id = ?", workspace.getId(), pipeline.getId());
                     });
-                }
+                });
             }
-        });
+        }
     }
 
     @Test
@@ -338,6 +345,72 @@ class DealRiskPagingTest extends AbstractServiceTest {
                     null, null, false, null, List.of("high"), MemberScope.allTeam(), 7, 3);
                 assertThat(riskPage.total()).isEqualTo(18);
                 assertThat(riskPage.items()).extracting(Deal::getId).containsExactlyElementsOf(nativePage.stream().map(Deal::getId).toList());
+            }
+        }
+    }
+
+    @Test
+    void textSortWeightsRespectEachColumnsPaddingAndKeepTheNativeIdTieBreak() {
+        var columnCollations = jdbc.queryForList("""
+            SELECT name_column.TABLE_NAME, name_column.COLLATION_NAME, name_collation.PAD_ATTRIBUTE
+            FROM information_schema.COLUMNS name_column
+            JOIN information_schema.COLLATIONS name_collation
+              ON name_collation.COLLATION_NAME = name_column.COLLATION_NAME
+            WHERE name_column.TABLE_SCHEMA = DATABASE() AND name_column.COLUMN_NAME = 'name'
+              AND name_column.TABLE_NAME IN ('deal', 'company', 'pipeline', 'stage')
+            """);
+        assertThat(columnCollations).extracting(row -> String.valueOf(row.get("TABLE_NAME")))
+            .containsExactlyInAnyOrder("deal", "company", "pipeline", "stage");
+        assertThat(columnCollations).allSatisfy(row -> {
+            assertThat(row.get("COLLATION_NAME")).isNotNull();
+            assertThat(String.valueOf(row.get("PAD_ATTRIBUTE"))).isIn("PAD SPACE", "NO PAD");
+        });
+        var mapped = sqlSessionFactory.getConfiguration()
+            .getMappedStatement(DealMapper.class.getName() + ".getRiskFilterMatches");
+        for (String sort : List.of("name", "company", "pipeline", "stage")) {
+            Map<String, Object> parameters = new HashMap<>();
+            parameters.put("workspaceId", workspace.getId());
+            parameters.put("orgWorkspaceIdsJson", dealScope(workspace.getId()));
+            parameters.put("ids", List.of(1, 2));
+            parameters.put("sort", sort);
+            String sql = mapped.getBoundSql(parameters).getSql().replaceAll("\\s+", " ").trim();
+            int keyStart = sql.indexOf("WEIGHT_STRING(");
+            int keyEnd = sql.indexOf(" AS risk_sort_key");
+            assertThat(keyStart).isGreaterThan(0);
+            assertThat(keyEnd).isGreaterThan(keyStart);
+            String keyExpression = sql.substring(keyStart, keyEnd);
+            String alias = switch (sort) {
+                case "name" -> "d";
+                case "company" -> "c";
+                case "pipeline" -> "p";
+                default -> "s";
+            };
+            for (String collation : List.of("utf8mb4_unicode_ci", "utf8mb4_0900_ai_ci")) {
+                for (String direction : List.of("asc", "desc")) {
+                    String query = """
+                        SELECT id, name, %s AS risk_sort_key
+                        FROM (
+                            SELECT 1 AS id, CONVERT(? USING utf8mb4) COLLATE %s AS name
+                            UNION ALL
+                            SELECT 2 AS id, CONVERT(? USING utf8mb4) COLLATE %s AS name
+                        ) %s
+                        ORDER BY name %s, id ASC
+                        """.formatted(keyExpression, collation, collation, alias, direction);
+                    List<DealRiskMatchDto> nativeOrder = jdbc.query(query, (result, rowNumber) -> {
+                        Deal deal = new Deal();
+                        deal.setId(result.getInt("id"));
+                        deal.setName(result.getString("name"));
+                        DealRiskMatchDto row = new DealRiskMatchDto();
+                        row.setDeal(deal);
+                        row.setSortKey(result.getBytes("risk_sort_key"));
+                        return row;
+                    }, "Alpha ", "Alpha");
+                    List<Integer> expected = "utf8mb4_unicode_ci".equals(collation) || "desc".equals(direction)
+                        ? List.of(1, 2) : List.of(2, 1);
+                    assertThat(nativeOrder).extracting(row -> row.getDeal().getId()).containsExactlyElementsOf(expected);
+                    assertThat(nativeOrder.stream().sorted(DealRiskMatchOrder.comparator(sort, direction))
+                        .map(row -> row.getDeal().getId()).toList()).containsExactlyElementsOf(expected);
+                }
             }
         }
     }

@@ -414,13 +414,15 @@
     <association property="deal" resultMap="DealResult"/>
   </resultMap>
 
+  <!-- Each column's comparison determines whether its trailing spaces are padding. Normalize
+       PAD SPACE values before WEIGHT_STRING, whose output is otherwise deliberately unpadded. -->
   <select id="getRiskFilterMatches" resultMap="DealRiskMatchResult">
     SELECT <include refid="qualifiedDealColumns"/>,
     <choose>
-      <when test="sort == 'name'">WEIGHT_STRING(d.name)</when>
-      <when test="sort == 'company'">WEIGHT_STRING(c.name)</when>
-      <when test="sort == 'pipeline'">WEIGHT_STRING(p.name)</when>
-      <when test="sort == 'stage'">WEIGHT_STRING(s.name)</when>
+      <when test="sort == 'name'">WEIGHT_STRING(IF(d.name = CONCAT(d.name, ' '), RTRIM(d.name), d.name))</when>
+      <when test="sort == 'company'">WEIGHT_STRING(IF(c.name = CONCAT(c.name, ' '), RTRIM(c.name), c.name))</when>
+      <when test="sort == 'pipeline'">WEIGHT_STRING(IF(p.name = CONCAT(p.name, ' '), RTRIM(p.name), p.name))</when>
+      <when test="sort == 'stage'">WEIGHT_STRING(IF(s.name = CONCAT(s.name, ' '), RTRIM(s.name), s.name))</when>
       <otherwise>NULL</otherwise>
     </choose> AS risk_sort_key
     FROM deal d

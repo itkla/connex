@@ -5,7 +5,7 @@ import java.util.Comparator;
 
 import ooo.klae.connex.backend.dto.DealRiskMatchDto;
 
-/** Orders bounded risk cohorts with the same null placement, collation and ID ties as the list SQL. */
+/** Orders padding-normalized database keys with the list SQL's null placement and ID ties. */
 final class DealRiskMatchOrder {
     private DealRiskMatchOrder() {}
 
