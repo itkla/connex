@@ -1,5 +1,7 @@
 'use client';
 
+import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
+
 import { type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -29,7 +31,7 @@ import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
 import type { RelationshipMapAvailability } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
-import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
+import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
@@ -80,8 +82,7 @@ export default function CompanyActionsMenu({
     const [editOpen, setEditOpen] = useState(false);
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [newDealDialogOpen, setNewDealDialogOpen] = useState(false);
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-    const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
+    const { pipelines, stagesByPipeline, setPipelines, setStagesByPipeline } = usePipelineChoices();
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(
         () => emptyContactPayload(company.id),
     );
@@ -115,14 +116,15 @@ export default function CompanyActionsMenu({
     }, [company.id]);
 
     useEffect(() => {
-        getPipelines().then(async (ps) => {
+        const origin = workspacePinnedRequest(activeWorkspaceId);
+        getPipelines(origin).then(async (ps) => {
             setPipelines(ps);
             const entries = await Promise.all(
-                ps.map(async (p) => [p.id, await getStagesByPipelineId(p.id).catch(() => [] as Stage[])] as const),
+                ps.map(async (p) => [p.id, await getStagesByPipelineId(p.id, origin).catch(() => [] as Stage[])] as const),
             );
             setStagesByPipeline(Object.fromEntries(entries));
         }).catch(() => setPipelines([]));
-    }, []);
+    }, [activeWorkspaceId, setPipelines, setStagesByPipeline]);
 
     useEffect(
         () => () => invalidatePendingContactClose(),
@@ -438,6 +440,10 @@ export default function CompanyActionsMenu({
                 setPayload={setContextualDealPayload}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onPipelineCreated={(pipeline, stages) => {
+                    setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+                    setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+                }}
                 isCreating={isCreatingDeal}
                 isSuccess={dealCreationSucceeded}
                 createNewDeal={createNewDeal}
