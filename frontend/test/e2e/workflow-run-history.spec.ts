@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { WorkflowListItem, WorkflowRunSummary } from "@/app/lib/types";
+import { dealDocumentsHref } from "@/app/components/records/deals/dealLinks";
 import { runFixture } from "./support/fixtures";
 import { useLocale } from "./support/locale";
 import { message } from "./support/messages";
@@ -16,6 +17,7 @@ for (const locale of ["en", "ja"] as const) {
     test(`${locale}: failed workflow history explains recovery and links the visible target @mobile`, async ({ page }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
         const company = fixture.companies.primary;
+        const deal = fixture.deals.primary;
         await useLocale(page, locale);
         await page.emulateMedia({ colorScheme: testInfo.project.name === "mobile-chromium" ? "dark" : "light" });
         const run: WorkflowRunSummary = {
@@ -35,8 +37,18 @@ for (const locale of ["en", "ja"] as const) {
             activeVersion: { id: 3, number: 2, publishedAt: STARTED_AT }, nodeCount: 3, actionCount: 1,
             latestRun: run,
         };
+        const documentRuns: WorkflowRunSummary[] = [61, 62, 63].map((id) => ({
+            ...run, runKey: `legacy-${id}`, status: "succeeded", legacyStatus: "matched", version: null, failure: null,
+            trigger: { type: "entity_change", event: "document.finalized", recordType: "document", recordId: id },
+        }));
+        const documentRequests: string[][] = [];
+        await page.route(/\/api\/documents\/targets(?:\?.*)?$/, (route) => {
+            documentRequests.push(new URL(route.request().url()).searchParams.getAll("ids"));
+            expect(route.request().headers()["x-workspace-id"]).toBe(String(fixture.workspaceId));
+            return route.fulfill({ json: [{ id: 61, dealId: deal.id, title: "Workflow quote" }] });
+        });
         await page.route(/\/api\/workflows(?:\?.*)?$/, (route) => route.fulfill({ json: [workflow] }));
-        await page.route(new RegExp(`/api/workflows/${WORKFLOW_ID}/runs(?:\\?.*)?$`), (route) => route.fulfill({ json: { items: [run], nextCursor: null } }));
+        await page.route(new RegExp(`/api/workflows/${WORKFLOW_ID}/runs(?:\\?.*)?$`), (route) => route.fulfill({ json: { items: [run, ...documentRuns], nextCursor: null } }));
         await page.goto("/workflows");
         await page.getByRole("button", { name: w("rowActions", { name: workflow.name }), exact: true }).click();
         await page.getByRole("menuitem", { name: w("runs.view"), exact: true }).click();
@@ -50,8 +62,12 @@ for (const locale of ["en", "ja"] as const) {
         await expect(dialog.getByText("private-debug-payload")).toHaveCount(0);
         const target = dialog.getByRole("link", { name: company.name, exact: true });
         await expect(target).toHaveAttribute("href", `/records/companies/${company.id}`);
-        await target.click();
-        await expect(page).toHaveURL(new RegExp(`/records/companies/${company.id}(?:\\?.*)?$`));
-        await expect(page.getByRole("heading", { name: company.name, exact: true })).toBeVisible();
+        const documentTarget = dialog.getByRole("link", { name: "Workflow quote", exact: true });
+        await expect(documentTarget).toHaveAttribute("href", dealDocumentsHref(deal.id));
+        await expect(dialog.getByText(w("runs.documentTargetUnavailable"), { exact: true })).toHaveCount(2);
+        expect(documentRequests).toEqual([["61", "62", "63"]]);
+        await documentTarget.click();
+        await expect(page).toHaveURL(new RegExp(`/records/deals/${deal.id}#deal-documents$`));
+        await expect(page.locator("section#deal-documents")).toBeInViewport();
     });
 }

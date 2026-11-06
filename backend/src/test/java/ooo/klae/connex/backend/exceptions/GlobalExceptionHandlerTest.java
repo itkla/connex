@@ -704,4 +704,20 @@ class GlobalExceptionHandlerTest {
             appender.stop();
         }
     }
+    @Test
+    void importMappingRefusalsExposeColumnCodesWithoutValues() {
+        ImportValidationException exception = new ImportValidationException("IMPORT_MAPPING_DUPLICATE",
+            "Multiple columns resolve to the same custom field",
+            Map.of("Region Code", "IMPORT_MAPPING_DUPLICATE", "Region-Code", "IMPORT_MAPPING_DUPLICATE"));
+        ResponseEntity<Map<String, Object>> response = handler.importValidation(exception);
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        Map<String, Object> body = response.getBody();
+        assertNotNull(body);
+        assertEquals("IMPORT_MAPPING_DUPLICATE", body.get("code"));
+        assertEquals(exception.getFieldErrors(), body.get("fieldErrors"));
+        var method = new ExceptionHandlerMethodResolver(GlobalExceptionHandler.class).resolveMethodByThrowable(exception);
+        assertNotNull(method);
+        assertEquals("importValidation", method.getName());
+    }
+
 }
