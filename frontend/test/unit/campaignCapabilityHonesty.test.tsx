@@ -1,4 +1,4 @@
-import { isValidElement, type PropsWithChildren } from "react";
+import { isValidElement, type PropsWithChildren, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,7 @@ import type { CampaignAccess } from "@/app/lib/campaignAccess";
 import type { Campaign, InstanceCapabilities, User } from "@/app/lib/types";
 
 vi.mock("next/headers", () => ({
+    cookies: async () => ({ get: () => ({ value: "7" }) }),
     headers: () => Promise.resolve(new Headers({
         cookie: "JSESSIONID=session; connex_workspace=7",
     })),
@@ -176,11 +177,19 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+function campaignElement(node: unknown): ReactElement {
+    if (!isValidElement(node)) throw new Error("Campaign detail did not render");
+    if (node.type === CampaignDetail) return node;
+    const props: unknown = node.props;
+    if (typeof props === "object" && props !== null && "children" in props) return campaignElement(props.children);
+    throw new Error("Campaign detail did not render within its section provider");
+}
+
 describe("campaign delivery capability honesty", () => {
     it("preserves an audience lookup failure instead of presenting an empty audience", async () => {
         stubCampaignReads(DISABLED_CAPABILITIES, true);
 
-        const rendered = await CampaignDetailPage({ params: Promise.resolve({ id: "1" }) });
+        const rendered = campaignElement(await CampaignDetailPage({ params: Promise.resolve({ id: "1" }) }));
 
         expect(isValidElement(rendered)).toBe(true);
         if (!isValidElement(rendered)) {
@@ -196,7 +205,7 @@ describe("campaign delivery capability honesty", () => {
     it("keeps campaign authoring and history available while delivery controls show retryable lookup failure", async () => {
         stubCampaignReads(null);
 
-        const rendered = await CampaignDetailPage({ params: Promise.resolve({ id: "1" }) });
+        const rendered = campaignElement(await CampaignDetailPage({ params: Promise.resolve({ id: "1" }) }));
         if (!isValidElement(rendered) || !hasDeliveryAvailability(rendered.props)) {
             throw new Error("Campaign detail did not render the expected capability contract");
         }
@@ -215,7 +224,7 @@ describe("campaign delivery capability honesty", () => {
     it("renders the resolved delivery-disabled fact without a lookup-failure state", async () => {
         stubCampaignReads(DISABLED_CAPABILITIES);
 
-        const rendered = await CampaignDetailPage({ params: Promise.resolve({ id: "1" }) });
+        const rendered = campaignElement(await CampaignDetailPage({ params: Promise.resolve({ id: "1" }) }));
         if (!isValidElement(rendered) || !hasDeliveryAvailability(rendered.props)) {
             throw new Error("Campaign detail did not render the expected capability contract");
         }

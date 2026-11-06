@@ -24,6 +24,8 @@ import SegmentBuilder from "@/app/components/records/SegmentBuilder";
 import { EMPTY_DEFINITION } from "@/app/lib/segmentLabels";
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
+import DetailSectionState from "@/app/components/records/DetailSectionState";
+import type { DetailSectionFailure } from "@/app/lib/detailSectionResult";
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
@@ -125,6 +127,9 @@ export default function CampaignDetail({
     initialMessages,
     initialSends,
     initialExports,
+    messagesFailure = null,
+    sendsFailure = null,
+    exportsFailure = null,
     initialEngagement,
     access,
     snapshotsRestricted,
@@ -137,6 +142,9 @@ export default function CampaignDetail({
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
     initialExports: CampaignAudienceExport[];
+    messagesFailure?: DetailSectionFailure | null;
+    sendsFailure?: DetailSectionFailure | null;
+    exportsFailure?: DetailSectionFailure | null;
     initialEngagement: CampaignEngagementData | null;
     access: CampaignAccess;
     snapshotsRestricted: boolean;
@@ -646,13 +654,15 @@ export default function CampaignDetail({
 
                     <TabsContent value="delivery" forceMount className="data-[state=inactive]:hidden">
                         <CampaignDelivery
-                            campaignId={current.id}
-                            initialMessages={initialMessages}
-                            initialSends={initialSends}
-                            snapshots={snapshots}
-                            access={access}
-                            deliveryAvailability={deliveryAvailability}
-                        />
+                                messagesFailure={messagesFailure}
+                                sendsFailure={sendsFailure}
+                                campaignId={current.id}
+                                initialMessages={initialMessages}
+                                initialSends={initialSends}
+                                snapshots={snapshots}
+                                access={access}
+                                deliveryAvailability={deliveryAvailability}
+                            />
                     </TabsContent>
 
                     <TabsContent value="engagement" forceMount className="data-[state=inactive]:hidden">
@@ -665,13 +675,15 @@ export default function CampaignDetail({
                     </TabsContent>
 
                     <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">
-                        <CampaignExportPanel
-                            campaignId={current.id}
-                            initialExports={initialExports}
-                            snapshots={snapshots}
-                            access={access}
-                            deliveryAvailability={deliveryAvailability}
-                        />
+                        <DetailSectionState title={t("tabExports")} sectionKeys={["campaignExports"]} failure={exportsFailure}>
+                            <CampaignExportPanel
+                                campaignId={current.id}
+                                initialExports={initialExports}
+                                snapshots={snapshots}
+                                access={access}
+                                deliveryAvailability={deliveryAvailability}
+                            />
+                        </DetailSectionState>
                     </TabsContent>
                 </Tabs>
                 </Rise>

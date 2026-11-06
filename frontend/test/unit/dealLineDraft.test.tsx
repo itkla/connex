@@ -1,8 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextIntlClientProvider } from 'next-intl';
+import { DealLineItemsSection } from '@/app/components/records/DetailCollections';
+import { DetailSectionsProvider } from '@/app/hooks/useDetailSections';
+import enRecords from '@/messages/en/records.json';
+import enCommon from '@/messages/en/common.json';
+import jaRecords from '@/messages/ja/records.json';
+import jaCommon from '@/messages/ja/common.json';
 import DealLineItems from '@/app/components/records/deals/DealLineItems';
 import type { DealLineItem, DealLineItemsResponse } from '@/app/lib/types';
 import { ApiError } from '@/app/lib/api';
@@ -10,13 +16,13 @@ import en from '@/messages/en/deals.json';
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
 import ja from '@/messages/ja/deals.json';
 
-const api = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn(), remove: vi.fn(), products: vi.fn(), refresh: vi.fn(), error: vi.fn() }));
+const api = vi.hoisted(() => ({ read: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn(), products: vi.fn(), refresh: vi.fn(), error: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: api.refresh }), usePathname: () => '/' }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 9 }) }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => api.error }));
 vi.mock('@/app/lib/api', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@/app/lib/api')>();
-    return { ...actual, getProducts: api.products, createDealLineItem: api.create,
+    return { ...actual, getDealLineItems: api.read, getProducts: api.products, createDealLineItem: api.create,
         updateDealLineItem: api.update, deleteDealLineItem: api.remove };
 });
 
@@ -33,7 +39,7 @@ function mount(initial = empty, locale = 'en', currency = 'USD') {
 }
 
 const shell = {};
-beforeEach(() => { vi.clearAllMocks(); api.products.mockResolvedValue([]);
+beforeEach(() => { vi.clearAllMocks(); api.read.mockReset(); api.products.mockResolvedValue([]);
     window.history.replaceState(null, '', '/'); bindRenderedWorkspace(shell, 9); });
 afterEach(() => { cleanup(); releaseRenderedWorkspace(shell); });
 
@@ -46,6 +52,11 @@ async function pricedDraft() {
 }
 
 describe('line value consent', () => {
+    it('keeps the standalone editor landmark when no recovery wrapper owns it', () => {
+        mount();
+        expect(screen.getAllByRole('region', { name: en.DealsLineItems.title })).toHaveLength(1);
+    });
+
     it.each(['en', 'ja'])('keeps Add line and discard local in %s', async (locale) => {
         mount(empty, locale);
         const t = locale === 'ja' ? ja.DealsLineItems : en.DealsLineItems;
@@ -151,5 +162,43 @@ describe('line value consent', () => {
     it('keeps fixed-amount discount bounds separate from percentages', () => {
         mount({ items: [{ ...line, discountType: 'amount', discountValue: 200 }], totals });
         expect(screen.getByRole('spinbutton', { name: 'Discount value' }).getAttribute('max')).toBeNull();
+    });
+});
+
+
+describe.each(['en', 'ja'] as const)('line-item section landmarks in %s', (locale) => {
+    const messages = locale === 'ja' ? { ...ja, ...jaRecords, ...jaCommon } : { ...en, ...enRecords, ...enCommon };
+    const labels = locale === 'ja' ? ja.DealsLineItems : en.DealsLineItems;
+    const recovery = locale === 'ja' ? jaRecords.RecordListState : enRecords.RecordListState;
+
+    it.each([{ name: 'empty', data: empty }, { name: 'populated', data: { items: [line], totals } }])('exposes one line-items landmark for a loaded $name section', ({ data }) => {
+        render(<NextIntlClientProvider locale={locale} messages={messages}>
+            <DetailSectionsProvider recordId={7} workspaceId={9} initial={{ dealLineItems: { kind: 'loaded', data } }}>
+                <DealLineItemsSection dealId={7} dealWorkspaceId={9} dealCurrency="USD" />
+            </DetailSectionsProvider>
+        </NextIntlClientProvider>);
+        expect(screen.getAllByRole('region', { name: labels.title })).toHaveLength(1);
+        expect(within(screen.getByRole('region', { name: labels.title })).getByRole('button', { name: labels.addLine })).toBeDefined();
+    });
+
+    it.each([403, 503])('keeps one line-items landmark through HTTP %s failure, pending retry and recovery', async (status) => {
+        let finish: ((value: DealLineItemsResponse) => void) | undefined;
+        api.read.mockImplementationOnce(() => new Promise<DealLineItemsResponse>((resolve) => { finish = resolve; }));
+        render(<NextIntlClientProvider locale={locale} messages={messages}>
+            <DetailSectionsProvider recordId={7} workspaceId={9} initial={{ dealLineItems: { kind: 'failed', status } }}>
+                <DealLineItemsSection dealId={7} dealWorkspaceId={9} dealCurrency="USD" />
+            </DetailSectionsProvider>
+        </NextIntlClientProvider>);
+        const landmark = screen.getByRole('region', { name: labels.title });
+        const retry = within(landmark).getByRole('button', { name: recovery.retry });
+        retry.focus();
+        fireEvent.click(retry);
+        expect(screen.getAllByRole('region', { name: labels.title })).toHaveLength(1);
+        expect(within(landmark).getByRole('button', { name: recovery.retrying }).hasAttribute('disabled')).toBe(true);
+        await act(async () => { finish?.(empty); });
+        await screen.findByRole('button', { name: labels.addLine });
+        expect(screen.getAllByRole('region', { name: labels.title })).toHaveLength(1);
+        expect(screen.getByRole('region', { name: labels.title })).toBe(landmark);
+        expect(document.activeElement).toBe(landmark);
     });
 });
