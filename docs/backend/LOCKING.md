@@ -1621,6 +1621,20 @@ complete a replacement claim. SMTP is consequently a best-effort campaign transp
 fence is captured at startup, rollback must follow the quiescence procedure in
 `docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
 
+Campaign content refusal is recorded before provider resolution and before any delivery claim.
+`CampaignContentRefusalService` takes only the owning send row mutex in a short `READ_COMMITTED`
+transaction, rechecks queued/running/triggered state, then inserts one marker against a still-pending
+delivery after a fresh send-scoped marker read. Reading after the mutex at READ COMMITTED prevents an
+older snapshot from missing a marker committed by the previous recorder. The order is send → child
+delivery/event, consistent with enrollment and reconciliation; no workspace/person lock, provider
+I/O, delivery state transition, lease change, or history rewrite occurs in this transaction.
+The marker uses event_type `failed`, fixed detail `CAMPAIGN_UNSUPPORTED_TOKEN`, a null provider_id,
+and reserved provider_event_id `connex-content-refusal:<sendId>`. This is the one internal-marker
+exception to leaving both provider correlation fields null. Provider diagnostics alone cannot set
+`contentRefused`, and its lookup seeks the full workspace/null-provider/send-specific event key.
+The ordinary send lifecycle and every recipient outcome remain unchanged; dispatch reports a
+fault and the campaign surface explains the refusal, including that existing in-flight work may finish.
+
 Audience delivery dispatch claims with a `pending` → `dispatching` compare-and-set that also writes
 the attempt's own lease end time, `audience_lease_until` (#1773), and stores no lease owner or
 attempt-target fingerprint. The `dispatch_lease_*` columns stay a triggered claim's, so

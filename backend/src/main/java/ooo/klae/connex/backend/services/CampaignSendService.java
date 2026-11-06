@@ -445,7 +445,8 @@ public class CampaignSendService {
                 send.getMessageVersion(), send.getChannel(), send.getPurpose(), send.getProviderId(),
                 send.getStatus(), send.getScheduledAt(), send.getStartedAt(), send.getCompletedAt(),
                 send.getTotalRecipients(), send.getDispatchedCount(), send.getSkippedCount(),
-                send.getFailedCount(), send.getCreatedById(), send.getCreatedAt(), send.getUpdatedAt());
+                send.getFailedCount(), send.getCreatedById(), send.getCreatedAt(), send.getUpdatedAt(),
+                send.isContentRefused());
     }
 
     private static String normalizeChannel(String value) {

@@ -16,6 +16,7 @@ import type {
     CampaignAudienceSnapshotSummary,
     CampaignEngagement,
     CampaignMessage,
+    CampaignSend,
 } from "@/app/lib/types";
 import enCampaigns from "@/messages/en/campaigns.json";
 import jaCampaigns from "@/messages/ja/campaigns.json";
@@ -373,6 +374,26 @@ describe("campaign date inputs", () => {
 });
 
 describe("campaign audience labels and unavailable state", () => {
+    it.each(["en", "ja"] as const)("shows persisted send refusal to readers without roster permission in %s", (locale) => {
+        localeState.locale = locale;
+        const send = {
+            id: 93, campaignId: CAMPAIGN.id, snapshotId: 91, origin: "audience",
+            messageId: EMAIL_MESSAGE.id, messageVersion: 1, channel: "email", purpose: "marketing",
+            providerId: null, status: "queued", scheduledAt: null, startedAt: null, completedAt: null,
+            totalRecipients: 3, dispatchedCount: 1, skippedCount: 0, failedCount: 0,
+            createdById: 9, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            contentRefused: true,
+        } satisfies CampaignSend;
+        const html = renderToStaticMarkup(<CampaignDelivery campaignId={CAMPAIGN.id}
+            initialMessages={[EMAIL_MESSAGE]} initialSends={[send]} snapshots={[]}
+            access={{ manage: false, send: false, consent: false }} deliveryAvailability="enabled" />);
+        const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+        expect(html).toContain(catalog.CampaignSends.contentRefusedStatus);
+        expect(html).toContain(catalog.CampaignSends.contentRefused);
+        expect(html).toContain(catalog.CampaignSends.status.queued);
+        expect(html).not.toContain("CAMPAIGN_UNSUPPORTED_TOKEN");
+    });
+
     it("reuses a saved revision and keeps the draft after saving another immutable revision", async () => {
         const interactive = installInteractiveDocument();
         const { createRoot } = await import("react-dom/client");

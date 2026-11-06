@@ -6,7 +6,16 @@
   <sql id="sendColumns">
     id, workspace_id, campaign_id, snapshot_id, origin, message_id, message_version, channel, purpose,
     provider_id, status, scheduled_at, started_at, completed_at, total_recipients,
-    dispatched_count, skipped_count, failed_count, created_by_id, created_at, updated_at
+    dispatched_count, skipped_count, failed_count, created_by_id, created_at, updated_at,
+    EXISTS (
+      SELECT 1 FROM campaign_delivery_event refusal
+      JOIN campaign_delivery refused ON refused.workspace_id = refusal.workspace_id AND refused.id = refusal.delivery_id
+      WHERE refused.workspace_id = #{workspaceId} AND refusal.workspace_id = #{workspaceId}
+        AND refused.send_id = campaign_send.id AND refusal.event_type = 'failed'
+        AND refusal.detail = 'CAMPAIGN_UNSUPPORTED_TOKEN'
+        AND refusal.provider_id IS NULL
+        AND refusal.provider_event_id = CONCAT('connex-content-refusal:', campaign_send.id)
+    ) AS content_refused
   </sql>
 
   <select id="getSendsByCampaign" resultType="CampaignSend">

@@ -37,6 +37,18 @@ for (const locale of ["en", "ja"] as const) {
             expect(refused.status()).toBe(400);
             expect(await refused.json()).toMatchObject({ code: "CAMPAIGN_UNSUPPORTED_TOKEN" });
         }
+        for (const bodyHtml of [
+            "<p>&#123;&#123;first_name&#125;&#125;</p>",
+            "<p>{<span>{first_name}</span>}</p>",
+            "<a title='&lbrace;&lbrace;first_name&rbrace;&rbrace;'>Hello</a>",
+            "<p>&#123;&#123;unsubscribe_url&#125;&#125;</p>",
+        ]) {
+            const refused = await page.request.post(`${base}/${messageId}/revisions`, {
+                headers, data: { locale, subject, bodyHtml, bodyText: text },
+            });
+            expect(refused.status()).toBe(400);
+            expect(await refused.json()).toMatchObject({ code: "CAMPAIGN_UNSUPPORTED_TOKEN" });
+        }
         const smsId = positiveId(await seed.post(base, { name: "SMS content", channel: "sms" }));
         const refusedSms = await page.request.post(`${base}/${smsId}/revisions`, {
             headers, data: { locale, bodyText: "{{first_name}}" },

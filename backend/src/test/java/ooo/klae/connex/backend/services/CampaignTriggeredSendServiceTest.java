@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.delivery.CampaignDispatchClaimBoundary;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
+import ooo.klae.connex.backend.delivery.CampaignContentRefusalService;
 import ooo.klae.connex.backend.delivery.CampaignFrequencyAdmissionService;
 import ooo.klae.connex.backend.delivery.CampaignUnsubscribeTokenRegistrationService;
 import ooo.klae.connex.backend.delivery.CampaignSendWorker;
@@ -251,6 +252,28 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 () -> triggeredSendService.enroll(recipient.getId(), message.id(), 1));
 
         assertTrue(campaignSendService.listSends(message.campaignId()).isEmpty());
+        assertEquals(0, fakeDispatcher.count());
+    }
+
+    @Test
+    void legacyTriggeredQueueRefusesContentWithoutChangingItsPendingAttempt() {
+        String prefix = "triggered-refusal-" + unique();
+        Person recipient = person(prefix, prefix + "@example.invalid");
+        CampaignMessageDto message = message(prefix);
+        CampaignTriggeredSendService.EnrollmentResult enrollment = triggeredSendService.enroll(
+                recipient.getId(), message.id(), 1);
+        jdbcTemplate.update("UPDATE campaign_message_revision SET body_html = ? "
+                        + "WHERE workspace_id = ? AND message_id = ? AND version = 1",
+                "<p>&#123;&#123;first_name&#125;&#125;</p>", workspace.getId(), message.id());
+        var before = jdbcTemplate.queryForMap("SELECT * FROM campaign_delivery WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), enrollment.deliveryId());
+        assertFalse(campaignDispatchService.processSend(workspace.getId(), enrollment.sendId()));
+        assertEquals(before, jdbcTemplate.queryForMap(
+                "SELECT * FROM campaign_delivery WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), enrollment.deliveryId()));
+        CampaignSendDto refused = campaignSendService.getSend(message.campaignId(), enrollment.sendId());
+        assertTrue(refused.contentRefused());
+        assertEquals("triggered", refused.status());
         assertEquals(0, fakeDispatcher.count());
     }
 
@@ -1037,7 +1060,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 frequencyAdmissionService,
                 unsubscribeTokenRegistrationService,
                 automationExecutor,
-                systemActor);
+                systemActor, mock(CampaignContentRefusalService.class));
     }
 
     private DeliveryProviderConfig deliveryConfig(String endpoint, String credentialRef) {

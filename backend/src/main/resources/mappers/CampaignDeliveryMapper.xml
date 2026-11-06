@@ -627,4 +627,23 @@
     )
   </select>
 
+  <insert id="insertContentRefusal">
+    INSERT INTO campaign_delivery_event (workspace_id, delivery_id, event_type, detail, provider_event_id)
+    SELECT #{workspaceId}, d.id, 'failed', 'CAMPAIGN_UNSUPPORTED_TOKEN', CONCAT('connex-content-refusal:', #{sendId})
+    FROM campaign_delivery d
+    WHERE d.workspace_id = #{workspaceId} AND d.send_id = #{sendId} AND d.status = 'pending'
+    ORDER BY d.id
+    LIMIT 1
+  </insert>
+
+  <select id="hasContentRefusal" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM campaign_delivery_event e
+      JOIN campaign_delivery recorded ON recorded.workspace_id = e.workspace_id AND recorded.id = e.delivery_id
+      WHERE e.workspace_id = #{workspaceId} AND recorded.workspace_id = #{workspaceId}
+        AND recorded.send_id = #{sendId} AND e.event_type = 'failed'
+        AND e.detail = 'CAMPAIGN_UNSUPPORTED_TOKEN'
+        AND e.provider_id IS NULL AND e.provider_event_id = CONCAT('connex-content-refusal:', #{sendId}))
+  </select>
+
 </mapper>

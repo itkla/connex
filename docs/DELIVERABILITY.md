@@ -767,10 +767,41 @@ normalization. Unknown or incomplete placeholders beginning with `{{` are refuse
 before revision insertion, audience-send creation, queueing an existing draft, or workflow enrollment. Existing
 invalid revisions remain inspectable and must be copied into a corrected new revision before use;
 validation does not rewrite historical content. Queue validation reads the send's bound revision,
-including drafts created before this guard was introduced. Sends already queued before rollout are
-not recalled or revalidated by this admission guard; inspect outstanding queued content before rollout.
+including drafts created before this guard was introduced. Dispatch also validates existing queued
+content before provider resolution or any pending delivery claim. Unsupported content produces a
+persisted `contentRefused` send outcome, shown to campaign readers as “Content refused” with correction
+guidance, and causes the dispatch job to report failure with a fixed, content-free diagnostic.
+Correct the revision and prepare a new send;
+this refusal never retries invalid content. Completed sends are not reopened or reclassified.
+
+The refusal appends one internal `failed` event against a pending delivery. It changes no delivery
+status, attempt count, provider correlation, reservation, lease, reconciliation state, counter, or
+previous event. Pending deliveries remain pending and are not claimed; already in-flight attempts
+may still complete. The event is a send-level refusal, not evidence of provider rejection or a failed
+recipient attempt. Normal send lifecycle and recipient delivery facts remain visible alongside it.
+Recording takes the send row mutex in a short `READ_COMMITTED` transaction, rechecks active status,
+and inserts at most one marker. Its reserved `provider_event_id` is `connex-content-refusal:<sendId>`
+with `provider_id=NULL`; this internal-marker exception distinguishes it from provider-controlled
+failure detail and allows an indexed lookup. Ordinary internal delivery events retain null provider
+correlation fields. Workspace predicates and the owning delivery join protect marker attribution.
+
+This guard protects pending claims by this release's workers. Quiesce older workers before relying
+on it; a pre-fix worker does not understand the refusal marker, including after a rollback. Attempts
+already claimed remain governed by their original lease and outcome handling.
+
 Ordinary closing CSS braces remain literal content, so nested email stylesheet rules remain usable.
-Token refusals return HTTP 400 with `CAMPAIGN_UNSUPPORTED_TOKEN` without echoing customer content.
+HTML validation uses the pinned jsoup HTML5 parser on an analysis-only copy: entity-decoded text
+nodes are joined across tags, and decoded attribute values are checked too. Exact literal supported
+markers are masked before parsing; encoded or tag-split spellings are refused even for
+`unsubscribe_url`, since dispatch cannot substitute those spellings. HTML is decoded once, so escaped
+literal entity text is not double-decoded. Original saved HTML, subject, and plain-text source remain
+unchanged. Subject/plain-text validation remains literal. Admission refusals return HTTP 400 with
+`CAMPAIGN_UNSUPPORTED_TOKEN` without echoing customer content.
+
+Authors must include `{{unsubscribe_url}}` in the message body, or supply an equivalent opt-out
+instruction themselves. Connex substitutes existing markers only: neither the renderer nor the
+SMTP, ESP, or SMS adapter appends an opt-out link or instruction. A subject-only marker does not
+provide an opt-out mechanism in the body.
 
 A visual editor, rendered/recipient-specific previews and test-send flow are deferred. This source
 inspection adds no external delivery. The instance capability, transport readiness, permissions,
@@ -781,7 +812,7 @@ consent and suppression gates continue to apply.
 | Bounce handling | Yes — **ESP provider with webhooks only** | **None** |
 | Complaint handling | Yes — same condition | **None** |
 | Suppression list | Yes — `unsubscribe`, `hard_bounce`, `complaint`, `do_not_contact`, `manual` | **None** |
-| Unsubscribe | Yes — body link, per recipient | **None** |
+| Unsubscribe | Body link when the author includes `{{unsubscribe_url}}`; otherwise author-supplied instructions | **None** |
 | `List-Unsubscribe` header | **No** | **No** |
 | Per-message outcome | Recorded against the delivery row | Swallowed ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)) |
 | Worker-loss replay | Triggered sends: HTTP ESP/SMS only when that connector explicitly declares idempotent submission; SMTP requires reconciliation. Audience sends: never; requires reconciliation | None |

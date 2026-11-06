@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
 import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.exceptions.UnsupportedCampaignTokenException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
@@ -91,6 +92,7 @@ public class CampaignDispatchService {
     private final CampaignUnsubscribeTokenRegistrationService unsubscribeTokenRegistrationService;
     private final AutomationExecutor automationExecutor;
     private final SystemActor systemActor;
+    private final CampaignContentRefusalService contentRefusalService;
     private LongSupplier nanoTimeSource = System::nanoTime;
 
     /**
@@ -186,6 +188,9 @@ public class CampaignDispatchService {
         if (triggered(send) && !triggeredSendGate.enabled()) {
             return true;
         }
+        if (send.isContentRefused()) {
+            return false;
+        }
         if ("running".equals(send.getStatus()) && "audience".equals(send.getOrigin())
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             settle(workspaceId, sendId);
@@ -194,6 +199,20 @@ public class CampaignDispatchService {
         DeliveryChannel channel;
         ResolvedDeliveryProvider target;
         MessageDispatcher dispatcher;
+        CampaignMessageRevision revision =
+                campaignMessageMapper.getRevision(workspaceId, send.getMessageId(), send.getMessageVersion());
+        if (revision == null) {
+            log.warn("Campaign send {} references a missing message revision", sendId);
+            return false;
+        }
+        try {
+            CampaignMessageTokens.validate(revision);
+        } catch (UnsupportedCampaignTokenException exception) {
+            contentRefusalService.record(workspaceId, sendId);
+            log.warn("Campaign send {} in workspace {} has unsupported personalization; no pending delivery was claimed",
+                    sendId, workspaceId);
+            return false;
+        }
         try {
             channel = DeliveryChannel.fromToken(send.getChannel());
             target = automationExecutor.runAs(workspaceId, systemActor.user(), "system",
@@ -202,12 +221,6 @@ public class CampaignDispatchService {
             dispatcher = deliveryProviderRouter.dispatcherFor(target.providerId());
         } catch (RuntimeException exception) {
             log.warn("Campaign send {} has no usable provider: {}", sendId, bounded(exception.getMessage()));
-            return false;
-        }
-        CampaignMessageRevision revision =
-                campaignMessageMapper.getRevision(workspaceId, send.getMessageId(), send.getMessageVersion());
-        if (revision == null) {
-            log.warn("Campaign send {} references a missing message revision", sendId);
             return false;
         }
         campaignSendMapper.assignProvider(workspaceId, sendId, target.providerId());

@@ -764,6 +764,9 @@ export default function CampaignDelivery({
                                         <div className="flex flex-wrap items-center justify-between gap-3">
                                             <div className="flex min-w-0 flex-wrap items-center gap-3">
                                                 <SendStatusBadge status={send.status} />
+                                                {send.contentRefused && (
+                                                    <Badge variant="destructive">{st("contentRefusedStatus")}</Badge>
+                                                )}
                                                 {!isAudienceSend && (
                                                     <Badge variant="outline">{st("workflowOrigin")}</Badge>
                                                 )}
@@ -779,6 +782,9 @@ export default function CampaignDelivery({
                                             </span>
                                         </div>
 
+                                        {send.contentRefused && (
+                                            <p role="status" className="text-sm text-destructive">{st("contentRefused")}</p>
+                                        )}
                                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
                                             <CampaignCounter
                                                 label={st("total")}

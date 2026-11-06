@@ -186,12 +186,12 @@
         "subjectPlaceholder": "A quick spring update",
         "bodyHtml": "HTML body",
         "bodyHtmlPlaceholder": "<p>Hello…</p>",
-        "unsubscribeHint": "'{{'unsubscribe_url'}}' is available and an unsubscribe link is appended automatically.",
+        "unsubscribeHint": "Include '{{'unsubscribe_url'}}' in the message body to provide an opt-out link. Connex does not add one for you.",
         "bodyText": "Plain-text body",
         "bodyTextPlaceholder": "Optional plain-text alternative",
         "smsBody": "Message text",
         "smsBodyPlaceholder": "A quick spring update from Connex…",
-        "smsHint": "SMS is plain text — no subject or HTML. An opt-out instruction is appended automatically.",
+        "smsHint": "SMS uses plain text only. Include '{{'unsubscribe_url'}}' or your own opt-out instruction in the message. Connex does not add an opt-out instruction for you.",
         "saveRevision": "Save revision",
         "saving": "Saving…",
         "revisionSaved": "Revision saved",
@@ -200,7 +200,7 @@
         "version": "v{version}",
         "createFailed": "Couldn't create the message",
         "revisionSaveFailed": "Couldn't save the revision",
-        "supportedTokens": "Supported token: '{{'unsubscribe_url'}}' only, spelled exactly as shown. It works in the subject, HTML and plain text. Names and other fields are not supported. An opt-out link or instruction is added automatically.",
+        "supportedTokens": "Only the exact '{{'unsubscribe_url'}}' marker is supported. Include it in the message body yourself, or provide an equivalent opt-out instruction. Names and other personalization fields are not supported. Connex does not add opt-out content automatically.",
         "unsupportedTokens": "Only '{{'unsubscribe_url'}}' is supported. Remove other personalization fields and check the braces before saving or queueing. Your draft is still here.",
         "inspect": "View content",
         "inspectRevision": "View revision v{version}",
@@ -209,6 +209,8 @@
         "closeInspection": "Close"
     },
     "CampaignSends": {
+        "contentRefused": "Further delivery is stopped because this revision contains unsupported personalization. Earlier delivery results are preserved, and attempts already in progress may still complete. Correct the content and create a new send.",
+        "contentRefusedStatus": "Content refused",
         "title": "Sends",
         "subtitle": "Dispatch a message to a frozen audience snapshot. Queueing is the actual send.",
         "status": {
