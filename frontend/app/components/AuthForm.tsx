@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { sameOriginPath, withSectionFragment } from "@/app/lib/sessionExpiry";
+import { authReturnPath, authSwitchHref, returnsToInvitation } from "@/app/lib/authReturnPath";
+import { withSectionFragment } from "@/app/lib/sessionExpiry";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 import {
@@ -102,7 +103,7 @@ export function AuthForm({
     const tCapability = useTranslations("CapabilityUnavailable");
 
     const fields = FORM_FIELDS[mode];
-    const altHref = ALT_HREF[mode];
+    const altHref = authSwitchHref(ALT_HREF[mode], redirectUrl);
 
     const fieldLabels: Record<FieldKey, string> = {
         username: mode === "login" ? tForm("labelLoginIdentifier") : tForm("labelUsername"),
@@ -129,7 +130,7 @@ export function AuthForm({
 
     function routeAfterAuth() {
         const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
-        const safeRedirect = sameOriginPath(redirectUrl);
+        const safeRedirect = authReturnPath(redirectUrl);
         if (safeRedirect) {
             router.push(withSectionFragment(safeRedirect, window.location.hash));
         } else if (!hasWorkspace) {
@@ -179,7 +180,7 @@ export function AuthForm({
         try {
             const discovery = await discoverSso(identifier);
             if (discovery.available && discovery.registrationId && discovery.protocol) {
-                window.location.assign(ssoStartPath(discovery.registrationId, discovery.protocol));
+                window.location.assign(ssoStartPath(discovery.registrationId, discovery.protocol, redirectUrl));
                 return;
             }
             const message = tLogin("ssoUnavailable");
@@ -274,6 +275,7 @@ export function AuthForm({
                     displayName: values.displayName,
                     password: values.password,
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+                    skipInitialWorkspace: returnsToInvitation(redirectUrl),
                 });
             }
 
@@ -535,7 +537,7 @@ export function AuthForm({
                                     {socialProviders.google && (
                                         <button
                                             type="button"
-                                            onClick={() => window.location.assign(socialLoginStartPath("google"))}
+                                            onClick={() => window.location.assign(socialLoginStartPath("google", redirectUrl))}
                                             className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                                         >
                                             <svg className="size-5" width={20} height={20} viewBox="0 0 48 48" aria-hidden="true">
@@ -562,7 +564,7 @@ export function AuthForm({
                                     {socialProviders.microsoft && (
                                         <button
                                             type="button"
-                                            onClick={() => window.location.assign(socialLoginStartPath("microsoft"))}
+                                            onClick={() => window.location.assign(socialLoginStartPath("microsoft", redirectUrl))}
                                             className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                                         >
                                             <svg className="size-5" width={20} height={20} viewBox="0 0 23 23" aria-hidden="true">

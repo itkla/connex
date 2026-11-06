@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { act, type AnchorHTMLAttributes, type PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { SsoLinkForm } from "@/app/sso/link/SsoLinkForm";
 import { AuthForm } from "@/app/components/AuthForm";
 import {
     installInteractiveDocument,
@@ -13,11 +14,17 @@ const {
     registerMock,
     toastErrorMock,
     toastSuccessMock,
+    pushMock,
+    replaceMock,
+    discoverSsoMock,
 } = vi.hoisted(() => ({
     loginMock: vi.fn(async () => {}),
     registerMock: vi.fn(async () => {}),
     toastErrorMock: vi.fn(),
     toastSuccessMock: vi.fn(),
+    pushMock: vi.fn(),
+    replaceMock: vi.fn(),
+    discoverSsoMock: vi.fn(),
 }));
 
 vi.mock("next/link", async () => {
@@ -31,9 +38,9 @@ vi.mock("next/link", async () => {
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({
-        push: vi.fn(),
+        push: pushMock,
         refresh: vi.fn(),
-        replace: vi.fn(),
+        replace: replaceMock,
     }),
 }));
 
@@ -50,6 +57,9 @@ vi.mock("@/app/lib/api", async (importOriginal) => {
         ...actual,
         login: loginMock,
         register: registerMock,
+        discoverSso: discoverSsoMock,
+        validateSsoLink: vi.fn(async () => ({ valid: true })),
+        confirmSsoLink: vi.fn(async () => undefined),
     };
 });
 
@@ -77,12 +87,13 @@ type Rendered = {
     unmount: () => Promise<void>;
 };
 
-async function renderAuthForm(mode: "login" | "register"): Promise<Rendered> {
+async function renderAuthForm(mode: "login" | "register", redirectUrl: string | null = null): Promise<Rendered> {
     const interactive = installInteractiveDocument("connex_workspace=7");
+    Object.defineProperty(window, "location", { configurable: true, value: new URL("http://localhost/auth/register") });
     const { createRoot } = await import("react-dom/client");
     const root = createRoot(interactive.container);
     await act(async () => {
-        root.render(<AuthForm mode={mode} redirectUrl={null} />);
+        root.render(<AuthForm mode={mode} redirectUrl={redirectUrl} />);
     });
 
     if (mode === "register") {
@@ -310,5 +321,78 @@ describe("registration next step", () => {
         expect(en.AuthRegister.verificationNotice).toContain("{email}");
         expect(ja.AuthRegister.verificationNotice).toContain("{email}");
         expect(ja.AuthRegister.verificationNotice).not.toBe(en.AuthRegister.verificationNotice);
+    });
+});
+
+
+describe("invitation authentication navigation", () => {
+    it.each(["/invite", "/invite-link"])("keeps %s through the login/register switch and registration", async (destination) => {
+        const rendered = await renderAuthForm("register", destination);
+        try {
+            const alternate = rendered.elements.find((element) => element.tagName === "A"
+                && element.attributes.get("href")?.startsWith("/auth/login"));
+            expect(alternate?.attributes.get("href")).toBe(`/auth/login?redirect=${encodeURIComponent(destination)}`);
+            expect(registerMock).toHaveBeenLastCalledWith(expect.objectContaining({ skipInitialWorkspace: true }));
+            expect(pushMock).toHaveBeenLastCalledWith(destination);
+        } finally {
+            await rendered.unmount();
+        }
+    });
+});
+
+
+describe("strict authentication navigation", () => {
+    it.each(["/%2f%2fhost", "/%5chost", "/in\nvite", "/invite\u0000", "http://localhost/invite"])("rejects %s for navigation and workspace suppression", async (path) => {
+        const rendered = await renderAuthForm("register", path);
+        try {
+            expect(pushMock).not.toHaveBeenCalled();
+            expect(replaceMock).toHaveBeenLastCalledWith("/dashboard");
+            expect(registerMock).toHaveBeenLastCalledWith(expect.objectContaining({ skipInitialWorkspace: false }));
+        } finally {
+            await rendered.unmount();
+        }
+    });
+
+    it.each(["/invite", "/invite-link", "/%2f%2fhost"])("retains only a validated SSO link-confirmation destination: %s", async (redirectUrl) => {
+        const interactive = installInteractiveDocument("connex_workspace=7");
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        try {
+            await act(async () => root.render(<SsoLinkForm redirectUrl={redirectUrl} />));
+            const form = interactive.elements.find((element) => element.tagName === "FORM");
+            if (!form) throw new Error("Missing SSO link confirmation");
+            await act(async () => interactive.dispatch("submit", form));
+            expect(replaceMock).toHaveBeenLastCalledWith(redirectUrl.startsWith("/%") ? "/dashboard" : redirectUrl);
+            const login = interactive.elements.find((element) => element.tagName === "A"
+                && element.attributes.get("href")?.startsWith("/auth/login"));
+            expect(login?.attributes.get("href")).toBe(redirectUrl.startsWith("/%") ? "/auth/login"
+                : `/auth/login?redirect=${encodeURIComponent(redirectUrl)}`);
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+});
+
+
+describe("authentication provider return-path handoff", () => {
+    it.each(["sso", "google", "microsoft"] as const)("passes the invitation destination when starting %s", async (provider) => {
+        const interactive = installInteractiveDocument("connex_workspace=7");
+        const assign = vi.fn();
+        Object.defineProperty(window, "location", { configurable: true, value: { origin: "http://localhost", hash: "", assign } });
+        discoverSsoMock.mockResolvedValue({ available: true, registrationId: "org-7", protocol: "oidc" });
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        try {
+            await act(async () => root.render(<AuthForm mode="login" redirectUrl="/invite-link" ssoEnabled socialProviders={{ google: true, microsoft: true }} />));
+            if (provider === "sso") await fillInput(interactive.elements, "login-username", "colleague@example.test");
+            const label = provider === "sso" ? "AuthLogin.ssoButton" : provider === "google" ? "AuthLogin.googleButton" : "AuthLogin.microsoftButton";
+            const button = interactive.elements.find((element) => element.tagName === "BUTTON" && element.textContent.includes(label));
+            if (!button) throw new Error("Missing provider button");
+            await act(async () => interactive.dispatch("click", button));
+            const registration = provider === "sso" ? "org-7" : provider;
+            expect(assign).toHaveBeenCalledWith(`/api/oauth2/authorization/${registration}?redirect=%2Finvite-link`);
+        } finally {
+            await act(async () => root.unmount());
+        }
     });
 });

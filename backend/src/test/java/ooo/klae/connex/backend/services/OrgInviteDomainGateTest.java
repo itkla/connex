@@ -60,16 +60,16 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
 
         ForbiddenException refusal = assertThrows(ForbiddenException.class,
-            () -> inviteService.createInvite(workspaceId, currentUser, "bob@other.com", "member"));
+            () -> afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@other.com", "member")));
         assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
-        InviteResultDto ok = inviteService.createInvite(workspaceId, currentUser, "bob@acme.com", "member");
+        InviteResultDto ok = afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@acme.com", "member"));
         assertTrue(ok.getInvite() != null);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void createInvite_isUnrestrictedWhenTheOrgHasNoAllowlist() {
-        InviteResultDto ok = inviteService.createInvite(workspaceId, currentUser, "bob@anywhere.com", "member");
+        InviteResultDto ok = afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@anywhere.com", "member"));
         assertTrue(ok.getInvite() != null, "an org with no allowlist must not gate invites");
     }
 
@@ -81,16 +81,16 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         User insider = register("insider-" + unique() + "@acme.com");
 
         ForbiddenException refusal = assertThrows(ForbiddenException.class,
-            () -> inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member"));
+            () -> afterFixtureCommit(() -> inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member")));
         assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
-        inviteService.addExistingMember(workspaceId, currentUser.getId(), insider.getEmail(), "member");
+        afterFixtureCommit(() -> inviteService.addExistingMember(workspaceId, currentUser.getId(), insider.getEmail(), "member"));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void acceptInvite_appliesTheOrgCeilingAtAcceptTime() {
         String email = "newcomer-" + unique() + "@acme.com";
-        InviteResultDto invite = inviteService.createInvite(workspaceId, currentUser, email, "member");
+        InviteResultDto invite = afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, email, "member"));
         User invitee = register(email);
 
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "different.com");

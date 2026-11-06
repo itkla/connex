@@ -63,7 +63,7 @@ import org.springframework.security.oauth2.client.authentication.OAuth2LoginAuth
 import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
-import org.springframework.security.oauth2.client.web.HttpSessionOAuth2AuthorizationRequestRepository;
+import ooo.klae.connex.backend.sso.OAuthAuthenticationAttemptRepository;
 import org.springframework.security.oauth2.client.web.OAuth2LoginAuthenticationFilter;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
@@ -177,6 +177,36 @@ class SecurityConfigOAuthTest {
         callback("google", session).andExpect(status().isOk());
         verify(fixtures.success).onAuthenticationSuccess(any(), any(), any());
         assertEquals(0, sentinelRequests.get());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void crossSiteImageStartsCannotBlockHeaderlessOrTopLevelGoogleLogin(boolean topLevel) throws Exception {
+        var session = new MockHttpSession();
+        for (int index = 0; index < 4; index++) {
+            mvc.perform(get("/api/oauth2/authorization/google").session(session)
+                    .header("Sec-Fetch-Site", "cross-site").header("Sec-Fetch-Mode", "no-cors")
+                    .header("Sec-Fetch-Dest", "image")).andExpect(status().isForbidden());
+        }
+        assertTrue(java.util.Collections.list(session.getAttributeNames()).stream()
+                .noneMatch(name -> name.startsWith("ooo.klae.connex.backend.sso.AuthenticationAttemptStore.")));
+        var request = get("/api/oauth2/authorization/google").session(session);
+        if (topLevel) {
+            request.header("Sec-Fetch-Site", "cross-site").header("Sec-Fetch-Mode", "navigate")
+                    .header("Sec-Fetch-Dest", "document");
+        }
+        String location = mvc.perform(request).andExpect(status().is3xxRedirection())
+                .andReturn().getResponse().getRedirectedUrl();
+        assertNotNull(location);
+        assertTrue(location.startsWith("https://accounts.google.com/"));
+        String state = UriComponentsBuilder.fromUriString(location).build().getQueryParams().getFirst("state");
+        assertNotNull(state);
+        state = org.springframework.web.util.UriUtils.decode(state, java.nio.charset.StandardCharsets.UTF_8);
+        var callback = new MockHttpServletRequest("GET", "/api/login/oauth2/code/google");
+        callback.setSession(session);
+        callback.addParameter("state", state);
+        assertNotNull(new OAuthAuthenticationAttemptRepository().loadAuthorizationRequest(callback));
+        verifyNoInteractions(fixtures.mapper);
     }
 
     @Test
@@ -477,7 +507,7 @@ class SecurityConfigOAuthTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpSession session = new MockHttpSession();
         request.setSession(session);
-        new HttpSessionOAuth2AuthorizationRequestRepository().saveAuthorizationRequest(
+        new OAuthAuthenticationAttemptRepository().saveAuthorizationRequest(
                 authorization(id), request, new MockHttpServletResponse());
         return session;
     }

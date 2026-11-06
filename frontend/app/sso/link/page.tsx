@@ -8,6 +8,11 @@ export async function generateMetadata(): Promise<Metadata> {
     return { title: t("title"), robots: { index: false, follow: false } };
 }
 
-export default function SsoLinkPage() {
-    return <SsoLinkForm />;
+export default async function SsoLinkPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ redirect?: string | string[] }>;
+}) {
+    const { redirect } = await searchParams;
+    return <SsoLinkForm redirectUrl={typeof redirect === "string" ? redirect : null} />;
 }

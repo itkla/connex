@@ -56,6 +56,48 @@ remain distinguishable by their absent expiry; the new contract prevents new acc
 does not erase information disclosed before this change or conceal the historical invitation format.
 Invite-link redemption and removed-member rejoin policy are unchanged.
 
+Invitation creation also reports `emailDelivery`, uniformly for every addressed email: `ACCEPTED`
+means the SMTP server accepted submission, not confirmed inbox delivery; `SKIPPED` means no usable
+sender was available; `FAILED` means preparation or submission failed. None of these outcomes
+resolves a recipient's Connex account. The command refuses an enclosing transaction before
+invitation writes, then submits mail synchronously after its own transaction fully releases its
+resources. There is no memory-only dispatch queue; every completed creation request reports the submission
+outcome. The creator can share
+the returned link or explicitly replace the invitation after a failed submission. The mail service
+routes the target workspace, and SMTP starts after sender-resolution locks are released.
+
+Authentication return destinations use the same strict relative-path contract on the frontend
+and backend. Starts carrying `redirect` require exactly `Sec-Fetch-Site: same-origin`; absent,
+`none`, same-site and cross-site metadata are refused before registration/configuration reads.
+Only enabled OAuth registrations and enabled SAML ceremonies can admit a destination. A disabled
+SAML start cannot mutate an OAuth attempt, including on a social-only deployment.
+All attempt allocations also refuse cross-site subresource requests: `cross-site` metadata
+requires both `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. This guard covers every
+supported start method, SAML's query-form start, and repository allocation from other paths.
+Ordinary starts without destinations retain top-level cross-site and headerless-client support.
+
+Full authorization requests and their destinations are saved together in one immutable session
+map keyed by OAuth state or SAML RelayState. SAML records retain the AuthnRequest id for
+framework response correlation. Matching also checks the callback's registration. Unknown,
+duplicate or mismatched callback state does not remove another attempt or produce navigation.
+Only matching repository removal publishes request-local navigation before session replacement;
+success, linking and failure handlers never read a last-destination session slot.
+
+Attempts expire after ten minutes. Each save prunes expired entries, refuses duplicate live
+identities, evicts the earliest-expiring entry when full, and persists a fresh immutable map with
+at most four entries. Capacity never refuses a fresh start. Each removal also copies, prunes and
+replaces the map. No request can persist more than four entries; this bound does not rely on
+locking per-request Spring Session wrappers. Concurrent detached snapshots may drop another
+in-flight entry; its callback fails closed, and no destination or authorization is rebound.
+Evicted attempts fail closed in the same way. Legacy per-attempt attributes and singleton return
+state are ignored. Missing or invalid destinations retain the existing
+dashboard/onboarding fallback, and no caller-supplied origin becomes the redirect origin.
+
+Self-service registration accepts `skipInitialWorkspace` to suppress optional personal workspace
+creation while returning to invitation acceptance. This preference grants no workspace membership
+or invitation authority, changes no signup or verification policy, and is ignored by administrator
+account creation. Existing purpose-bound invitation cookies retain their narrow API paths.
+
 ## AI and model-provider egress
 
 Read `docs/backend/AI_SECURITY.md` before changing AI gates, masking, prompts, media admission, provider adapters, endpoint validation, budgets, streaming, assistant tools, or transcript collaboration.

@@ -141,7 +141,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             String frontendBase) throws IOException {
         authService.downgradeToUnauthenticatedSession(request, response);
         if (!response.isCommitted()) {
-            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
+            response.sendRedirect(frontendBase + AuthenticationReturnPathSession.continuation(request, "/auth/login?sso_error=1"));
         }
     }
 
@@ -255,8 +255,12 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
                 User user = authService.establishAuthenticatedSession(login.user(), request, response);
                 auditService.record(auditAction, "user", user.getId(), user.getDisplayName(),
                         user.getDisplayName() + auditSummarySuffix, auditContext);
-                boolean hasWorkspace = !workspaceMapper.getWorkspacesForUser(user.getId()).isEmpty();
-                response.sendRedirect(frontendBase + (hasWorkspace ? "/dashboard" : "/onboarding"));
+                String destination = AuthenticationReturnPathSession.captured(request);
+                if (destination == null) {
+                    boolean hasWorkspace = !workspaceMapper.getWorkspacesForUser(user.getId()).isEmpty();
+                    destination = hasWorkspace ? "/dashboard" : "/onboarding";
+                }
+                response.sendRedirect(frontendBase + destination);
             }
             case SsoLoginResult.LinkRequired linkRequired -> {
                 authService.downgradeToUnauthenticatedSession(request, response);
@@ -270,7 +274,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
                     OneTimeTokenDigest.sha256(linkToken));
                 oneTimeLinkFlowCookie.set(
                     response, Purpose.SSO_LINK, grant.value(), grant.lifetime());
-                response.sendRedirect(frontendBase + "/sso/link");
+                response.sendRedirect(frontendBase + AuthenticationReturnPathSession.continuation(request, "/sso/link"));
             }
         }
     }

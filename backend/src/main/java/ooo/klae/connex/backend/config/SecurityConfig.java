@@ -86,6 +86,12 @@ import ooo.klae.connex.backend.publicapi.PublicApiCorsProcessor;
 import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
+import ooo.klae.connex.backend.sso.AuthenticationReturnPathFilter;
+import ooo.klae.connex.backend.sso.AuthenticationReturnPathSession;
+import ooo.klae.connex.backend.sso.OAuthAuthenticationAttemptRepository;
+import ooo.klae.connex.backend.sso.SamlAuthenticationAttemptRepository;
+import org.springframework.security.saml2.provider.service.authentication.AbstractSaml2AuthenticationRequest;
+import org.springframework.security.saml2.provider.service.web.Saml2AuthenticationRequestRepository;
 import ooo.klae.connex.backend.sso.SsoHttpClient;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
@@ -271,6 +277,10 @@ public class SecurityConfig {
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled,
             @Value("${connex.cors.allowed-origins}") String[] corsAllowedOrigins) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
+        if (oauthEnabled || ssoEnabled) {
+            http.addFilterBefore(new AuthenticationReturnPathFilter(ssoEnabled,
+                    compositeClientRegistrationRepository, dbRelyingPartyRegistrationRepository), OAuth2AuthorizationRequestRedirectFilter.class);
+        }
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
         http.addFilterAfter(
             new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
@@ -429,7 +439,7 @@ public class SecurityConfig {
                         public <O extends OAuth2AuthorizationRequestRedirectFilter> O postProcess(O filter) {
                             filter.setAuthenticationFailureHandler((request, response, exception) -> {
                                 log.warn("OAuth2 initiation failed [{}]", exception.getClass().getName());
-                                response.sendRedirect("/auth/login?sso_error=1");
+                                response.sendRedirect(AuthenticationReturnPathSession.failurePath(request));
                             });
                             return filter;
                         }
@@ -440,10 +450,11 @@ public class SecurityConfig {
                     .userInfoEndpoint(u -> u
                             .oidcUserService(oidcUserService(ssoHttpClient, socialLoginClientRegistrations))
                             .userService(oauth2UserService(ssoHttpClient, socialLoginClientRegistrations)))
-                    .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
+                    .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization")
+                            .authorizationRequestRepository(new OAuthAuthenticationAttemptRepository()))
                     .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
                     .successHandler(ssoAuthenticationSuccessHandler)
-                    .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"));
+                    .failureHandler((rq, rs, ex) -> rs.sendRedirect(AuthenticationReturnPathSession.failurePath(rq)));
                 });
         }
         if (ssoEnabled) {
@@ -452,10 +463,16 @@ public class SecurityConfig {
                 .loginProcessingUrl("/api/login/saml2/sso/{registrationId}")
                 .authenticationManager(samlAuthenticationManager())
                 .successHandler(ssoAuthenticationSuccessHandler)
-                .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
+                .failureHandler((rq, rs, ex) -> rs.sendRedirect(AuthenticationReturnPathSession.failurePath(rq)))
             );
         }
         return http.build();
+    }
+
+    /** Shares the attempt-bound repository between SAML request generation and callback validation. */
+    @Bean
+    Saml2AuthenticationRequestRepository<AbstractSaml2AuthenticationRequest> samlAuthenticationAttemptRepository() {
+        return new SamlAuthenticationAttemptRepository();
     }
 
     @Bean

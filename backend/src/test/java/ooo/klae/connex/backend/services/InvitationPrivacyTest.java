@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,21 +30,31 @@ class InvitationPrivacyTest extends AbstractServiceTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private RoleService roleService;
 
+    @BeforeEach
+    void isolateCommittedInvitationFixtures() {
+        tenantContext.clear();
+        var isolated = workspaceService.createWorkspace("Invitation privacy fixtures", currentUser.getId());
+        authenticateAs(currentUser, isolated.getId());
+        approveForStepUp(currentUser);
+    }
+
     @Test
     void accountCreationAndRepeatedPendingInvitesDoNotChangeTheDisclosure() {
         var target = workspaceService.createWorkspace("Private invitation", currentUser.getId());
+        assertNotEquals(workspace.getOrgId(), target.getOrgId());
         String email = "invite-privacy-" + unique() + "@example.com";
-        var absent = inviteService.createInvite(target.getId(), currentUser, email, "member");
+        var absent = afterFixtureCommit(() -> inviteService.createInvite(target.getId(), currentUser, email, "member"));
         User recipient = newUser();
         userMapper.updateEmail(recipient.getId(), email);
         recipient.setEmail(email);
-        var registered = inviteService.createInvite(target.getId(), currentUser, email, "member");
-        var repeated = inviteService.addExistingMember(target.getId(), currentUser.getId(), email, "member");
+        var registered = afterFixtureCommit(() -> inviteService.createInvite(target.getId(), currentUser, email, "member"));
+        var repeated = afterFixtureCommit(() -> inviteService.addExistingMember(target.getId(), currentUser.getId(), email, "member"));
 
         JsonMapper mapper = JsonMapper.builder().build();
         for (var result : List.of(absent, registered, repeated)) {
             var json = mapper.readTree(mapper.writeValueAsString(result));
-            assertEquals(Set.of("invite"), Set.copyOf(json.propertyNames()));
+            assertEquals(Set.of("invite", "emailDelivery"), Set.copyOf(json.propertyNames()));
+            assertEquals(absent.getEmailDelivery().name(), json.path("emailDelivery").asString());
             assertEquals(Set.of("id", "email", "role", "status", "token", "invitedByLabel", "expiresAt", "createdAt"),
                 Set.copyOf(json.path("invite").propertyNames()));
             assertEquals(email, json.path("invite").path("email").asString());
@@ -109,7 +121,10 @@ class InvitationPrivacyTest extends AbstractServiceTest {
     @Test
     void historicalInvitationRevocationIsWorkspaceBoundAndCannotRemoveAcceptedMembership() {
         var first = workspaceService.createWorkspace("First privacy", currentUser.getId());
+        authenticateAs(currentUser, first.getId());
+        approveForStepUp(currentUser);
         var second = workspaceService.createWorkspace("Second privacy", currentUser.getId());
+        assertEquals(first.getOrgId(), second.getOrgId());
         User recipient = newUser();
         workspaceService.addPendingMember(first.getId(), currentUser, recipient, "member");
         String reference = inviteService.listInvites(first.getId(), currentUser.getId()).getFirst().getId();
@@ -147,7 +162,7 @@ class InvitationPrivacyTest extends AbstractServiceTest {
         User recipient = newUser();
         workspaceService.addPendingMember(target.getId(), currentUser, recipient, "member");
 
-        var replacement = inviteService.createInvite(target.getId(), currentUser, recipient.getEmail(), "member");
+        var replacement = afterFixtureCommit(() -> inviteService.createInvite(target.getId(), currentUser, recipient.getEmail(), "member"));
 
         assertNull(workspaceMapper.getMember(target.getId(), recipient.getId()));
         assertEquals(1, inviteService.listInvites(target.getId(), currentUser.getId()).size());
@@ -179,10 +194,10 @@ class InvitationPrivacyTest extends AbstractServiceTest {
     void unrelatedTenantCannotCreateListOrRevokeInvitationsOrReadRoster() {
         var target = workspaceService.createWorkspace("Tenant privacy", currentUser.getId());
         User outsider = newUser();
-        var invitation = inviteService.createInvite(target.getId(), currentUser, outsider.getEmail(), "member");
+        var invitation = afterFixtureCommit(() -> inviteService.createInvite(target.getId(), currentUser, outsider.getEmail(), "member"));
 
         assertThrows(ForbiddenException.class,
-            () -> inviteService.createInvite(target.getId(), outsider, currentUser.getEmail(), "member"));
+            () -> afterFixtureCommit(() -> inviteService.createInvite(target.getId(), outsider, currentUser.getEmail(), "member")));
         assertThrows(ForbiddenException.class,
             () -> inviteService.listInvites(target.getId(), outsider.getId()));
         assertThrows(ForbiddenException.class,

@@ -15,6 +15,7 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { ApiError, confirmSsoLink, validateSsoLink } from "@/app/lib/api";
+import { authReturnPath, authSwitchHref } from "@/app/lib/authReturnPath";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -25,9 +26,10 @@ type Status = "ready" | "invalid";
  * Reached only via the backend redirect after an IdP login whose verified email collides
  * with a password account. The backend installs a purpose-bound HttpOnly flow before redirecting
  * to this token-free page; the user re-enters their password here. On success the backend links
- * the identity and establishes a session, so the user is routed straight into the app.
+ * the identity and establishes a session. A validated return destination takes precedence over
+ * the ordinary workspace entry page.
  */
-export function SsoLinkForm() {
+export function SsoLinkForm({ redirectUrl = null }: { redirectUrl?: string | null }) {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
     const t = useTranslations("SsoLink");
@@ -58,7 +60,7 @@ export function SsoLinkForm() {
 
     function routeAfterLink() {
         const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
-        router.replace(hasWorkspace ? "/dashboard" : "/onboarding");
+        router.replace(authReturnPath(redirectUrl) ?? (hasWorkspace ? "/dashboard" : "/onboarding"));
         router.refresh();
     }
 
@@ -114,7 +116,7 @@ export function SsoLinkForm() {
                                     {t("invalidBody")}
                                 </p>
                                 <Link
-                                    href="/auth/login"
+                                    href={authSwitchHref("/auth/login", redirectUrl)}
                                     className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
                                 >
                                     {t("backToLogin")}
@@ -214,7 +216,7 @@ export function SsoLinkForm() {
                                     style={{ animationDelay: "300ms" }}
                                 >
                                     <Link
-                                        href="/auth/login"
+                                        href={authSwitchHref("/auth/login", redirectUrl)}
                                         className="inline-flex items-center gap-1.5 font-semibold text-foreground underline decoration-brand decoration-2 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-brand-hover"
                                     >
                                         <ArrowLeftIcon className="size-4" />

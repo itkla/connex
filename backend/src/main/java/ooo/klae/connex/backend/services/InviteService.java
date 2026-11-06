@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -20,6 +21,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.mail.MailDispatchOutcome;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
@@ -47,17 +49,31 @@ public class InviteService {
     /**
      * Creates the same email-bound token invitation for every address. Recipient account
      * existence and mailbox-verification state are never resolved or returned to the inviter.
-     * A previous token invitation for the address is superseded.
+     * A previous token invitation for the address is superseded. This command must start without
+     * an enclosing transaction so it can report mail submission after all invitation locks and
+     * connections have been released.
+     * @throws IllegalStateException when called inside an enclosing transaction
      */
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actor.getId());
-        return freshMembershipTransaction.execute(
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Invitation creation must start outside a transaction");
+        }
+        PreparedInvitation prepared = freshMembershipTransaction.execute(
             workspaceId,
             () -> createInviteInWorkspace(workspaceId, actor, emailRaw, roleRaw));
+        try {
+            MailDispatchOutcome outcome = inviteEmailService.sendInvite(workspaceId, prepared.workspaceName(),
+                    prepared.email(), prepared.inviterName(), prepared.role(), prepared.token());
+            prepared.result().setEmailDelivery(outcome == null ? MailDispatchOutcome.FAILED : outcome);
+        } catch (RuntimeException exception) {
+            prepared.result().setEmailDelivery(MailDispatchOutcome.FAILED);
+        }
+        return prepared.result();
     }
 
-    private InviteResultDto createInviteInWorkspace(
+    private PreparedInvitation createInviteInWorkspace(
             int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actor.getId());
@@ -82,9 +98,6 @@ public class InviteService {
         auditService.record("workspace.invite", "workspace", workspaceId, email,
                 "Invited " + email + " as " + role, null);
 
-        inviteEmailService.sendInvite(workspaceId, workspaceNameFor(actor, workspaceId), email,
-                actor.getDisplayName(), role, invite.getToken());
-
         WorkspaceInvite saved = inviteMapper.findByTokenHash(invite.getTokenHash());
         InviteDto dto = new InviteDto();
         dto.setId(OneTimeTokenDigest.sha256("workspace-invite:" + saved.getId()));
@@ -95,7 +108,13 @@ public class InviteService {
         dto.setExpiresAt(saved.getExpiresAt());
         dto.setCreatedAt(saved.getCreatedAt());
         dto.setInvitedByLabel(actor.getDisplayName());
-        return new InviteResultDto(dto);
+        InviteResultDto result = new InviteResultDto(dto, MailDispatchOutcome.FAILED);
+        return new PreparedInvitation(result, workspaceNameFor(actor, workspaceId), email,
+                actor.getDisplayName(), role, invite.getToken());
+    }
+
+    private record PreparedInvitation(InviteResultDto result, String workspaceName, String email,
+            String inviterName, String role, String token) {
     }
 
     /** Lists the workspace's still-pending invites. */

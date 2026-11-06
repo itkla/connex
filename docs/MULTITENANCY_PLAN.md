@@ -25,7 +25,7 @@ self-registration → #81; hardening grab-bag → #67/#68/#69/#71/#72/#73/#76/#7
 | 6 | **Per-tenant pipelines, optionally shareable** | pipeline/stage = owned-but-shareable (same model as §0.1) |
 | 7 | No hard uniqueness on person.email / company.name | index only |
 | 8 | Session attr + re-validated `X-Workspace-Id` header | no URL segment |
-| 9 | Registration **creates+owns** a workspace **and** invite-join, **with an instance setting to disable self-service creation** | `allow_public_workspace_creation` flag (config-backed); relates to #81 |
+| 9 | Registration normally **creates+owns** a workspace and supports invite-join; invitation entry may defer the optional personal workspace. **An instance setting can disable self-service creation.** | `allow_public_workspace_creation` flag (config-backed); `skipInitialWorkspace` suppresses only self-service provisioning and grants no membership; relates to #81 |
 | 10 | `owner`/`admin`/`member` built-in **+ owner-defined custom roles with chosen privileges** | full RBAC (`workspace_role` + `permission` catalog + `workspace_role_permission`); built-ins first, custom roles a dedicated later phase (§0.2) |
 | 11 | Both invite flows (email-token **and** admin-adds-existing) | new `WorkspaceController` endpoints |
 | 12 | Member removal → owner/assignee `SET NULL`, authored history preserved | (matches plan §2 user-ref hardening) |

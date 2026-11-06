@@ -51,6 +51,7 @@ import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
 import { useConfinementAcknowledgement } from "@/app/hooks/useConfinementAcknowledgement";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,7 +74,9 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import {
+    Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import Rise from "@/app/components/motion/Rise";
 import AllowedDomainsPanel from "@/app/components/settings/AllowedDomainsPanel";
@@ -220,6 +223,10 @@ function MembersWorkspacePanel({
     const [inviteEmail, setInviteEmail] = useState("");
     const [inviteRole, setInviteRole] = useState<WorkspaceRole>("member");
     const [sending, setSending] = useState(false);
+    const [invitationTab, setInvitationTab] = useState("email");
+    const inviteLinkTab = useRef<HTMLButtonElement>(null);
+    const [copyRecoveryUrl, setCopyRecoveryUrl] = useState<string | null>(null);
+    const [mailOutcome, setMailOutcome] = useState<string | null>(null);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const [busyMemberId, setBusyMemberId] = useState<number | null>(null);
@@ -420,7 +427,7 @@ function MembersWorkspacePanel({
             membersRefresh.current += 1;
             setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
             ownershipOffers.refresh();
-            toastSuccess(t("removed"));
+            toastSuccess(t("removed"), { description: t("removedDescription") });
             setRemoveTarget(null);
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -431,28 +438,38 @@ function MembersWorkspacePanel({
         }
     };
 
+    const copyUrl = useCallback(async (url: string, silent = false): Promise<boolean> => {
+        try {
+            await navigator.clipboard.writeText(url);
+            setCopyRecoveryUrl(null);
+            if (!silent) toastSuccess(t("linkCopied"));
+            return true;
+        } catch {
+            setCopyRecoveryUrl(url);
+            toastError(t("copyFailed"), { description: t("copyFailedDescription") });
+            return false;
+        }
+    }, [t]);
+
     const copyInviteLink = useCallback(
-        async (token: string, silent = false) => {
-            const link = `${window.location.origin}/invite#token=${token}`;
-            try {
-                await navigator.clipboard.writeText(link);
-                if (!silent) toastSuccess(t("linkCopied"));
-            } catch {
-                if (!silent) toastError(link);
-            }
-        },
-        [t],
+        (token: string, silent = false) => copyUrl(`${window.location.origin}/invite#token=${token}`, silent),
+        [copyUrl],
     );
 
-    const sendInvite = async () => {
+    const sendInvite = async (email = inviteEmail.trim(), requestedRole = inviteRole) => {
         if (!workspaceId || sending) return;
         resetFieldErrors();
+        setMailOutcome(null);
+        setCopyRecoveryUrl(null);
         setSending(true);
         try {
-            const result = await createWorkspaceInvite(workspaceId, inviteEmail.trim(), inviteRole);
+            const result = await createWorkspaceInvite(workspaceId, email, requestedRole);
             setInviteEmail("");
             if (result.invite) {
                 const invite = result.invite;
+                setMailOutcome(t(result.emailDelivery === "ACCEPTED" ? "emailAccepted"
+                    : result.emailDelivery === "SKIPPED" ? "emailSkipped"
+                        : result.emailDelivery === "FAILED" ? "emailFailed" : "emailUnconfirmed"));
                 setInvites((prev) => [invite, ...prev.filter((i) => i.email !== invite.email)]);
                 if (invite.token) {
                     await copyInviteLink(invite.token, true);
@@ -476,6 +493,7 @@ function MembersWorkspacePanel({
         try {
             await revokeWorkspaceInvite(workspaceId, inviteId);
             setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+            setCopyRecoveryUrl(null);
             toastSuccess(t("revoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -489,18 +507,15 @@ function MembersWorkspacePanel({
     const copyShareLink = useCallback(
         async (link: WorkspaceInviteLink) => {
             if (!link.token) return;
-            const url = `${window.location.origin}/invite-link#token=${link.token}`;
-            try {
-                await navigator.clipboard.writeText(url);
+            const copied = await copyUrl(`${window.location.origin}/invite-link#token=${link.token}`, true);
+            if (copied) {
                 setCopiedLinkId(link.id);
                 window.setTimeout(() => {
                     setCopiedLinkId((current) => (current === link.id ? null : current));
                 }, 1500);
-            } catch {
-                toastError(url);
             }
         },
-        [],
+        [copyUrl],
     );
 
     const createLink = async () => {
@@ -534,6 +549,7 @@ function MembersWorkspacePanel({
         try {
             await revokeWorkspaceInviteLink(workspaceId, linkId);
             setInviteLinks((prev) => prev.filter((l) => l.id !== linkId));
+            setCopyRecoveryUrl(null);
             toastSuccess(t("linkRevoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -806,13 +822,13 @@ function MembersWorkspacePanel({
                         title={showDomains ? t("inviteAccessTitle") : t("inviteMemberTitle")}
                         description={showDomains ? t("inviteAccessSubtitle") : t("inviteMemberSubtitle")}
                     >
-                        <Tabs defaultValue="email" className="gap-5">
+                        <Tabs value={invitationTab} onValueChange={setInvitationTab} className="gap-5">
                             <TabsList className="w-full sm:w-auto">
                                 <TabsTrigger value="email">
                                     <EnvelopeIcon />
                                     {t("inviteTabEmail")}
                                 </TabsTrigger>
-                                <TabsTrigger value="link">
+                                <TabsTrigger ref={inviteLinkTab} value="link">
                                     <LinkIcon />
                                     {t("inviteTabLink")}
                                 </TabsTrigger>
@@ -823,6 +839,20 @@ function MembersWorkspacePanel({
                                     </TabsTrigger>
                                 )}
                             </TabsList>
+
+                            {copyRecoveryUrl ? (
+                                <Alert role="region" aria-label={t("copyFailed")}>
+                                    <AlertTitle>{t("copyFailed")}</AlertTitle>
+                                    <AlertDescription className="gap-3">
+                                        <p>{t("copyFailedDescription")}</p>
+                                        <Input aria-label={t("inviteUrl")} readOnly value={copyRecoveryUrl} onFocus={(event) => event.currentTarget.select()} />
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button variant="outline" onClick={() => setCopyRecoveryUrl(null)}>{t("close")}</Button>
+                                            <Button onClick={() => { void copyUrl(copyRecoveryUrl); }}>{t("copyLink")}</Button>
+                                        </div>
+                                    </AlertDescription>
+                                </Alert>
+                            ) : null}
 
                             <TabsContent value="email" className="space-y-5">
                                 <p className="max-w-prose text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
@@ -907,8 +937,10 @@ function MembersWorkspacePanel({
                                     </form>
                                 )}
 
+                                <p role="status" aria-live="polite" aria-atomic="true" className="max-w-prose text-sm text-muted-foreground">{mailOutcome}</p>
                                 <div className="space-y-2">
                                     <TabListHeading title={t("pendingTitle")} count={invites.length} />
+                                    <p className="max-w-prose text-sm text-muted-foreground">{t("replaceInviteHint")}</p>
                                     {invites.length === 0 ? (
                                         <EmptyRow>{t("pendingEmpty")}</EmptyRow>
                                     ) : (
@@ -961,6 +993,11 @@ function MembersWorkspacePanel({
                                                                             <LinkIcon className="size-4" />
                                                                             {t("copyLink")}
                                                                         </DropdownMenuItem>
+                                                                    ) : grantableInviteRoles.includes(invite.role) ? (
+                                                                        <DropdownMenuItem disabled={sending} onSelect={() => void sendInvite(invite.email, invite.role)}>
+                                                                            <EnvelopeIcon className="size-4" />
+                                                                            {t("replaceInvite")}
+                                                                        </DropdownMenuItem>
                                                                     ) : null}
                                                                     <DropdownMenuItem
                                                                         variant="destructive"
@@ -982,6 +1019,7 @@ function MembersWorkspacePanel({
 
                             <TabsContent value="link" className="space-y-5">
                                 <p className="max-w-prose text-sm text-muted-foreground">{t("linkSubtitle")}</p>
+                                <p className="max-w-prose text-sm text-muted-foreground">{t("revokeLinkConsequences")}</p>
                                 {roleOptionsStatus === "loading" ? (
                                     <InviteRoleOptionsSkeleton />
                                 ) : roleOptionsStatus === "error" ? (
@@ -1154,18 +1192,30 @@ function MembersWorkspacePanel({
                 </Rise>
             )}
 
-            <DeleteRecordDialog
-                open={removeTarget !== null}
-                onOpenChange={(open) => {
-                    if (!open) setRemoveTarget(null);
-                }}
-                selectedIds={new Set(removeTarget ? [removeTarget.id] : [])}
-                selectedItems={removeTarget ? [removeTarget] : []}
-                entityLabel={t("memberEntityLabel")}
-                getDisplayName={(m) => m.displayName}
-                isDeleting={isRemoving}
-                confirmDelete={confirmRemove}
-            />
+            <Dialog open={removeTarget !== null} onOpenChange={(open) => { if (!open && !isRemoving) setRemoveTarget(null); }}>
+                <DialogContent className="max-h-[80dvh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>{t("removeTitle", { name: removeTarget?.displayName ?? "" })}</DialogTitle>
+                        <DialogDescription>{t("removeDescription", { workspace: activeWorkspace?.name ?? "" })}</DialogDescription>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">{t("removeOwnershipConsequences")}</p>
+                    <p className="text-sm text-muted-foreground">{t("removeRejoinConsequences")}</p>
+                    <Button variant="outline" disabled={isRemoving} onClick={() => {
+                        setRemoveTarget(null);
+                        setInvitationTab("link");
+                        requestAnimationFrame(() => {
+                            inviteLinkTab.current?.scrollIntoView({ block: "center" });
+                            inviteLinkTab.current?.focus({ preventScroll: true });
+                        });
+                    }}>{t("reviewInvitations")}</Button>
+                    <DialogFooter>
+                        <DialogClose asChild><Button variant="outline" disabled={isRemoving}>{t("cancel")}</Button></DialogClose>
+                        <Button variant="destructive" disabled={isRemoving} onClick={confirmRemove}>
+                            {isRemoving ? <Loader2Icon className="size-4 animate-spin" /> : t("remove")}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <ConfinementAcknowledgementDialog acknowledgement={confinement} />
 
