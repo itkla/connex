@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-type NavigationGuard = { request: (navigate: () => void) => void; isDirty: () => boolean };
+type NavigationAction = () => void | Promise<void>;
+type PendingNavigation = { navigate: NavigationAction; onCancel?: () => void };
+type NavigationGuard = {
+    request: (navigate: NavigationAction, onCancel?: () => void) => void;
+    isDirty: () => boolean;
+    leave: () => void;
+};
 const navigationGuards = new Set<NavigationGuard>();
 const HISTORY_INDEX = '__connexEditorHistoryIndex';
 let historyTrackingActive = false;
@@ -28,27 +34,38 @@ export function trackEditorNavigationHistory(): (() => void) | undefined {
     const originalPush = window.history.pushState;
     const originalReplace = window.history.replaceState;
     let running = true;
-    let index = historyIndex(window.history.state) ?? 0;
+    let index: number | null = historyIndex(window.history.state) ?? 0;
     let url = window.location.href;
     let restoring: { delta: number; guard: NavigationGuard } | null = null;
     originalReplace.call(window.history, indexedHistoryState(window.history.state, index), '', url);
 
     const push: History['pushState'] = (state: unknown, unused: string, destination?: string | URL | null) => {
         if (!running) return originalPush.call(window.history, state, unused, destination);
-        originalPush.call(window.history, indexedHistoryState(state, index + 1), unused, destination);
-        index += 1;
+        originalPush.call(window.history, index === null ? state : indexedHistoryState(state, index + 1), unused, destination);
+        if (index !== null) index += 1;
         url = window.location.href;
     };
     const replace: History['replaceState'] = (state: unknown, unused: string, destination?: string | URL | null) => {
-        originalReplace.call(window.history, running ? indexedHistoryState(state, index) : state, unused, destination);
+        originalReplace.call(window.history, running && index !== null ? indexedHistoryState(state, index) : state, unused, destination);
         if (running) url = window.location.href;
     };
     const onPopState = (event: PopStateEvent) => {
+        const targetIndex = historyIndex(event.state);
+        const guard = [...navigationGuards].at(-1);
+        const destination = new URL(window.location.href);
+        const current = new URL(url);
+        const changesRoute = destination.pathname !== current.pathname || destination.search !== current.search;
+        if (targetIndex === null || index === null) {
+            if (changesRoute) guard?.leave();
+            restoring = null;
+            index = targetIndex;
+            url = window.location.href;
+            return;
+        }
         if (restoring) {
             event.stopImmediatePropagation();
-            const restoredIndex = historyIndex(event.state);
-            if (restoredIndex !== null && restoredIndex !== index) {
-                window.history.go(index - restoredIndex);
+            if (targetIndex !== index) {
+                window.history.go(index - targetIndex);
                 return;
             }
             const { delta, guard } = restoring;
@@ -56,17 +73,15 @@ export function trackEditorNavigationHistory(): (() => void) | undefined {
             guard.request(() => window.history.go(delta));
             return;
         }
-        const targetIndex = historyIndex(event.state) ?? index - 1;
-        const guard = [...navigationGuards].at(-1);
-        const destination = new URL(window.location.href);
-        const current = new URL(url);
-        if (guard?.isDirty() && (destination.pathname !== current.pathname || destination.search !== current.search)) {
-            event.stopImmediatePropagation();
+        if (guard?.isDirty() && changesRoute) {
             const delta = targetIndex - index;
-            if (delta === 0) return;
-            restoring = { delta, guard };
-            window.history.go(-delta);
-            return;
+            if (delta !== 0) {
+                event.stopImmediatePropagation();
+                restoring = { delta, guard };
+                window.history.go(-delta);
+                return;
+            }
+            guard.leave();
         }
         index = targetIndex;
         url = window.location.href;
@@ -83,11 +98,27 @@ export function trackEditorNavigationHistory(): (() => void) | undefined {
     };
 }
 
-/** Routes an imperative shell navigation through the mounted full-page editor's discard guard. */
-export function requestGuardedNavigation(navigate: () => void): void {
+/**
+ * Routes a shell operation through the editor's discard choice before its side effects run.
+ * `onCancel` settles owners waiting for a decision. Async operations own their error feedback;
+ * the guard rearms after they settle so a refused workspace selection leaves the draft protected.
+ * Route callers supply `destination` so same-path/query requests remain inert without disabling protection.
+ */
+export function requestGuardedNavigation(navigate: NavigationAction, { destination, onCancel }: {
+    destination?: string;
+    onCancel?: () => void;
+} = {}): void {
+    if (destination && typeof window !== 'undefined' && window.location?.href) {
+        const url = new URL(destination, window.location.href);
+        if (url.origin === window.location.origin && url.pathname === window.location.pathname
+            && url.search === window.location.search) {
+            onCancel?.();
+            return;
+        }
+    }
     const guard = [...navigationGuards].at(-1);
-    if (guard) guard.request(navigate);
-    else navigate();
+    if (guard) guard.request(navigate, onCancel);
+    else void navigate();
 }
 
 type GuardOptions = {
@@ -98,7 +129,11 @@ type GuardOptions = {
     /** When false the guard is inert and dismissals close immediately (e.g. while submitting). */
     enabled?: boolean;
     /** Full-page editors also protect links, shell navigation and browser history traversal. */
-    navigation?: { push: (href: string) => void };
+    navigation?: {
+        push: (href: string) => void;
+        /** Synchronously invalidates editor continuations before any accepted departure. */
+        onBeforeLeave?: () => void;
+    };
 };
 
 type Guard = {
@@ -107,7 +142,7 @@ type Guard = {
     /** For dismiss paths that bypass `onOpenChange` (a Cancel/back button). */
     requestClose: () => void;
     /** Performs an intentional navigation after a successful save without prompting again. */
-    allowNavigation: (navigate: () => void) => void;
+    allowNavigation: (navigate: NavigationAction) => void;
     /** Drives the confirm-discard dialog. */
     confirm: { open: boolean; onKeepEditing: () => void; onDiscard: () => void };
 };
@@ -124,7 +159,7 @@ type Guard = {
  */
 export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navigation }: GuardOptions): Guard {
     const [confirmOpen, setConfirmOpen] = useState(false);
-    const pendingNavigation = useRef<(() => void) | null>(null);
+    const pendingNavigation = useRef<PendingNavigation | null>(null);
     const leaving = useRef(false);
     const mounted = useRef(false);
     const readsDirtyState = typeof isDirty === 'function';
@@ -136,7 +171,11 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
 
     useEffect(() => {
         mounted.current = true;
-        return () => { mounted.current = false; };
+        return () => {
+            mounted.current = false;
+            pendingNavigation.current?.onCancel?.();
+            pendingNavigation.current = null;
+        };
     }, []);
 
     useEffect(() => {
@@ -150,29 +189,58 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
         return () => window.removeEventListener('beforeunload', onBeforeUnload);
     }, [active, hasUnsavedChanges]);
 
-    const allowNavigation = useCallback((navigate: () => void) => {
+    const push = navigation?.push;
+    const onBeforeLeave = navigation?.onBeforeLeave;
+    const allowNavigation = useCallback((navigate: NavigationAction) => {
         if (!mounted.current || leaving.current) return;
         leaving.current = true;
         pendingNavigation.current = null;
         setConfirmOpen(false);
-        navigate();
-    }, []);
-
-    const requestNavigation = useCallback((navigate: () => void) => {
-        if (hasUnsavedChanges()) {
-            pendingNavigation.current = navigate;
-            setConfirmOpen(true);
-        } else {
-            navigate();
+        onBeforeLeave?.();
+        try {
+            const pending = navigate();
+            if (pending) {
+                void pending.then(
+                    () => { leaving.current = false; },
+                    () => { leaving.current = false; },
+                );
+            }
+        } catch (error) {
+            leaving.current = false;
+            throw error;
         }
-    }, [hasUnsavedChanges]);
+    }, [onBeforeLeave]);
 
-    const requestClose = useCallback(() => requestNavigation(onClose), [onClose, requestNavigation]);
-    const push = navigation?.push;
+    const requestNavigation = useCallback((navigate: NavigationAction, onCancel?: () => void) => {
+        pendingNavigation.current?.onCancel?.();
+        if (hasUnsavedChanges()) {
+            pendingNavigation.current = { navigate, onCancel };
+            setConfirmOpen(true);
+        } else if (push) {
+            allowNavigation(navigate);
+        } else {
+            void navigate();
+        }
+    }, [allowNavigation, hasUnsavedChanges, push]);
+
+    const requestClose = useCallback(() => {
+        pendingNavigation.current?.onCancel?.();
+        pendingNavigation.current = null;
+        if (hasUnsavedChanges()) setConfirmOpen(true);
+        else if (push) allowNavigation(onClose);
+        else onClose();
+    }, [allowNavigation, hasUnsavedChanges, onClose, push]);
 
     useEffect(() => {
         if (!push) return;
-        const navigationGuard = { request: requestNavigation, isDirty: hasUnsavedChanges };
+        const navigationGuard = {
+            request: requestNavigation,
+            isDirty: hasUnsavedChanges,
+            leave: () => {
+                pendingNavigation.current?.onCancel?.();
+                allowNavigation(() => {});
+            },
+        };
         navigationGuards.add(navigationGuard);
         const onClick = (event: MouseEvent) => {
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
@@ -207,7 +275,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
             document.removeEventListener('click', onClick, true);
             window.navigation?.removeEventListener('navigate', onNavigate);
         };
-    }, [hasUnsavedChanges, push, requestNavigation]);
+    }, [allowNavigation, hasUnsavedChanges, push, requestNavigation]);
 
     const onOpenChange = useCallback(
         (open: boolean) => {
@@ -218,11 +286,13 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
     );
 
     const onKeepEditing = useCallback(() => {
+        pendingNavigation.current?.onCancel?.();
         pendingNavigation.current = null;
         setConfirmOpen(false);
     }, []);
     const onDiscard = useCallback(() => {
-        const navigate = pendingNavigation.current ?? onClose;
+        const navigate = pendingNavigation.current?.navigate ?? onClose;
+        pendingNavigation.current = null;
         if (push) allowNavigation(navigate);
         else {
             setConfirmOpen(false);

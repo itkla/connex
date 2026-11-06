@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import Link from 'next/link';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,8 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TemplateBuilder from '@/app/components/library/documents/TemplateBuilder';
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
 import { blankReportConfig } from '@/app/components/reports/reportConfig';
-import { requestGuardedNavigation, trackEditorNavigationHistory } from '@/app/hooks/useUnsavedChangesGuard';
-import type { DocumentTemplate, ReportDefinition } from '@/app/lib/types';
+import { requestGuardedNavigation, trackEditorNavigationHistory, useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import { useWorkspace, WorkspaceProvider } from '@/app/hooks/useWorkspace';
+import { renderedWorkspaceId } from '@/app/lib/renderedWorkspace';
+import type { DocumentTemplate, ReportDefinition, Workspace } from '@/app/lib/types';
 import common from '@/messages/en/common.json';
 import documents from '@/messages/en/document-templates.json';
 import reports from '@/messages/en/reports.json';
@@ -17,8 +20,9 @@ import jaDocuments from '@/messages/ja/document-templates.json';
 import jaReports from '@/messages/ja/reports.json';
 
 const mocks = vi.hoisted(() => ({
-    push: vi.fn(), back: vi.fn(), refresh: vi.fn(), createReport: vi.fn(), updateReport: vi.fn(),
+    push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn(), createReport: vi.fn(), updateReport: vi.fn(),
     createTemplate: vi.fn(), updateTemplate: vi.fn(), showError: vi.fn(),
+    switchWorkspace: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => mocks }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => mocks.showError }));
@@ -26,6 +30,8 @@ vi.mock('@/app/lib/toast', () => ({ toastError: vi.fn(), toastSuccess: vi.fn() }
 vi.mock('@/app/lib/api', () => ({
     createReport: mocks.createReport, updateReport: mocks.updateReport,
     createDocumentTemplate: mocks.createTemplate, updateDocumentTemplate: mocks.updateTemplate,
+    switchWorkspace: mocks.switchWorkspace, createWorkspace: vi.fn(), readAuthoritativeWorkspaceSelection: vi.fn(),
+    WorkspaceSelectionUnavailableError: class extends Error {},
 }));
 vi.mock('motion/react', () => ({ useReducedMotion: () => true }));
 vi.mock('@/app/components/layout/SortableGrid', () => ({ default: () => null }));
@@ -43,6 +49,18 @@ const template: DocumentTemplate = {
     id: 17, name: 'Quote', type: 'quote', locale: 'en', title: 'Quotation', active: true,
     intro: 'Existing introduction', createdAt: '', updatedAt: '',
 };
+
+const workspaces: Workspace[] = [1, 2].map((id) => ({
+    id, name: `Workspace ${id}`, slug: `workspace-${id}`, timezone: null, identityVersion: 0, role: 'member',
+    orgId: id, orgName: `Organization ${id}`, orgIdentityVersion: 0, orgRole: null,
+}));
+
+function mountGuardedWorkspace() {
+    return renderHook(() => ({
+        workspace: useWorkspace(),
+        guard: useUnsavedChangesGuard({ isDirty: true, onClose: vi.fn(), navigation: { push: mocks.push } }),
+    }), { wrapper: ({ children }) => <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={1}>{children}</WorkspaceProvider> });
+}
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -70,6 +88,63 @@ function unloadPrevented() {
 }
 
 describe('full-page editor navigation', () => {
+    it('guards workspace selection before switching or publishing a new workspace', async () => {
+        mocks.switchWorkspace.mockResolvedValue(undefined);
+        const { result } = mountGuardedWorkspace();
+        let canceled: Promise<void> | undefined;
+        act(() => { canceled = result.current.workspace.switchTo(2); });
+        expect(mocks.switchWorkspace).not.toHaveBeenCalled();
+        expect(result.current.workspace.switching).toBe(false);
+        expect(renderedWorkspaceId()).toBe(1);
+        await act(async () => { result.current.guard.confirm.onKeepEditing(); await canceled; });
+        expect(mocks.switchWorkspace).not.toHaveBeenCalled();
+        expect(mocks.replace).not.toHaveBeenCalled();
+        let confirmed: Promise<void> | undefined;
+        act(() => { confirmed = result.current.workspace.switchTo(2); });
+        await act(async () => { result.current.guard.confirm.onDiscard(); await confirmed; });
+        expect(mocks.switchWorkspace).toHaveBeenCalledExactlyOnceWith(2);
+        expect(renderedWorkspaceId()).toBe(2);
+        expect(mocks.replace).toHaveBeenCalledWith('/dashboard');
+    });
+
+    it('rearms the editor guard when a confirmed workspace switch fails', async () => {
+        const failure = new Error('Switch refused');
+        mocks.switchWorkspace.mockRejectedValue(failure);
+        const { result } = mountGuardedWorkspace();
+        let switching: Promise<void> | undefined;
+        act(() => { switching = result.current.workspace.switchTo(2); });
+        if (!switching) throw new Error('Switch was not requested');
+        const refused = switching.catch((error: unknown) => error);
+        await act(async () => { result.current.guard.confirm.onDiscard(); expect(await refused).toBe(failure); });
+        expect(renderedWorkspaceId()).toBe(1);
+        act(() => result.current.guard.requestClose());
+        expect(result.current.guard.confirm.open).toBe(true);
+    });
+    it('uses the latest dismissal callback after a caller changes its requested exit', () => {
+        const close = vi.fn();
+        const back = vi.fn();
+        const { result, rerender } = renderHook(({ onClose }) => useUnsavedChangesGuard({ isDirty: true, onClose }), {
+            initialProps: { onClose: close },
+        });
+        act(() => result.current.requestClose());
+        rerender({ onClose: back });
+        act(() => result.current.confirm.onDiscard());
+        expect(back).toHaveBeenCalledOnce();
+        expect(close).not.toHaveBeenCalled();
+    });
+
+    it('retains an explicit navigation destination when the dismissal callback changes', () => {
+        const destination = vi.fn();
+        const close = vi.fn();
+        const { result, rerender } = renderHook(({ onClose }) => useUnsavedChangesGuard({ isDirty: true, onClose, navigation: { push: mocks.push } }), {
+            initialProps: { onClose: vi.fn() },
+        });
+        act(() => requestGuardedNavigation(destination));
+        rerender({ onClose: close });
+        act(() => result.current.confirm.onDiscard());
+        expect(destination).toHaveBeenCalledOnce();
+        expect(close).not.toHaveBeenCalled();
+    });
     it.each(['report', 'template'] as const)('keeps a dirty %s and restores the triggering control after Keep editing', async (kind) => {
         mount(kind);
         const input = screen.getByLabelText('Name');
@@ -267,6 +342,80 @@ describe('full-page editor navigation', () => {
             fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
             expect(go).toHaveBeenLastCalledWith(delta);
             go.mockRestore();
+        } finally {
+            stopTracking?.();
+            nativeReplace({}, '', '/');
+        }
+    });
+
+    it('lets an unknown multi-entry legacy traversal reach the router without guessing a restoration', () => {
+        vi.stubGlobal('navigation', undefined);
+        const nativePush = window.history.pushState.bind(window.history);
+        const nativeReplace = window.history.replaceState.bind(window.history);
+        nativeReplace({}, '', '/docs/first');
+        nativePush({}, '', '/docs/second');
+        nativePush({ __NA: true }, '', '/insights/reports/new');
+        const stopTracking = trackEditorNavigationHistory();
+        const routerPop = vi.fn();
+        window.addEventListener('popstate', routerPop);
+        const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+        try {
+            mount('report');
+            fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unindexed departure' } });
+            nativeReplace({}, '', '/docs/first');
+            act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: {} })); });
+            expect(go).not.toHaveBeenCalled();
+            expect(routerPop).toHaveBeenCalledOnce();
+            expect(screen.queryByRole('dialog')).toBeNull();
+            expect(window.location.pathname).toBe('/docs/first');
+            window.history.pushState({}, '', '/docs/third');
+            expect(window.history.state).not.toHaveProperty('__connexEditorHistoryIndex');
+        } finally {
+            go.mockRestore();
+            window.removeEventListener('popstate', routerPop);
+            stopTracking?.();
+            nativeReplace({}, '', '/');
+        }
+    });
+
+    it('keeps native skip-link history synchronized after list, dirty editor, fragment, then go(-2)', async () => {
+        vi.stubGlobal('navigation', undefined);
+        const nativeReplace = window.history.replaceState.bind(window.history);
+        nativeReplace({ __NA: true }, '', '/insights/reports');
+        const stopTracking = trackEditorNavigationHistory();
+        window.history.pushState({ __NA: true }, '', '/insights/reports/new');
+
+        function HistoryRoute() {
+            const [path, setPath] = useState(window.location.pathname);
+            useEffect(() => {
+                const onPop = () => setPath(window.location.pathname);
+                window.addEventListener('popstate', onPop);
+                return () => window.removeEventListener('popstate', onPop);
+            }, []);
+            return <NextIntlClientProvider locale="en" messages={{ ...common, ...reports }} timeZone="UTC">
+                {path === '/insights/reports/new' ? <>
+                    <a href="#app-main">Skip to main content</a>
+                    <div id="app-main">
+                        <ReportBuilderBoard pipelines={[]} owners={[]} ownersFailed={false} tags={[]} canReadGoals />
+                    </div>
+                </> : <h1>Reports list</h1>}
+            </NextIntlClientProvider>;
+        }
+
+        try {
+            render(<HistoryRoute />);
+            fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dirty skip-link draft' } });
+            const entries = window.history.length;
+            fireEvent.click(screen.getByRole('link', { name: 'Skip to main content' }));
+            await waitFor(() => expect(window.location.hash).toBe('#app-main'));
+            await waitFor(() => expect(window.history.length).toBe(entries + 1));
+            expect(window.history.state ?? null).toBeNull();
+            expect(unloadPrevented()).toBe(true);
+            window.history.go(-2);
+            await waitFor(() => expect(window.location.pathname).toBe('/insights/reports'));
+            await screen.findByRole('heading', { name: 'Reports list' });
+            expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
+            expect(screen.queryByRole('dialog')).toBeNull();
         } finally {
             stopTracking?.();
             nativeReplace({}, '', '/');

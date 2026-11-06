@@ -214,6 +214,12 @@ Any dialog/drawer that accumulates meaningful input participates in the shared u
 
 Workflow, report, and document-template pages reuse `useUnsavedChangesGuard` and `ConfirmDiscardDialog` for dirty editor exits, including links, global search/actions, browser Back/Forward, and native document-leave warnings. Keep editing preserves content and restores the requesting control's focus. Back returns workflows to `/workflows` and templates to `/library/documents`. Report Cancel returns to `/insights/reports/{id}` when editing, or `/insights/reports` when creating, even on a direct entry with no prior app history. Pending and failed saves stay protected; only a successful save bypasses confirmation. Same-document history traversal uses the browser Navigation API, falling back to indices the app shell adds to existing history state while preserving Next's fields. Neither path inserts history entries.
 
+Shell operations that own their router, including Ask Connex full view and workspace selection, must request the shared guard before changing their surface or workspace. Every confirmed editor departure invalidates workflow creation continuations synchronously. Ordinary dismissals resolve the latest close callback at confirmation; explicit navigation keeps its chosen destination. Template initialization and editability changes do not count as user edits, and empty document bodies normalize to null.
+
+Route callers supply their destination to the existing guard helper. A request matching the current origin, pathname and search is a no-op: it neither asks to discard nor disables draft protection. Hash-only destinations do not count as editor departures.
+
+In browsers without the Navigation API, history entries created before the app shell may have no index. An unknown traversal distance is never guessed: that traversal proceeds through Next's normal routing, keeping URL, history and rendered content synchronized, without an in-app discard choice. Cross-document departures retain the native leave warning. Known indexed traversals remain guarded.
+
 Use the shared record delete confirmation for ordinary record deletion. Organization-level permanent deletion may use stronger typed confirmation. A surface contributes its object label and consequence details; it does not rewrite the common destructive grammar.
 
 When a row menu opens a delete confirmation, cancellation returns keyboard focus to that row's action button.

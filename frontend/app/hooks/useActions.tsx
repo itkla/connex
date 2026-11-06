@@ -325,7 +325,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
                 await action.execute(currentContext, {
                     router: {
                         ...router,
-                        push: (href, navigationOptions) => requestGuardedNavigation(() => router.push(href, navigationOptions)),
+                        push: (href, navigationOptions) => requestGuardedNavigation(() => router.push(href, navigationOptions), { destination: href }),
                     },
                     openOverlay,
                     closeOverlay,

@@ -112,11 +112,8 @@ function WorkflowEditorBody({
     const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem });
     const guard = useUnsavedChangesGuard({
         isDirty: editor.dirty,
-        onClose: () => {
-            editor.cancelCreationContinuation();
-            router.push("/workflows");
-        },
-        navigation: { push: router.push },
+        onClose: () => router.push("/workflows"),
+        navigation: { push: router.push, onBeforeLeave: editor.cancelCreationContinuation },
     });
     const loadedWorkflow = editor.workflow;
     const inspectRun = editor.inspectRun;

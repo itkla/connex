@@ -74,12 +74,13 @@ function bodyHasContent(body: string | null): boolean {
 }
 
 function toDraft(template: DocumentTemplate | null, termsLabel: string): Draft {
+    const body = template?.body ?? (template ? legacyToBody(template, termsLabel) : null);
     return {
         name: template?.name ?? '',
         type: template?.type ?? 'quote',
         locale: template?.locale ?? 'en',
         title: template?.title ?? '',
-        body: template?.body ?? (template ? legacyToBody(template, termsLabel) : null),
+        body: bodyHasContent(body) ? body : null,
         active: template?.active ?? true,
     };
 }

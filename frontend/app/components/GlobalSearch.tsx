@@ -286,7 +286,8 @@ export default function GlobalSearch() {
         if (!trimmed) return;
         setInlineOpen(false);
         setActiveIndex(-1);
-        requestGuardedNavigation(() => router.push(`/search?query=${encodeURIComponent(trimmed)}`));
+        const href = `/search?query=${encodeURIComponent(trimmed)}`;
+        requestGuardedNavigation(() => router.push(href), { destination: href });
     };
 
     const runAction = (id: string) => {

@@ -227,6 +227,6 @@ export function openResult(router: ReturnType<typeof useRouter>, href: string, e
     if (external) {
         window.open(href, "_blank", "noopener,noreferrer");
     } else {
-        requestGuardedNavigation(() => router.push(href));
+        requestGuardedNavigation(() => router.push(href), { destination: href });
     }
 }

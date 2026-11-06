@@ -1,4 +1,4 @@
-import { act, isValidElement, type ComponentProps } from 'react';
+import { act, isValidElement, useEffect, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AskConnexProvider from '@/app/components/ask-connex/AskConnexProvider';
@@ -12,6 +12,22 @@ import type { AiChatSocketHandlers } from '@/app/lib/realtime';
 import type { AiAgentRun, AiAgentRunPage, AiChatSession, AiChatSessionDetail, AiChatTurn } from '@/app/lib/types';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 import { navigateAfterWorkspaceSelection } from '@/app/lib/renderedWorkspace';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import type { AppAction } from '@/app/lib/actions/types';
+
+const registeredActions = vi.hoisted(() => vi.fn<(actions: AppAction[]) => void>());
+let editorGuard: ReturnType<typeof useUnsavedChangesGuard> | undefined;
+
+function DirtyEditorGuard() {
+    const guard = useUnsavedChangesGuard({ isDirty: true, onClose: () => {}, navigation: { push: harness.router.push } });
+    useEffect(() => { editorGuard = guard; });
+    return null;
+}
+
+function currentEditorGuard() {
+    if (!editorGuard) throw new Error('Editor guard did not mount');
+    return editorGuard;
+}
 
 const harness = vi.hoisted(() => ({
     drawer: vi.fn<(props: ComponentProps<typeof AskConnexDrawer>) => null>(() => null),
@@ -29,14 +45,15 @@ const harness = vi.hoisted(() => ({
     context: { user: { id: 1, displayName: 'Member' }, record: null, selection: null },
     workspace: { activeWorkspaceId: 1, switching: false },
     sessionId: '7',
+    pathname: '',
 }));
 
 vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({ default: harness.drawer }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionCreate', () => ({ default: () => null }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionProgress', () => ({ default: () => null }));
 vi.mock('next-intl', () => ({ useTimeZone: () => "UTC", useLocale: () => 'en', useTranslations: () => harness.translate }));
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: harness.sessionId }), usePathname: () => `/ask-connex/${harness.sessionId}`, useRouter: () => harness.router }));
-vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: () => {} }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: harness.sessionId }), usePathname: () => harness.pathname || `/ask-connex/${harness.sessionId}`, useRouter: () => harness.router }));
+vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: registeredActions }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => harness.workspace }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermissionCheck: () => 'granted' }));
 vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({ usePrivilegedMfaReadiness: () => "ready", usePrivilegedMfaConfinement: () => false }));
@@ -112,7 +129,7 @@ async function flushRealtimeRefresh() {
     await act(async () => { await vi.advanceTimersByTimeAsync(ASK_CONNEX_REALTIME_REFRESH_DELAY_MS); });
 }
 
-async function mount(active = true, generation = '1', storedTurn?: StoredAskConnexTurn) {
+async function mount(active = true, generation = '1', storedTurn?: StoredAskConnexTurn, guarded = false) {
     const interactive = installInteractiveDocument();
     const storage = new Map(storedTurn ? [[askConnexTurnStorageKey(1, 1), serializeStoredAskConnexTurn(storedTurn)]] : []);
     Object.assign(window, {
@@ -128,7 +145,7 @@ async function mount(active = true, generation = '1', storedTurn?: StoredAskConn
     harness.getTurn.mockResolvedValue(running);
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(interactive.container);
-    const render = () => act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+    const render = () => act(async () => root.render(<AskConnexProvider>{guarded ? <DirtyEditorGuard /> : null}</AskConnexProvider>));
     await render();
     return { render, unmount: () => act(async () => root.unmount()) };
 }
@@ -146,10 +163,45 @@ describe('Ask Connex provider privacy withdrawal', () => {
         vi.clearAllMocks();
         harness.workspace = { activeWorkspaceId: 1, switching: false };
         harness.sessionId = '7';
+        harness.pathname = '';
+        editorGuard = undefined;
         harness.getSessions.mockResolvedValue({ items: [] });
         harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
     });
     afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it.each(['palette', 'full-view'])('guards the %s workspace exit before changing the assistant surface', async (source) => {
+        harness.pathname = '/workflows/new';
+        const mounted = await mount(false, '1', undefined, true);
+        const open = async () => {
+            if (source === 'full-view') {
+                props().onOpenWorkspace();
+                return;
+            }
+            const action = registeredActions.mock.calls.flatMap(([actions]) => actions)
+                .find((candidate) => candidate.id === 'workspace.ask-connex-workspace');
+            if (!action) throw new Error('Workspace action was not registered');
+            await action.execute({ workspace: null, user: null, route: { pathname: harness.pathname }, locale: 'en', record: null, selection: null, can: () => true }, {
+                router: { ...harness.router, forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn(), bfcacheId: 'editor-route' },
+                openOverlay: vi.fn(), closeOverlay: vi.fn(), source: 'palette', translate: (key) => key,
+            });
+        };
+        try {
+            await act(async () => props().onOpenChange(true));
+            await act(open);
+            expect(currentEditorGuard().confirm.open).toBe(true);
+            expect(harness.router.push).not.toHaveBeenCalled();
+            expect(props().open).toBe(true);
+            await act(async () => currentEditorGuard().confirm.onKeepEditing());
+            expect(harness.router.push).not.toHaveBeenCalled();
+            await act(open);
+            await act(async () => currentEditorGuard().confirm.onDiscard());
+            expect(harness.router.push).toHaveBeenCalledOnce();
+            expect(props().open).toBe(false);
+        } finally {
+            await mounted.unmount();
+        }
+    });
 
     it('keeps a newer deep-link selection when initial readiness finishes late', async () => {
         const ready = await getAiCommandCenter();

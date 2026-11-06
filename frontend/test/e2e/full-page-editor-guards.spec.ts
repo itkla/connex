@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { useLocale } from './support/locale';
 import { message } from './support/messages';
 
@@ -9,6 +10,14 @@ const editors = [
 ] as const;
 
 for (const locale of ['en', 'ja'] as const) {
+    test(`an untouched template returns to Documents without a discard prompt in ${locale} @mobile`, async ({ page }) => {
+        await useLocale(page, locale);
+        await page.goto('/library/documents/new');
+        await expect(page.locator('.tiptap')).toBeVisible();
+        await page.getByRole('button', { name: message(locale, 'document-templates', 'DocumentTemplateBuilder.back'), exact: true }).click();
+        await expect(page).toHaveURL('/library/documents');
+        await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
     for (const editor of editors) {
         test(`${editor.key} keeps dirty content and confirms its return destination in ${locale} @mobile`, async ({ page }) => {
             await useLocale(page, locale);
@@ -47,6 +56,66 @@ for (const locale of ['en', 'ja'] as const) {
         });
     }
 }
+
+test('an unindexed legacy history jump keeps the destination URL and router synchronized', async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(window, 'navigation', { configurable: true, value: undefined }));
+    await page.goto('/docs');
+    await page.locator('aside a[href^="/docs/"]:visible').first().click();
+    await expect(page).toHaveURL(/\/docs\/[^/]+\/[^/?]+/);
+    const articleUrl = page.url();
+    await page.getByRole('link', { name: 'Open app', exact: true }).click();
+    await expect(page).toHaveURL('/dashboard');
+    await page.locator('a[href="/insights/reports"]:visible').first().click();
+    await page.locator('a[href="/insights/reports/new"]').first().click();
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Legacy history jump');
+    await page.evaluate(() => window.history.go(-3));
+    await expect(page).toHaveURL(articleUrl);
+    await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Discard unsaved changes?' })).toHaveCount(0);
+});
+
+test('a native skip-link entry followed by go(-2) keeps the list URL and rendered route synchronized', async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(window, 'navigation', { configurable: true, value: undefined }));
+    await page.goto('/insights/reports');
+    await page.locator('a[href="/insights/reports/new"]').first().click();
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Skip-link history draft');
+    const skip = page.locator('a[href="#app-main"]');
+    await skip.focus();
+    await skip.press('Enter');
+    await expect(page).toHaveURL('/insights/reports/new#app-main');
+    await page.evaluate(() => window.history.go(-2));
+    await expect(page).toHaveURL('/insights/reports');
+    await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Discard unsaved changes?' })).toHaveCount(0);
+});
+
+test('searching for the current workflow leaves its draft and departure protection intact', async ({ page }) => {
+    const savedName = `Search guard ${randomUUID()}`;
+    await page.goto('/workflows/new');
+    const name = page.getByRole('textbox', { name: 'Workflow name', exact: true });
+    await name.fill(savedName);
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await expect(page).toHaveURL(/\/workflows\/\d+$/);
+    await expect(name).toHaveValue(savedName);
+    await name.fill(`${savedName} edited`);
+    await page.getByPlaceholder('Search for anything').fill(savedName);
+    await page.getByRole('option', { name: new RegExp(savedName) }).first().click();
+    await expect(page.getByRole('dialog', { name: 'Discard unsaved changes?' })).toHaveCount(0);
+    await expect(name).toHaveValue(`${savedName} edited`);
+
+    const warning = page.waitForEvent('dialog');
+    const reload = page.evaluate(() => window.location.reload());
+    const nativeWarning = await warning;
+    expect(nativeWarning.type()).toBe('beforeunload');
+    await nativeWarning.dismiss();
+    await reload;
+    await expect(name).toHaveValue(`${savedName} edited`);
+    await page.locator('a[href="/records/deals"]:visible').first().click();
+    const discard = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    await expect(discard).toBeVisible();
+    await discard.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(name).toHaveValue(`${savedName} edited`);
+});
 
 test('report Cancel from a direct link returns to reports without browser history', async ({ page }) => {
     await page.goto('/insights/reports/new');
