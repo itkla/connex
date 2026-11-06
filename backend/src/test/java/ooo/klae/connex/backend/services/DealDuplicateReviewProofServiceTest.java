@@ -13,9 +13,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.HexFormat;
+import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -29,28 +32,34 @@ class DealDuplicateReviewProofServiceTest {
     @Mock private WorkspaceService workspaceService;
 
     private DuplicatePreflightProperties properties;
+    private ooo.klae.connex.backend.config.AuditIntegrityProperties integrityProperties;
     private DealDuplicateReviewProofService service;
 
     @BeforeEach
     void setUp() {
         properties = new DuplicatePreflightProperties();
+        integrityProperties = new ooo.klae.connex.backend.config.AuditIntegrityProperties();
+        integrityProperties.setHmacSecret(UUID.randomUUID().toString());
         service = new DealDuplicateReviewProofService(
             mapper,
             workspaceService,
-            properties);
+            properties, integrityProperties);
         org.mockito.Mockito.lenient()
             .when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
         org.mockito.Mockito.lenient()
             .when(workspaceService.getCurrentUserId()).thenReturn(9);
     }
 
-    @Test
-    void issuePersistsOnlyHashedTokenMaterialWithTheExactBinding() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void issuePersistsOnlyHashedTokenMaterialWithTheExactBinding(boolean boundedPerson) {
         ArgumentCaptor<byte[]> tokenHash = ArgumentCaptor.forClass(byte[].class);
         when(mapper.insert(any(), eq(5), eq(9), any(), any(), eq(1_800L)))
             .thenReturn(1);
 
-        String token = service.issue("a".repeat(64), "b".repeat(64));
+        String token = boundedPerson
+            ? service.issueBoundedPerson("a".repeat(64), "b".repeat(64))
+            : service.issue("a".repeat(64), "b".repeat(64));
 
         verify(mapper).deleteExpired(5, 100);
         verify(mapper).insert(
