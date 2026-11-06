@@ -3075,15 +3075,18 @@ class AiAssistantToolCallReadServiceTest {
     @Test
     void taskCardsHidePendingReferencesLikeOutsiderReferencesWithRealHydration() {
         WorkspaceMapper memberships = mock(WorkspaceMapper.class);
-        when(memberships.getActiveMemberIdsIn(eq(WORKSPACE_ID), anyList())).thenReturn(List.of());
+        when(memberships.getActiveMemberIdsIn(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
+            List<Integer> ids = invocation.getArgument(1);
+            return ids.contains(44) ? List.of(44) : List.of();
+        });
         when(memberships.getMemberIdsIncludingPending(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
             List<Integer> ids = invocation.getArgument(1);
-            return ids.contains(42) ? List.of(42) : List.of();
+            return ids.stream().filter(id -> id == 42 || id == 44).toList();
         });
         referenceService = new ReferenceService(mock(EntityReferenceMapper.class), workspaceService,
             personMapper, dealMapper, companyMapper, noteMapper, mock(AttachmentMapper.class),
             taskMapper, activityMapper, memberships, unfiltered());
-        service = service(List.of(new AiAssistantCompleteTaskWriteTool(mock(TaskService.class))));
+        service = service(AiAssistantDeclaredWriteTools.tools());
         Task pending = new Task();
         pending.setId(73);
         pending.setDescription("[Invitee](user:42)");
@@ -3094,10 +3097,16 @@ class AiAssistantToolCallReadServiceTest {
         outsider.setDescription("[Invitee](user:43)");
         outsider.setStatus("todo");
         outsider.setAssignedTo(user(USER_ID, "Ada Owner", "ada-owner"));
-        when(taskMapper.getTaskSnapshotsIn(WORKSPACE_ID, List.of(73, 74))).thenReturn(List.of(pending, outsider));
+        Task active = new Task();
+        active.setId(75);
+        active.setDescription("[Member](user:44)");
+        active.setStatus("todo");
+        active.setAssignedTo(user(USER_ID, "Ada Owner", "ada-owner"));
+        when(taskMapper.getTaskSnapshotsIn(WORKSPACE_ID, List.of(73, 74, 75)))
+            .thenReturn(List.of(pending, outsider, active));
         List<AiChatToolCall> proposals = new ArrayList<>();
         ObjectMapper mapper = JsonMapper.builder().build();
-        for (Task task : List.of(pending, outsider)) {
+        for (Task task : List.of(pending, outsider, active)) {
             int proposalId = 91 + proposals.size();
             AiChatToolCall proposal = toolCall(
                 proposalId, USER_ID, "complete_task", "confirm", "proposed", "task", task.getId(), proposalId, null);
@@ -3111,13 +3120,15 @@ class AiAssistantToolCallReadServiceTest {
 
         List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
 
-        assertEquals(2, cards.size());
-        assertEquals(List.of(73, 74), cards.stream().map(card -> card.target().id()).toList());
-        assertEquals(List.of("(unavailable reference)", "(unavailable reference)"),
+        assertEquals(3, cards.size());
+        assertEquals(List.of(73, 74, 75), cards.stream().map(card -> card.target().id()).toList());
+        List<String> expectedLabels = List.of(
+            "(unavailable reference)", "(unavailable reference)", "[Member](user:44)");
+        assertEquals(expectedLabels,
             cards.stream().map(card -> card.target().label()).toList());
         JsonNode wire = JsonMapper.builder().build().valueToTree(cards);
-        for (JsonNode card : wire) {
-            assertEquals("(unavailable reference)", card.path("target").path("label").asString());
+        for (int index = 0; index < expectedLabels.size(); index++) {
+            assertEquals(expectedLabels.get(index), wire.get(index).path("target").path("label").asString());
         }
         verify(memberships, never()).getMemberIdsIncludingPending(eq(WORKSPACE_ID), anyList());
     }
