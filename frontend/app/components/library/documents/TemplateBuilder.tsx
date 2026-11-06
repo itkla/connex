@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeftIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
@@ -95,13 +95,16 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
     const t = useTranslations('DocumentTemplateBuilder');
     const showApiError = useApiErrorToast('DocumentTemplateBuilder');
     const router = useRouter();
+    const pathname = usePathname();
+    const search = useSearchParams().toString();
     const [initialDraft] = useState(() => toDraft(template, t('slashTermsHeading')));
     const [draft, setDraft] = useState<Draft>(initialDraft);
+    const [savedDraft, setSavedDraft] = useState(initialDraft);
     const [saving, setSaving] = useState(false);
     const guard = useUnsavedChangesGuard({
-        isDirty: JSON.stringify(draft) !== JSON.stringify(initialDraft),
+        isDirty: JSON.stringify(draft) !== JSON.stringify(savedDraft),
         onClose: () => router.push('/library/documents'),
-        navigation: { push: router.push },
+        navigation: { push: router.push, replace: router.replace, renderedHref: search ? `${pathname}?${search}` : pathname },
     });
 
     const patch = (next: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...next }));
@@ -132,6 +135,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
             }
             toastSuccess(t('saved'));
             guard.allowNavigation(() => {
+                setSavedDraft(draft);
                 router.push('/library/documents');
                 router.refresh();
             });

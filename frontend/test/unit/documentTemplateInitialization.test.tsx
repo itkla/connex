@@ -10,7 +10,7 @@ import common from '@/messages/en/common.json';
 import documents from '@/messages/en/document-templates.json';
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => router }));
+vi.mock('next/navigation', () => ({ useRouter: () => router, usePathname: () => window.location.pathname, useSearchParams: () => new URLSearchParams(window.location.search) }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => vi.fn() }));
 vi.mock('@/app/lib/api', () => ({ createDocumentTemplate: vi.fn(), updateDocumentTemplate: vi.fn() }));
 

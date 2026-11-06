@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkflowEditor from '@/app/components/settings/workflows/WorkflowEditor';
 import { createEmptyWorkflowGraph } from '@/app/components/settings/workflows/workflowGraph';
-import { requestGuardedNavigation, trackEditorNavigationHistory } from '@/app/hooks/useUnsavedChangesGuard';
+import { requestGuardedNavigation } from '@/app/hooks/useUnsavedChangesGuard';
 import { openResult } from '@/app/lib/search/resultGroups';
 import type { WorkflowDto } from '@/app/lib/types';
 import common from '@/messages/en/common.json';
@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
     push: vi.fn(), replace: vi.fn(), create: vi.fn(), getWorkflow: vi.fn(),
     back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn(), bfcacheId: 'workflow-route',
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => mocks, useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useRouter: () => mocks, usePathname: () => window.location.pathname, useSearchParams: () => new URLSearchParams() }));
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: PropsWithChildren) => children }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 1, switching: false }) }));
 vi.mock('@/app/hooks/usePermissions', () => ({ useGrantedPermissions: () => [] }));
@@ -50,7 +50,7 @@ beforeEach(() => {
     vi.stubGlobal('matchMedia', (media: string) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} }));
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/'); });
 
 async function startCreation() {
     const pending = Promise.withResolvers<WorkflowDto>();
@@ -85,8 +85,11 @@ describe('workflow creation departure', () => {
                 expect(unload.defaultPrevented).toBe(true);
 
                 act(() => openResult(mocks, '/workflows/41?mode=different'));
-                fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
-                expect(mocks.push).not.toHaveBeenCalled();
+                fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+                expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/workflows/41?mode=different');
+                const afterQuery = new Event('beforeunload', { cancelable: true });
+                window.dispatchEvent(afterQuery);
+                expect(afterQuery.defaultPrevented).toBe(true);
                 act(() => openResult(mocks, '/records/deals'));
                 await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
                 fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
@@ -100,24 +103,21 @@ describe('workflow creation departure', () => {
         },
     );
     it.each(['back', 'sidebar', 'shell', 'browser'])('invalidates creation synchronously on confirmed %s departure while the editor remains mounted', async (exit) => {
-        const navigation = new EventTarget();
-        const traverseTo = vi.fn(() => ({ committed: Promise.resolve(), finished: Promise.resolve() }));
-        Object.assign(navigation, { traverseTo });
-        vi.stubGlobal('navigation', navigation);
+        window.history.replaceState({ __NA: true }, '', '/workflows/new');
         const pending = await startCreation();
         if (exit === 'back') fireEvent.click(screen.getByRole('button', { name: 'Back to workflows' }));
         else if (exit === 'sidebar') fireEvent.click(screen.getByRole('link', { name: 'Deals' }));
         else if (exit === 'shell') act(() => requestGuardedNavigation(() => mocks.push('/records/deals')));
         else {
-            const event = new Event('navigate', { cancelable: true });
-            Object.defineProperties(event, { navigationType: { value: 'traverse' }, destination: { value: { sameDocument: true, key: 'previous', url: new URL('/records/deals', window.location.href).href } } });
-            act(() => { navigation.dispatchEvent(event); });
+            window.history.replaceState(null, '', '/records/deals');
+            act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: null })); });
         }
         fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
-        if (exit === 'browser') expect(traverseTo).toHaveBeenCalledWith('previous');
+        if (exit === 'browser') expect(mocks.replace).toHaveBeenCalledWith('/records/deals');
         else expect(mocks.push).toHaveBeenCalledWith(exit === 'back' ? '/workflows' : '/records/deals');
+        const replacements = mocks.replace.mock.calls.length;
         await act(async () => { pending.resolve(created); });
-        expect(mocks.replace).not.toHaveBeenCalled();
+        expect(mocks.replace).toHaveBeenCalledTimes(replacements);
     });
 
     it('keeps the creation continuation when departure is canceled', async () => {
@@ -128,23 +128,20 @@ describe('workflow creation departure', () => {
         expect(mocks.replace).toHaveBeenCalledExactlyOnceWith('/workflows/41');
     });
 
-    it('invalidates creation when an unknown legacy traversal proceeds normally', async () => {
+    it('invalidates creation after confirming an unattributed history traversal', async () => {
         vi.stubGlobal('navigation', undefined);
         const nativeReplace = window.history.replaceState.bind(window.history);
         nativeReplace({ __NA: true }, '', '/workflows/new');
-        const stopTracking = trackEditorNavigationHistory();
-        const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
         try {
             const pending = await startCreation();
             nativeReplace({}, '', '/docs/earlier');
             act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: {} })); });
-            expect(go).not.toHaveBeenCalled();
-            expect(screen.queryByRole('dialog')).toBeNull();
+            expect(window.location.pathname).toBe('/workflows/new');
+            fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+            expect(mocks.replace).toHaveBeenCalledExactlyOnceWith('/docs/earlier');
             await act(async () => { pending.resolve(created); });
-            expect(mocks.replace).not.toHaveBeenCalled();
+            expect(mocks.replace).toHaveBeenCalledExactlyOnceWith('/docs/earlier');
         } finally {
-            go.mockRestore();
-            stopTracking?.();
             nativeReplace({}, '', '/');
         }
     });

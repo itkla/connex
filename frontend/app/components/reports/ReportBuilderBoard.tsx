@@ -1,7 +1,7 @@
 'use client';
 
 import { type ReactNode, useId, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
     ArrowsPointingInIcon,
@@ -100,6 +100,8 @@ export default function ReportBuilderBoard({
     const t = useTranslations('Reports');
     const showApiError = useApiErrorToast('Reports');
     const router = useRouter();
+    const pathname = usePathname();
+    const search = useSearchParams().toString();
     const reduceMotion = useReducedMotion() ?? false;
     const [initialDraft] = useState(() => {
         const initialConfig = initialReport
@@ -127,12 +129,13 @@ export default function ReportBuilderBoard({
     const [description, setDescription] = useState(initialDraft.description);
     const [cadence, setCadence] = useState<ReportCadence>(initialDraft.cadence);
     const [config, setConfig] = useState<ReportConfig>(initialDraft.config);
+    const [savedDraft, setSavedDraft] = useState(initialDraft);
     const [saving, setSaving] = useState(false);
     const returnHref = initialReport ? `/insights/reports/${initialReport.id}` : '/insights/reports';
     const guard = useUnsavedChangesGuard({
-        isDirty: JSON.stringify({ name, description, cadence, config }) !== JSON.stringify(initialDraft),
+        isDirty: JSON.stringify({ name, description, cadence, config }) !== JSON.stringify(savedDraft),
         onClose: () => router.push(returnHref),
-        navigation: { push: router.push },
+        navigation: { push: router.push, replace: router.replace, renderedHref: search ? `${pathname}?${search}` : pathname },
     });
 
     const layoutById = useMemo(
@@ -281,6 +284,7 @@ export default function ReportBuilderBoard({
             templateKey: initialReport?.templateKey ?? initialTemplate?.key ?? null,
             config,
         };
+        const submittedDraft = { name, description, cadence, config };
         setSaving(true);
         try {
             const saved = initialReport
@@ -288,6 +292,7 @@ export default function ReportBuilderBoard({
                 : await createReport(payload);
             toastSuccess(t(initialReport ? 'builder.updated' : 'builder.created'));
             guard.allowNavigation(() => {
+                setSavedDraft(submittedDraft);
                 router.push(`/insights/reports/${saved.id}`);
                 router.refresh();
             });

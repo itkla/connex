@@ -11,7 +11,6 @@ import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import MobileBottomBar from "@/app/components/MobileBottomBar";
 import { useAskConnex, useAskConnexMount } from "@/app/components/ask-connex/AskConnexProvider";
 import { useSidebarMode } from "@/app/hooks/useSidebarMode";
-import { trackEditorNavigationHistory } from "@/app/hooks/useUnsavedChangesGuard";
 import { askConnexWidthLength } from "@/app/lib/askConnexSurface";
 import { instant, springSmooth } from "@/app/lib/motion";
 import { useTranslations } from "next-intl";
@@ -73,8 +72,6 @@ export default function ContentShell({
     const pathname = usePathname();
     const lastFocusedPathname = useRef(pathname);
     const t = useTranslations("CommonContentShell");
-
-    useEffect(() => { trackEditorNavigationHistory(); }, []);
 
     const [prevPathname, setPrevPathname] = useState(pathname);
     if (pathname !== prevPathname) {

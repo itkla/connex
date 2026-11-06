@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ExclamationTriangleIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
@@ -100,7 +100,9 @@ function WorkflowEditorBody({
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const router = useRouter();
+    const pathname = usePathname();
     const searchParams = useSearchParams();
+    const search = searchParams.toString();
     const isNarrow = useSyncExternalStore(
         subscribeToNarrowEditor,
         narrowEditorSnapshot,
@@ -113,7 +115,12 @@ function WorkflowEditorBody({
     const guard = useUnsavedChangesGuard({
         isDirty: editor.dirty,
         onClose: () => router.push("/workflows"),
-        navigation: { push: router.push, onBeforeLeave: editor.cancelCreationContinuation },
+        navigation: {
+            push: router.push,
+            replace: router.replace,
+            renderedHref: search ? `${pathname}?${search}` : pathname,
+            onBeforeLeave: editor.cancelCreationContinuation,
+        },
     });
     const loadedWorkflow = editor.workflow;
     const inspectRun = editor.inspectRun;

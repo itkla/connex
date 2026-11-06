@@ -1,107 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 type NavigationAction = () => void | Promise<void>;
 type PendingNavigation = { navigate: NavigationAction; onCancel?: () => void };
 type NavigationGuard = {
     request: (navigate: NavigationAction, onCancel?: () => void) => void;
-    isDirty: () => boolean;
-    leave: () => void;
 };
 const navigationGuards = new Set<NavigationGuard>();
-const HISTORY_INDEX = '__connexEditorHistoryIndex';
-let historyTrackingActive = false;
-
-function historyIndex(state: unknown): number | null {
-    if (!state || typeof state !== 'object' || !(HISTORY_INDEX in state)) return null;
-    const index: unknown = state[HISTORY_INDEX];
-    return typeof index === 'number' && Number.isSafeInteger(index) ? index : null;
-}
-
-function indexedHistoryState(state: unknown, index: number): object {
-    return { ...(state && typeof state === 'object' ? state : {}), [HISTORY_INDEX]: index };
-}
-
-/**
- * Tracks existing entries for browsers without the Navigation API, preserving Next's state. Tracking
- * lives for the document so repeated shell mounts cannot reset indices after a public-route visit.
- * The returned cleanup disposes the document's tracker; repeated initialization is inert.
- */
-export function trackEditorNavigationHistory(): (() => void) | undefined {
-    if (window.navigation || historyTrackingActive) return;
-    historyTrackingActive = true;
-    const originalPush = window.history.pushState;
-    const originalReplace = window.history.replaceState;
-    let running = true;
-    let index: number | null = historyIndex(window.history.state) ?? 0;
-    let url = window.location.href;
-    let restoring: { delta: number; guard: NavigationGuard } | null = null;
-    originalReplace.call(window.history, indexedHistoryState(window.history.state, index), '', url);
-
-    const push: History['pushState'] = (state: unknown, unused: string, destination?: string | URL | null) => {
-        if (!running) return originalPush.call(window.history, state, unused, destination);
-        originalPush.call(window.history, index === null ? state : indexedHistoryState(state, index + 1), unused, destination);
-        if (index !== null) index += 1;
-        url = window.location.href;
-    };
-    const replace: History['replaceState'] = (state: unknown, unused: string, destination?: string | URL | null) => {
-        originalReplace.call(window.history, running && index !== null ? indexedHistoryState(state, index) : state, unused, destination);
-        if (running) url = window.location.href;
-    };
-    const onPopState = (event: PopStateEvent) => {
-        const targetIndex = historyIndex(event.state);
-        const guard = [...navigationGuards].at(-1);
-        const destination = new URL(window.location.href);
-        const current = new URL(url);
-        const changesRoute = destination.pathname !== current.pathname || destination.search !== current.search;
-        if (targetIndex === null || index === null) {
-            if (changesRoute) guard?.leave();
-            restoring = null;
-            index = targetIndex;
-            url = window.location.href;
-            return;
-        }
-        if (restoring) {
-            event.stopImmediatePropagation();
-            if (targetIndex !== index) {
-                window.history.go(index - targetIndex);
-                return;
-            }
-            const { delta, guard } = restoring;
-            restoring = null;
-            guard.request(() => window.history.go(delta));
-            return;
-        }
-        if (guard?.isDirty() && changesRoute) {
-            const delta = targetIndex - index;
-            if (delta !== 0) {
-                event.stopImmediatePropagation();
-                restoring = { delta, guard };
-                window.history.go(-delta);
-                return;
-            }
-            guard.leave();
-        }
-        index = targetIndex;
-        url = window.location.href;
-    };
-    window.history.pushState = push;
-    window.history.replaceState = replace;
-    window.addEventListener('popstate', onPopState, true);
-    return () => {
-        historyTrackingActive = false;
-        running = false;
-        window.removeEventListener('popstate', onPopState, true);
-        if (window.history.pushState === push) window.history.pushState = originalPush;
-        if (window.history.replaceState === replace) window.history.replaceState = originalReplace;
-    };
-}
 
 /**
  * Routes a shell operation through the editor's discard choice before its side effects run.
  * `onCancel` settles owners waiting for a decision. Async operations own their error feedback;
- * the guard rearms after they settle so a refused workspace selection leaves the draft protected.
+ * protection stays active whenever a dirty editor is still mounted.
  * Route callers supply `destination` so same-path/query requests remain inert without disabling protection.
  */
 export function requestGuardedNavigation(navigate: NavigationAction, { destination, onCancel }: {
@@ -131,6 +42,10 @@ type GuardOptions = {
     /** Full-page editors also protect links, shell navigation and browser history traversal. */
     navigation?: {
         push: (href: string) => void;
+        /** Path and search from the rendered Next route, independent of a browser traversal in progress. */
+        renderedHref: string;
+        /** Reconciles browser traversal with Next, including entries whose state Next ignores. */
+        replace?: (href: string) => void;
         /** Synchronously invalidates editor continuations before any accepted departure. */
         onBeforeLeave?: () => void;
     };
@@ -153,21 +68,40 @@ type Guard = {
  * through {@link Guard.requestClose}) opens an in-app confirm instead of closing, and a `beforeunload`
  * listener catches refresh / tab-close / external navigation. Once the user confirms, {@link onClose}
  * runs. Full-page editors opt into `navigation` to guard links, shell navigation and same-document
- * Back/Forward through the Navigation API or the shell's indexed history, without inserting entries. Document departures
- * retain the browser's native warning. Use `allowNavigation` only after a successful save; a pending
- * or failed save must stay guarded. Dialogs can disable the guard during their post-success close.
+ * Back/Forward by restoring the editor's history entry before asking and explicitly routing the
+ * accepted destination. No history indices or additional entries are used. Dirty checks remain active
+ * for the entire mounted lifetime. `allowNavigation` is versioned so a late save cannot redirect after
+ * a newer departure; successful saves must update their saved draft baseline. Restoration uses the
+ * native history prototype so Next does not interpret restoring the address bar as a new route.
  */
 export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navigation }: GuardOptions): Guard {
     const [confirmOpen, setConfirmOpen] = useState(false);
+    const [navigationVersion, setNavigationVersion] = useState(0);
     const pendingNavigation = useRef<PendingNavigation | null>(null);
-    const leaving = useRef(false);
+    const currentNavigationVersion = useRef(0);
+    const editorEntry = useRef<{ url: string; state: unknown } | null>(null);
     const mounted = useRef(false);
     const readsDirtyState = typeof isDirty === 'function';
     const active = enabled && (readsDirtyState || isDirty);
     const hasUnsavedChanges = useCallback(
-        () => !leaving.current && enabled && (typeof isDirty === 'function' ? isDirty() : isDirty),
+        () => enabled && (typeof isDirty === 'function' ? isDirty() : isDirty),
         [enabled, isDirty],
     );
+
+    useLayoutEffect(() => {
+        if (!navigation?.push || !window.location?.href || !window.history) return;
+        const rendered = new URL(navigation.renderedHref, window.location.origin);
+        const visible = new URL(window.location.href);
+        const matches = rendered.pathname === visible.pathname && rendered.search === visible.search;
+        const previous = editorEntry.current;
+        const previousUrl = previous ? new URL(previous.url) : null;
+        const previousMatches = previousUrl?.pathname === rendered.pathname && previousUrl.search === rendered.search;
+        const state: unknown = window.history.state;
+        editorEntry.current = {
+            url: rendered.href + (matches ? visible.hash : previousMatches ? previousUrl.hash : ''),
+            state: matches ? state ?? previous?.state ?? null : previous?.state ?? null,
+        };
+    });
 
     useEffect(() => {
         mounted.current = true;
@@ -190,26 +124,19 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
     }, [active, hasUnsavedChanges]);
 
     const push = navigation?.push;
+    const replace = navigation?.replace ?? push;
     const onBeforeLeave = navigation?.onBeforeLeave;
     const allowNavigation = useCallback((navigate: NavigationAction) => {
-        if (!mounted.current || leaving.current) return;
-        leaving.current = true;
+        if (!mounted.current || navigationVersion !== currentNavigationVersion.current) return false;
+        currentNavigationVersion.current += 1;
+        setNavigationVersion(currentNavigationVersion.current);
         pendingNavigation.current = null;
         setConfirmOpen(false);
         onBeforeLeave?.();
-        try {
-            const pending = navigate();
-            if (pending) {
-                void pending.then(
-                    () => { leaving.current = false; },
-                    () => { leaving.current = false; },
-                );
-            }
-        } catch (error) {
-            leaving.current = false;
-            throw error;
-        }
-    }, [onBeforeLeave]);
+        const pending = navigate();
+        if (pending) void pending.catch(() => undefined);
+        return true;
+    }, [navigationVersion, onBeforeLeave]);
 
     const requestNavigation = useCallback((navigate: NavigationAction, onCancel?: () => void) => {
         pendingNavigation.current?.onCancel?.();
@@ -217,7 +144,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
             pendingNavigation.current = { navigate, onCancel };
             setConfirmOpen(true);
         } else if (push) {
-            allowNavigation(navigate);
+            if (!allowNavigation(navigate)) onCancel?.();
         } else {
             void navigate();
         }
@@ -233,14 +160,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
 
     useEffect(() => {
         if (!push) return;
-        const navigationGuard = {
-            request: requestNavigation,
-            isDirty: hasUnsavedChanges,
-            leave: () => {
-                pendingNavigation.current?.onCancel?.();
-                allowNavigation(() => {});
-            },
-        };
+        const navigationGuard = { request: requestNavigation };
         navigationGuards.add(navigationGuard);
         const onClick = (event: MouseEvent) => {
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
@@ -254,28 +174,29 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
             event.stopPropagation();
             requestNavigation(() => push(url.pathname + url.search + url.hash));
         };
-        const onNavigate = (event: NavigateEvent) => {
-            if (event.navigationType !== 'traverse' || !event.destination.sameDocument
-                || !event.cancelable || !hasUnsavedChanges()) return;
-            const url = new URL(event.destination.url);
-            if (url.pathname === window.location.pathname && url.search === window.location.search) return;
-            event.preventDefault();
-            const key = event.destination.key;
-            requestNavigation(() => {
-                const result = window.navigation.traverseTo(key);
-                void Promise.allSettled([result.committed, result.finished]).then((results) => {
-                    if (results.some((result) => result.status === 'rejected')) leaving.current = false;
-                });
-            });
+        const onPopState = (event: PopStateEvent) => {
+            const entry = editorEntry.current;
+            if (!entry || !replace) return;
+            const destination = new URL(window.location.href);
+            const source = new URL(entry.url);
+            const href = destination.pathname + destination.search + destination.hash;
+            event.stopImmediatePropagation();
+            if (destination.pathname === source.pathname && destination.search === source.search) {
+                editorEntry.current = { ...entry, url: destination.href };
+                replace(href);
+                return;
+            }
+            window.History.prototype.replaceState.call(window.history, entry.state, '', entry.url);
+            requestNavigation(() => replace(href));
         };
         document.addEventListener('click', onClick, true);
-        window.navigation?.addEventListener('navigate', onNavigate);
+        window.addEventListener('popstate', onPopState, true);
         return () => {
             navigationGuards.delete(navigationGuard);
             document.removeEventListener('click', onClick, true);
-            window.navigation?.removeEventListener('navigate', onNavigate);
+            window.removeEventListener('popstate', onPopState, true);
         };
-    }, [allowNavigation, hasUnsavedChanges, push, requestNavigation]);
+    }, [hasUnsavedChanges, push, replace, requestNavigation]);
 
     const onOpenChange = useCallback(
         (open: boolean) => {

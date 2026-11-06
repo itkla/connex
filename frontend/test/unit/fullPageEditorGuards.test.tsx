@@ -1,6 +1,5 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
-import { useEffect, useState } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import Link from 'next/link';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TemplateBuilder from '@/app/components/library/documents/TemplateBuilder';
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
 import { blankReportConfig } from '@/app/components/reports/reportConfig';
-import { requestGuardedNavigation, trackEditorNavigationHistory, useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import { requestGuardedNavigation, useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { useWorkspace, WorkspaceProvider } from '@/app/hooks/useWorkspace';
 import { renderedWorkspaceId } from '@/app/lib/renderedWorkspace';
 import type { DocumentTemplate, ReportDefinition, Workspace } from '@/app/lib/types';
@@ -24,7 +23,7 @@ const mocks = vi.hoisted(() => ({
     createTemplate: vi.fn(), updateTemplate: vi.fn(), showError: vi.fn(),
     switchWorkspace: vi.fn(),
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => mocks }));
+vi.mock('next/navigation', () => ({ useRouter: () => mocks, usePathname: () => window.location.pathname, useSearchParams: () => new URLSearchParams(window.location.search) }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => mocks.showError }));
 vi.mock('@/app/lib/toast', () => ({ toastError: vi.fn(), toastSuccess: vi.fn() }));
 vi.mock('@/app/lib/api', () => ({
@@ -58,7 +57,7 @@ const workspaces: Workspace[] = [1, 2].map((id) => ({
 function mountGuardedWorkspace() {
     return renderHook(() => ({
         workspace: useWorkspace(),
-        guard: useUnsavedChangesGuard({ isDirty: true, onClose: vi.fn(), navigation: { push: mocks.push } }),
+        guard: useUnsavedChangesGuard({ isDirty: true, onClose: vi.fn(), navigation: { push: mocks.push, renderedHref: '/' } }),
     }), { wrapper: ({ children }) => <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={1}>{children}</WorkspaceProvider> });
 }
 
@@ -136,7 +135,7 @@ describe('full-page editor navigation', () => {
     it('retains an explicit navigation destination when the dismissal callback changes', () => {
         const destination = vi.fn();
         const close = vi.fn();
-        const { result, rerender } = renderHook(({ onClose }) => useUnsavedChangesGuard({ isDirty: true, onClose, navigation: { push: mocks.push } }), {
+        const { result, rerender } = renderHook(({ onClose }) => useUnsavedChangesGuard({ isDirty: true, onClose, navigation: { push: mocks.push, renderedHref: '/' } }), {
             initialProps: { onClose: vi.fn() },
         });
         act(() => requestGuardedNavigation(destination));
@@ -161,7 +160,7 @@ describe('full-page editor navigation', () => {
         fireEvent.click(back);
         fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
         expect(mocks.push).toHaveBeenCalledWith(kind === 'report' ? '/insights/reports' : '/library/documents');
-        expect(unloadPrevented()).toBe(false);
+        expect(unloadPrevented()).toBe(true);
     });
 
     it.each(['report', 'template'] as const)('allows an untouched existing %s to return without prompting', (kind) => {
@@ -215,6 +214,8 @@ describe('full-page editor navigation', () => {
         await waitFor(() => expect(mocks.push).toHaveBeenCalledWith(kind === 'report' ? '/insights/reports/42' : '/library/documents'));
         expect(screen.queryByRole('dialog')).toBeNull();
         expect(unloadPrevented()).toBe(false);
+        fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Edited again after saving' } });
+        expect(unloadPrevented()).toBe(true);
     });
 
     it.each(['report', 'template'] as const)('keeps a pending %s save guarded and does not redirect after a confirmed departure', async (kind) => {
@@ -232,6 +233,7 @@ describe('full-page editor navigation', () => {
         fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
         await act(async () => finish(kind === 'report' ? report : template));
         expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/records/deals');
+        expect(unloadPrevented()).toBe(true);
     });
 
     it('protects a sidebar link and does not reuse a cancelled destination', async () => {
@@ -270,155 +272,4 @@ describe('full-page editor navigation', () => {
         expect(navigate).toHaveBeenCalledTimes(2);
     });
 
-    it.each(['previous-entry', 'next-entry'])('cancels browser traversal to %s without changing history, then replays only on discard', async (key) => {
-        const navigation = new EventTarget();
-        const traverseTo = vi.fn(() => ({ committed: Promise.resolve(), finished: Promise.resolve() }));
-        Object.assign(navigation, { traverseTo });
-        vi.stubGlobal('navigation', navigation);
-        const historyLength = window.history.length;
-        mount('report');
-        const input = screen.getByLabelText('Name');
-        fireEvent.change(input, { target: { value: 'Unsaved report' } });
-        input.focus();
-        const traverse = () => {
-            const event = new Event('navigate', { cancelable: true });
-            Object.defineProperties(event, {
-                navigationType: { value: 'traverse' },
-                destination: { value: { key, sameDocument: true, url: new URL('/insights/reports', window.location.href).href } },
-            });
-            act(() => { navigation.dispatchEvent(event); });
-            expect(event.defaultPrevented).toBe(true);
-        };
-        traverse();
-        expect(window.history.length).toBe(historyLength);
-        expect(traverseTo).not.toHaveBeenCalled();
-        fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.keepEditing }));
-        await waitFor(() => expect(document.activeElement).toBe(input));
-        expect(input).toHaveProperty('value', 'Unsaved report');
-        traverse();
-        fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
-        expect(traverseTo).toHaveBeenCalledExactlyOnceWith(key);
-    });
-
-    it.each([-1, 1])('restores a legacy browser traversal by %s before asking, preserving Next history and focus', async (delta) => {
-        vi.stubGlobal('navigation', undefined);
-        const nativeReplace = window.history.replaceState.bind(window.history);
-        const nextState = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['app-tree'] };
-        nativeReplace(nextState, '', '/insights/reports');
-        const stopTracking = trackEditorNavigationHistory();
-        try {
-            expect(trackEditorNavigationHistory()).toBeUndefined();
-            const listState: unknown = window.history.state;
-            window.history.pushState(nextState, '', '/insights/reports/new');
-            const editorState: unknown = window.history.state;
-            window.history.pushState(nextState, '', '/records/deals');
-            const dealsState: unknown = window.history.state;
-            nativeReplace(editorState, '', '/insights/reports/new');
-            window.dispatchEvent(new PopStateEvent('popstate', { state: editorState }));
-            const historyLength = window.history.length;
-            const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
-            mount('report');
-            const input = screen.getByLabelText('Name');
-            fireEvent.change(input, { target: { value: 'Legacy browser draft' } });
-            input.focus();
-            const attempt = () => {
-                const state = delta === -1 ? listState : dealsState;
-                nativeReplace(state, '', delta === -1 ? '/insights/reports' : '/records/deals');
-                act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state })); });
-                expect(go).toHaveBeenLastCalledWith(-delta);
-                expect(screen.queryByRole('dialog')).toBeNull();
-                act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state })); });
-                expect(screen.queryByRole('dialog')).toBeNull();
-                nativeReplace(editorState, '', '/insights/reports/new');
-                act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: editorState })); });
-            };
-            attempt();
-            fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.keepEditing }));
-            await waitFor(() => expect(document.activeElement).toBe(input));
-            expect(input).toHaveProperty('value', 'Legacy browser draft');
-            expect(window.history.state).toMatchObject(nextState);
-            expect(window.history.length).toBe(historyLength);
-            attempt();
-            fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
-            expect(go).toHaveBeenLastCalledWith(delta);
-            go.mockRestore();
-        } finally {
-            stopTracking?.();
-            nativeReplace({}, '', '/');
-        }
-    });
-
-    it('lets an unknown multi-entry legacy traversal reach the router without guessing a restoration', () => {
-        vi.stubGlobal('navigation', undefined);
-        const nativePush = window.history.pushState.bind(window.history);
-        const nativeReplace = window.history.replaceState.bind(window.history);
-        nativeReplace({}, '', '/docs/first');
-        nativePush({}, '', '/docs/second');
-        nativePush({ __NA: true }, '', '/insights/reports/new');
-        const stopTracking = trackEditorNavigationHistory();
-        const routerPop = vi.fn();
-        window.addEventListener('popstate', routerPop);
-        const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
-        try {
-            mount('report');
-            fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unindexed departure' } });
-            nativeReplace({}, '', '/docs/first');
-            act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: {} })); });
-            expect(go).not.toHaveBeenCalled();
-            expect(routerPop).toHaveBeenCalledOnce();
-            expect(screen.queryByRole('dialog')).toBeNull();
-            expect(window.location.pathname).toBe('/docs/first');
-            window.history.pushState({}, '', '/docs/third');
-            expect(window.history.state).not.toHaveProperty('__connexEditorHistoryIndex');
-        } finally {
-            go.mockRestore();
-            window.removeEventListener('popstate', routerPop);
-            stopTracking?.();
-            nativeReplace({}, '', '/');
-        }
-    });
-
-    it('keeps native skip-link history synchronized after list, dirty editor, fragment, then go(-2)', async () => {
-        vi.stubGlobal('navigation', undefined);
-        const nativeReplace = window.history.replaceState.bind(window.history);
-        nativeReplace({ __NA: true }, '', '/insights/reports');
-        const stopTracking = trackEditorNavigationHistory();
-        window.history.pushState({ __NA: true }, '', '/insights/reports/new');
-
-        function HistoryRoute() {
-            const [path, setPath] = useState(window.location.pathname);
-            useEffect(() => {
-                const onPop = () => setPath(window.location.pathname);
-                window.addEventListener('popstate', onPop);
-                return () => window.removeEventListener('popstate', onPop);
-            }, []);
-            return <NextIntlClientProvider locale="en" messages={{ ...common, ...reports }} timeZone="UTC">
-                {path === '/insights/reports/new' ? <>
-                    <a href="#app-main">Skip to main content</a>
-                    <div id="app-main">
-                        <ReportBuilderBoard pipelines={[]} owners={[]} ownersFailed={false} tags={[]} canReadGoals />
-                    </div>
-                </> : <h1>Reports list</h1>}
-            </NextIntlClientProvider>;
-        }
-
-        try {
-            render(<HistoryRoute />);
-            fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dirty skip-link draft' } });
-            const entries = window.history.length;
-            fireEvent.click(screen.getByRole('link', { name: 'Skip to main content' }));
-            await waitFor(() => expect(window.location.hash).toBe('#app-main'));
-            await waitFor(() => expect(window.history.length).toBe(entries + 1));
-            expect(window.history.state ?? null).toBeNull();
-            expect(unloadPrevented()).toBe(true);
-            window.history.go(-2);
-            await waitFor(() => expect(window.location.pathname).toBe('/insights/reports'));
-            await screen.findByRole('heading', { name: 'Reports list' });
-            expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
-            expect(screen.queryByRole('dialog')).toBeNull();
-        } finally {
-            stopTracking?.();
-            nativeReplace({}, '', '/');
-        }
-    });
 });

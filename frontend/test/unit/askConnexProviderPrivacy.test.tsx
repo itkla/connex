@@ -19,7 +19,7 @@ const registeredActions = vi.hoisted(() => vi.fn<(actions: AppAction[]) => void>
 let editorGuard: ReturnType<typeof useUnsavedChangesGuard> | undefined;
 
 function DirtyEditorGuard() {
-    const guard = useUnsavedChangesGuard({ isDirty: true, onClose: () => {}, navigation: { push: harness.router.push } });
+    const guard = useUnsavedChangesGuard({ isDirty: true, onClose: () => {}, navigation: { push: harness.router.push, renderedHref: '/workflows/new' } });
     useEffect(() => { editorGuard = guard; });
     return null;
 }
