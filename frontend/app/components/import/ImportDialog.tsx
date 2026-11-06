@@ -794,7 +794,7 @@ function ReviewStep({
                         })}
                     </p>
                     <div className="overflow-hidden rounded-lg border border-border">
-                        <table className="w-full text-sm">
+                        <table role="table" className="block w-full text-sm sm:table">
                             <caption className="sr-only">{t('reviewTableCaption')}</caption>
                             <thead className="sr-only">
                                 <tr>
@@ -804,19 +804,19 @@ function ReviewStep({
                                     <th scope="col">{t('rowColLink')}</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody role="rowgroup" className="block sm:table-row-group">
                                 {shown.map((row) => (
-                                    <tr key={row.rowIndex} className="border-b border-border last:border-0">
-                                        <td className="w-12 px-3 py-2 align-middle text-xs text-muted-foreground">#{row.rowIndex + 1}</td>
-                                        <td className="w-20 px-3 py-2 align-middle">
+                                    <tr key={row.rowIndex} role="row" className="grid grid-cols-[auto_1fr] border-b border-border last:border-0 sm:table-row">
+                                        <td role="cell" className="px-3 pt-3 text-xs text-muted-foreground sm:w-12 sm:py-2 sm:align-middle">#{row.rowIndex + 1}</td>
+                                        <td role="cell" className="px-3 pt-3 sm:w-20 sm:py-2 sm:align-middle">
                                             <Badge variant={row.status === 'invalid' ? 'destructive' : row.status === 'match' ? 'secondary' : 'outline'}>
                                                 {t(`rowStatus.${row.status}`)}
                                             </Badge>
                                         </td>
-                                        <td className="max-w-0 px-3 py-2 align-middle">
+                                        <td role="cell" className="col-span-2 min-w-0 px-3 py-2 sm:max-w-0 sm:align-middle">
                                             <div className="min-w-0 space-y-2">
                                                 <p className={cn(
-                                                    'truncate text-sm',
+                                                    'break-words text-sm sm:truncate',
                                                     row.errors?.length ? 'text-destructive' : 'text-muted-foreground',
                                                 )}>
                                                     {row.errors?.length
@@ -865,7 +865,7 @@ function ReviewStep({
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="w-56 px-3 py-2 text-right align-middle">
+                                        <td role="cell" className="col-span-2 min-w-0 px-3 pb-3 text-left sm:w-56 sm:py-2 sm:text-right sm:align-middle">
                                             <RowLinker
                                                 entity={entity}
                                                 linkedLabel={links[row.rowIndex] != null ? linkLabels[row.rowIndex] : undefined}

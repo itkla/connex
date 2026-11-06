@@ -62,6 +62,7 @@ for (const locale of ['en', 'ja'] as const) {
         await dialog.getByRole('button', { name: t('next'), exact: true }).click();
         expect((await firstPreview).status()).toBe(200);
         await expect(dialog.getByText(reversedName, { exact: true })).toBeVisible();
+        await expect(dialog.getByText(reversedName, { exact: true })).toBeInViewport();
         await dialog.getByRole('button', { name: t('back'), exact: true }).click();
         await choose(page, nameOrder(), t(locale === 'ja' ? 'nameOrderFamilyGiven' : 'nameOrderGivenFamily'));
 
