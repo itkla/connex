@@ -9,10 +9,10 @@ export type LocaleTarget = BrowserContext | Page;
  * Pins the application locale for every document the target loads from here on.
  *
  * Locale is not a URL segment in Connex: `i18n/request.ts` resolves it server-side from the
- * `NEXT_LOCALE` cookie, and a user's `locale` database column only reaches that cookie through a
- * client-side sync that deliberately skips contexts which already carry an explicit preference.
- * Setting the cookie is therefore the only deterministic way to drive a run in Japanese, and it
- * must happen *before* the navigation whose markup should be translated.
+ * `NEXT_LOCALE` cookie before falling back to the browser language, and a user's `locale` database
+ * column reaches that cookie through a client sync that skips contexts with an explicit preference.
+ * Setting the cookie pins a run independently of its browser language and must happen *before*
+ * the navigation whose markup should be translated.
  *
  * @param target browser context, or a page whose context to pin
  * @param locale supported application locale

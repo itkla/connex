@@ -1,7 +1,7 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
 
-import { LOCALE_COOKIE, resolveLocale, type Locale } from "@/i18n/config";
+import { LOCALE_COOKIE, locales, localeFromAcceptLanguage, resolveLocale, type Locale } from "@/i18n/config";
 import { requestTimeZone } from "@/app/lib/requestTimeZone";
 import { requestNow } from "@/app/lib/requestClock";
 
@@ -74,7 +74,10 @@ export default getRequestConfig(async ({ locale: explicitLocale, requestLocale }
     const cookieLocale = requestedLocale == null
         ? (await cookies()).get(LOCALE_COOKIE)?.value
         : undefined;
-    const locale = resolveLocale(requestedLocale ?? cookieLocale);
+    const locale = requestedLocale != null
+        ? resolveLocale(requestedLocale)
+        : locales.find((supportedLocale) => supportedLocale === cookieLocale)
+            ?? localeFromAcceptLanguage((await headers()).get("accept-language"));
 
     return {
         locale,
