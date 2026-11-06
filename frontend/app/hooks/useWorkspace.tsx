@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { requestGuardedNavigation } from "@/app/hooks/useUnsavedChangesGuard";
 
 import WorkspaceSelectionUnavailable from "@/app/components/WorkspaceSelectionUnavailable";
 import type { MyWorkspaces, Workspace } from "@/app/lib/types";
@@ -407,14 +408,14 @@ export function WorkspaceProvider({
     }, [runSelectionChange]);
 
     const switchTo = useCallback(
-        async (id: number) => {
-            await runInWorkspace(id, async () => {
+        (id: number) => new Promise<void>((resolve, reject) => {
+            requestGuardedNavigation(() => runInWorkspace(id, async () => {
                 navigateAfterWorkspaceSelection(() => {
                     router.replace("/dashboard");
                     router.refresh();
                 });
-            });
-        },
+            }).then(() => resolve(), reject), { onCancel: resolve });
+        }),
         [router, runInWorkspace],
     );
 
