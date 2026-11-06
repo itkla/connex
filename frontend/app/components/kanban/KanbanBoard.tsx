@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     DndContext,
     DragOverlay,
@@ -50,12 +50,25 @@ export interface KanbanBoardProps<T> {
     getPosition: (item: T) => number;
     renderCard: (item: T, dragHandle?: ReactNode) => ReactNode;
     dragLabel: (item: T) => string;
-    /** Persist a move; rejection or an explicit false cancels its optimistic placement. */
-    onMove?: (itemId: number, toColumnId: string, index: number) => Promise<void | boolean>;
+    /** Seek consent with the source placement visible; false cancels before persistence. */
+    onBeforeMove?: (itemId: number, toColumnId: string, index: number) => Promise<boolean>;
+    /** Persist a move and optionally return its saved placement within the visible board. */
+    onMove?: (itemId: number, toColumnId: string, index: number) => Promise<void | boolean | KanbanMoveResult>;
     reduce: boolean;
     emptyHint?: string;
     countLabel: (count: number) => string;
-    accessibility?: { announcements?: Announcements; screenReaderInstructions?: ScreenReaderInstructions };
+    accessibility?: {
+        announcements?: Announcements;
+        screenReaderInstructions?: ScreenReaderInstructions;
+        moveRestored?: (itemId: number, columnId: string, position: number) => string;
+    };
+}
+
+/** The server-confirmed visible placement of a persisted move. */
+export interface KanbanMoveResult {
+    columnId: string;
+    /** Visible index after saving, or -1 when the saved item no longer matches the board. */
+    index: number;
 }
 
 type ColumnItems = Record<string, number[]>;
@@ -85,13 +98,19 @@ function indexColumns(map: ColumnItems): Map<number, string> {
     return index;
 }
 
+function placeItem(current: ColumnItems, itemId: number, saved: KanbanMoveResult): ColumnItems {
+    const next = Object.fromEntries(Object.entries(current).map(([column, ids]) => [column, ids.filter((id) => id !== itemId)]));
+    if (saved.index >= 0 && next[saved.columnId]) next[saved.columnId].splice(Math.min(saved.index, next[saved.columnId].length), 0, itemId);
+    return next;
+}
+
 const boardCollisionDetection: CollisionDetection = (args) => {
     const pointerCollisions = pointerWithin(args);
     return pointerCollisions.length > 0 ? pointerCollisions : closestCorners(args);
 };
 
 export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
-    const { columns, items, getId, getColumnId, getPosition, renderCard, dragLabel, onMove, reduce, emptyHint, countLabel, accessibility } = props;
+    const { columns, items, getId, getColumnId, getPosition, renderCard, dragLabel, onBeforeMove, onMove, reduce, emptyHint, countLabel, accessibility } = props;
 
     const incoming = useMemo(
         () => groupItems(columns, items, getId, getColumnId, getPosition),
@@ -102,12 +121,14 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const [columnItems, setColumnItems] = useState<ColumnItems>(incoming);
     const snapshotRef = useRef<ColumnItems>(incoming);
     const snapshotColumnByItemIdRef = useRef<Map<number, string>>(new Map());
+    const snapshotIncomingKeyRef = useRef(incomingKey);
     const [activeId, setActiveId] = useState<number | null>(null);
     const [saving, setSaving] = useState(false);
     const boardRef = useRef<HTMLDivElement>(null);
+    const [moveAnnouncement, setMoveAnnouncement] = useState('');
 
     const [syncedKey, setSyncedKey] = useState(incomingKey);
-    if (syncedKey !== incomingKey && activeId == null) {
+    if (syncedKey !== incomingKey && activeId == null && !saving) {
         setSyncedKey(incomingKey);
         setColumnItems(incoming);
     }
@@ -117,6 +138,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
         [items, getId],
     );
     const columnByItemId = useMemo(() => indexColumns(columnItems), [columnItems]);
+    const latestIncomingRef = useRef({ columns: incoming, key: incomingKey, itemsById });
+    useLayoutEffect(() => {
+        latestIncomingRef.current = { columns: incoming, key: incomingKey, itemsById };
+    }, [incoming, incomingKey, itemsById]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -130,8 +155,10 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
     const onDragStart = (event: DragStartEvent) => {
         if (!onMove) return;
+        setMoveAnnouncement('');
         snapshotRef.current = columnItems;
         snapshotColumnByItemIdRef.current = columnByItemId;
+        snapshotIncomingKeyRef.current = incomingKey;
         setActiveId(Number(event.active.id));
     };
 
@@ -177,6 +204,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             return;
         }
 
+        let next = current;
         let toIds = current[toCol];
         const oldIndex = toIds.indexOf(activeId);
         if (oldIndex < 0) {
@@ -185,32 +213,59 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
                 ? toIds.length
                 : Math.max(0, toIds.indexOf(Number(over.id)));
             toIds = [...toIds.slice(0, insertAt), activeId, ...toIds.slice(insertAt)];
-            const next = { ...current, [toCol]: toIds };
+            next = { ...current, [toCol]: toIds };
             if (fromCol && fromCol !== toCol) {
                 next[fromCol] = current[fromCol].filter((id) => id !== activeId);
             }
-            commit(next);
         } else {
             let newIndex = overStr.startsWith(COL_PREFIX) ? toIds.length - 1 : toIds.indexOf(Number(over.id));
             if (newIndex < 0) newIndex = toIds.length - 1;
             if (oldIndex !== newIndex) {
                 toIds = arrayMove(toIds, oldIndex, newIndex);
-                commit({ ...current, [toCol]: toIds });
+                next = { ...current, [toCol]: toIds };
             }
         }
         const finalIndex = toIds.indexOf(activeId);
 
         const originCol = snapshotColumnByItemIdRef.current.get(activeId);
         const originIndex = originCol ? snapshot[originCol].indexOf(activeId) : -1;
+        const restorePlacement = () => {
+            const latest = latestIncomingRef.current;
+            const restored = latest.key === snapshotIncomingKeyRef.current ? snapshot : latest.columns;
+            commit(restored);
+            setSyncedKey(latest.key);
+            const column = indexColumns(restored).get(activeId);
+            const item = latest.itemsById.get(activeId);
+            if (column) setMoveAnnouncement(accessibility?.moveRestored?.(activeId, column, item ? getPosition(item) : restored[column].indexOf(activeId)) ?? '');
+        };
         if (originCol === toCol && originIndex === finalIndex) {
+            restorePlacement();
             restoreFocus(event);
             return;
         }
 
         setSaving(true);
-        void onMove(activeId, toCol, finalIndex)
-            .then((accepted) => { if (accepted === false) commit(snapshot); })
-            .catch(() => commit(snapshot))
+        if (onBeforeMove) commit(snapshot);
+        else commit(next);
+        const persist = async () => {
+            if (onBeforeMove) {
+                if (!await onBeforeMove(activeId, toCol, finalIndex)) {
+                    restorePlacement();
+                    return;
+                }
+                commit(next);
+            }
+            const saved = await onMove(activeId, toCol, finalIndex);
+            if (saved === false) restorePlacement();
+            else {
+                const latest = latestIncomingRef.current;
+                const placement = saved && typeof saved === 'object' ? saved : { columnId: toCol, index: finalIndex };
+                setSyncedKey(latest.key);
+                setColumnItems((current) => placeItem(latest.key === snapshotIncomingKeyRef.current ? current : latest.columns, activeId, placement));
+            }
+        };
+        void persist()
+            .catch(restorePlacement)
             .finally(() => { setSaving(false); restoreFocus(event); });
     };
 
@@ -235,6 +290,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             onDragCancel={(event) => { setActiveId(null); commit(snapshotRef.current); restoreFocus(event); }}
             accessibility={accessibility}
         >
+            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{moveAnnouncement}</div>
             <div className="relative">
                 <div
                     ref={setBoardRef}

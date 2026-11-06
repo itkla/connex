@@ -1,7 +1,7 @@
 'use client';
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import type { UniqueIdentifier } from '@dnd-kit/core';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
@@ -16,6 +16,7 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { usePermission } from '@/app/hooks/usePermissions';
 import { getCompaniesByIds, getDealBoard, getDealById, getDealRisks, moveDeal, reopenDeal } from '@/app/lib/api';
 import { withDealMoved } from '@/app/lib/dealBoard';
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { Company, Deal, DealFilterParams, DealRisk, Pipeline, Stage } from '@/app/lib/types';
 import type { RecordReturnSelectionSnapshot } from '@/app/lib/recordReturnPath';
@@ -97,15 +98,17 @@ export default function DealsKanban({
     returnSelection,
 }: DealsKanbanProps) {
     const t = useTranslations('DealsKanban');
+    const locale = useLocale();
     const showApiError = useApiErrorToast('DealsKanban');
     const canUpdateDeals = usePermission('DEAL_UPDATE');
-    const [pendingMove, setPendingMove] = useState<{ name: string; column: string; outcome: 'won' | 'lost' } | null>(null);
+    const [pendingMove, setPendingMove] = useState<{ name: string; column: string; outcome: 'won' | 'lost'; valueDisclosure: string } | null>(null);
     const confirmMoveRef = useRef<((confirmed: boolean) => void) | null>(null);
     const cancelMoveRef = useRef<HTMLButtonElement>(null);
     const [moveMessage, setMoveMessage] = useState('');
     const [moveResult, setMoveResult] = useState<{ deal: Deal; workspaceId: number | null } | null>(null);
     const [reopening, setReopening] = useState(false);
     const boardContainerRef = useRef<HTMLDivElement>(null);
+    const moveWorkspaceRef = useRef<number | null>(null);
 
     useEffect(() => () => confirmMoveRef.current?.(false), []);
 
@@ -334,26 +337,44 @@ export default function DealsKanban({
         [boardRisks, onQuickEdit, prepareQuickEdit, onDelete, resolvedCompanyById, returnSelection, timezone],
     );
 
-    const onMove = useCallback(
-        async (dealId: number, colId: string, index: number) => {
+    const beforeMove = useCallback(
+        async (dealId: number, colId: string) => {
             const deal = dealsById.get(dealId);
             const stage = stageById.get(Number(colId));
             if (!deal || !stage) return false;
             const originWorkspaceId = renderedWorkspaceId();
+            moveWorkspaceRef.current = originWorkspaceId;
             setMoveResult(null);
             setMoveMessage('');
             const outcome = classifyStage(stage);
             if (deal.stage !== stage.id && outcome !== 'normal') {
+                const money = (value: number) => `${getNumberFormatter(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)} ${deal.currency}`;
+                const valueDisclosure = outcome === 'lost'
+                    ? t('confirmValueLost', { current: money(deal.actualValue), amount: money(0) })
+                    : deal.won === true
+                      ? t('confirmValueFrozen', { amount: money(deal.actualValue) })
+                      : t('confirmValueFreshWin', { current: money(deal.value), currency: deal.currency });
                 const confirmed = await new Promise<boolean>((resolve) => {
                     confirmMoveRef.current = resolve;
-                    setPendingMove({ name: deal.name, column: stage.name, outcome });
+                    setPendingMove({ name: deal.name, column: stage.name, outcome, valueDisclosure });
                 });
                 if (!confirmed) {
-                    setMoveMessage(t('moveCancelled', { name: deal.name, column: stageById.get(deal.stage ?? -1)?.name ?? '', outcome: t(`outcome.${dealOutcome(deal.won)}`) }));
+                    setMoveMessage(t('moveCancelled', { name: deal.name, column: stageById.get(deal.stage ?? -1)?.name ?? '', position: deal.position + 1, outcome: t(`outcome.${dealOutcome(deal.won)}`) }));
                     return false;
                 }
             }
-            if (renderedWorkspaceId() !== originWorkspaceId) return false;
+            return renderedWorkspaceId() === originWorkspaceId;
+        },
+        [dealsById, locale, stageById, t],
+    );
+
+    const onMove = useCallback(
+        async (dealId: number, colId: string, index: number) => {
+            const deal = dealsById.get(dealId);
+            const stage = stageById.get(Number(colId));
+            const originWorkspaceId = moveWorkspaceRef.current;
+            if (!deal || !stage || renderedWorkspaceId() !== originWorkspaceId) return false;
+            const outcome = classifyStage(stage);
             try {
                 const stageId = Number(colId);
                 const absoluteStageDeals = loadedBoardDeals
@@ -371,16 +392,21 @@ export default function DealsKanban({
                 if (renderedWorkspaceId() !== originWorkspaceId) return false;
                 setBoardState((current) => current.pipelineId !== selectedPipelineId
                     ? current
-                    : { ...current, deals: withDealMoved(current.deals, moved, absoluteIndex) });
+                    : { ...current, deals: withDealMoved(current.deals, moved) });
                 onMoved();
                 const message = t(moved.won != null && outcome === 'normal' && deal.stage !== moved.stage ? 'movedRetained' : 'moved', {
                     name: moved.name,
                     column: stageById.get(moved.stage ?? -1)?.name ?? stage.name,
                     outcome: t(`outcome.${dealOutcome(moved.won)}`),
+                    position: moved.position + 1,
                 });
                 setMoveMessage(message);
                 setMoveResult({ deal: moved, workspaceId: originWorkspaceId });
                 toastSuccess(message);
+                const visibleDestination = withDealMoved(loadedBoardDeals, moved)
+                    .filter((deal) => deal.stage === moved.stage && matchesBoardDeal(deal))
+                    .sort((left, right) => left.position - right.position || left.id - right.id);
+                return { columnId: String(moved.stage), index: visibleDestination.findIndex((deal) => deal.id === moved.id) };
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;
@@ -395,9 +421,9 @@ export default function DealsKanban({
         try {
             const reopened = await reopenDeal(moveResult.deal.id, workspacePinnedRequest(moveResult.workspaceId));
             if (renderedWorkspaceId() !== moveResult.workspaceId) return;
-            setBoardState((current) => ({ ...current, deals: withDealMoved(current.deals, reopened, reopened.position) }));
+            setBoardState((current) => ({ ...current, deals: withDealMoved(current.deals, reopened) }));
             setMoveResult(null);
-            const message = t('moved', { name: reopened.name, column: stageById.get(reopened.stage ?? -1)?.name ?? '', outcome: t('outcome.open') });
+            const message = t('moved', { name: reopened.name, column: stageById.get(reopened.stage ?? -1)?.name ?? '', position: reopened.position + 1, outcome: t('outcome.open') });
             setMoveMessage(message);
             toastSuccess(message);
             onMoved();
@@ -424,7 +450,7 @@ export default function DealsKanban({
         });
     }, [columnName, dealName, dealsById, stageById, t]);
 
-    const { announcements, screenReaderInstructions } = useMemo(
+    const { announcements, screenReaderInstructions, moveRestored } = useMemo(
         () => kanbanAccessibility(t, dealName, columnName, dropped),
         [t, dealName, columnName, dropped],
     );
@@ -455,11 +481,12 @@ export default function DealsKanban({
             getPosition={dealPosition}
             renderCard={renderCard}
             dragLabel={(deal) => t('moveCard', { name: deal.name })}
+            onBeforeMove={canUpdateDeals ? beforeMove : undefined}
             onMove={canUpdateDeals ? onMove : undefined}
             reduce={reduce}
             emptyHint={t('emptyColumn')}
             countLabel={(count) => t('count', { count })}
-            accessibility={{ announcements, screenReaderInstructions }}
+            accessibility={{ announcements, screenReaderInstructions, moveRestored }}
         />
     );
 
@@ -513,7 +540,10 @@ export default function DealsKanban({
                 >
                     <DialogHeader>
                         <DialogTitle>{t('confirmTitle', { column: pendingMove?.column ?? '' })}</DialogTitle>
-                        <DialogDescription>{pendingMove ? t('confirmDescription', { name: pendingMove.name, column: pendingMove.column, outcome: t(`outcome.${pendingMove.outcome}`) }) : ''}</DialogDescription>
+                        <DialogDescription>{pendingMove ? <>
+                            {t('confirmDescription', { name: pendingMove.name, column: pendingMove.column, outcome: t(`outcome.${pendingMove.outcome}`) })}
+                            <span className="mt-3 block">{pendingMove.valueDisclosure}</span>
+                        </> : ''}</DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
                         <Button ref={cancelMoveRef} variant="outline" onClick={() => resolveMove(false)}>{t('cancelMove')}</Button>

@@ -25,7 +25,7 @@ for (const locale of ['en', 'ja'] as const) {
         const catalog = board === 'deals' ? (locale === 'en' ? dealsEn.DealsKanban : dealsJa.DealsKanban) : (locale === 'en' ? activityEn.ActivityTasks : activityJa.ActivityTasks);
         const messages: Record<string, string> = {
             a11yInstructions: catalog.a11yInstructions, a11yLifted: catalog.a11yLifted, a11yOver: catalog.a11yOver,
-            a11yDropped: catalog.a11yDropped, a11yCancelled: catalog.a11yCancelled,
+            a11yMoveRequested: catalog.a11yMoveRequested, a11yRestored: catalog.a11yRestored, a11yCancelled: catalog.a11yCancelled,
         };
         const t = createTranslator({ locale, messages });
         describe(`${locale} ${board} announcements`, () => {
@@ -33,12 +33,15 @@ for (const locale of ['en', 'ja'] as const) {
             it('names the live destination when over the reparented active card', () => {
                 const drag = event(target(1, 'destination'));
                 expect(accessibility.announcements.onDragOver?.(drag)).toBe(t('a11yOver', { name: 'Example', column: 'Stage destination' }));
-                expect(accessibility.announcements.onDragEnd(drag)).toBe(t('a11yDropped', { name: 'Example', column: 'Stage destination' }));
+                expect(accessibility.announcements.onDragEnd(drag)).toBe(t('a11yMoveRequested', { name: 'Example', column: 'Stage destination' }));
             });
             it('names a non-empty target container and an empty target column', () => {
                 for (const over of [target(2, 'next'), target('col:next')]) {
-                    expect(accessibility.announcements.onDragEnd(event(over))).toBe(t('a11yDropped', { name: 'Example', column: 'Stage next' }));
+                    expect(accessibility.announcements.onDragEnd(event(over))).toBe(t('a11yMoveRequested', { name: 'Example', column: 'Stage next' }));
                 }
+            });
+            it('names the restored source position after a refused request', () => {
+                expect(accessibility.moveRestored(1, 'source', 4)).toBe(t('a11yRestored', { name: 'Example', column: 'Stage source', position: '5' }));
             });
             it('announces cancellation outside the board without inventing a destination', () => {
                 expect(accessibility.announcements.onDragEnd(event(null))).toBe(t('a11yCancelled', { name: 'Example' }));

@@ -4,6 +4,7 @@ import { csrfBootstrap, seeder } from './support/api';
 import { runFixture } from './support/fixtures';
 import { useLocale } from './support/locale';
 import { message } from './support/messages';
+import type { DealRisk } from '@/app/lib/types';
 
 async function keyboardMove(page: Page, handle: Locator, direction: 'ArrowRight' | 'ArrowLeft', destination: string) {
     await handle.focus();
@@ -31,11 +32,21 @@ for (const locale of ['en', 'ja'] as const) {
             const deal = await seed.post('/api/deals', { name, pipeline: pipeline.id, stage: openStage.id, value: 100, currency: 'JPY', duplicateReviewToken: review.reviewToken });
             if (typeof deal.id !== 'number' || typeof terminalStage.name !== 'string' || typeof openStage.name !== 'string') throw new Error('Invalid board fixture');
             const id = deal.id;
+            const risk: DealRisk = { dealId: id, level: 'high', score: 90, factors: [{ code: 'no_stakeholders', severity: 'high', params: {} }], assessedAt: '2026-11-05T00:00:00Z', value: 100, currency: 'JPY' };
+            await page.route(/\/api\/deals\/risk\?/, (route) => route.fulfill({ json: [risk] }));
             await page.goto(`/records/deals?q=${encodeURIComponent(name)}`);
             await page.getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.kanbanView'), exact: true }).click();
             const handleName = message(locale, 'deals', 'DealsKanban.moveCard').replace('{name}', name);
             const handle = page.getByRole('button', { name: handleName, exact: true });
             await expect(handle).toBeVisible();
+            const riskTrigger = page.locator('[data-kanban-card] [data-slot="tooltip-trigger"]').filter({ hasText: message(locale, 'deals', 'DealRisk.levelHigh') });
+            await expect(riskTrigger).toHaveAttribute('tabindex', '0');
+            await riskTrigger.hover();
+            await expect(page.getByRole('tooltip')).toContainText(message(locale, 'deals', 'DealRisk.factorNoStakeholders'));
+            await handle.focus();
+            await riskTrigger.focus();
+            await expect(riskTrigger).toBeFocused();
+            await expect(page.getByRole('tooltip')).toContainText(message(locale, 'deals', 'DealRisk.factorNoStakeholders'));
             await expect(page.locator('[data-kanban-card][role="button"]')).toHaveCount(0);
             const outline = await handle.evaluate((button) => {
                 button.focus();
@@ -55,6 +66,8 @@ for (const locale of ['en', 'ja'] as const) {
             await keyboardMove(page, handle, 'ArrowRight', terminalStage.name);
             const dialog = page.getByRole('dialog');
             await expect(dialog).toBeVisible();
+            await expect(page.locator('section').filter({ has: page.getByRole('heading', { name: openStage.name, exact: true }) }).locator('[data-kanban-card]')).toContainText(name);
+            await expect(dialog).toContainText(won ? message(locale, 'deals', 'DealsKanban.confirmValueFreshWin').replace('{current}', '100.00 JPY').replace('{currency}', 'JPY') : message(locale, 'deals', 'DealsKanban.confirmValueLost').replace('{current}', '0.00 JPY').replace('{amount}', '0.00 JPY'));
             expect(moves).toBe(0);
             await dialog.getByRole('button', { name: message(locale, 'deals', 'DealsKanban.cancelMove'), exact: true }).click();
             await expect(dialog).not.toBeVisible();
@@ -69,17 +82,18 @@ for (const locale of ['en', 'ja'] as const) {
             await keyboardMove(page, handle, 'ArrowRight', terminalStage.name);
             const saved = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}/move`));
             await dialog.getByRole('button', { name: message(locale, 'deals', 'DealsKanban.confirmMove'), exact: true }).click();
-            expect(await (await saved).json()).toMatchObject({ stage: terminalStage.id, won });
+            expect(await (await saved).json()).toMatchObject({ stage: terminalStage.id, won, position: 0 });
             await expect(handle).toBeFocused();
             const boardStatus = page.getByRole('status').filter({ hasText: name }).filter({ hasText: terminalStage.name });
             await expect(boardStatus.first()).toContainText(message(locale, 'deals', `DealsKanban.outcome.${won ? 'won' : 'lost'}`));
+            await expect(boardStatus.first()).toContainText(locale === 'en' ? 'position 1' : '1番目');
 
             const back = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}/move`));
             await keyboardMove(page, handle, 'ArrowLeft', openStage.name);
             expect(await (await back).json()).toMatchObject({ stage: openStage.id, won });
             await expect(dialog).not.toBeVisible();
             const retained = message(locale, 'deals', 'DealsKanban.movedRetained')
-                .replace('{name}', name).replace('{column}', openStage.name).replace('{outcome}', message(locale, 'deals', `DealsKanban.outcome.${won ? 'won' : 'lost'}`));
+                .replace('{name}', name).replace('{column}', openStage.name).replace('{outcome}', message(locale, 'deals', `DealsKanban.outcome.${won ? 'won' : 'lost'}`)).replace('{position}', '1');
             await expect(page.getByRole('status').filter({ hasText: retained }).first()).toBeVisible();
             const reopened = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}/reopen`));
             await page.getByRole('button', { name: message(locale, 'deals', 'DealsKanban.reopen'), exact: true }).click();
@@ -116,8 +130,13 @@ for (const locale of ['en', 'ja'] as const) {
         await expect(handle).toBeVisible();
         const saved = page.waitForResponse((response) => response.url().endsWith(`/api/tasks/${task.id}/move`));
         await keyboardMove(page, handle, 'ArrowRight', message(locale, 'activity', 'ActivityTasks.statusInProgress'));
-        expect(await (await saved).json()).toMatchObject({ status: 'in_progress' });
+        const savedTask: unknown = await (await saved).json();
+        expect(savedTask).toMatchObject({ status: 'in_progress' });
+        if (typeof savedTask !== 'object' || savedTask === null || !('position' in savedTask) || typeof savedTask.position !== 'number') throw new Error('Invalid saved task position');
         await expect(handle).toBeFocused();
+        const savedMessage = message(locale, 'activity', 'ActivityTasks.a11ySaved').replace('{name}', name)
+            .replace('{column}', message(locale, 'activity', 'ActivityTasks.statusInProgress')).replace('{position}', String(savedTask.position + 1));
+        await expect(page.getByRole('status').filter({ hasText: savedMessage }).first()).toBeVisible();
         const card = page.locator('[data-kanban-card]').filter({ has: handle });
         await expect(card).not.toHaveAttribute('role', 'button');
         await card.getByRole('button', { name: message(locale, 'activity', 'ActivityTasks.openTask'), exact: true }).click();

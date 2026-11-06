@@ -147,7 +147,7 @@ export default function DealKanbanCard({
                     {formatCompactCurrency(deal.value, deal.currency || 'USD', locale)}
                 </span>
                 <div className="flex shrink-0 items-center gap-1.5">
-                    <DealRiskPill risk={risk} />
+                    <DealRiskPill risk={risk} className="relative z-10" focusable />
                     <span
                         className={cn(
                             'rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider',

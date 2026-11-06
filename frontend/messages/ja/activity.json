@@ -254,7 +254,10 @@
     "taskMarkedAsCompleteSuccess": "タスクを完了にしました",
     "taskMarkedAsIncompleteSuccess": "タスクを未完了にしました",
     "moveCard": "タスク「{name}」を移動",
-    "openTask": "タスクを開く"
+    "openTask": "タスクを開く",
+    "a11yMoveRequested": "タスク「{name}」を「{column}」に移動しようとしています。",
+    "a11ySaved": "タスク「{name}」を「{column}」の{position}番目に保存しました。",
+    "a11yRestored": "移動を確認できませんでした。タスク「{name}」を「{column}」の{position}番目に表示しています。"
   },
   "ActivityTasksDialog": {
     "titleCreate": "新しいタスク",
