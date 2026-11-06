@@ -19,8 +19,13 @@ for (const locale of ["en", "ja"] as const) {
             const copy = (key: string) => message(locale, "workspace", `WorkspaceRoles.${key}`);
             await page.goto("/settings/workspace/people#roles");
             const roles = page.locator("#roles");
-            const member = roles.locator("li").filter({ hasText: copy("builtInRoles.member.description") }).first();
-            await expect(member.getByText(copy("builtInRoles.member.name"), { exact: true })).toBeVisible();
+            const member = roles.getByRole("listitem").filter({
+                has: page.getByText(copy("builtInRoles.member.description"), { exact: true }),
+            });
+            await expect(member).toHaveCount(1);
+            const memberName = member.locator(':scope > div > div > span:not([data-slot="badge"])');
+            await expect(memberName).toHaveText(copy("builtInRoles.member.name"));
+            await expect(memberName).toBeVisible();
             await member.locator("summary").click();
             await expect(member.getByText(`${copy("permissionLabels.ROLE_MANAGE.action")} · ${copy("notAllowed")}`, { exact: true })).toBeVisible();
             await expect(member.getByText(copy("permissionLabels.AI_SESSION_ADMIN.description"), { exact: true })).toBeVisible();
