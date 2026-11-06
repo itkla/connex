@@ -17,7 +17,16 @@
     "workspaceUnavailable": "This belongs to a workspace that is no longer available to you, so nothing was saved. Everything you entered is still here. Copy what you want to keep before you reload.",
     "workspaceUnavailableNamed": "This belongs to {workspace}, which is no longer available to you, so nothing was saved. Everything you entered is still here. Copy what you want to keep before you reload.",
     "reference": "Reference: {id}",
-    "staleRecord": "This record has changed since you loaded it. Your changes were not saved. Review the latest version before saving again."
+    "staleRecord": "This record has changed since you loaded it. Your changes were not saved. Review the latest version before saving again.",
+    "workspaceLastOwner": "This change would leave the workspace without an owner, so nothing changed. Have another member accept workspace ownership before you leave or change the last owner's role.",
+    "organizationLastOwner": "This change would leave the organization without an owner, so nothing changed. Have another eligible member accept organization ownership before you leave or change the last owner's role.",
+    "workspaceRecoveryOwnerRequired": "The workspace must keep an owner who can manage members and roles, so nothing changed. Ask a current owner to assign the built-in Owner role to an owner before making this change.",
+    "inviteEmailDomainNotAllowed": "This invitation was refused because the email domain isn't approved. Use an approved work email, or ask the inviter to have an organization admin check organization allowed domains and a workspace admin check workspace allowed domains in Settings.",
+    "lastPasskeyRequired": "This passkey wasn't removed because accounts with administrative access must keep at least one passkey. Add another passkey in Account security before removing this one.",
+    "lastSufficientPasskeyRequired": "This passkey wasn't removed because it is your last passkey approved everywhere you have administrative access. Add another passkey and have it approved in each organization before removing this one. Ask another workspace owner or an organization owner for a passkey approval code.",
+    "organizationMemberEligibilityRequired": "Organization access wasn't granted. The person must first join a workspace in this organization and verify their email when required. Ask a workspace admin to invite them, then ask an organization owner to grant organization access.",
+    "disclosureIdentityVerificationRequired": "The disclosure wasn't prepared because identity verification hasn't been recorded. Ask an organization admin to verify the requester and record verification on the data request before downloading the disclosure.",
+    "approvalPolicyCurrencyInvalid": "Document approval could not be checked because an approval policy has an invalid currency. Nothing was changed. Ask a workspace administrator to correct it in Settings → CRM configuration → Approval policies."
   },
   "ErrorState": {
     "title": "Something went wrong",

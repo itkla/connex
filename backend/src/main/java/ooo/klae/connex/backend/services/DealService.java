@@ -105,6 +105,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 /**
  * Business logic for logging and retrieving {@code Deal} records.
@@ -1221,6 +1222,7 @@ public class DealService {
             Deal deal,
             RecordCreationAugmentationService.PreparedAugmentation prepared, MutationAdmission admission,
             RecordVisibilityScope scope) {
+        deal.setCurrency(CurrencyCodes.forDealCreation(deal.getCurrency()));
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         deal.setWorkspaceId(workspaceId);
@@ -1298,8 +1300,9 @@ public class DealService {
         if (deal.getExpectedVersion() != null && deal.getExpectedVersion() != before.getVersion()) {
             throw new StaleRecordException(before.getVersion());
         }
-        boolean currencyChanged = deal.getCurrency() != null
-            && !deal.getCurrency().equalsIgnoreCase(before.getCurrency());
+        if (deal.getCurrency() == null) throw new BadRequestException("currency is required");
+        deal.setCurrency(CurrencyCodes.updated(deal.getCurrency(), before.getCurrency()));
+        boolean currencyChanged = !CurrencyCodes.equivalent(deal.getCurrency(), before.getCurrency());
         boolean valueChanged = before.getValue().compareTo(deal.getValue()) != 0;
         if (currencyChanged && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
             throw new BadRequestException(

@@ -61,6 +61,7 @@ abstract class RecordControllerMvcTestSupport {
     @MockitoBean protected PersonService personService;
     @MockitoBean protected CompanyService companyService;
     @MockitoBean protected DealService dealService;
+    @MockitoBean protected ooo.klae.connex.backend.services.CurrencyFilterService currencyFilterService;
     @MockitoBean protected BulkOperationService bulkOperationService;
     @MockitoBean protected DealRiskService dealRiskService;
     @MockitoBean protected AiGenerationAdapterService aiGenerationAdapterService;

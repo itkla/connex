@@ -93,6 +93,27 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void businessRefusalsKeepTheirCodesInTheExistingErrorEnvelope() {
+        Map<BadRequestException, String> refusals = Map.of(
+            new WorkspaceOwnerRequiredException("Owner required"), "WORKSPACE_LAST_OWNER",
+            new OrganizationOwnerRequiredException("Owner required"), "ORG_LAST_OWNER",
+            new WorkspaceRecoveryOwnerRequiredException("Recovery required"), "WORKSPACE_RECOVERY_OWNER_REQUIRED",
+            new LastPasskeyRemovalForbiddenException(), "LAST_PASSKEY_REQUIRED",
+            new LastSufficientPasskeyRemovalForbiddenException(), "LAST_SUFFICIENT_PASSKEY_REQUIRED",
+            new OrganizationMemberEligibilityRequiredException("Membership required"), "ORG_MEMBER_ELIGIBILITY_REQUIRED",
+            new DisclosureIdentityVerificationRequiredException("Verification required"), "DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED");
+        refusals.forEach((refusal, code) -> {
+            var response = handler.badRequest(refusal);
+            assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+            assertEquals(Map.of("code", code, "message", refusal.getMessage()), response.getBody());
+        });
+        var domain = handler.forbidden(new InviteDomainNotAllowedException("Domain not allowed"));
+        assertEquals(HttpStatus.FORBIDDEN, domain.getStatusCode());
+        assertEquals(Map.of("code", "INVITE_EMAIL_DOMAIN_NOT_ALLOWED", "message", "Domain not allowed"),
+            domain.getBody());
+    }
+
+    @Test
     void missingParameter_mapsTo400WithParameterName() {
         ResponseEntity<String> response = handler.missingParameter(
                 new MissingServletRequestParameterException("personA", "int"));

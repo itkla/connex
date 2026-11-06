@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -58,8 +59,9 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
     void createInvite_isConstrainedByTheOrgAllowlist() {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@other.com", "member")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
         InviteResultDto ok = afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@acme.com", "member"));
         assertTrue(ok.getInvite() != null);
     }
@@ -78,8 +80,9 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         User outsider = register("outsider-" + unique() + "@other.com");
         User insider = register("insider-" + unique() + "@acme.com");
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> afterFixtureCommit(() -> inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
         afterFixtureCommit(() -> inviteService.addExistingMember(workspaceId, currentUser.getId(), insider.getEmail(), "member"));
     }
 
@@ -92,9 +95,10 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
 
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "different.com");
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> inviteService.acceptInvite(invite.getInvite().getToken(), invitee),
             "a policy tightened after the invite must block acceptance");
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -103,8 +107,9 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
         InviteLinkDto link = inviteLinkService.createLink(workspaceId, currentUser, "member", null, null);
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> inviteLinkService.redeemLink(link.getToken(), register("out-" + unique() + "@other.com")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
         User insider = register("in-" + unique() + "@acme.com");
         inviteLinkService.redeemLink(link.getToken(), insider);
         assertTrue(workspaceMapper.isMember(workspaceId, insider.getId()));
@@ -118,9 +123,10 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
 
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> workspaceService.approveMembership(workspaceId, outsider.getId()),
             "a pending member whose domain the org disallowed after the invite cannot activate");
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)

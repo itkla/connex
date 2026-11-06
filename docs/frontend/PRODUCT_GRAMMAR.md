@@ -37,6 +37,11 @@ Do not turn record details into dense multi-panel consoles or promote aggregate 
 
 Client collections using `useServerRecords` wrap their list content in `RecordListState`, keeping search and filter controls outside it so members can change or clear a failed filter. Failed loads show the shared alert and Retry, suppress empty and onboarding copy, and preserve the last successful rows only within the same workspace. A pending retry keeps its error visible with a disabled busy control; success clears the error. Expired sessions use the shared sign-in redirect and suppress collection content. Authentication and permission failures discard the cached page until a successful load; permission refusals use access guidance. API support references appear when available.
 
+Client-owned activity/task lists subscribe to the shared record-mutation signal. Canonical composers
+publish after acknowledged creation, including activity follow-up tasks; rejected or aborted writes
+publish nothing. This reloads the current filtered page and total even when Quick Create lives outside
+the list tree. A server-component refresh alone does not invalidate those client-owned pages.
+
 Server-loaded detail collections use `loadDetailSection`, a record/workspace-scoped `DetailSectionsProvider`, and `DetailSectionState`. Retry fetches only failed collections and updates their consumers without refreshing the route or reloading successful sections. Failed entry collections hide dependent totals/history; failed editor choices disable the affected editing actions while independently loaded chronology remains visible. Campaign messages, sends and exports recover separately; send creation and queueing additionally require messages. Permission denials hide the affected content, and expired sessions preserve the current path/query through the existing sign-in `redirect` parameter. Late responses cannot publish into another workspace. The recovery wrapper owns the section landmark; embedded content must not add a second region with the same name. A successful retry announces a localized status and transfers focus from its removed Retry control to the named section, unless the user has moved focus elsewhere.
 
 Every collection/list surface distinguishes all four states:
@@ -69,6 +74,28 @@ Follow `docs/PRODUCT.md` for the product law. The normal implementation mapping 
 Per-surface deviations are product decisions, not precedent for inventing a new mapping.
 
 ## Signed-off adaptations
+
+### My Work
+
+`/me` is the personal daily surface. Its existing source-owned queue streams independently of
+relationship intelligence, deal KPIs, attention panels, the pulse, and recent history. Every section
+keeps failed, permission-denied, and genuinely empty reads distinct; Retry refreshes the server read,
+and an expired session follows the sign-in flow. Previously loaded values never substitute for a
+failed or denied section.
+
+Supporting reads use `/api/my-work/{relationships,deal-kpis,risks,pulse,history}`. The server resolves
+the active workspace and current actor; callers cannot select another member. Personal relationships
+are active, processable contacts owned by that member and visible in the active workspace, including
+shared-in contacts under the contact list's canonical `scope=me` visibility and organization ceiling.
+Full-corpus warmth counts are aggregated in SQL; only the warmest 18 and the six most urgent cooling
+contacts are hydrated. History loads the latest 25 assigned tasks, 25 authored activities, and 25
+visible authored note previews, with the
+existing note continuation. The 84-day UTC pulse remains complete independently of those previews,
+using activity timestamps, completed-task update timestamps, and visible-note creation timestamps.
+Risk ranking retains the existing 1,000-candidate interactive ceiling; overflow shows unavailable
+guidance instead of an incomplete all-clear. Currency changes re-fetch the personal KPI partition,
+preserve other URL parameters, and acknowledge the pending navigation. The reporting window and
+currency semantics remain those in `PRODUCT.md`.
 
 ### Pipeline setup and order
 
@@ -105,6 +132,19 @@ the map page handles any continuing fetch failure through its error boundary and
 neighbourhood map and scalable rendering remain deferred under [#2262](https://github.com/itkla/connex/issues/2262).
 
 ### Campaigns
+
+Contact details expose marketing preferences for contacts owned by the rendered workspace. Consent and contact-restriction details and changes require `CONSENT_MANAGE`; privacy holds independently require `PERSON_UPDATE`. Consent updates are explicit manual records, and never remove contact restrictions. Removing a restriction requires separate confirmation explaining the shared-address effect. The panel uses the server marketing-status projection for current blocks and explains the existing opt-out default without promising delivery. Missing or unknown consent alone does not block; explicit revocation, contact restrictions, privacy holds, and final dispatch checks still apply. LINE and WhatsApp preferences are recordable but have no delivery support.
+
+Consent confirmations retain the reviewed mutation version, including explicit row absence. A stale
+write reloads preferences and requires a new action; it never retries automatically. Restriction
+details come from the contact-scoped, cursor-paged endpoint (50 entries per page), matched server-side
+by person link or canonical channel address. The contact panel never downloads the workspace-wide
+restriction list or unrelated addresses, operator notes, creator ids, or person ids. Cancelling a
+confirmation restores focus to the initiating action; confirmed changes return focus to the labeled
+preferences section, including while refreshed data is still pending. Background route refreshes
+revalidate preferences in place, preserving an open confirmation and its captured mutation version.
+Workspace/contact identity changes still replace the controls. Older reads cannot replace a newer post-save result.
+Privacy controls submit only deliberately changed flags.
 
 Campaign creation asks for the minimum facts required by the backend (name and type) before entering the campaign builder. Objective/status/budget/window belong in the builder rather than an oversized create dialog. Campaign settings use the established quick-edit sheet shell.
 

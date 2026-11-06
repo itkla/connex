@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.controllers;
 
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.TaskMoveRequest;
@@ -72,12 +74,10 @@ public class TaskController {
     @GetMapping("/page")
     public PageResponse<TaskDto> getTasksPage(
         @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "25") int size
+        @RequestParam(defaultValue = "25") int size,
+        @Valid @ModelAttribute ActivityListFilter filter
     ) {
-        PageBounds bounds = PageBounds.of(page, size);
-        List<TaskDto> items = taskService.getTasksPage(bounds.size(), bounds.offset())
-            .stream().map(TaskDto::from).toList();
-        return new PageResponse<>(items, taskService.countTasks());
+        return taskService.getListPage(filter, PageBounds.of(page, size));
     }
 
     /**

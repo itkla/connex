@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.MemberRoleChange;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.OrganizationMemberEligibilityRequiredException;
 import ooo.klae.connex.backend.exceptions.OrganizationOwnerRequiredException;
 import ooo.klae.connex.backend.exceptions.OrganizationMembershipRequiredException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -357,7 +358,7 @@ public class OrgMemberService {
                 throw notAnActiveTenant();
             }
             if (registrationVerificationService.requiresMailboxProof(target)) {
-                throw new BadRequestException("The account must verify its email before joining the organization");
+                throw new OrganizationMemberEligibilityRequiredException("The account must verify its email before joining the organization");
             }
         }
         if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
@@ -520,7 +521,7 @@ public class OrgMemberService {
     }
 
     private static BadRequestException notAnActiveTenant() {
-        return new BadRequestException(
+        return new OrganizationMemberEligibilityRequiredException(
                 "Only active members of a workspace in this organization can be added to it");
     }
 

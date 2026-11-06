@@ -17,6 +17,10 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -95,6 +99,16 @@ public class ActivityService {
         requireDealExists(workspaceId, dealId);
         return referenceService.hydrateActivities(workspaceId,
             activityMapper.getActivitiesFilteredPage(workspaceId, personId, dealId, createdById, limit, offset));
+    }
+
+    /** Reads only one page and its matching count under the same trusted visibility ceiling. */
+    public PageResponse<ActivityDto> getListPage(ActivityListFilter filter, PageBounds bounds) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        var rows = activityMapper.getListPage(workspaceId, scope, filter, bounds.size(), bounds.offset());
+        var items = referenceService.hydrateActivities(workspaceId, rows).stream().map(ActivityDto::from).toList();
+        long total = activityMapper.countList(workspaceId, scope, filter);
+        return new PageResponse<>(items, total);
     }
 
     public long countActivities(Integer personId, Integer dealId, Integer createdById) {

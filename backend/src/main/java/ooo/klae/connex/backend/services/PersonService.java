@@ -364,6 +364,13 @@ public class PersonService {
             workspaceService.getCurrentWorkspaceId(), () -> getPersonByIdWithinVisibilityScope(id));
     }
 
+    /** Reads only visible contact fields and masked employers for a bounded picker batch. */
+    public List<Person> getPersonReferences(List<Integer> ids) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return personMapper.getByIds(workspaceId, scope.workspaceIdsJson(), ids);
+    }
+
     private Person getPersonByIdWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
@@ -899,13 +906,13 @@ public class PersonService {
     }
 
     /**
-     * Sets or clears the contact's processing and third-party-provision restrictions. Ceasing
+     * Patches supplied processing and third-party-provision flags under the owned-contact lock. Ceasing
      * third-party provision also revokes every standing cross-workspace share of the contact —
      * the restriction must stop provision already in flight, not just new grants.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
-    public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
+    public Person updateProcessingRestrictions(int id, Boolean requestedSuspended, Boolean requestedProvisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
@@ -915,6 +922,8 @@ public class PersonService {
         if (before == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        boolean suspended = requestedSuspended != null ? requestedSuspended : before.getSuspendedAt() != null;
+        boolean provisionCeased = requestedProvisionCeased != null ? requestedProvisionCeased : before.getProvisionCeasedAt() != null;
         List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
             ? restrictionWorkspaceIds(orgId, workspaceId)
             : List.of();

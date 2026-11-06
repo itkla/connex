@@ -4,7 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import PersonalDealSignals from "@/app/components/me/PersonalDealSignals";
-import { personalDealKpis } from "@/app/components/me/personalDealKpis";
+import { personalDealKpis } from "./support/personalDealKpis";
 import type { Deal, DealMetrics } from "@/app/lib/types";
 import { computeKpis, resolveAnalyticsWindow } from "@/app/components/overview/analytics/metrics";
 import { toTiles } from "@/app/components/overview/analytics/currencyScope";
@@ -12,12 +12,13 @@ import en from "@/messages/en/me.json";
 import ja from "@/messages/ja/me.json";
 
 const fixture = vi.hoisted<{ currency: string | null }>(() => ({ currency: null }));
-const queryWriter = vi.hoisted(() => vi.fn());
+const replace = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-    useSearchParams: () => new URLSearchParams(fixture.currency ? { currency: fixture.currency } : {}),
+    useSearchParams: () => new URLSearchParams(fixture.currency ? { currency: fixture.currency, task: "42" } : { task: "42" }),
+    useRouter: () => ({ replace }),
+    usePathname: () => "/me",
 }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
-vi.mock("@/app/hooks/useOwnedUrlParams", () => ({ useOwnedUrlParams: queryWriter }));
 vi.mock("@/app/components/overview/analytics/CurrencyControl", () => ({
     default: ({ counts, onChange }: { counts: ReadonlyMap<string, number>; onChange: (currency: string) => void }) => (
         <div>{[...counts.keys()].map((currency) => <button key={currency} onClick={() => onChange(currency)}>{currency}</button>)}</div>
@@ -53,10 +54,10 @@ const deals: Deal[] = [
     })),
 ];
 
-function mount(locale: "en" | "ja" = "en", data: DealMetrics | null = metrics, personalDeals = deals) {
+function mount(locale: "en" | "ja" = "en", data: DealMetrics = metrics, personalDeals = deals, currency = "USD") {
     return render(
         <NextIntlClientProvider locale={locale} messages={locale === "ja" ? ja : en}>
-            <PersonalDealSignals deals={personalDeals} dealMetrics={data} timezone="Asia/Tokyo" />
+            <PersonalDealSignals data={{ currency, metrics: data, kpis: personalDealKpis(personalDeals, currency, WINDOW, "Asia/Tokyo") }} />
         </NextIntlClientProvider>,
     );
 }
@@ -153,21 +154,7 @@ describe("personal currency aggregation", () => {
 });
 
 describe("personal deal signal tiles", () => {
-    it("derives currency options and preserves every KPI when the metrics request fails", () => {
-        mount("en", null);
-        expect(screen.getByText("$735K")).toBeTruthy();
-        expect(screen.getByText("$35.4K")).toBeTruthy();
-        expect(screen.getByText("67")).toBeTruthy();
-        expect(screen.getByText("10")).toBeTruthy();
-        fireEvent.click(screen.getByRole("button", { name: "JPY" }));
-        expect(screen.getByText("¥45.5M")).toBeTruthy();
-        expect(screen.getByText("¥1.2M")).toBeTruthy();
-        expect(screen.getByText("100")).toBeTruthy();
-        expect(screen.getByText("30")).toBeTruthy();
-        expect(screen.getAllByText("JPY only")).toHaveLength(2);
-    });
-
-    it("shows only the dominant currency, with a visible scope on both money tiles", () => {
+    it("shows only the selected currency, with a visible scope on both money tiles", () => {
         mount();
         expect(screen.getByText("$735K")).toBeTruthy();
         expect(screen.getByText("$35.4K")).toBeTruthy();
@@ -175,34 +162,33 @@ describe("personal deal signal tiles", () => {
         expect(screen.getByText("67")).toBeTruthy();
         expect(screen.getByText("10")).toBeTruthy();
         expect(screen.queryByText("$46.2M")).toBeNull();
-        expect(screen.queryByText("$1.2M")).toBeNull();
     });
 
-    it("switches every KPI to the other currency immediately and persists the selection", () => {
+    it("requests a currency partition while preserving the timeline deep link", () => {
         mount();
         fireEvent.click(screen.getByRole("button", { name: "JPY" }));
+        expect(replace).toHaveBeenCalledWith("/me?task=42&currency=JPY", { scroll: false });
+        expect(screen.getAllByText("USD only")).toHaveLength(2);
+        expect(screen.queryByText("¥45.5M")).toBeNull();
+        cleanup();
+        mount("en", metrics, deals, "JPY");
         expect(screen.getByText("¥45.5M")).toBeTruthy();
         expect(screen.getByText("¥1.2M")).toBeTruthy();
         expect(screen.getAllByText("JPY only")).toHaveLength(2);
         expect(screen.getByText("100")).toBeTruthy();
         expect(screen.getByText("30")).toBeTruthy();
-        expect(screen.queryByText("$735K")).toBeNull();
-        expect(queryWriter).toHaveBeenLastCalledWith({ currency: "JPY" });
     });
 
-    it("restores a currency deep link and rejects a currency absent from the owner's metrics", () => {
-        fixture.currency = "JPY";
-        mount();
-        expect(screen.getByText("¥45.5M")).toBeTruthy();
-        cleanup();
+    it("retains the server's validated partition for an unknown currency URL", () => {
         fixture.currency = "EUR";
         mount();
         expect(screen.getByText("$735K")).toBeTruthy();
-        expect(queryWriter).toHaveBeenLastCalledWith({ currency: undefined });
+        expect(screen.getAllByText("USD only")).toHaveLength(2);
+        expect(replace).not.toHaveBeenCalled();
     });
 
     it("keeps single-currency figures and labels both money tiles in Japanese", () => {
-        mount("ja", { totalCount: 6, byCurrency: [metrics.byCurrency[0]] }, deals.filter((entry) => entry.currency === "JPY"));
+        mount("ja", { totalCount: 6, byCurrency: [metrics.byCurrency[0]] }, deals.filter((entry) => entry.currency === "JPY"), "JPY");
         expect(screen.getByText("￥4545万")).toBeTruthy();
         expect(screen.getByText("￥120万")).toBeTruthy();
         expect(screen.getAllByText("JPY建て")).toHaveLength(2);

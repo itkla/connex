@@ -2918,6 +2918,11 @@ export async function getUserReferences(ids: number[], init: RequestInit = {}) {
     return references.flat();
 }
 
+/** Bounded active-member search for activity and task pickers. */
+export function getUserOptions(q = '', init: RequestInit = {}) {
+    return getJson<Types.User[]>(`/api/users/options${buildQuery({ q })}`, init);
+}
+
 export function getUsers(init: RequestInit = {}) {
     return getJson<Types.User[]>(`/api/users`, init);
 }
@@ -2976,7 +2981,7 @@ export function getTasks(init: RequestInit = {}) {
     return getCompletePageItems<Types.Task>(getTasksPage, init);
 }
 
-export function getTasksPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+export function getTasksPage(params: Types.TasksPageParams = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.Task>>(`/api/tasks/page${buildQuery(params)}`, init);
 }
 
@@ -2990,7 +2995,7 @@ export function getTasksFromCookie(cookie: string | null) {
 
 export function getTasksPageResultFromCookie(
     cookie: string | null,
-    params: Types.PageParams = {},
+    params: Types.TasksPageParams = {},
 ) {
     return resultWithCookie<Types.Page<Types.Task>>((init) => getTasksPage(params, init), cookie);
 }
@@ -3591,6 +3596,19 @@ export function getContactIds(params: Types.ContactsPageParams = {}, init: Reque
 
 export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
+}
+
+/** Hydrates visible contact selections in capped batches without relationship history. */
+export async function getContactReferences(ids: number[], init: RequestInit = {}) {
+    const uniqueIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+    const batches = Array.from(
+        { length: Math.ceil(uniqueIds.length / WORKSPACE_LIST_PAGE_SIZE) },
+        (_, index) => uniqueIds.slice(index * WORKSPACE_LIST_PAGE_SIZE, (index + 1) * WORKSPACE_LIST_PAGE_SIZE),
+    );
+    const references = await Promise.all(batches.map((batch) =>
+        getJson<Types.ContactReference[]>(`/api/persons/references${buildQuery({ ids: batch })}`, init),
+    ));
+    return references.flat();
 }
 
 export function getContactEmployment(id: number, init: RequestInit = {}) {
@@ -5106,6 +5124,23 @@ export function getMyWorkResultFromCookie(cookie: string | null) {
     return resultWithCookie<Types.WorkItemPage>((init) => getMyWork({}, init), cookie);
 }
 
+/** A personal section refuses failures distinctly, including expired sessions and access denial. */
+export type MyWorkReadResult<T> = { ok: true; data: T } | { ok: false; status: number };
+
+/** Reads a fixed-size self-only projection; no workspace or user id can widen its scope. */
+export async function getMyWorkReadResultFromCookie<K extends keyof Types.MyWorkReadSections>(
+    section: K, cookie: string | null, currency?: string,
+): Promise<MyWorkReadResult<Types.MyWorkReadSections[K]>> {
+    if (!cookie) return { ok: false, status: 401 };
+    try {
+        const data = await getJson<Types.MyWorkReadSections[K]>(
+            `/api/my-work/${section}${buildQuery({ currency })}`, withCookie(cookie));
+        return { ok: true, data };
+    } catch (error) {
+        return { ok: false, status: error instanceof ApiError ? error.status : 0 };
+    }
+}
+
 export function getMyWorkSummary(init: RequestInit = {}) {
     return getJson<Types.WorkItemSummary>(`/api/my-work/summary`, { cache: 'no-store', ...init });
 }
@@ -5658,7 +5693,7 @@ export function assembleDataSubjectDisclosure(orgId: number, requestId: number) 
 }
 
 /** Sets or clears a contact's APPI processing restrictions (suspend / cease provision). */
-export function updateContactRestrictions(contactId: number, body: { suspended: boolean; provisionCeased: boolean }) {
+export function updateContactRestrictions(contactId: number, body: { suspended?: boolean; provisionCeased?: boolean }) {
     return putJson<Types.Contact>(`/api/persons/${contactId}/restrictions`, body);
 }
 
@@ -7874,6 +7909,11 @@ export function setPersonConsent(personId: number, payload: Types.ContactChannel
 
 export function getSuppressions(init: RequestInit = {}) {
     return getJson<Types.SuppressionEntry[]>(`/api/suppressions`, init);
+}
+
+/** Reads one bounded page of this contact's matching restrictions, without operator metadata. */
+export function getPersonSuppressions(personId: number, afterId = 0, init: RequestInit = {}) {
+    return getJson<Types.ContactSuppressionPage>(`/api/suppressions/persons/${personId}?afterId=${afterId}`, init);
 }
 
 export function getSuppressionsFromCookie(cookie: string | null) {

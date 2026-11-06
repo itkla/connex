@@ -152,3 +152,17 @@ contract. Automation provenance is separate from the member or system principal 
 ## Ownership consent (#1534 slice 4o)
 
 Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Business refusal codes
+
+Safety refusals use the existing exception `getCode()` and `GlobalExceptionHandler` envelope.
+The frontend selects catalogued EN/JA descriptions through `errorMessages.ts`; unknown codes
+retain status-based safe copy and never surface exception prose. Existing last-owner codes remain
+unchanged. Invitation domain checks return `INVITE_EMAIL_DOMAIN_NOT_ALLOWED` without disclosing
+allowlist contents. Passkey removal distinguishes `LAST_PASSKEY_REQUIRED` from
+`LAST_SUFFICIENT_PASSKEY_REQUIRED`. Unverified disclosure returns
+`DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED` only after organization authorization and request lookup.
+Organization grants use `ORG_MEMBER_ELIGIBILITY_REQUIRED` for every ineligible target, including
+unknown addresses and outsiders; explanations describe prerequisites without asserting account
+existence. Invitation creation retains its uniform email-bound flow and does not resolve recipient
+accounts to provide more specific advice.

@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
 import ooo.klae.connex.backend.exceptions.ApprovalImpactConfirmationRequiredException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.InvalidApprovalCurrencyException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -43,6 +44,7 @@ import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 /**
  * Manages workspace-scoped document approval policies and evaluates them against generated
@@ -88,6 +90,7 @@ public class ApprovalPolicyService {
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public ApprovalPolicy create(ApprovalPolicy policy) {
         policy.getSteps().forEach(step -> step.setId(0));
+        policy.setCurrency(CurrencyCodes.optional(policy.getCurrency()));
         normalize(policy);
         validate(policy);
         policy.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
@@ -115,6 +118,7 @@ public class ApprovalPolicyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         ApprovalPolicy preliminary = require(workspaceId, id);
+        policy.setCurrency(CurrencyCodes.updated(policy.getCurrency(), preliminary.getCurrency()));
         normalize(policy);
         validate(policy);
         validateStepIdentities(preliminary, policy);
@@ -138,6 +142,7 @@ public class ApprovalPolicyService {
                 "You cannot manage document approval policies in this workspace");
         }
         ApprovalPolicy before = requireForUpdate(workspaceId, id);
+        policy.setCurrency(CurrencyCodes.updated(policy.getCurrency(), before.getCurrency()));
         normalize(policy);
         validate(policy);
         validateStepIdentities(before, policy);
@@ -182,10 +187,11 @@ public class ApprovalPolicyService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public ApprovalPolicyImpactDto impact(int id, ApprovalPolicy proposed) {
-        normalize(proposed);
-        validate(proposed);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ApprovalPolicy before = require(workspaceId, id);
+        proposed.setCurrency(CurrencyCodes.updated(proposed.getCurrency(), before.getCurrency()));
+        normalize(proposed);
+        validate(proposed);
         validateStepIdentities(before, proposed);
         proposed.setId(id);
         proposed.setWorkspaceId(workspaceId);
@@ -341,10 +347,22 @@ public class ApprovalPolicyService {
     /**
      * The first of the given active policies matching the document's frozen snapshot, or
      * {@code null} when none matches and the document may be finalized without approval.
+     *
+     * @throws InvalidApprovalCurrencyException when an otherwise matching policy in the document's
+     * currency bucket has an invalid currency, even if an earlier policy would match
      */
     public ApprovalPolicy firstMatch(List<ApprovalPolicy> policies, DealDocument document, DocumentContent content) {
         BigDecimal grandTotal = content == null || content.totals() == null ? null : content.totals().grandTotal();
         BigDecimal discountPercent = discountPercent(content);
+        for (ApprovalPolicy policy : policies) {
+            if (policy.isActive()
+                    && (policy.getDocumentType() == null || policy.getDocumentType().equals(document.getType()))
+                    && !CurrencyCodes.isSupported(policy.getCurrency())
+                    && currenciesMatch(policy.getCurrency(), document.getCurrency())
+                    && matches(policy, document, grandTotal, discountPercent)) {
+                throw new InvalidApprovalCurrencyException();
+            }
+        }
         return policies.stream()
             .filter(policy -> matches(policy, document, grandTotal, discountPercent))
             .findFirst()
@@ -398,15 +416,8 @@ public class ApprovalPolicyService {
         return percent.max(BigDecimal.ZERO);
     }
 
-    /**
-     * Normalizes the currency to a trimmed uppercase code so a policy saved as {@code "jpy "} can
-     * never silently fail to match {@code "JPY"} documents — a mismatch would fail open.
-     */
+    /** Normalizes approval modes and step defaults before validation and persistence. */
     private void normalize(ApprovalPolicy policy) {
-        if (policy.getCurrency() != null) {
-            String currency = policy.getCurrency().trim().toUpperCase();
-            policy.setCurrency(currency.isEmpty() ? null : currency);
-        }
         if (policy.getMode() == null || policy.getMode().isBlank()) {
             policy.setMode("sequential");
         }
@@ -424,8 +435,7 @@ public class ApprovalPolicyService {
     }
 
     private boolean currenciesMatch(String policyCurrency, String documentCurrency) {
-        return policyCurrency != null && documentCurrency != null
-            && policyCurrency.trim().equalsIgnoreCase(documentCurrency.trim());
+        return CurrencyCodes.equivalent(policyCurrency, documentCurrency);
     }
 
     private void validate(ApprovalPolicy policy) {

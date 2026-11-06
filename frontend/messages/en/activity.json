@@ -1,4 +1,13 @@
 {
+  "ActivityList": {
+    "pickerLoadFailed": "Couldn't load record names and filters",
+    "pickerLoadFailedBody": "Your records are unchanged. Reload this page to try again.",
+    "loading": "Loading…",
+    "range": "{from}–{to} of {total}",
+    "pagination": "List pages",
+    "previous": "Previous page",
+    "next": "Next page"
+  },
   "ActivityPage": {
     "title": "Activity",
     "subtitle": "Every call, email, and meeting your team logs, in one timeline.",
@@ -7,7 +16,7 @@
     "allActivities": "All Activities",
     "new": "New",
     "newAria": "Log activity",
-    "searchPlaceholder": "Search activity",
+    "searchPlaceholder": "Search subjects, notes, contacts or deals",
     "filtersHeader": "Types",
     "filterAll": "All",
     "typeCall": "Call",
@@ -216,7 +225,7 @@
     "a11yOver": "Task {name} is over the {column} column.",
     "a11yDropped": "Task {name} was dropped into the {column} column.",
     "a11yCancelled": "Moving task {name} was cancelled.",
-    "searchPlaceholder": "Search tasks",
+    "searchPlaceholder": "Search task titles, contacts or deals",
     "queuesHeader": "Queues",
     "queue_myOpen": "My open",
     "queue_dueToday": "Due today",

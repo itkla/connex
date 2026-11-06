@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import {
@@ -13,6 +14,8 @@ import {
     DropdownMenuSeparator,
     DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import type { ServerPickerSearch } from "@/lib/server-picker-search";
 import { cn } from "@/lib/utils";
 
 export type MultiSelectOption = { value: string; total?: number; label?: string };
@@ -57,6 +60,7 @@ export function MultiSelectFilter({
     clearLabel,
     capitalize,
     scroll,
+    search,
 }: {
     label: string;
     ariaLabel: string;
@@ -68,10 +72,17 @@ export function MultiSelectFilter({
     clearLabel: string;
     capitalize?: boolean;
     scroll?: boolean;
+    search?: { value: string; onChange: (value: string) => void; state: ServerPickerSearch };
 }) {
     const active = selected.size > 0;
+    const inputRef = useRef<HTMLInputElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const composingRef = useRef(false);
+    const menuItems = () => Array.from(contentRef.current?.querySelectorAll<HTMLElement>(
+        '[role^="menuitem"]:not([data-disabled]):not([aria-disabled="true"])',
+    ) ?? []);
     return (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => { if (!open) composingRef.current = false; }}>
             <DropdownMenuTrigger asChild>
                 <FilterTrigger active={active} aria-label={ariaLabel} menu>
                     <span>{label}</span>
@@ -82,11 +93,40 @@ export function MultiSelectFilter({
                     )}
                 </FilterTrigger>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-60 data-open:animate-none data-closed:animate-none">
+            <DropdownMenuContent ref={contentRef} align="start" className="w-60 data-open:animate-none data-closed:animate-none"
+                onFocusCapture={(event) => {
+                    if (search && event.target === event.currentTarget) {
+                        queueMicrotask(() => inputRef.current?.focus());
+                    }
+                }}
+                onEscapeKeyDown={(event) => {
+                    if (search && (composingRef.current || event.isComposing || event.keyCode === 229)) event.preventDefault();
+                }}
+                onKeyDownCapture={(event) => {
+                    if (!search || event.target === inputRef.current) return;
+                    if (event.key === 'Tab' || (event.key === 'ArrowUp' && event.target === menuItems()[0])) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        inputRef.current?.focus();
+                    }
+                }}>
+
                 <DropdownMenuLabel>{label}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {search ? <Input ref={inputRef} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} value={search.value} aria-label={label} placeholder={label} className="mb-2" onChange={(event) => search.onChange(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Escape') return;
+                        event.stopPropagation();
+                        if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+                        if (['ArrowDown', 'ArrowUp', 'Tab'].includes(event.key)) {
+                            event.preventDefault();
+                            const items = menuItems();
+                            const backwards = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey);
+                            (backwards ? items.at(-1) : items[0])?.focus();
+                        } else if (event.key === 'Enter') event.preventDefault();
+                    }} /> : null}
                 <div className={cn(scroll && "max-h-72 overflow-y-auto")}>
-                    {options.map((opt) => {
+                    {options.filter((opt) => !search || selected.has(opt.value) || search.state.accepts({ id: opt.value })).map((opt) => {
                         const checked = selected.has(opt.value);
                         const count = countOf(opt.value, counts, opt.total);
                         const text = opt.label ?? opt.value;
@@ -96,7 +136,7 @@ export function MultiSelectFilter({
                                 checked={checked}
                                 onSelect={(e) => {
                                     e.preventDefault();
-                                    onToggle(opt.value);
+                                    if (!search || selected.has(opt.value) || search.state.accepts({ id: opt.value })) onToggle(opt.value);
                                 }}
                             >
                                 <span className={cn("flex flex-1 items-center justify-between gap-2", capitalize && "capitalize")}>

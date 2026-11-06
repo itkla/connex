@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.InviteDomainNotAllowedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -303,7 +304,7 @@ public class InviteService {
     private int requireOrgDomainAllowed(int workspaceId, String email) {
         int orgId = workspaceService.getOrgId(workspaceId);
         if (!orgAllowedDomainService.isJoinAllowed(orgId, email)) {
-            throw new ForbiddenException("This organization only allows members from approved email domains");
+            throw new InviteDomainNotAllowedException("This organization only allows members from approved email domains");
         }
         return orgId;
     }

@@ -19,11 +19,12 @@ import common from "@/messages/en/common.json";
 
 const noop = vi.hoisted(() => () => undefined);
 const permissions = vi.hoisted(() => new Set(["MEMBER_MANAGE", "ROLE_MANAGE"]));
+const managementAccess = vi.hoisted(() => ({ allowed: true }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: noop, push: noop, replace: noop }) }));
 vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({
     activeWorkspaceId: 9, activeWorkspace: { id: 9, name: "Invite team", role: "owner" },
 }) }));
-vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => true, useGrantedPermissions: () => permissions }));
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => managementAccess.allowed, useGrantedPermissions: () => permissions }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => noop }));
 vi.mock("@/app/hooks/usePasskeyStepUpError", () => ({ usePasskeyStepUpErrorHandler: () => () => false }));
 vi.mock("@/app/lib/toast", () => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
@@ -80,6 +81,7 @@ const pending: WorkspaceInvite = {
 beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     vi.clearAllMocks();
+    managementAccess.allowed = true;
     clipboard.mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboard } });
     host = document.createElement("div");
@@ -126,6 +128,25 @@ async function submitInvitation(email = pending.email) {
 }
 
 describe("invitation disclosure in the member-management panel", () => {
+    it.each(["en", "ja"] as const)("preserves localized built-in role labels for readers in %s", async (language) => {
+        managementAccess.allowed = false;
+        const catalog = language === "en" ? english : japanese;
+        const roles = ["owner", "admin", "member"] as const;
+        vi.mocked(getWorkspaceMembers).mockResolvedValue(roles.map((role, index) => ({
+            id: index + 1, username: `teammate_${index}`, displayName: `Teammate ${index}`,
+            email: `teammate_${index}@example.test`, role, builtInRole: role, status: "active",
+        })));
+
+        await render(language);
+
+        for (const [index, role] of roles.entries()) {
+            const row = [...host.querySelectorAll("li")].find((item) => item.textContent?.includes(`Teammate ${index}`));
+            const labels = [...(row?.querySelectorAll('[data-slot="badge"]') ?? [])].map((badge) => badge.textContent);
+            expect(labels).toContain(catalog.WorkspaceRoles.builtInRoles[role].name);
+        }
+        expect(host.querySelector("form")).toBeNull();
+    });
+
     it.each(["en", "ja"] as const)("adds an address-only invite without changing the member count in %s", async (language) => {
         const copy = (language === "en" ? english : japanese).WorkspaceMembers;
         await render(language);

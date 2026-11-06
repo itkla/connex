@@ -7,10 +7,16 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.SuppressionEntry;
 import ooo.klae.connex.backend.dto.ChannelAddressRef;
 import ooo.klae.connex.backend.dto.SuppressionChannelStateRow;
+import ooo.klae.connex.backend.dto.ContactSuppressionDto;
 
 /** Data access for workspace-owned suppression entries. */
 public interface SuppressionMapper {
     List<SuppressionEntry> getAll(@Param("workspaceId") int workspaceId);
+
+    /** At most 51 contact/address matches, including one look-ahead row for the bounded cursor. */
+    List<ContactSuppressionDto> findForPerson(
+            @Param("workspaceId") int workspaceId, @Param("personId") int personId,
+            @Param("addresses") List<ChannelAddressRef> addresses, @Param("afterId") int afterId);
 
     /**
      * The channel/reason pairs one contact is suppressed under, matched both by the contact link and

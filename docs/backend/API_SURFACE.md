@@ -77,41 +77,18 @@ non-CORS requests. This is not an end-to-end token, tenant-interceptor, provider
 SSO ceremony test. `/api/v1` and framework protocol routes retain their dedicated tests and are not
 counted by this sentinel test. No alternate port, proxy deployment, or production traffic is tested.
 
-## Invitation and registration outcomes
+## My Work supporting reads
 
-Workspace invitation creation returns `{invite, emailDelivery}` for every recipient address.
-`emailDelivery` is `ACCEPTED` only after SMTP accepts submission, `SKIPPED` when no usable sender
-is available, and `FAILED` when preparation/submission fails. Submission does not prove mailbox
-delivery. The command rejects an enclosing transaction before invitation writes, commits its own
-invitation transaction, and submits mail synchronously after transaction cleanup. No in-memory
-queue is used; an unsuccessful submission is visible alongside the recoverable invitation link.
-The response and sending path never depend on whether the recipient has a Connex account;
-pending profiles stay withheld.
+Authenticated `GET /api/my-work/history`, `/pulse`, `/relationships`, `/deal-kpis`, and `/risks`
+resolve the caller and active workspace in `MyWorkReadService`. No user id, member selection, or
+workspace query parameter changes that scope. These are personal projections, separate from the
+administrator-only member-scoping controls on the Analytics endpoints. `deal-kpis` accepts a
+currency from the caller's own currency buckets and otherwise selects the most common currency
+(alphabetical tie-break, USD when empty). It delegates to the existing calendar-window KPI service
+for the latest 90 workspace-local dates and ISO-week trends, preserving all previous-period and
+currency boundaries. Supporting-query failures propagate to the section boundary.
 
-OAuth2 enterprise/social and SAML start endpoints accept an optional `redirect` query parameter
-only for enabled registrations/ceremonies. Destination-setting starts require browser Fetch
-Metadata exactly `Sec-Fetch-Site: same-origin`; missing/cross-site metadata returns 403 without
-changing authentication attempt state. The saved complete authorization request and normalized
-relative destination are bound to that attempt's OAuth state or SAML RelayState, registration,
-and (for SAML) AuthnRequest id. A later start creates fresh state or is refused; it never replaces
-a live attempt's destination. Callback handlers use only navigation published by matching saved
-request removal, including linking and failure continuations across session replacement.
-Absolute URLs, controls, backslashes and encoded separators/controls remain refused under the
-shared frontend/backend validation vectors. There is no singleton last-destination fallback.
-Every attempt allocation refuses cross-site subresources unless metadata identifies a top-level
-navigation (`navigate` mode and `document` destination). This includes every supported start
-method and SAML's query-form start. Ordinary headerless and cross-site top-level starts still
-work without destinations; destination-bearing starts retain the stricter same-origin rule.
-Attempts have a ten-minute lifetime and share one immutable session map of at most four entries.
-Saves prune expired entries and evict the earliest expiry to admit a fresh identity at capacity;
-duplicate live identities remain refused. Concurrent session snapshots may drop another attempt,
-whose callback fails closed without aliasing authorization or destinations. The previous
-per-attempt session attributes are ignored.
-
-Self-service registration accepts an optional `skipInitialWorkspace` boolean, defaulting to false.
-It suppresses only the optional personal workspace, so invitation entry can continue without
-creating an unrelated workspace. It grants no membership, bypasses no signup or email-verification
-checks, and has no effect on administrator-created accounts.
+See [the My Work presentation and bounds contract](../frontend/PRODUCT_GRAMMAR.md#my-work).
 
 ## Note link updates
 

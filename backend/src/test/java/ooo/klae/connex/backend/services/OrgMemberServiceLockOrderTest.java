@@ -262,6 +262,7 @@ class OrgMemberServiceLockOrderTest {
                 () -> service.setMember(7, 9, 1, "admin"));
 
         assertEquals(NOT_A_TENANT, refused.getMessage());
+        assertEquals("ORG_MEMBER_ELIGIBILITY_REQUIRED", refused.getCode());
         verifyNoInteractions(registrationVerificationService, auditService);
         verify(orgMemberMapper, never()).addMemberClearingFounder(7, 1, "admin");
     }
@@ -278,6 +279,7 @@ class OrgMemberServiceLockOrderTest {
                 () -> service.setMember(7, 9, 1, "admin"));
 
         assertEquals(NOT_A_TENANT, refused.getMessage());
+        assertEquals("ORG_MEMBER_ELIGIBILITY_REQUIRED", refused.getCode());
         verify(orgMemberMapper).isEligibleForMembership(7, 1);
         verify(userMapper, never()).lockByIdForShare(anyInt());
         verifyNoInteractions(organizationMapper, auditService);
@@ -302,6 +304,7 @@ class OrgMemberServiceLockOrderTest {
                 () -> service.setMemberByEmail(7, 9, "Someone@Example.com ", "admin"));
 
         assertEquals(NOT_A_TENANT, ineligible.getMessage());
+        assertEquals("ORG_MEMBER_ELIGIBILITY_REQUIRED", ineligible.getCode());
         verify(orgMemberMapper).findEligibleUserIdByEmail(7, "someone@example.com");
         verify(userMapper, never()).getUserByEmail(any());
         verify(userMapper, never()).lockByIdForShare(anyInt());

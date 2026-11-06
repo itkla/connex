@@ -1,16 +1,13 @@
 package ooo.klae.connex.backend.dto;
 
-import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** Requested processing and third-party-provision restrictions for a contact. */
+/** Only supplied flags change; omitted or null flags preserve the locked current restriction. */
 @Data
 @NoArgsConstructor
 public class PersonRestrictionsDto {
-    @NotNull
     private Boolean suspended;
 
-    @NotNull
     private Boolean provisionCeased;
 }
