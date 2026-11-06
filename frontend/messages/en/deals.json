@@ -628,8 +628,8 @@
         "cancel": "Cancel",
         "saved": "Stakeholder saved",
         "removed": "Stakeholder removed",
-        "saveFailed": "Couldn’t save the stakeholder. Your input is kept; try again.",
-        "removeFailed": "Couldn’t remove the stakeholder. Try again.",
+        "saveFailed": "Couldn't save the stakeholder",
+        "removeFailed": "Couldn't remove the stakeholder",
         "searchFailed": "Couldn’t load contacts. Search again to retry.",
         "warmthUnavailable": "Warmth unavailable",
         "contactRequired": "Choose a contact to add."

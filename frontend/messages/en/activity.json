@@ -584,7 +584,7 @@
     "removeFor": "Remove tag from {name}",
     "added": "Tag added",
     "removed": "Tag removed",
-    "changeFailed": "Couldn’t change the tag. Try again.",
+    "changeFailed": "Couldn't change the tag",
     "searchFailed": "Couldn’t load search results. Search again to retry."
   }
 }

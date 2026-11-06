@@ -5,16 +5,36 @@ import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const scopedComponents = [
+    "app/components/library/tags/TagMembersSheet.tsx",
     "app/components/records/companies/CompaniesBrowser.tsx",
     "app/components/records/companies/EditCompanySheet.tsx",
     "app/components/records/contacts/ChangeCompanyDialog.tsx",
     "app/components/records/contacts/ContactCard.tsx",
     "app/components/records/deals/DealsBrowser.tsx",
     "app/components/records/deals/EditDealSheet.tsx",
+    "app/components/records/deals/DealStakeholders.tsx",
     "app/components/records/pipelines/EditPipelineSheet.tsx",
 ] as const;
 
 const fallbackTitles = [
+    {
+        catalog: "activity",
+        key: "TagMembers.changeFailed",
+        en: "Couldn't change the tag",
+        ja: "タグを変更できませんでした",
+    },
+    {
+        catalog: "deals",
+        key: "DealStakeholders.saveFailed",
+        en: "Couldn't save the stakeholder",
+        ja: "関係者を保存できませんでした",
+    },
+    {
+        catalog: "deals",
+        key: "DealStakeholders.removeFailed",
+        en: "Couldn't remove the stakeholder",
+        ja: "関係者を解除できませんでした",
+    },
     {
         catalog: "companies",
         key: "CompaniesBrowser.toastSelectAllFailed",
@@ -185,7 +205,7 @@ describe("API error fallback titles", () => {
         const approved = fallbackTitles.map(({ key }) => key).sort();
         const derived = scopedComponents.flatMap(fallbackKeysFor).sort();
 
-        expect(fallbackTitles).toHaveLength(15);
+        expect(fallbackTitles).toHaveLength(18);
         expect(approved).toEqual([...new Set(approved)]);
         expect(derived).toEqual(approved);
     });
