@@ -154,6 +154,24 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     @Test
+    void legacyClaimPinsVersionOnlyWhenTheExecutedRuleStillMatchesTheLockedPublication() {
+        Rule fetched = rule();
+        fetched.setActionsJson("old actions");
+        when(workflowMapper.getByLegacyRuleIdForUpdate(7, 13)).thenReturn(workflow("legacy"));
+        when(ruleMapper.getById(7, 13)).thenReturn(fetched);
+        var current = service.claimLegacyEntity(fetched, entityTrigger(), dispatch);
+        assertTrue(current.started());
+        assertTrue(current.execution().getDetail().contains("19"));
+
+        Rule republished = rule();
+        republished.setActionsJson("new actions");
+        when(ruleMapper.getById(7, 13)).thenReturn(republished);
+        var stale = service.claimLegacyEntity(fetched, entityTrigger(), dispatch);
+        assertTrue(stale.started());
+        assertNull(stale.execution().getDetail());
+    }
+
+    @Test
     void unpairedLegacyRuleClaimsExactlyOnceAndDedupesRedelivery() {
         Rule rule = rule();
         RuleExecution persisted = new RuleExecution();

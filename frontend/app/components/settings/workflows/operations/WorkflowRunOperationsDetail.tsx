@@ -39,6 +39,7 @@ import type {
     WorkflowRunDetail,
 } from "@/app/lib/types";
 import { offeredWorkflowRetryStep } from "@/app/lib/workflowOperations";
+import WorkflowRunFailure from "@/app/components/settings/workflows/WorkflowRunFailure";
 import WorkflowRunReference from "@/app/components/settings/workflows/WorkflowRunReference";
 import {
     formatWorkflowRunDateTime,
@@ -225,6 +226,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                     <AlertDescription>{t("errors.mutationBody")}</AlertDescription>
                 </Alert>
             ) : null}
+            {run.failure ? <WorkflowRunFailure failure={run.failure} /> : null}
             <header className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0 space-y-2">

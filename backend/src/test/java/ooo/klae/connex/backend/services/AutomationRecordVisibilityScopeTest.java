@@ -218,8 +218,9 @@ class AutomationRecordVisibilityScopeTest {
         verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
     }
 
-    @Test
-    void legacyListenerDispatchReusesTheOperationScopeForEachStageChange() {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2})
+    void legacyListenerDispatchReusesTheOperationScopeForEachStageChange(int failingActions) {
         RuleMapper rules = mock(RuleMapper.class);
         UserMapper users = mock(UserMapper.class);
         WorkspaceService workspaces = mock(WorkspaceService.class);
@@ -248,6 +249,9 @@ class AutomationRecordVisibilityScopeTest {
                 assertTrue(tenantContext.isResolved());
                 assertEquals(AutomationScope.Origin.rule(23, 31, "user"), automationScope.origin());
                 actionScopes.add(scopes.getForWorkspace(7));
+                if (stageId - 99 < failingActions) {
+                    throw new IllegalStateException("secret=must-never-appear-in-history");
+                }
                 return null;
             });
         }
@@ -266,7 +270,17 @@ class AutomationRecordVisibilityScopeTest {
         assertSame(actionScopes.getFirst(), actionScopes.getLast());
         assertFalse(tenantContext.isResolved());
         assertNull(tenantContext.getCatalog());
-        verify(rules).updateExecution(7, 31, "matched", null);
+        if (failingActions == 0) {
+            verify(rules).updateExecution(7, 31, "matched", null);
+        } else {
+            var detail = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(rules).updateExecution(eq(7), eq(31), eq(failingActions == 2 ? "failed" : "partial"), detail.capture());
+            assertFalse(detail.getValue().contains("must-never-appear"));
+            var evidence = RuleExecutionEvidence.read(json, detail.getValue());
+            assertEquals(1, evidence.failure().actionNumber());
+            assertEquals("change_stage", evidence.failure().actionType());
+            assertEquals("execution_failed", evidence.failure().code());
+        }
         verify(dealService).changeStage(41, 99);
         verify(dealService).changeStage(41, 100);
         verify(workspaceMapper, times(1)).findOrganizationWorkspacesForShare(7);

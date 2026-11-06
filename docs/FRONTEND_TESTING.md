@@ -112,7 +112,32 @@ The phone project is deliberately **Chromium, not Mobile Safari**: CI installs a
 
 ## Running in Japanese
 
-Locale is **not a URL segment**. `i18n/request.ts` resolves it server-side from the `NEXT_LOCALE` cookie (`i18n/config.ts`). A user's `locale` database column does not by itself drive the UI: the only thing that copies it into the cookie is `PreferenceActionsBridge`, a client effect that deliberately does nothing when the context already carries an explicit preference. So a Japanese run sets the cookie itself:
+Locale is **not a URL segment**. `i18n/request.ts` honors an explicit next-intl locale first,
+then a supported `NEXT_LOCALE` cookie, then the signed-in profile language, then
+`Accept-Language`, and finally English. The profile and time zone share one cached request
+resolver; an absent, unsupported or failed profile preference falls through to browser matching.
+Requests without a session do not fetch a profile. Browser language matching accepts
+English/Japanese regional tags, uses positive quality weights in
+descending order, and preserves header order for ties. Unsupported ranges, wildcard ranges,
+zero-quality ranges and malformed entries are ignored. An absent or unsupported cookie does not
+prevent browser-language matching. Browser inference never writes a preference cookie.
+
+API requests use the same effective UI language through `app/lib/apiLocale.ts`: the browser reads
+the server-rendered `html[lang]`, and server fetches read next-intl's request locale. JSON, multipart,
+public-link, CSV, report and upload requests share this choice, including the locale in AI/request
+identity keys. Cookie changes take effect after the rendered language changes. Outside a rendered
+page or next-intl request context, the client retains the cookie/English fallback.
+
+The profile bootstrap explicitly carries the cookie/browser language available before the saved
+profile is known. Workspace-zone fallback honors an explicit cookie before the profile language. These
+preference reads bypass next-intl resolution to avoid recursively requesting their own unfinished
+configuration; later data requests use the resolved request language. Neither bootstrap adds a
+second profile lookup. `apiLocalePropagation.test.ts` exercises this loop with the real request
+configuration and API helpers, including workspace fallback and concurrent request isolation.
+
+The saved profile language applies to the first server render, including public routes without
+`PreferenceActionsBridge`. To pin a Japanese run regardless of its saved profile or browser
+language, set the cookie itself:
 
 ```ts
 import { useLocale } from "./support/locale";
@@ -124,6 +149,18 @@ await expect(page.getByRole("heading", { name: message("ja", "auth", "AuthLogin.
 ```
 
 `useLocale(target, locale)` accepts a `Page` or a `BrowserContext`. `message(locale, namespace, key)` reads `messages/<locale>/<namespace>.json`, so assertions track the shipped catalogue instead of a literal that keeps passing after the copy changes.
+
+`public-entry-locale.spec.ts` instead starts with empty storage and a Japanese browser locale.
+It covers sign-in, registration, recovery, email/passkey confirmation, signed-out invitation
+redirects and unsubscribe entry on desktop and phone, plus explicit-cookie precedence,
+authenticated English profiles with Japanese browsers, and unsupported-browser fallback.
+The public-page cases also compare API `Accept-Language` with the rendered language for saved
+English/Japanese profiles, explicit cookies and signed-out browser inference.
+`publicEntryLocaleMessages.test.ts` checks the spec's literal and table-driven catalogue/key
+references in both languages before browser execution, including invitation copy in `workspace.json`.
+`i18nRequest.test.ts` checks locale precedence, profile-read failure and a single shared profile
+read for language and time zone. Document acceptance retains its separate document-locale contract
+in [ESIGNATURE.md](ESIGNATURE.md).
 
 ## Seeded identities (deterministic volume seeder)
 

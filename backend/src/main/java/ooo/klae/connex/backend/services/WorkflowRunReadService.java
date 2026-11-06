@@ -189,7 +189,7 @@ public class WorkflowRunReadService {
             "legacy",
             status,
             execution.getStatus(),
-            null,
+            legacyVersion(execution),
             new WorkflowRunSummaryDto.Trigger(
                 null,
                 null,
@@ -199,7 +199,7 @@ public class WorkflowRunReadService {
             executedAt,
             "running".equals(status) ? null : executedAt,
             "running".equals(status) ? null : 0L,
-            legacyFailure(execution.getStatus()),
+            legacyFailure(execution),
             false);
     }
 
@@ -288,7 +288,7 @@ public class WorkflowRunReadService {
             executedAt,
             "running".equals(status) ? null : executedAt,
             "running".equals(status) ? null : 0L,
-            legacyFailure(execution.getStatus()),
+            legacyFailure(execution),
             false,
             List.of());
     }
@@ -318,17 +318,55 @@ public class WorkflowRunReadService {
             ? null : new WorkflowRunSummaryDto.Failure(nodeId, code, message);
     }
 
-    private static WorkflowRunSummaryDto.Failure legacyFailure(String legacyStatus) {
-        String normalized = normalizeLegacyStatus(legacyStatus);
+    private WorkflowRunSummaryDto.Version legacyVersion(RuleExecution execution) {
+        Long versionId = RuleExecutionEvidence.read(objectMapper, execution.getDetail()).workflowVersionId();
+        if (versionId == null) {
+            return null;
+        }
+        Workflow workflow = workflowMapper.getByLegacyRuleId(execution.getWorkspaceId(), execution.getRuleId());
+        if (workflow == null) {
+            return null;
+        }
+        WorkflowVersion version = workflowVersionMapper.getById(
+            execution.getWorkspaceId(), workflow.getId(), versionId);
+        return version == null || version.getDefinitionHash() == null ? null
+            : new WorkflowRunSummaryDto.Version(version.getId(), version.getVersionNumber(),
+                HexFormat.of().formatHex(version.getDefinitionHash()), version.getPublishedAt());
+    }
+
+    private WorkflowRunSummaryDto.Failure legacyFailure(RuleExecution execution) {
+        String normalized = normalizeLegacyStatus(execution.getStatus());
         if (!"failed".equals(normalized) && !"partial".equals(normalized)) {
             return null;
         }
-        String code = "partial".equals(normalize(legacyStatus))
-            ? "legacy_partial" : "legacy_failed";
-        String message = "partial".equals(normalize(legacyStatus))
-            ? "Legacy execution completed only some actions; per-step diagnostics are unavailable."
-            : "Legacy execution failed; per-step diagnostics are unavailable.";
-        return new WorkflowRunSummaryDto.Failure(null, code, message);
+        RuleExecutionEvidence.ActionFailure action =
+            RuleExecutionEvidence.read(objectMapper, execution.getDetail()).failure();
+        if (action != null) {
+            return new WorkflowRunSummaryDto.Failure(null, action.code(),
+                "A workflow action could not finish.", action.actionNumber(), action.actionType());
+        }
+        if (execution.getDetail() == null) {
+            return summaryOnlyFailure(normalized);
+        }
+        try {
+            var detail = objectMapper.readTree(execution.getDetail());
+            if (detail == null || !detail.isObject()) {
+                return summaryOnlyFailure(normalized);
+            }
+            String code = detail.path("code").asText("");
+            if (RuleExecutionEvidence.safeCode(code)) {
+                return new WorkflowRunSummaryDto.Failure(null, code, "The workflow could not finish.");
+            }
+        } catch (RuntimeException exception) {
+            return summaryOnlyFailure(normalized);
+        }
+        return summaryOnlyFailure(normalized);
+    }
+
+    private static WorkflowRunSummaryDto.Failure summaryOnlyFailure(String status) {
+        return new WorkflowRunSummaryDto.Failure(null,
+            "partial".equals(status) ? "legacy_partial" : "legacy_failed",
+            "Detailed failure evidence was not recorded for this run.");
     }
 
     static String normalizeLegacyStatus(String legacyStatus) {
