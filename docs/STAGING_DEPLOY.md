@@ -45,6 +45,15 @@ deployed by logic loaded from the older commit. The candidate
    are checked by `frontend/ci/verify_build_chunks.mjs`, and the backend gets `clean bootJar` with
    the target sha stamped into `build-info.properties`. A failed build cannot mutate a running
    component or its checkout.
+
+   Only the staging `pnpm build` call sets `CONNEX_DISABLE_TURBOPACK_BUILD_CACHE=1` and
+   `CONNEX_SKIP_BUILD_TYPECHECK=1`, for both target builds and previous-runtime rebuilds. The first
+   disables Turbopack's build filesystem cache: every build uses a fresh scratch tree that is
+   deleted afterwards, so the cache would never be read. The second skips the memory-intensive
+   build-time TypeScript check, which required CI already performs before a PR can merge to main.
+   A type error that reaches main through a merge would therefore not block the staging build;
+   CI on main still reports it. Both opt-outs require the exact value `1`; absent or other values
+   preserve the existing cache and type-check behavior for CI, Docker, and local builds.
 3. **Seals one complete release pair.** Each release lives at
    `.staging/releases/<sha>/` with `backend.jar`, a complete Next standalone `frontend/` runtime
    (traced dependencies, server, static output, and `public`), and `manifest.tsv`. Verification

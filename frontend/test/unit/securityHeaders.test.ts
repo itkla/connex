@@ -1,7 +1,7 @@
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import { NextRequest } from "next/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import nextConfig from "@/next.config";
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
@@ -73,6 +73,74 @@ function reportOnlyPolicy(path = "/auth/login"): { response: Response; policy: s
 
 afterEach(() => {
     vi.unstubAllEnvs();
+});
+
+describe("staging build opt-outs", () => {
+    beforeEach(() => {
+        vi.resetModules();
+        vi.stubEnv("NODE_ENV", "production");
+        vi.stubEnv("CONNEX_DISABLE_TURBOPACK_BUILD_CACHE", undefined);
+        vi.stubEnv("CONNEX_SKIP_BUILD_TYPECHECK", undefined);
+    });
+
+    it.each([undefined, "", "0", "true", "01", " 1", "1 "])(
+        "preserves build defaults when opt-outs are %s",
+        async (value) => {
+            vi.stubEnv("CONNEX_DISABLE_TURBOPACK_BUILD_CACHE", value);
+            vi.stubEnv("CONNEX_SKIP_BUILD_TYPECHECK", value);
+
+            const { default: config } = await import("@/next.config");
+
+            expect(config.experimental?.turbopackFileSystemCacheForBuild).toBeUndefined();
+            expect(config.experimental?.proxyClientMaxBodySize).toBeUndefined();
+            expect(config.typescript?.ignoreBuildErrors).toBeUndefined();
+        },
+    );
+
+    it("disables only the build cache when explicitly requested", async () => {
+        vi.stubEnv("CONNEX_DISABLE_TURBOPACK_BUILD_CACHE", "1");
+
+        const { default: config } = await import("@/next.config");
+
+        expect(config.experimental?.turbopackFileSystemCacheForBuild).toBe(false);
+        expect(config.experimental?.turbopackFileSystemCacheForDev).toBeUndefined();
+        expect(config.experimental?.proxyClientMaxBodySize).toBeUndefined();
+        expect(config.typescript?.ignoreBuildErrors).toBeUndefined();
+    });
+
+    it("skips only the build type check when explicitly requested", async () => {
+        vi.stubEnv("CONNEX_SKIP_BUILD_TYPECHECK", "1");
+
+        const { default: config } = await import("@/next.config");
+
+        expect(config.typescript?.ignoreBuildErrors).toBe(true);
+        expect(config.experimental?.turbopackFileSystemCacheForBuild).toBeUndefined();
+        expect(config.experimental?.proxyClientMaxBodySize).toBeUndefined();
+    });
+
+    it.each(["production", "development"])("combines both opt-outs in %s", async (nodeEnv) => {
+        vi.stubEnv("NODE_ENV", nodeEnv);
+        vi.stubEnv("CONNEX_DISABLE_TURBOPACK_BUILD_CACHE", "1");
+        vi.stubEnv("CONNEX_SKIP_BUILD_TYPECHECK", "1");
+
+        const { default: config } = await import("@/next.config");
+
+        expect(config.experimental?.turbopackFileSystemCacheForBuild).toBe(false);
+        expect(config.typescript?.ignoreBuildErrors).toBe(true);
+        expect(config.experimental?.proxyClientMaxBodySize).toBe(
+            nodeEnv === "development" ? 67_108_864 : undefined,
+        );
+    });
+
+    it("preserves development proxy buffering without opt-outs", async () => {
+        vi.stubEnv("NODE_ENV", "development");
+
+        const { default: config } = await import("@/next.config");
+
+        expect(config.experimental?.proxyClientMaxBodySize).toBe(67_108_864);
+        expect(config.experimental?.turbopackFileSystemCacheForBuild).toBeUndefined();
+        expect(config.typescript?.ignoreBuildErrors).toBeUndefined();
+    });
 });
 
 describe("frontend security headers", () => {
