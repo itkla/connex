@@ -1348,6 +1348,8 @@ case_isolated_frontend_build_preserves_working_directory() (
     printf '%s\n' \
         '#!/bin/bash' \
         'if [ "${1:-}" = "build" ]; then' \
+        '    [ "${CONNEX_DISABLE_TURBOPACK_BUILD_CACHE:-}" = "1" ] || exit 1' \
+        '    [ "${CONNEX_SKIP_BUILD_TYPECHECK:-}" = "1" ] || exit 1' \
         '    mkdir -p "$NEXT_DIST_DIR/standalone" "$NEXT_DIST_DIR/static"' \
         '    printf "server\\n" > "$NEXT_DIST_DIR/standalone/server.js"' \
         '    printf "asset\\n" > "$NEXT_DIST_DIR/static/app.js"' \
@@ -1409,6 +1411,8 @@ case_first_transactional_run_preserves_live_legacy_trees() (
     {
         printf '#!/bin/bash\n'
         printf 'if [ "${1:-}" = "build" ]; then\n'
+        printf '    [ "${CONNEX_DISABLE_TURBOPACK_BUILD_CACHE:-}" = "1" ] || exit 1\n'
+        printf '    [ "${CONNEX_SKIP_BUILD_TYPECHECK:-}" = "1" ] || exit 1\n'
         printf '    mkdir -p "$NEXT_DIST_DIR/standalone/$NEXT_DIST_DIR/server" "$NEXT_DIST_DIR/static"\n'
         printf '    printf "server\\n" > "$NEXT_DIST_DIR/standalone/server.js"\n'
         printf '    printf "route\\n" > "$NEXT_DIST_DIR/standalone/$NEXT_DIST_DIR/server/app.js"\n'

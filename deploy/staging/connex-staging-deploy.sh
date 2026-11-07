@@ -570,7 +570,9 @@ build_frontend_runtime_from_source() (
         || ! "$PNPM" install --frozen-lockfile --silent; then
         return 1
     fi
-    NEXT_DIST_DIR="$dist_name" "$PNPM" build || build_status=$?
+    # Fresh scratch builds never read the cache; required CI on main owns type checking.
+    NEXT_DIST_DIR="$dist_name" CONNEX_DISABLE_TURBOPACK_BUILD_CACHE=1 CONNEX_SKIP_BUILD_TYPECHECK=1 \
+        "$PNPM" build || build_status=$?
     if ! cp -f "$original_tsconfig" "$frontend_root/tsconfig.json" \
         || ! cmp -s "$original_tsconfig" "$frontend_root/tsconfig.json"; then
         restore_status=1
