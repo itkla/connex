@@ -1,16 +1,13 @@
 package ooo.klae.connex.backend.connectedaccounts.nativeflow;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NativeConnectSession;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountIdentityResolver.ProviderAccountIdentity;
@@ -24,21 +21,38 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 
 /** Transactional state transitions for managed native authorization sessions. */
 @Component
-@RequiredArgsConstructor
 public class NativeConnectSessionPersistence {
-    private static final Set<String> ACTIVE_STATUSES =
-        Set.of("pending", "prepared", "exchanging");
+    private static final Set<String> CANCELLABLE_STATUSES = Set.of("pending", "prepared");
 
     private final NativeConnectSessionMapper sessionMapper;
     private final UserMapper userMapper;
     private final NativeConnectPkceSecretCipher pkceSecretCipher;
     private final ProviderCredentialPersistence credentialPersistence;
-    private final Clock clock;
+    private final int exchangeLeaseSeconds;
+
+    /** Configures a bounded exchange lease measured from the database claim time. */
+    public NativeConnectSessionPersistence(
+            NativeConnectSessionMapper sessionMapper,
+            UserMapper userMapper,
+            NativeConnectPkceSecretCipher pkceSecretCipher,
+            ProviderCredentialPersistence credentialPersistence,
+            @Value("${connex.connected-accounts.native.exchange-lease-seconds:120}")
+                int exchangeLeaseSeconds) {
+        if (exchangeLeaseSeconds < 1 || exchangeLeaseSeconds > 600) {
+            throw new IllegalArgumentException("Native exchange lease must be between 1 and 600 seconds");
+        }
+        this.sessionMapper = sessionMapper;
+        this.userMapper = userMapper;
+        this.pkceSecretCipher = pkceSecretCipher;
+        this.credentialPersistence = credentialPersistence;
+        this.exchangeLeaseSeconds = exchangeLeaseSeconds;
+    }
 
     /**
-     * Supersedes the user's active provider session and inserts a fresh pending session. Terminal
+     * Supersedes the user's unclaimed provider session and inserts a fresh pending session. In-flight
+     * exchanges retain their lease and verifier until completion, failure, or scheduled recovery. Terminal
      * sessions for the same user and provider are reclaimed here rather than waiting for the
-     * scheduled cleanup, so repeated pairing attempts cannot grow the control plane without bound.
+     * scheduled cleanup. Abandoned exchanges are recovered by that bounded cleanup sweep.
      */
     @Transactional
     public boolean create(
@@ -53,7 +67,7 @@ public class NativeConnectSessionPersistence {
             sessionMapper.getLatestByUserAndProviderForUpdate(userId, provider);
         boolean superseded = sessionMapper.failActiveForUserAndProvider(
             userId, provider, "superseded") > 0;
-        if (previous != null && ACTIVE_STATUSES.contains(previous.getStatus())) {
+        if (superseded && previous != null && CANCELLABLE_STATUSES.contains(previous.getStatus())) {
             deleteVerifier(previous);
         }
         for (NativeConnectSession terminal
@@ -85,20 +99,20 @@ public class NativeConnectSessionPersistence {
         requireReadableUser(userId);
         NativeConnectSession session =
             sessionMapper.getLatestByUserAndProvider(userId, provider);
-        if (session != null && ACTIVE_STATUSES.contains(session.getStatus()) && expired(session)) {
+        if (session != null && CANCELLABLE_STATUSES.contains(session.getStatus()) && session.isExpired()) {
             session.setStatus("failed");
             session.setErrorCode("expired");
         }
         return session;
     }
 
-    /** Cancels only the current user's active provider session. */
+    /** Cancels only the current user's provider session before exchange has been claimed. */
     @Transactional
     public boolean cancel(int userId, String provider) {
         requireUser(userId);
         NativeConnectSession session =
             sessionMapper.getLatestByUserAndProviderForUpdate(userId, provider);
-        if (session == null || !ACTIVE_STATUSES.contains(session.getStatus())) {
+        if (session == null || !CANCELLABLE_STATUSES.contains(session.getStatus())) {
             return false;
         }
         if (sessionMapper.fail(session.getId(), session.getStatus(), "cancelled") != 1) {
@@ -145,6 +159,7 @@ public class NativeConnectSessionPersistence {
             verifierRef,
             redirectUri);
         if (updated != 1) {
+            requirePendingPairing(sessionMapper.getByPairingCodeHashForUpdate(pairingCodeHash));
             throw new NativeConnectException(
                 "pairing_already_claimed", "Pairing code has already been claimed");
         }
@@ -170,6 +185,7 @@ public class NativeConnectSessionPersistence {
             sessionMapper.getByHandoffTicketHashForUpdate(handoffTicketHash);
         requirePreparedHandoff(session);
         if (sessionMapper.claimForExchange(session.getId(), handoffTicketHash) != 1) {
+            requirePreparedHandoff(sessionMapper.getByHandoffTicketHashForUpdate(handoffTicketHash));
             throw new NativeConnectException(
                 "handoff_already_used", "Handoff ticket has already been used");
         }
@@ -206,20 +222,42 @@ public class NativeConnectSessionPersistence {
             identity.accountId(),
             identity.email(),
             grantedScopes);
-        if (sessionMapper.complete(session.getId()) != 1) {
+        if (sessionMapper.complete(session.getId(), exchangeLeaseSeconds) != 1) {
             throw new ConflictException("Native authorization session is no longer exchangeable");
         }
         deleteVerifier(session);
         return created;
     }
 
-    /** Fails an exchange claim and destroys its retained verifier. */
+    /** Fails an exchange claim and destroys its retained verifier only when this transition wins. */
     @Transactional
-    public void failExchange(NativeConnectSession session, String errorCode) {
+    public boolean failExchange(NativeConnectSession session, String errorCode) {
         requireUser(session.getUserId());
         if (sessionMapper.fail(session.getId(), "exchanging", errorCode) == 1) {
             deleteVerifier(session);
+            return true;
         }
+        return false;
+    }
+
+    /** Finds every abandoned exchange, including sessions older than the user's latest pairing. */
+    public List<NativeConnectSession> findExpiredExchanges(int limit) {
+        return sessionMapper.findExpiredExchanges(exchangeLeaseSeconds, limit);
+    }
+
+    /** Recovers one expired exchange under the user root before the exact session lock. */
+    @Transactional
+    public boolean failExpiredExchange(int sessionId, int userId) {
+        if (userMapper.lockByIdForShare(userId) == null) {
+            return false;
+        }
+        NativeConnectSession session = sessionMapper.getByIdForUpdate(sessionId);
+        if (session == null || session.getUserId() != userId
+                || sessionMapper.failExpiredExchange(sessionId, exchangeLeaseSeconds) != 1) {
+            return false;
+        }
+        deleteVerifier(session);
+        return true;
     }
 
     /** Finds a bounded batch of sessions beyond the expired-session retention grace. */
@@ -238,8 +276,11 @@ public class NativeConnectSessionPersistence {
         NativeConnectSession session = sessionMapper.getByIdForUpdate(sessionId);
         if (session == null
                 || session.getUserId() != userId
+                || "exchanging".equals(session.getStatus())
                 || session.getExpiresAt() == null
-                || session.getExpiresAt().isAfter(cutoff)) {
+                || session.getExpiresAt().isAfter(cutoff)
+                || session.getUpdatedAt() == null
+                || session.getUpdatedAt().isAfter(cutoff)) {
             return false;
         }
         deleteVerifier(session);
@@ -250,7 +291,7 @@ public class NativeConnectSessionPersistence {
         if (session == null) {
             throw invalidPairingCode();
         }
-        if ("expired".equals(session.getErrorCode())) {
+        if ("expired".equals(session.getErrorCode()) || session.isExpired()) {
             throw new NativeConnectException(
                 "pairing_expired", "Pairing code has expired");
         }
@@ -258,17 +299,13 @@ public class NativeConnectSessionPersistence {
             throw new NativeConnectException(
                 "pairing_already_claimed", "Pairing code has already been claimed");
         }
-        if (expired(session)) {
-            throw new NativeConnectException(
-                "pairing_expired", "Pairing code has expired");
-        }
     }
 
     private void requirePreparedHandoff(NativeConnectSession session) {
         if (session == null) {
             throw invalidHandoffTicket();
         }
-        if ("expired".equals(session.getErrorCode())) {
+        if ("expired".equals(session.getErrorCode()) || session.isExpired()) {
             throw new NativeConnectException(
                 "handoff_expired", "Handoff ticket has expired");
         }
@@ -276,16 +313,6 @@ public class NativeConnectSessionPersistence {
             throw new NativeConnectException(
                 "handoff_already_used", "Handoff ticket has already been used");
         }
-        if (expired(session)) {
-            throw new NativeConnectException(
-                "handoff_expired", "Handoff ticket has expired");
-        }
-    }
-
-    private boolean expired(NativeConnectSession session) {
-        return session.getExpiresAt() == null
-            || !session.getExpiresAt().isAfter(
-                LocalDateTime.ofInstant(Instant.now(clock), ZoneOffset.UTC));
     }
 
     private void requireUser(int userId) {

@@ -18,6 +18,8 @@ import static org.mockito.Mockito.when;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -25,6 +27,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +63,7 @@ import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProperties;
 import ooo.klae.connex.backend.connectedaccounts.ProviderConnectionService;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenClient;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenResponse;
+import ooo.klae.connex.backend.connectedaccounts.ProviderTokenException;
 import ooo.klae.connex.backend.connectedaccounts.UserProviderSecretCipher;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCaptureConnectionStateService;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -80,6 +88,7 @@ class NativeConnectServiceTest {
     @Autowired private NativeConnectSessionMapper nativeSessionMapper;
     @Autowired private NativeConnectPkceSecretCipher pkceSecretCipher;
     @Autowired private NativeConnectSessionCleanup nativeConnectSessionCleanup;
+    @Autowired private NativeConnectSessionPersistence sessionPersistence;
     @Autowired private ProviderConnectionMapper connectionMapper;
     @Autowired private UserProviderSecretCipher tokenCipher;
     @Autowired private UserMapper userMapper;
@@ -240,7 +249,8 @@ class NativeConnectServiceTest {
         assertNotNull(verifierRef);
         jdbcTemplate.update(
             "UPDATE provider_native_connect_session "
-                + "SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY) "
+                + "SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY), "
+                + "updated_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY) "
                 + "WHERE id = ?",
             session.getId());
 
@@ -251,6 +261,177 @@ class NativeConnectServiceTest {
         assertThrows(
             RuntimeException.class,
             () -> pkceSecretCipher.read(PROVIDER, firstUser.getId(), verifierRef));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"cancel", "supersede"})
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void inFlightCompletionSurvivesCancellationAndSupersession(String operation) {
+        NativePrepareResponse prepared = prepare(nativeConnectService.createPairing(PROVIDER));
+        byte[] handoffHash = NativeConnectPkce.hash(prepared.handoffTicket());
+        NativeConnectSession claimed = nativeSessionMapper.getByHandoffTicketHash(handoffHash);
+        when(tokenClient.exchange(anyString(), anyMap())).thenAnswer(invocation -> {
+            assertEquals("exchanging", nativeSessionMapper.getByHandoffTicketHash(handoffHash).getStatus());
+            jdbcTemplate.update("UPDATE provider_native_connect_session "
+                + "SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND), updated_at = updated_at "
+                + "WHERE id = ?", claimed.getId());
+            authenticate(firstUser);
+            assertEquals("exchanging", nativeConnectService.pairingStatus(PROVIDER).status());
+            if ("cancel".equals(operation)) {
+                nativeConnectService.cancelPairing(PROVIDER);
+            } else {
+                nativeConnectService.createPairing(PROVIDER);
+            }
+            assertEquals("exchanging", nativeSessionMapper.getByHandoffTicketHash(handoffHash).getStatus());
+            assertNotNull(pkceSecretCipher.read(PROVIDER, firstUser.getId(), claimed.getVerifierRef()));
+            clearAuthentication();
+            nativeConnectSessionCleanup.purgeExpired();
+            return tokenResponse("issuer", "subject", "inflight@example.test", "inflight-code");
+        });
+
+        assertEquals("connected", complete(prepared, "inflight-code",
+            queryParameter(prepared.authorizeUrl(), "state")).status());
+
+        assertEquals("completed", nativeSessionMapper.getByHandoffTicketHash(handoffHash).getStatus());
+        assertTrue(tokenCipher.decryptTokenBundle(PROVIDER, firstUser.getId(),
+            connection(firstUser).getCredentialRef()).contains("refresh-inflight-code"));
+        assertTerminalAuditCount(1);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void processLossIsRecoveredOnceByCompetingSweepsBeforeGraceDeletion() throws Exception {
+        NativePrepareResponse prepared = prepare(nativeConnectService.createPairing(PROVIDER));
+        byte[] handoffHash = NativeConnectPkce.hash(prepared.handoffTicket());
+        NativeConnectSession session = sessionPersistence.claimForExchange(handoffHash);
+        authenticate(firstUser);
+        nativeConnectService.createPairing(PROVIDER);
+        clearAuthentication();
+        jdbcTemplate.update("UPDATE provider_native_connect_session SET "
+            + "expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY), "
+            + "updated_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 3 MINUTE) WHERE id = ?", session.getId());
+
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Runnable sweep = () -> {
+                try {
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    nativeConnectSessionCleanup.purgeExpired();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+            };
+            Future<?> first = executor.submit(sweep);
+            Future<?> second = executor.submit(sweep);
+            start.countDown();
+            first.get(20, TimeUnit.SECONDS);
+            second.get(20, TimeUnit.SECONDS);
+        }
+        nativeConnectSessionCleanup.purgeExpired();
+
+        NativeConnectSession recovered = nativeSessionMapper.getByHandoffTicketHash(handoffHash);
+        assertNotNull(recovered);
+        assertEquals("failed", recovered.getStatus());
+        assertEquals("exchange_expired", recovered.getErrorCode());
+        assertFailureAudit(firstUser, null, "exchange_expired", 1);
+        assertTerminalAuditCount(1);
+        assertThrows(RuntimeException.class, () -> pkceSecretCipher.read(
+            PROVIDER, firstUser.getId(), session.getVerifierRef()));
+        verify(tokenClient, never()).exchange(anyString(), anyMap());
+
+        jdbcTemplate.update("UPDATE provider_native_connect_session "
+            + "SET updated_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY) WHERE id = ?", session.getId());
+        nativeConnectSessionCleanup.purgeExpired();
+        assertNull(nativeSessionMapper.getByHandoffTicketHash(handoffHash));
+        assertTerminalAuditCount(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void sweepWinsAgainstLateCompletionOrFailureWithoutAnotherAudit(boolean providerFails) {
+        NativePrepareResponse prepared = prepare(nativeConnectService.createPairing(PROVIDER));
+        NativeConnectSession session = latest(firstUser);
+        when(tokenClient.exchange(anyString(), anyMap())).thenAnswer(invocation -> {
+            jdbcTemplate.update("UPDATE provider_native_connect_session "
+                + "SET updated_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 3 MINUTE) WHERE id = ?", session.getId());
+            nativeConnectSessionCleanup.purgeExpired();
+            if (providerFails) {
+                throw new ProviderTokenException("exchange_failed", "Provider refused the exchange");
+            }
+            return tokenResponse("issuer", "subject", "late@example.test", "late-code");
+        });
+
+        NativeConnectException error = assertThrows(NativeConnectException.class, () -> complete(
+            prepared, "late-code", queryParameter(prepared.authorizeUrl(), "state")));
+
+        assertEquals(providerFails ? "exchange_failed" : "connection_conflict", error.getCode());
+        assertNull(connectionMapper.getByUserAndProvider(firstUser.getId(), PROVIDER));
+        assertEquals("failed", latest(firstUser).getStatus());
+        assertFailureAudit(firstUser, null, "exchange_expired", 1);
+        assertTerminalAuditCount(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void exactDatabaseExpiryWinsOverAnEarlierJvmClock(boolean handoff) {
+        NativePairingResponse pairing = nativeConnectService.createPairing(PROVIDER);
+        NativePrepareResponse prepared = handoff ? prepare(pairing) : null;
+        NativeConnectSession session = latest(firstUser);
+        jdbcTemplate.execute("SET timestamp = 1893456000.123456");
+        try {
+            jdbcTemplate.update("UPDATE provider_native_connect_session SET expires_at = UTC_TIMESTAMP(6) "
+                + "WHERE id = ?", session.getId());
+            LocalDateTime databaseNow = jdbcTemplate.queryForObject("SELECT UTC_TIMESTAMP(6)", LocalDateTime.class);
+            assertEquals(databaseNow, latest(firstUser).getExpiresAt());
+            assertTrue(databaseNow.isAfter(LocalDateTime.now(Clock.systemUTC())));
+            assertEquals(0, handoff
+                ? nativeSessionMapper.claimForExchange(session.getId(), NativeConnectPkce.hash(prepared.handoffTicket()))
+                : nativeSessionMapper.prepare(session.getId(), NativeConnectPkce.hash(pairing.pairingCode()),
+                    new byte[32], new byte[32], "unused", "http://127.0.0.1:49152/callback"));
+
+            NativeConnectException error = assertThrows(NativeConnectException.class, () -> {
+                if (handoff) {
+                    complete(prepared, "expired-code", queryParameter(prepared.authorizeUrl(), "state"));
+                } else {
+                    prepare(pairing);
+                }
+            });
+
+            assertEquals(handoff ? "handoff_expired" : "pairing_expired", error.getCode());
+            verify(tokenClient, never()).exchange(anyString(), anyMap());
+        } finally {
+            jdbcTemplate.execute("SET timestamp = DEFAULT");
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void expiredLeaseRefusesCompletionBeforeTheSweepRuns() {
+        NativePrepareResponse prepared = prepare(nativeConnectService.createPairing(PROVIDER));
+        NativeConnectSession session = latest(firstUser);
+        when(tokenClient.exchange(anyString(), anyMap())).thenAnswer(invocation -> {
+            jdbcTemplate.update("UPDATE provider_native_connect_session "
+                + "SET updated_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 3 MINUTE) WHERE id = ?", session.getId());
+            return tokenResponse("issuer", "subject", "expired-lease@example.test", "expired-lease-code");
+        });
+
+        NativeConnectException error = assertThrows(NativeConnectException.class, () -> complete(
+            prepared, "expired-lease-code", queryParameter(prepared.authorizeUrl(), "state")));
+
+        assertEquals("connection_conflict", error.getCode());
+        assertNull(connectionMapper.getByUserAndProvider(firstUser.getId(), PROVIDER));
+        assertEquals("failed", latest(firstUser).getStatus());
+        assertFailureAudit(firstUser, null, "connection_conflict", 1);
+        assertTerminalAuditCount(1);
+        verify(tokenClient).revoke("https://oauth2.googleapis.com/revoke", "refresh-expired-lease-code");
+    }
+
+    private void assertTerminalAuditCount(int expectedCount) {
+        assertEquals(expectedCount, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log "
+            + "WHERE action IN ('user.connection.connect', 'user.connection.connect_failed') "
+            + "AND entity_type = 'user' AND entity_id = ?", Integer.class, firstUser.getId()));
     }
 
     @Test

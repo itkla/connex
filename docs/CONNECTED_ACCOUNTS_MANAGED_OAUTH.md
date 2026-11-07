@@ -106,6 +106,19 @@ specific sentence: `managed_identity_unavailable`, `invalid_redirect_uri`, `stat
 `superseded`; anything else falls back to one honest "couldn't be completed" message rather than
 inventing a diagnosis.
 
+Before exchange starts, cancellation and a newer pairing invalidate the older pending or prepared
+attempt. Once exchange is claimed, it retains its verifier and may finish despite either action.
+The database claim time in `updated_at` starts a bounded lease, configured by
+`connex.connected-accounts.native.exchange-lease-seconds` (120 seconds by default, 1–600 allowed).
+Completion after the lease cannot persist a connection. The existing hourly native-session cleanup
+recovers up to 100 abandoned exchanges per pass as `failed`, with `exchange_expired`, before its
+grace deletion pass. It scans older attempts even when a newer pairing exists. Recovered rows retain
+terminal history for a day after recovery unless a new pairing reclaims them earlier. Each terminal
+transition has one winning audit emitter; these existing best-effort, postcommit audits do not
+provide crash-atomic delivery. Claims and expiry classification both use database UTC, including
+the exact expiry boundary. Status polling remains a read and waits for recovery to terminalize an
+abandoned exchange.
+
 ### Redirect URI validation
 
 `POST /prepare` accepts a redirect URI only when **every** one of these holds:
@@ -367,7 +380,7 @@ cannot finish.
 4. Enter the pairing code, verify that the printed Connex account label is your own account, and
    answer `y` or `yes`. Any other answer exits without opening the provider.
 5. Approve the consent screen the helper opens. The dialog polls every ~2 seconds and reports
-   completion; the code expires after 10 minutes and can be cancelled at any time.
+   completion; the code expires after 10 minutes and can be cancelled before exchange starts.
 
 The helper needs outbound access to the instance and to the provider, and permission to bind a
 loopback port. It is a plain script — read it before running it.

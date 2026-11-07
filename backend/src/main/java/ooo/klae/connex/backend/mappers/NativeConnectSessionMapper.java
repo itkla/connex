@@ -36,7 +36,10 @@ public interface NativeConnectSessionMapper {
     int claimForExchange(
         @Param("id") int id,
         @Param("handoffTicketHash") byte[] handoffTicketHash);
-    int complete(@Param("id") int id);
+    int complete(@Param("id") int id, @Param("leaseSeconds") int leaseSeconds);
+    List<NativeConnectSession> findExpiredExchanges(
+        @Param("leaseSeconds") int leaseSeconds, @Param("limit") int limit);
+    int failExpiredExchange(@Param("id") int id, @Param("leaseSeconds") int leaseSeconds);
     int fail(
         @Param("id") int id,
         @Param("expectedStatus") String expectedStatus,

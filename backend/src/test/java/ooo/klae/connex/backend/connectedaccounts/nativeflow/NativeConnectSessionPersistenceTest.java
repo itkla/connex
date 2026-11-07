@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.connectedaccounts.nativeflow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -12,7 +13,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -46,7 +46,7 @@ class NativeConnectSessionPersistenceTest {
             userMapper,
             pkceSecretCipher,
             mock(ProviderCredentialPersistence.class),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            120);
         when(userMapper.getUserById(USER_ID)).thenReturn(user());
     }
 
@@ -71,6 +71,7 @@ class NativeConnectSessionPersistenceTest {
         NativeConnectSession session = session(
             8, "prepared", LocalDateTime.ofInstant(NOW.minusSeconds(1), ZoneOffset.UTC));
         session.setVerifierRef("secret:8");
+        session.setExpired(true);
         when(sessionMapper.getLatestByUserAndProvider(USER_ID, "google"))
             .thenReturn(session);
 
@@ -91,6 +92,7 @@ class NativeConnectSessionPersistenceTest {
         LocalDateTime cutoff = LocalDateTime.ofInstant(NOW.minusSeconds(60), ZoneOffset.UTC);
         NativeConnectSession session = session(9, "prepared", cutoff.minusSeconds(1));
         session.setVerifierRef("secret:9");
+        session.setUpdatedAt(cutoff.minusSeconds(1));
         when(userMapper.lockByIdForShare(USER_ID)).thenReturn(USER_ID);
         when(sessionMapper.getByIdForUpdate(9)).thenReturn(session);
         when(sessionMapper.deleteExpired(9, cutoff)).thenReturn(1);
@@ -102,6 +104,51 @@ class NativeConnectSessionPersistenceTest {
         order.verify(sessionMapper).getByIdForUpdate(9);
         order.verify(pkceSecretCipher).delete("google", USER_ID, "secret:9");
         order.verify(sessionMapper).deleteExpired(9, cutoff);
+    }
+
+    @Test
+    void failureReturnsOnlyTheWinningTransitionAndPreservesTheLosersVerifier() {
+        NativeConnectSession session = session(10, "exchanging", LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+        session.setVerifierRef("verifier-ref");
+        when(userMapper.lockById(USER_ID)).thenReturn(USER_ID);
+        when(sessionMapper.fail(10, "exchanging", "connection_failed")).thenReturn(1, 0);
+
+        assertTrue(persistence.failExchange(session, "connection_failed"));
+        assertFalse(persistence.failExchange(session, "connection_failed"));
+
+        verify(pkceSecretCipher).delete("google", USER_ID, "verifier-ref");
+    }
+
+    @Test
+    void zeroRowPrepareRechecksDatabaseExpiryInsteadOfReportingAlreadyClaimed() {
+        byte[] pairingHash = NativeConnectPkce.hash("pairing");
+        NativeConnectSession before = session(11, "pending", LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+        NativeConnectSession after = session(11, "pending", before.getExpiresAt());
+        after.setExpired(true);
+        when(userMapper.lockById(USER_ID)).thenReturn(USER_ID);
+        when(sessionMapper.getByPairingCodeHash(pairingHash)).thenReturn(before);
+        when(sessionMapper.getByPairingCodeHashForUpdate(pairingHash)).thenReturn(before, after);
+
+        NativeConnectException error = assertThrows(NativeConnectException.class, () -> persistence.prepare(
+            pairingHash, new byte[32], new byte[32], "verifier", "http://127.0.0.1:49152/callback"));
+
+        assertEquals("pairing_expired", error.getCode());
+    }
+
+    @Test
+    void zeroRowClaimRechecksDatabaseExpiryInsteadOfReportingAlreadyUsed() {
+        byte[] handoffHash = NativeConnectPkce.hash("handoff");
+        NativeConnectSession before = session(12, "prepared", LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+        NativeConnectSession after = session(12, "prepared", before.getExpiresAt());
+        after.setExpired(true);
+        when(userMapper.lockById(USER_ID)).thenReturn(USER_ID);
+        when(sessionMapper.getByHandoffTicketHash(handoffHash)).thenReturn(before);
+        when(sessionMapper.getByHandoffTicketHashForUpdate(handoffHash)).thenReturn(before, after);
+
+        NativeConnectException error = assertThrows(NativeConnectException.class,
+            () -> persistence.claimForExchange(handoffHash));
+
+        assertEquals("handoff_expired", error.getCode());
     }
 
     private static NativeConnectSession session(
