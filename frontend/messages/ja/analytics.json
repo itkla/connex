@@ -17,6 +17,7 @@
     "rangeCustomEnd": "終了日",
     "rangeCustomDays": "{count}日間",
     "rangeCustomActivities": "{count}件の活動",
+    "rangeCustomPreviewUnavailable": "活動のプレビューを読み込めませんでした。期間の選択と適用は引き続き行えます。",
     "rangeCustomGrid": "期間選択カレンダー",
     "rangeCustomPrevious": "前の期間",
     "rangeCustomNext": "次の期間",

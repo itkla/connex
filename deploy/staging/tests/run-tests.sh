@@ -106,6 +106,7 @@ load_deploy() {
     SMOKE_LOGIN_REQUIRED_MODE=640
     BACKEND_URL=http://backend.test
     FRONTEND_URL=http://frontend.test
+    df() { printf 'Avail\n99999999999\n'; }
     mkdir -p "$RELEASES_DIR" "$RELEASE_QUARANTINE_DIR" "$(dirname "$LIVE_JAR")"
 }
 
@@ -288,7 +289,8 @@ make_wrapper_boundary_shims() {
         printf 'served_sha="${MOCK_SERVED_SHA:-$MOCK_SELECTED_SHA}"\n'
         printf 'printf '\''{"gitSha":"%%s"}\\n'\'' "$served_sha"\n'
     } > "$fake_bin/curl"
-    chmod 0755 "$fake_bin/git" "$fake_bin/systemctl" "$fake_bin/curl"
+    printf '#!/bin/bash\nprintf "Avail\\n99999999999\\n"\n' > "$fake_bin/df"
+    chmod 0755 "$fake_bin/git" "$fake_bin/systemctl" "$fake_bin/curl" "$fake_bin/df"
 }
 
 case_mixed_live_release_refused() (
@@ -1178,7 +1180,7 @@ case_main_refuses_low_staging_disk_headroom() (
     status=$?
     assert_status main_disk_headroom_preflight_fails_closed 1 "$status" || return 1
     assert_contains main_disk_headroom_preflight_reports_available_bytes \
-        'Staging filesystem headroom: 4095 bytes available; preflight requires at least 4096 bytes' \
+        "Staging filesystem headroom: 4095 bytes available; preflight requires at least $((4096 + STAGING_RELEASE_FALLBACK_BYTES + STAGING_BUILD_CACHE_MARGIN_BYTES)) bytes" \
         <(printf '%s\n' "$output") || return 1
     assert_contains main_disk_headroom_preflight_is_loud \
         'Deploy refused: staging filesystem has insufficient free-space headroom' \
@@ -1301,7 +1303,11 @@ case_main_rechecks_staging_disk_before_initial_activation() (
         count=$((count + 1))
         printf '%s\n' "$count" > "$disk_probe"
         printf 'Avail\n'
-        if [ "$count" -eq 1 ]; then printf '4096\n'; else printf '4095\n'; fi
+        if [ "$count" -eq 1 ]; then
+            printf '%s\n' "$((4096 + STAGING_RELEASE_FALLBACK_BYTES + STAGING_BUILD_CACHE_MARGIN_BYTES))"
+        else
+            printf '4095\n'
+        fi
     }
     validate_live_components() { return 0; }
     validate_smoke_login_file() { return 0; }
@@ -1329,6 +1335,406 @@ case_main_rechecks_staging_disk_before_initial_activation() (
         "$activation_log" || return 1
     assert_file_missing activation_disk_headroom_recheck_precedes_transaction \
         "$TRANSACTION_FILE" || return 1
+)
+
+setup_pretransaction_fixture() {
+    local root="$1" previous="$2" rollback="$3"
+    load_deploy "$root"
+    make_bundle "$root" "$previous" || return 1
+    make_bundle "$root" "$rollback" || return 1
+    printf '%s\n' "$previous" > "$MARKER"
+    printf '%s\n' "$rollback" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
+    printf '%s\t%s\n' "$previous" "$$" > "$FRONTEND_RUNNING_MARKER"
+    PROC_ROOT="$root/proc"
+    CGROUP_ROOT="$root/cgroup"
+    mkdir -p "$PROC_ROOT/$$/fd" "$CGROUP_ROOT/test-frontend"
+    ln -s "$RELEASES_DIR/$previous/frontend" "$PROC_ROOT/$$/cwd"
+    ln -s / "$PROC_ROOT/$$/root"
+    ln -s "$(command -v bash)" "$PROC_ROOT/$$/exe"
+    : > "$PROC_ROOT/$$/maps"
+    printf 'Name:\ttest\nState:\tS (sleeping)\nPPid:\t1\n' > "$PROC_ROOT/$$/status"
+    printf '0::/test-frontend\n' > "$PROC_ROOT/$$/cgroup"
+    printf '%s\n' "$$" > "$CGROUP_ROOT/test-frontend/cgroup.procs"
+    frontend_pid() { printf '%s\n' "$$"; }
+    frontend_control_group() { printf '/test-frontend\n'; }
+    guard_wrapper_contract() { return 0; }
+    git() { [ "$1" = cat-file ] && [ "$2" = -e ]; }
+    validate_live_components() { return 0; }
+    validate_smoke_login_file() { return 0; }
+    build_target_release() {
+        local fixture_root="${STAGING_DIR%/staging}"
+        printf 'build\n' >> "$fixture_root/build.log"
+        [ ! -e "$RELEASES_DIR/$1" ] || return 1
+        make_bundle "$fixture_root" "$1"
+    }
+    quiesce_frontend_and_switch_checkout() {
+        printf 'activation\n' > "${STAGING_DIR%/staging}/activation.log"
+        return 1
+    }
+}
+
+case_prebuild_headroom_includes_deployed_footprint() (
+    local root="$SANDBOX/prebuild-reserve" previous rollback target footprint required fixture_available output status
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    target=3333333333333333333333333333333333333333
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    assert_equals staging_deploy_floor_is_four_gib 4294967296 "$STAGING_MIN_FREE_BYTES" || return 1
+    footprint="$(du -sb -- "$RELEASES_DIR/$previous" | awk '{print $1}')"
+    required=$((STAGING_MIN_FREE_BYTES + footprint + STAGING_BUILD_CACHE_MARGIN_BYTES))
+    df() { printf 'Avail\n%s\n' "$fixture_available"; }
+    for fixture_available in "$STAGING_MIN_FREE_BYTES" "$((required - 1))"; do
+        output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+        status=$?
+        assert_status bare_floor_refuses_before_build 1 "$status" || return 1
+        assert_file_missing no_build_below_inclusive_floor "$root/build.log" || return 1
+        assert_file_missing no_transaction_below_inclusive_floor "$TRANSACTION_FILE" || return 1
+        assert_contains reserve_uses_measured_tree \
+            "release_bytes=$footprint source=deployed cache_margin_bytes=$STAGING_BUILD_CACHE_MARGIN_BYTES" \
+            <(printf '%s\n' "$output") || return 1
+        assert_contains inclusive_requirement_is_reported \
+            "$fixture_available bytes available; preflight requires at least $required bytes" \
+            <(printf '%s\n' "$output") || return 1
+    done
+    fixture_available="$required"
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status activation_stub_stops_run 1 "$status" || return 1
+    assert_file_exists inclusive_floor_starts_build "$root/build.log" || return 1
+    assert_file_exists inclusive_floor_reaches_activation "$root/activation.log" || return 1
+    assert_file_exists prepared_transaction_owns_target "$TRANSACTION_FILE" || return 1
+    assert_file_exists prepared_target_is_not_quarantined "$RELEASES_DIR/$target/manifest.tsv" || return 1
+    assert_file_missing prepared_target_absent_from_quarantine "$RELEASE_QUARANTINE_DIR/$target" || return 1
+    assert_contains activation_keeps_bare_floor \
+        "preflight requires at least $STAGING_MIN_FREE_BYTES bytes" <(printf '%s\n' "$output") || return 1
+)
+
+case_prebuild_headroom_falls_back_for_unmeasurable_deployed_tree() (
+    local root="$SANDBOX/prebuild-fallback" previous required fixture_available output status variant
+    previous=1111111111111111111111111111111111111111
+    load_deploy "$root"
+    printf '%s\n' "$previous" > "$MARKER"
+    required=$((STAGING_MIN_FREE_BYTES + STAGING_RELEASE_FALLBACK_BYTES + STAGING_BUILD_CACHE_MARGIN_BYTES))
+    df() { printf 'Avail\n%s\n' "$fixture_available"; }
+    for variant in missing unreadable malformed symlink; do
+        case "$variant" in
+            unreadable)
+                mkdir -p "$RELEASES_DIR/$previous"
+                du() { echo 'untrusted size diagnostic' >&2; return 1; }
+                ;;
+            malformed) du() { printf 'invalid-size\n'; } ;;
+            symlink)
+                unset -f du
+                rmdir "$RELEASES_DIR/$previous"
+                ln -s "$root" "$RELEASES_DIR/$previous"
+                ;;
+        esac
+        fixture_available="$((required - 1))"
+        output="$(staging_build_headroom_sufficient 2>&1)"
+        status=$?
+        assert_status "${variant}_fallback_refuses_shortfall" 1 "$status" || return 1
+        assert_contains "${variant}_fallback_is_reported" \
+            "release_bytes=$STAGING_RELEASE_FALLBACK_BYTES source=fallback" <(printf '%s\n' "$output") || return 1
+        assert_contains "${variant}_fallback_requirement" \
+            "preflight requires at least $required bytes" <(printf '%s\n' "$output") || return 1
+        assert_absent du_errors_are_sanitized 'untrusted size diagnostic' <(printf '%s\n' "$output") || return 1
+        fixture_available="$required"
+        staging_build_headroom_sufficient >/dev/null || return 1
+    done
+)
+
+case_pretransaction_failures_quarantine_only_target_and_retry_rebuilds() (
+    local root="$SANDBOX/pretransaction-cleanup" previous rollback target output status failure snapshot artifacts
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    target=3333333333333333333333333333333333333333
+    for failure in headroom target_verification previous_verification transaction_write; do
+        setup_pretransaction_fixture "$root/$failure" "$previous" "$rollback" || return 1
+        local fixture_root="$root/$failure"
+        build_target_release() {
+            printf 'build\n' >> "$fixture_root/build.log"
+            [ ! -e "$RELEASES_DIR/$1" ] || return 1
+            make_bundle "$fixture_root" "$1" || return 1
+            if [ "$failure" = target_verification ]; then
+                printf 'corrupt\n' >> "$RELEASES_DIR/$1/backend.jar"
+            elif [ "$failure" = previous_verification ]; then
+                printf 'corrupt\n' >> "$RELEASES_DIR/$previous/backend.jar"
+            fi
+        }
+        df() {
+            if [ "$failure" = headroom ] && [ -e "$RELEASES_DIR/$target" ]; then
+                printf 'Avail\n%s\n' "$((STAGING_MIN_FREE_BYTES - 1))"
+            else
+                printf 'Avail\n99999999999\n'
+            fi
+        }
+        mv() {
+            [ "$failure" != transaction_write ] || [ "${*: -1}" != "$TRANSACTION_FILE" ] || return 1
+            command mv "$@"
+        }
+        snapshot="$(cat "$MARKER" "$ROLLBACK_MARKER" "$FRONTEND_RELEASE_MARKER" "$FRONTEND_RUNNING_MARKER")"
+        if [ "$failure" = headroom ]; then
+            artifacts="$(sha256sum "$RELEASES_DIR/$previous/backend.jar" "$RELEASES_DIR/$rollback/backend.jar")"
+        fi
+        output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+        status=$?
+        assert_status "${failure}_refuses_deploy" 1 "$status" || return 1
+        assert_file_missing "${failure}_target_leaves_releases" "$RELEASES_DIR/$target" || return 1
+        assert_file_exists "${failure}_target_remains_complete_in_quarantine" "$RELEASE_QUARANTINE_DIR/$target/frontend/server.js" || return 1
+        assert_file_exists "${failure}_deployed_preserved" "$RELEASES_DIR/$previous/manifest.tsv" || return 1
+        assert_file_exists "${failure}_rollback_preserved" "$RELEASES_DIR/$rollback/manifest.tsv" || return 1
+        assert_equals "${failure}_markers_unchanged" "$snapshot" \
+            "$(cat "$MARKER" "$ROLLBACK_MARKER" "$FRONTEND_RELEASE_MARKER" "$FRONTEND_RUNNING_MARKER")" || return 1
+        assert_file_missing "${failure}_no_activation" "$fixture_root/activation.log" || return 1
+        assert_file_missing "${failure}_no_transaction" "$TRANSACTION_FILE" || return 1
+        assert_contains "${failure}_cleanup_is_reported" "Quarantined unactivated target $target" <(printf '%s\n' "$output") || return 1
+        if [ "$failure" = headroom ]; then
+            assert_equals refusal_preserves_protected_artifacts "$artifacts" \
+                "$(sha256sum "$RELEASES_DIR/$previous/backend.jar" "$RELEASES_DIR/$rollback/backend.jar")" || return 1
+            failure=retry
+            output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+            assert_equals retry_builds_same_sha_again 2 "$(wc -l < "$fixture_root/build.log")" || return 1
+            verify_release_bundle "$target" || return 1
+            assert_file_exists retry_preserves_quarantined_tree "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+            assert_file_exists retry_reaches_prepared_transaction "$TRANSACTION_FILE" || return 1
+        fi
+    done
+)
+
+case_quarantined_sha_retry_commits_and_duplicate_reclaims_after_retirement() (
+    local root="$SANDBOX/quarantined-retry-lifecycle" previous rollback target next final output status
+    local refuse_activation=1 quarantined_identity rebuilt_identity quarantined_at
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    target=3333333333333333333333333333333333333333
+    next=4444444444444444444444444444444444444444
+    final=5555555555555555555555555555555555555555
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    : > "$root/deploy.lock"
+    df() {
+        if [ "$refuse_activation" = 1 ] && [ -e "$RELEASES_DIR/$target" ]; then
+            printf 'Avail\n%s\n' "$((STAGING_MIN_FREE_BYTES - 1))"
+        else
+            printf 'Avail\n99999999999\n'
+        fi
+    }
+    quiesce_frontend_and_switch_checkout() { ROLLBACK_ARMED=1; write_transaction frontend_stopped; }
+    activate_backend() { cp "$RELEASES_DIR/$1/backend.jar" "$LIVE_JAR"; }
+    activate_frontend() {
+        write_sha_marker "$FRONTEND_RELEASE_MARKER" "$1" \
+            && printf '%s\t%s\n' "$1" "$$" > "$FRONTEND_RUNNING_MARKER" \
+            && ln -sfn "$RELEASES_DIR/$1/frontend" "$PROC_ROOT/$$/cwd"
+    }
+    post_deploy_smoke() { return 0; }
+    run_lifecycle_pruner() {
+        quarantined_at="$(stat -c %Z -- "$RELEASE_QUARANTINE_DIR/$target")" || return 1
+        touch -d "@$((quarantined_at + 1))" "$PROC_ROOT/$$" || return 1
+        CONNEX_STAGING_DIR="$STAGING_DIR" PROC_ROOT="$PROC_ROOT" \
+            CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+            CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS=0 CONNEX_STAGING_PRUNE_KEEP_RECENT=0 \
+            bash "$STAGING_DEPLOY_DIR/connex-staging-prune.sh"
+    }
+
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_first_attempt_refused 1 "$status" || return 1
+    assert_file_exists lifecycle_first_target_quarantined "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+    assert_file_missing lifecycle_first_target_not_ready "$RELEASES_DIR/$target" || return 1
+    quarantined_identity="$(stat -c '%d:%i' -- "$RELEASE_QUARANTINE_DIR/$target")"
+    refuse_activation=0
+
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_retry_commits_and_prunes_cleanly 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_retry_committed_target "$target" "$(read_sha_file "$MARKER")" || return 1
+    assert_equals lifecycle_retry_rebuilt_target 2 "$(wc -l < "$root/build.log")" || return 1
+    rebuilt_identity="$(stat -c '%d:%i' -- "$RELEASES_DIR/$target")"
+    [ "$quarantined_identity" != "$rebuilt_identity" ] || return 1
+    assert_contains lifecycle_duplicate_deferral_is_reported \
+        "Release quarantine deferred: stale duplicate of protected release $target" <(printf '%s\n' "$output") || return 1
+    assert_file_missing lifecycle_retry_clears_transaction "$TRANSACTION_FILE" || return 1
+    assert_file_missing lifecycle_retry_clears_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
+    run_lifecycle_pruner > "$root/prune-deployed.log" 2>&1 || return 1
+    assert_contains deployed_duplicate_is_protected "Skipped $target: protected release" "$root/prune-deployed.log" || return 1
+    assert_file_exists deployed_duplicate_survives_pruner "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_no_change_succeeds 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_no_change_does_not_build 2 "$(wc -l < "$root/build.log")" || return 1
+    assert_file_missing lifecycle_no_change_has_no_pending_prune "$PRUNE_NEEDED_MARKER" || return 1
+
+    output="$(CONNEX_DEPLOY_TARGET="$next" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_next_deploy_succeeds 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_retained_target "$target" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    run_lifecycle_pruner > "$root/prune-rollback.log" 2>&1 || return 1
+    assert_file_exists rollback_duplicate_survives_pruner "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+
+    output="$(CONNEX_DEPLOY_TARGET="$final" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_retirement_deploy_succeeds 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_target_no_longer_retained "$next" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    run_lifecycle_pruner > "$root/prune-retired.log" 2>&1 || return 1
+    assert_file_missing retired_duplicate_is_reclaimed "$RELEASE_QUARANTINE_DIR/$target" || return 1
+    assert_file_exists retired_public_tree_is_untouched "$RELEASES_DIR/$target/manifest.tsv" || return 1
+    assert_file_missing lifecycle_retirement_has_no_pending_prune "$PRUNE_NEEDED_MARKER" || return 1
+    verify_release_bundle "$next" && verify_release_bundle "$final" || return 1
+    assert_equals duplicate_retirement_keeps_rebuilt_tree "$rebuilt_identity" \
+        "$(stat -c '%d:%i' -- "$RELEASES_DIR/$target")" || return 1
+)
+
+case_retiring_rebuilt_tree_defers_until_older_quarantine_copy_is_reclaimed() (
+    local root="$SANDBOX/retiring-duplicate" previous rollback candidate sha status output
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    candidate=3333333333333333333333333333333333333333
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    make_bundle "$root" "$candidate" || return 1
+    cp -a "$RELEASES_DIR/$candidate" "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    touch -d @10 "$RELEASES_DIR/$candidate"
+    for sha in 4444444444444444444444444444444444444444 \
+        5555555555555555555555555555555555555555 6666666666666666666666666666666666666666; do
+        mkdir -p "$RELEASES_DIR/$sha"
+        touch -d @20 "$RELEASES_DIR/$sha"
+    done
+    output="$(prune_releases 2>&1)"
+    status=$?
+    assert_status retired_duplicate_wait_is_successful 0 "$status" || return 1
+    assert_contains retired_duplicate_wait_is_reported \
+        "Release pruning deferred: stale quarantine duplicate must be reclaimed before retiring $candidate" \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_exists deferred_public_tree_stays_complete "$RELEASES_DIR/$candidate/manifest.tsv" || return 1
+    assert_file_exists deferred_quarantine_stays_complete "$RELEASE_QUARANTINE_DIR/$candidate/manifest.tsv" || return 1
+    assert_file_exists deferred_move_stays_pending "$PRUNE_NEEDED_MARKER" || return 1
+    : > "$root/deploy.lock"
+    local quarantined_at
+    quarantined_at="$(stat -c %Z -- "$RELEASE_QUARANTINE_DIR/$candidate")" || return 1
+    touch -d "@$((quarantined_at + 1))" "$PROC_ROOT/$$" || return 1
+    CONNEX_STAGING_DIR="$STAGING_DIR" PROC_ROOT="$PROC_ROOT" \
+        CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+        CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS=0 CONNEX_STAGING_PRUNE_KEEP_RECENT=0 \
+        bash "$STAGING_DEPLOY_DIR/connex-staging-prune.sh" > "$root/prune.log" 2>&1 || return 1
+    assert_file_missing old_duplicate_reclaimed_before_move "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    prune_releases >/dev/null 2>&1 || return 1
+    assert_file_missing deferred_public_tree_can_retire "$RELEASES_DIR/$candidate" || return 1
+    assert_file_exists rebuilt_tree_retires_by_rename "$RELEASE_QUARANTINE_DIR/$candidate/manifest.tsv" || return 1
+    assert_file_missing deferred_move_pending_clears "$PRUNE_NEEDED_MARKER" || return 1
+)
+
+case_protected_quarantine_duplicate_requires_distinct_directory_identity() (
+    local root="$SANDBOX/duplicate-identity" previous rollback variant output status
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    cp -a "$RELEASES_DIR/$rollback" "$RELEASE_QUARANTINE_DIR/$rollback" || return 1
+    for variant in missing same_identity unreadable; do
+        if [ "$variant" = missing ]; then
+            mv "$RELEASES_DIR/$rollback" "$root/saved-rollback" || return 1
+        fi
+        stat() {
+            if [ "${2:-}" = '%d:%i' ]; then
+                case "$variant" in
+                    same_identity) printf '1:2\n'; return 0 ;;
+                    unreadable) return 1 ;;
+                esac
+            fi
+            command stat "$@"
+        }
+        output="$(prune_releases 2>&1)"
+        status=$?
+        assert_status "${variant}_protected_quarantine_refused" 1 "$status" || return 1
+        assert_file_exists "${variant}_protected_quarantine_remains" "$RELEASE_QUARANTINE_DIR/$rollback/manifest.tsv" || return 1
+        assert_file_exists "${variant}_refusal_remains_pending" "$PRUNE_NEEDED_MARKER" || return 1
+        if [ "$variant" = missing ]; then
+            mv "$root/saved-rollback" "$RELEASES_DIR/$rollback" || return 1
+        fi
+    done
+    unset -f stat
+    prune_releases >/dev/null 2>&1 || return 1
+    assert_file_missing distinct_duplicate_does_not_leave_pending_prune "$PRUNE_NEEDED_MARKER" || return 1
+    assert_file_exists distinct_duplicate_stays_quarantined "$RELEASE_QUARANTINE_DIR/$rollback/manifest.tsv" || return 1
+)
+
+case_pretransaction_signal_quarantines_built_target() (
+    local root="$SANDBOX/pretransaction-signal" previous rollback target output status
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    target=3333333333333333333333333333333333333333
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    verify_release_bundle() {
+        if [ "$1" = "$target" ]; then
+            kill -TERM "$BASHPID"
+        fi
+        verify_release_directory "$1" "$RELEASES_DIR/$1"
+    }
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status term_keeps_signal_exit_status 143 "$status" || return 1
+    assert_file_missing term_target_leaves_releases "$RELEASES_DIR/$target" || return 1
+    assert_file_exists term_target_is_quarantined "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+    assert_file_missing term_precedes_transaction "$TRANSACTION_FILE" || return 1
+)
+
+case_unactivated_target_quarantine_preserves_protected_and_referenced_trees() (
+    local root="$SANDBOX/unactivated-protections" previous rollback target protected reference status
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    target=3333333333333333333333333333333333333333
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    make_bundle "$root" "$target" || return 1
+    for protected in "$previous" "$rollback"; do
+        DEPLOY_TARGET="$protected"
+        quarantine_unactivated_target >/dev/null || return 1
+        assert_file_exists protected_target_stays "$RELEASES_DIR/$protected/manifest.tsv" || return 1
+    done
+    DEPLOY_TARGET="$target"
+    printf '%s\n' "$target" > "$FRONTEND_RELEASE_MARKER"
+    quarantine_unactivated_target >/dev/null || return 1
+    assert_file_exists selected_frontend_stays "$RELEASES_DIR/$target/manifest.tsv" || return 1
+    printf '%s\n' "$previous" > "$FRONTEND_RELEASE_MARKER"
+    read_frontend_running() { printf '%s\t%s\n' "$target" "$$"; }
+    quarantine_unactivated_target >/dev/null || return 1
+    assert_file_exists attested_frontend_stays "$RELEASES_DIR/$target/manifest.tsv" || return 1
+    read_frontend_running() { printf '%s\t%s\n' "$previous" "$$"; }
+    for reference in cwd root exe fd maps unreadable; do
+        case "$reference" in
+            cwd|root|exe) ln -sfn "$RELEASES_DIR/$target/frontend" "$PROC_ROOT/$$/$reference" ;;
+            fd) ln -s "$RELEASES_DIR/$target/backend.jar" "$PROC_ROOT/$$/fd/9" ;;
+            maps) printf 'mapped %s/backend.jar\n' "$RELEASES_DIR/$target" > "$PROC_ROOT/$$/maps" ;;
+            unreadable) rm "$PROC_ROOT/$$/maps" ;;
+        esac
+        quarantine_unactivated_target >/dev/null
+        status=$?
+        assert_status "${reference}_blocks_quarantine" 1 "$status" || return 1
+        assert_file_exists "${reference}_target_stays" "$RELEASES_DIR/$target/manifest.tsv" || return 1
+        case "$reference" in
+            cwd) ln -sfn "$RELEASES_DIR/$previous/frontend" "$PROC_ROOT/$$/cwd" ;;
+            root) ln -sfn / "$PROC_ROOT/$$/root" ;;
+            exe) ln -sfn "$(command -v bash)" "$PROC_ROOT/$$/exe" ;;
+            fd) rm "$PROC_ROOT/$$/fd/9" ;;
+            maps|unreadable) : > "$PROC_ROOT/$$/maps" ;;
+        esac
+    done
+    mkdir -p "$RELEASE_QUARANTINE_DIR/$target"
+    printf 'keep\n' > "$RELEASE_QUARANTINE_DIR/$target/sentinel"
+    quarantine_unactivated_target >/dev/null
+    assert_status quarantine_collision_refuses 1 "$?" || return 1
+    assert_equals collision_preserves_existing_tree keep "$(cat "$RELEASE_QUARANTINE_DIR/$target/sentinel")" || return 1
+    assert_file_exists collision_preserves_target "$RELEASES_DIR/$target/manifest.tsv" || return 1
+    rm "$RELEASE_QUARANTINE_DIR/$target/sentinel"
+    rmdir "$RELEASE_QUARANTINE_DIR/$target"
+    atomic_quarantine_move_supported() { return 1; }
+    quarantine_unactivated_target >/dev/null
+    assert_status unsupported_atomic_move_retains_target 1 "$?" || return 1
+    assert_file_exists atomic_move_failure_keeps_target "$RELEASES_DIR/$target/manifest.tsv" || return 1
+    atomic_quarantine_move_supported() { return 0; }
+    rm "$FRONTEND_RUNNING_MARKER"
+    read_frontend_running() { return 1; }
+    quarantine_unactivated_target >/dev/null
+    assert_status unreadable_serving_state_retains_target 1 "$?" || return 1
+    assert_file_exists invalid_serving_state_keeps_target "$RELEASES_DIR/$target/manifest.tsv" || return 1
 )
 
 case_isolated_frontend_build_preserves_working_directory() (
@@ -3188,6 +3594,14 @@ run_case case_main_refuses_low_staging_disk_headroom
 run_case case_main_recovers_frontend_stopped_below_disk_headroom_gate
 run_case case_main_recovers_committed_below_disk_headroom_gate
 run_case case_main_rechecks_staging_disk_before_initial_activation
+run_case case_prebuild_headroom_includes_deployed_footprint
+run_case case_prebuild_headroom_falls_back_for_unmeasurable_deployed_tree
+run_case case_pretransaction_failures_quarantine_only_target_and_retry_rebuilds
+run_case case_quarantined_sha_retry_commits_and_duplicate_reclaims_after_retirement
+run_case case_retiring_rebuilt_tree_defers_until_older_quarantine_copy_is_reclaimed
+run_case case_protected_quarantine_duplicate_requires_distinct_directory_identity
+run_case case_pretransaction_signal_quarantines_built_target
+run_case case_unactivated_target_quarantine_preserves_protected_and_referenced_trees
 run_case case_isolated_frontend_build_preserves_working_directory
 run_case case_first_transactional_run_preserves_live_legacy_trees
 run_case case_backend_activation_never_skips_target

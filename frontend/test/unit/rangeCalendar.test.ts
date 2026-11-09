@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
     DAY_GRID_CELLS,
+    MAX_DAILY_PREVIEW_DAYS,
     WEEK_STARTS_ON,
     YEAR_PAGE_SIZE,
     bandCaps,
     endOfMonth,
     endOfYear,
     cellSeries,
+    calendarPreviewSpan,
+    calendarPreviewRequests,
     monthCellsForYear,
     parseDayKey,
     periodOverlaps,
@@ -323,6 +326,17 @@ describe("sumSeries", () => {
 });
 
 describe("visibleSpan", () => {
+    it("shares preview coverage for both responsive layouts within one daily request", () => {
+        for (let month = 0; month < 48; month++) {
+            const anchor = new Date(2024, month, 1);
+            const preview = calendarPreviewSpan("day", anchor);
+            const mobile = visibleSpan("day", anchor, 1);
+            expect(preview).toEqual(visibleSpan("day", anchor, 2));
+            expect(preview.from <= mobile.from && preview.to >= mobile.to).toBe(true);
+            expect(rangeDays(preview)).toBeLessThanOrEqual(120);
+        }
+    });
+
     it("covers both six-week day grids of a two-panel view", () => {
         expect(visibleSpan("day", parseDayKey("2026-08-01")!, 2)).toEqual({
             from: "2026-07-26",
@@ -388,5 +402,65 @@ describe("splitIntoWindows", () => {
     it("returns nothing for a reversed or unparseable span", () => {
         expect(splitIntoWindows({ from: "2026-03-01", to: "2026-01-01" }, 731)).toEqual([]);
         expect(splitIntoWindows({ from: "nope", to: "2026-01-01" }, 731)).toEqual([]);
+    });
+});
+
+describe("calendarPreviewRequests", () => {
+    it("keeps exactly 120 inclusive daily buckets in one request", () => {
+        expect(MAX_DAILY_PREVIEW_DAYS).toBe(120);
+        expect(calendarPreviewRequests({ from: "2026-01-01", to: "2026-04-30" }, "month")).toEqual([
+            { from: "2026-01-01", to: "2026-04-30", granularity: "day" },
+        ]);
+    });
+
+    it("starts a new request for the 121st day", () => {
+        expect(calendarPreviewRequests({ from: "2026-01-01", to: "2026-05-01" }, "month")).toEqual([
+            { from: "2026-01-01", to: "2026-04-30", granularity: "day" },
+            { from: "2026-05-01", to: "2026-05-01", granularity: "day" },
+        ]);
+    });
+
+    it("covers a multi-year daily span exactly without gaps or overlaps", () => {
+        const requests = calendarPreviewRequests({ from: "2024-01-01", to: "2027-12-31" }, "month");
+        expect(requests).toHaveLength(13);
+        expect(requests[0].from).toBe("2024-01-01");
+        expect(requests.at(-1)?.to).toBe("2027-12-31");
+        expect(requests.reduce((days, request) => days + rangeDays(request), 0)).toBe(1461);
+        for (const [index, request] of requests.entries()) {
+            expect(rangeDays(request)).toBeLessThanOrEqual(120);
+            if (index > 0) expect(rangeDays({ from: requests[index - 1].to, to: request.from })).toBe(2);
+        }
+    });
+
+    it.each(["UTC", "Asia/Tokyo", "America/New_York", "Pacific/Honolulu"])("keeps civil day keys in %s across DST and leap days", (timezone) => {
+        const previous = process.env.TZ;
+        process.env.TZ = timezone;
+        try {
+            expect(calendarPreviewRequests({ from: "2024-02-01", to: "2024-06-01" }, "month")).toEqual([
+                { from: "2024-02-01", to: "2024-05-30", granularity: "day" },
+                { from: "2024-05-31", to: "2024-06-01", granularity: "day" },
+            ]);
+        } finally {
+            if (previous === undefined) delete process.env.TZ;
+            else process.env.TZ = previous;
+        }
+    });
+
+    it("loads a twelve-year page with six month-aligned requests within both server limits", () => {
+        const requests = calendarPreviewRequests({ from: "2016-01-01", to: "2027-12-31" }, "year");
+        expect(requests).toHaveLength(6);
+        expect(requests[0]).toEqual({ from: "2016-01-01", to: "2017-12-31", granularity: "month" });
+        expect(requests.at(-1)).toEqual({ from: "2026-01-01", to: "2027-12-31", granularity: "month" });
+        expect(requests.reduce((days, request) => days + rangeDays(request), 0)).toBe(4383);
+        for (const request of requests) expect(rangeDays(request)).toBeLessThanOrEqual(731);
+    });
+
+    it("uses full monthly totals for year bars without adding overlapping daily data", () => {
+        const daily = new Map([["2026-01-01", 99]]);
+        const monthly = new Map([["2026-01-01", 2], ["2026-02-01", 4]]);
+        const date = new Date(2026, 0, 1);
+        expect(cellSeries("year", date, daily, monthly)).toEqual([2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        expect(cellSeries("month", date, daily, monthly)[0]).toBe(99);
+        expect(cellSeries("day", date, daily, monthly)).toEqual([99]);
     });
 });

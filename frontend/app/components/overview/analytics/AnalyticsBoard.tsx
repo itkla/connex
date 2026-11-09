@@ -496,6 +496,7 @@ export default function AnalyticsBoard({
                                 end: t('rangeCustomEnd'),
                                 days: (count: number) => t('rangeCustomDays', { count }),
                                 activities: (count: number) => t('rangeCustomActivities', { count }),
+                                previewUnavailable: t('rangeCustomPreviewUnavailable'),
                                 grid: t('rangeCustomGrid'),
                                 previous: t('rangeCustomPrevious'),
                                 next: t('rangeCustomNext'),
