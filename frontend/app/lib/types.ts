@@ -1793,7 +1793,8 @@ export type UpdateProductPayload = Partial<CreateProductPayload>;
 /**
  * A line item on a deal. Catalog values are snapshotted at creation, so later product edits
  * never mutate an existing line. {@link lineSubtotal}/{@link lineTax}/{@link lineTotal} are
- * server-computed (BigDecimal) — the client never does money arithmetic.
+ * server-computed (BigDecimal). The client may reconcile rounded document displays, but never
+ * recomputes or persists canonical monetary values.
  */
 export type DealLineItem = {
     id: number;

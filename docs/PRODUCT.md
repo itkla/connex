@@ -216,6 +216,22 @@ Each Retry click revalidates that answer's execution evidence and action cards w
 before sending and proceeds only when that fresh evidence still rules out executable or saved
 changes. A failed check keeps Retry hidden and shows the existing guidance to check records.
 
+### Commercial-document rounding
+
+Generated documents preserve their canonical line amounts, numeric totals, and resolved merge fields.
+For currencies without minor units, readers round each displayed amount using the document currency
+and locale. If displayed item amounts do not sum to the displayed grand total, show a signed
+**Rounding adjustment** / **端数調整** immediately before that total. Screen, recipient, and print/PDF
+readers use the same rule; currencies with minor units retain their existing presentation.
+
+Item amounts include tax. When rounding creates a discrepancy in any displayed path, show separately
+labelled groups for subtotal plus tax, one-time plus recurring amounts when present, and displayed item
+amounts. Preserve each canonical breakdown amount, and reconcile each group independently to the grand
+total with its own adjustment immediately before the total. Never add an item's reconciliation to the
+tax or billing breakdown. For two tax-free JPY items of 100.50, the item group reads 202, −1, 201;
+the subtotal/tax group reads 201, 0, 201. All reconciliation is presentation-only and never changes a
+stored snapshot or the canonical total merge field.
+
 ## 7. Where things live
 
 The top-level IA contract. **This section is normative target state** — the structure the product is converging on, stated as its destination; where the shipped navigation differs, it is mid-migration, and old paths redirect permanently to the new ones (browser-tab titles follow the new names). New features find their home here first; new top-level sections require amending this document.
