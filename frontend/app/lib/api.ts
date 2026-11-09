@@ -5487,6 +5487,16 @@ export function exportAuditRowsCsv(ids: readonly number[], orgId?: number, init:
 * == Organization admin (org control plane)
 */
 
+/** Reads organization export grants independently of the active workspace role. */
+export function getOrgExportPermissions(orgId: number, init: RequestInit = {}) {
+    return getJson<Types.ExportPermissions>(`/api/orgs/${orgId}/export-permissions`, { cache: "no-store", ...init });
+}
+
+/** Changes one organization role's export grant. */
+export function updateOrgExportPermission(orgId: number, role: Types.OrgRole, enabled: boolean) {
+    return putJson<Types.ExportPermissions>(`/api/orgs/${orgId}/export-permissions/${role}`, { enabled });
+}
+
 export function getOrgMembers(orgId: number, init: RequestInit = {}) {
     return getJson<Types.OrgMember[]>(`/api/orgs/${orgId}/members`, { cache: "no-store", ...init });
 }
@@ -6106,6 +6116,11 @@ export function getWorkspaceRoles(workspaceId: number, init: RequestInit = {}) {
 
 export function getBuiltInRoles(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.CustomRole[]>(`/api/workspaces/${workspaceId}/roles/built-in`, { cache: "no-store", ...init });
+}
+
+/** Changes only export access for one built-in workspace role. */
+export function updateBuiltInRoleExportPermission(workspaceId: number, role: string, enabled: boolean) {
+    return putJson<Types.CustomRole[]>(`/api/workspaces/${workspaceId}/roles/built-in/${role}/export-permission`, { enabled });
 }
 
 export function createWorkspaceRole(workspaceId: number, name: string, permissions: string[]) {

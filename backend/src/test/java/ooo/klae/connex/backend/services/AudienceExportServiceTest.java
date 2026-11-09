@@ -102,7 +102,7 @@ class AudienceExportServiceTest {
     private static final int CONFIG_ID = 81;
     private static final long CONFIG_VERSION = 4L;
     private static final Set<Permission> EXPORT_PERMISSIONS = Set.of(
-            Permission.CAMPAIGN_MANAGE, Permission.CONSENT_MANAGE);
+            Permission.CAMPAIGN_MANAGE, Permission.CONSENT_MANAGE, Permission.EXPORT_DATA);
 
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
 
@@ -194,6 +194,15 @@ class AudienceExportServiceTest {
             return 1;
         });
         return snapshot;
+    }
+
+    @Test
+    void creatingExportWithoutExportDataRefusesBeforeStepUpOrProviderWork() {
+        org.mockito.Mockito.doThrow(new ForbiddenException("Requires EXPORT_DATA"))
+            .when(workspaceService).requirePermission(Permission.EXPORT_DATA);
+        assertThrows(ForbiddenException.class, () -> service().createExport(CAMPAIGN, request()));
+        verifyNoInteractions(sessionSecurityService, campaignMapper, exportMapper, personMapper,
+            transactionManager, connectorConfigService, deliveryProviderRouter);
     }
 
     @Test

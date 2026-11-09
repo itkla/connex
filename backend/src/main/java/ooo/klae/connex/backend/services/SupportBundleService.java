@@ -118,6 +118,7 @@ public class SupportBundleService {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public SupportBundle generate(SupportBundleRequest request, int actorId) {
         orgMemberService.requireOrgAdmin(request.orgId(), actorId);
+        orgMemberService.requireExportData(request.orgId(), actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
 
         Instant generatedAt = clock.instant();

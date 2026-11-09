@@ -102,7 +102,14 @@
         "deletePermanently": "Delete permanently",
         "deleting": "Deleting",
         "workspaceDeleted": "{name} was permanently deleted.",
-        "organizationDeleted": "{name} was permanently deleted."
+        "organizationDeleted": "{name} was permanently deleted.",
+        "exportPermissionDenied": "Your role does not allow exporting data. Ask an administrator to grant access.",
+        "exportPermissionUnavailable": "Export permission could not be checked. Refresh this page to try again.",
+        "exportPermissionsTitle": "Export permissions",
+        "exportPermissionsDescription": "Choose which organization roles can export workspace archives and organization audit data.",
+        "exportPermissionLabel": "Allow {role} to export data",
+        "exportPermissionSaved": "Export permission updated",
+        "exportPermissionSaveFailed": "Couldn't update export permission"
     },
     "OrgAi": {
         "title": "AI provider",
@@ -256,6 +263,9 @@
             "org": {
                 "create": "Organization created",
                 "rename": "Organization renamed",
+                "role": {
+                    "export_permission": "Organization role export permission changed"
+                },
                 "member": {
                     "set": "Organization administrator role changed",
                     "remove": "Organization administrator removed",

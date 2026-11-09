@@ -651,6 +651,7 @@ describe("assistant proposal review", () => {
         expect(running).toContain(new Intl.DateTimeFormat("en", {
             dateStyle: "medium",
             timeStyle: "short",
+            timeZone: "UTC",
         }).format(Date.UTC(2026, 7, 13, 9, 30)));
         expect(running).not.toContain("2026-08-13T09:30");
         expect(running).toContain("48 hours after it&#x27;s applied");

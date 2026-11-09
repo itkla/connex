@@ -337,7 +337,7 @@
         "defaultRolesLabel": "標準ロール",
         "customRolesLabel": "カスタムロール",
         "builtInBadge": "標準",
-        "builtInSubtitle": "標準のアクセスレベルです。これらは編集できません。",
+        "builtInSubtitle": "標準のアクセス権限です。データのエクスポート権限はロールごとに変更できます。",
         "fullAccess": "すべての権限",
         "noPermissions": "権限なし",
         "createTitle": "新しいロール",
@@ -562,6 +562,10 @@
             "TEAM_MANAGE": {
                 "action": "チームを管理",
                 "description": "チームを作成し、メンバーとマネージャーを管理できます。チームへの所属だけではワークスペースの権限は付与されません。"
+            },
+            "EXPORT_DATA": {
+                "action": "データのエクスポート",
+                "description": "アクセスできるデータをエクスポートします。レコード、レポート、監査ログの閲覧権限とセキュリティ要件は引き続き適用されます。"
             }
         },
         "confinementSubjectRoleEdit": "ロール「{name}」の変更を保存",
@@ -592,7 +596,8 @@
             "CONSENT": "連絡に関する設定",
             "AI": "Ask ConnexとAI機能",
             "SEQUENCE": "シーケンス",
-            "TEAM": "チーム"
+            "TEAM": "チーム",
+            "EXPORT": "データのエクスポート"
         },
         "accessDetails": "許可される操作・されない操作を確認",
         "accessScopeHint": "「許可」と表示された操作のみ実行できます。レコードの公開範囲、組織の権限、セキュリティ上の確認は引き続き適用されます。",
@@ -614,7 +619,9 @@
                 "name": "メンバー",
                 "description": "連絡先、案件、アクティビティ、メモ、コメント、タスク、ファイル、レポートを扱えます。ワークスペース設定、メンバー、ロール、ワークフローの管理やAI機能の利用はできません。"
             }
-        }
+        },
+        "exportPermissionSaving": "エクスポート権限を保存中…",
+        "exportPermissionLabel": "{role}によるデータのエクスポートを許可"
     },
     "WorkflowAuthoring": {
         "noAccess": "このワークスペースでワークフローを管理する権限がありません。必要な場合はワークスペース管理者にご相談ください。",

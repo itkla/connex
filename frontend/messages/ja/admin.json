@@ -179,7 +179,9 @@
     "loadMore": "さらに読み込む",
     "loadMoreLoading": "読み込み中…",
     "loadMoreRetry": "再試行",
-    "loadMoreError": "追加のイベントを読み込めませんでした。"
+    "loadMoreError": "追加のイベントを読み込めませんでした。",
+    "exportPermissionDenied": "現在のロールではデータをエクスポートできません。管理者に権限の付与を依頼してください。",
+    "exportPermissionUnavailable": "エクスポート権限を確認できませんでした。ページを再読み込みしてお試しください。"
   },
   "AdminLogsLayout": {
     "title": "監査ログ",

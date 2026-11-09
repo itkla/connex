@@ -173,6 +173,7 @@ public class TenantExportService {
             int workspaceId,
             int actorId) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
+        orgMemberService.requireExportData(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         AcquiredWorkspace acquired = controlOperations.acquireExport(
             orgId,

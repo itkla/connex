@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
     ArrowDownTrayIcon,
@@ -15,12 +15,15 @@ import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError"
 import {
     ApiError,
     requestWorkspaceTenantExport,
+    updateOrgExportPermission,
     teardownOrganization,
     teardownOrganizationWorkspace,
 } from "@/app/lib/api";
+import { useOrgExportPermissions } from "@/app/hooks/useOrgExportPermissions";
 import { organizationLifecycleAccess } from "@/app/lib/organizationLifecycleAccess";
 import { toastSuccess } from "@/app/lib/toast";
 import type {
+    ExportPermissions,
     OrganizationIdentity,
     OrganizationLayoutWorkspace,
     OrgRole,
@@ -31,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
     ResponsiveDialog,
     ResponsiveDialogClose,
@@ -143,7 +147,7 @@ function ExportSection({
                             </p>
                         </div>
                         <div className="flex shrink-0 flex-wrap gap-2">
-                            {exportGrants.has(workspace.id) ? (
+                            {access.canExport && exportGrants.has(workspace.id) ? (
                                 <>
                                     <Button asChild variant="outline">
                                         <a
@@ -360,6 +364,56 @@ function TeardownDialog({
     );
 }
 
+function OrganizationExportPermissions({ orgId, permissions, onUpdated }: {
+    orgId: number;
+    permissions: ExportPermissions | null;
+    onUpdated: (permissions: ExportPermissions) => void;
+}) {
+    const t = useTranslations("OrgDataLifecycle");
+    const showApiError = useApiErrorToast("OrgDataLifecycle");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const [savingRole, setSavingRole] = useState<OrgRole | null>(null);
+    const mounted = useRef(true);
+    useLayoutEffect(() => {
+        mounted.current = true;
+        return () => { mounted.current = false; };
+    }, []);
+    async function update(role: OrgRole, enabled: boolean) {
+        if (savingRole !== null) return;
+        setSavingRole(role);
+        try {
+            const updated = await updateOrgExportPermission(orgId, role, enabled);
+            if (!mounted.current) return;
+            onUpdated(updated);
+            toastSuccess(t("exportPermissionSaved"));
+        } catch (error) {
+            if (mounted.current && !handlePasskeyStepUpError(error)) showApiError(error, "exportPermissionSaveFailed");
+        } finally {
+            if (mounted.current) setSavingRole(null);
+        }
+    }
+    return (
+        <div className="space-y-3 border-t border-border pt-4">
+            <div className="space-y-1">
+                <p className="text-sm font-medium">{t("exportPermissionsTitle")}</p>
+                <p className="text-sm text-muted-foreground">{t("exportPermissionsDescription")}</p>
+            </div>
+            {(["owner", "admin"] as const).map((role) => (
+                <div key={role} className="flex items-center justify-between gap-4">
+                    <Label htmlFor={`org-export-${role}`}>{t(role === "owner" ? "roleOwner" : "roleAdmin")}</Label>
+                    <Switch
+                        id={`org-export-${role}`}
+                        aria-label={t("exportPermissionLabel", { role: t(role === "owner" ? "roleOwner" : "roleAdmin") })}
+                        checked={permissions?.[role] === true}
+                        disabled={permissions === null || savingRole !== null}
+                        onCheckedChange={(enabled) => void update(role, enabled)}
+                    />
+                </div>
+            ))}
+        </div>
+    );
+}
+
 /** Organization-admin export controls and organization-owner teardown controls. */
 export default function OrganizationLifecyclePanel({
     organization,
@@ -379,7 +433,8 @@ export default function OrganizationLifecyclePanel({
     const t = useTranslations("OrgDataLifecycle");
     const showApiError = useApiErrorToast("OrgDataLifecycle");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
-    const access = organizationLifecycleAccess(orgRole);
+    const { permissions: exportPermissions, replace: replaceExportPermissions } = useOrgExportPermissions(organization.id);
+    const access = { ...organizationLifecycleAccess(orgRole), canExport: exportPermissions?.[orgRole] === true };
     const [exportingWorkspaceId, setExportingWorkspaceId] = useState<number | null>(null);
     const [exportGrants, setExportGrants] = useState(
         () => new Map<number, TenantExportGrant>(),
@@ -390,6 +445,7 @@ export default function OrganizationLifecyclePanel({
     const [tearingDown, setTearingDown] = useState(false);
 
     async function exportWorkspace(workspace: OrganizationLayoutWorkspace) {
+        if (!access.canExport) return;
         setExportingWorkspaceId(workspace.id);
         try {
             const grant = await requestWorkspaceTenantExport(
@@ -465,6 +521,17 @@ export default function OrganizationLifecyclePanel({
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
             <div className="grid gap-5 p-6">
                 <LifecycleAuthoritySection orgRole={orgRole} />
+                <OrganizationExportPermissions
+                    key={organization.id}
+                    orgId={organization.id}
+                    permissions={exportPermissions}
+                    onUpdated={replaceExportPermissions}
+                />
+                {!access.canExport && (
+                    <p className="text-sm text-muted-foreground">
+                        {t(exportPermissions === null ? "exportPermissionUnavailable" : "exportPermissionDenied")}
+                    </p>
+                )}
                 <ExportSection
                     workspaces={workspaces}
                     access={access}

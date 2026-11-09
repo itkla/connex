@@ -502,6 +502,8 @@
       },
       "deleteFailed": "目標を削除できませんでした",
       "saveFailed": "目標を保存できませんでした"
-    }
+    },
+    "exportPermissionDenied": "現在のロールではデータをエクスポートできません。管理者に権限の付与を依頼してください。",
+    "exportPermissionUnavailable": "エクスポート権限を確認できませんでした。ページを再読み込みしてお試しください。"
   }
 }

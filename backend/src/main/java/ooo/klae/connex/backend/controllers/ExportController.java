@@ -28,6 +28,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.services.CurrencyFilterService;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
  * REST controller for CSV export of contacts, companies, deals, and products. Each endpoint returns
@@ -55,6 +57,7 @@ public class ExportController {
      * Export contacts as CSV, honoring the contact list's search, facet, and member-scope filters.
      */
     @GetMapping("/persons")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportPersons(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<String> companies,
@@ -84,6 +87,7 @@ public class ExportController {
      * Export companies as CSV, honoring the company list's search, facet, and member-scope filters.
      */
     @GetMapping("/companies")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportCompanies(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<String> industry,
@@ -107,6 +111,7 @@ public class ExportController {
      * lists.
      */
     @GetMapping("/products")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportProducts(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<String> billingFrequency,
@@ -121,6 +126,7 @@ public class ExportController {
      * Export deals as CSV, honoring the deal list's search, facet, and member-scope filters.
      */
     @GetMapping("/deals")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportDeals(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String currency,
@@ -149,6 +155,7 @@ public class ExportController {
 
     /** Export deals matching both a Smart Segment and the complete native list filter. */
     @PostMapping("/deals/segment")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportSegmentDeals(
             @Valid @RequestBody DealSegmentQueryRequest request) {
         String query = request.getQ() == null || request.getQ().isBlank()

@@ -502,6 +502,8 @@
       },
       "deleteFailed": "Couldn't delete the goal",
       "saveFailed": "Couldn't save the goal"
-    }
+    },
+    "exportPermissionDenied": "Your role does not allow exporting data. Ask an administrator to grant access.",
+    "exportPermissionUnavailable": "Export permission could not be checked. Refresh this page to try again."
   }
 }

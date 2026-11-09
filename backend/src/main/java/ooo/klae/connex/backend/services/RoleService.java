@@ -43,7 +43,26 @@ public class RoleService {
             throw new ForbiddenException(
                 "Requires member or role management permission in this workspace");
         }
-        return workspaceService.builtInRoles();
+        List<WorkspaceRole> roles = workspaceService.builtInRoles(workspaceId);
+        boolean editable = workspaceService.canEditBuiltInExportPolicy(workspaceId, actorId);
+        roles.forEach(role -> role.setExportPermissionEditable(editable));
+        return roles;
+    }
+
+    /** Changes only a built-in role's export access under current role-management authority. */
+    @Transactional
+    public List<WorkspaceRole> updateBuiltInExportPermission(
+            int workspaceId, int actorId, String role, boolean enabled) {
+        if (!Set.of("owner", "admin", "member").contains(role)) {
+            throw new BadRequestException("Unknown built-in role");
+        }
+        workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        workspaceService.lockBuiltInExportPolicyAuthorization(workspaceId, actorId);
+        workspaceService.updateBuiltInExportPermission(workspaceId, role, enabled);
+        auditService.record("workspace.role.update", "workspace", workspaceId, null,
+            "Updated built-in role export permission", java.util.Map.of("role", role, "enabled", enabled));
+        return builtInRoles(workspaceId, actorId);
     }
 
     @Transactional

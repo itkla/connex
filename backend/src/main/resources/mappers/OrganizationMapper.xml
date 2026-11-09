@@ -59,4 +59,20 @@
     WHERE id = #{id} AND lifecycle_state = 'active'
     FOR SHARE
   </select>
+  <select id="getExportPermissions" resultType="ooo.klae.connex.backend.dto.ExportPermissions" flushCache="true" useCache="false">
+    SELECT export_data_owner AS `owner`, export_data_admin AS `admin`, FALSE AS `member`
+    FROM organization
+    WHERE id = #{id} AND lifecycle_state = 'active'
+  </select>
+
+  <update id="updateExportPermission">
+    UPDATE organization
+    SET
+    <choose>
+      <when test="role == 'owner'">export_data_owner = #{enabled}</when>
+      <when test="role == 'admin'">export_data_admin = #{enabled}</when>
+      <otherwise>id = id</otherwise>
+    </choose>
+    WHERE id = #{id} AND lifecycle_state = 'active'
+  </update>
 </mapper>

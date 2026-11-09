@@ -34,6 +34,34 @@ Every tenant-owned query uses server-resolved tenant/workspace scope; every endp
 
 Workspace teams are tenant-plane configuration. Reads require active workspace membership; every mutation requires the grantable `TEAM_MANAGE` permission and revalidates it from locked authorization rows before locking or changing a team. Team seats may name only active members of the same workspace. Path-addressed membership removal performs preliminary authorization against the path workspace before resolving its placement, then pins that workspace's catalog and tenant identity before opening the transaction, regardless of the active-header workspace. Active removal, pending-invitation decline, leave, fresh re-invitation, and account erasure delete team seats and clear manager references in the routed catalog without treating those configuration references as authored content.
 
+### Export authority
+
+`EXPORT_DATA` is additive to each domain's existing authority, visibility, privacy exclusions,
+and recent-passkey requirements. Workspace built-in owner/admin/member roles use independent
+export flags on their workspace; custom roles use their explicit permission rows. Organization
+owner/admin exports use organization export flags, independently of any active workspace.
+Only un-overlaid built-in workspace administrators/owners can change built-in export policy,
+under existing member-management locks and recent authentication. Organization policy mutations
+retain account → organization → membership lock order. Policy administration remains available
+after self-revocation, while custom-role grants keep their existing permission ceiling.
+
+| Export operation | Additional retained authority |
+| --- | --- |
+| GET `/api/exports/persons`, `/companies`, `/products`, `/deals`; POST `/api/exports/deals/segment` | Active workspace membership, scoped filters/privacy exclusions; existing step-up |
+| POST `/api/reports/{id}/export.csv`, `/snapshots/{snapshotId}/export.csv`, `/export-completion` | `REPORT_READ`, report visibility and underlying domain permissions, step-up |
+| GET `/api/audit/export` | `AUDIT_READ`, bounded authorized scope, step-up |
+| GET `/api/orgs/{orgId}/audit/export` | Organization admin/owner, bounded organization-only audit scope, step-up |
+| POST and GET `/api/orgs/{orgId}/workspaces/{workspaceId}/export` | Organization admin/owner, target-workspace lifecycle, recent authentication at grant issuance, session-bound one-use grant at redemption |
+| POST `/api/campaigns/{id}/exports` | `CAMPAIGN_MANAGE`, `CONSENT_MANAGE`, consent/visibility/provider fences and step-up; status and reconciliation remain separately authorized |
+| POST `/api/orgs/{orgId}/support-bundle` | Organization admin/owner and recent authentication; entity-filtered workspace events also require that workspace's `AUDIT_READ` and `EXPORT_DATA` |
+
+Workspace ZIP issuance and redemption revalidate organization export policy under the existing
+organization root lock before grant/lease writes. Locked workspace authorization reads current
+policy with `FOR SHARE`; nonlocking snapshot authorization retains its consistent-read semantics.
+Ordinary attachments/document artifacts and statutory data-subject disclosure retain their own
+access/privacy contracts; they are not bulk-export endpoints. Existing export completion audit
+semantics and passkey step-up are unchanged. See [V248 deployment](../UPGRADING.md#export-data-permission-control-v248).
+
 ### Workspace invitation disclosure
 
 Both email invitation creation and the compatibility member-add route return the same token

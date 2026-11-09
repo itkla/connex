@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -52,6 +53,7 @@ import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
 class ExportServiceTest {
@@ -161,7 +163,9 @@ class ExportServiceTest {
         try {
             if (enforced) {
                 assertThrows(RecentAuthenticationRequiredException.class, () -> service.exportProducts(null, ProductFacetFilter.none()));
-                verifyNoInteractions(workspaceService, productMapper);
+                verify(workspaceService).requirePermission(Permission.EXPORT_DATA);
+                verifyNoMoreInteractions(workspaceService);
+                verifyNoInteractions(productMapper);
                 verify(auditService).recordExportStepUpRefused();
             } else {
                 when(workspaceService.getCurrentWorkspaceId()).thenReturn(9);
@@ -199,7 +203,9 @@ class ExportServiceTest {
             org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
             org.mockito.ArgumentMatchers.nullable(MemberScope.class),
             org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean());
-        verifyNoInteractions(workspaceService, personMapper, companyMapper,
+        verify(workspaceService).requirePermission(Permission.EXPORT_DATA);
+        verifyNoMoreInteractions(workspaceService);
+        verifyNoInteractions(personMapper, companyMapper,
                 productMapper, dealService, tagMapper, customFieldValueService);
     }
 

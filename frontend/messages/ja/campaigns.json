@@ -352,7 +352,9 @@
         "markedNotDelivered": "エクスポートを未配信にしました",
         "reconcileFailed": "エクスポートを更新できませんでした",
         "exportUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。",
-        "createFailed": "エクスポートを作成できませんでした"
+        "createFailed": "エクスポートを作成できませんでした",
+        "exportPermissionDenied": "現在のロールではデータをエクスポートできません。管理者に権限の付与を依頼してください。",
+        "exportPermissionUnavailable": "エクスポート権限を確認できませんでした。ページを再読み込みしてお試しください。"
     },
     "CampaignRecipients": {
         "descriptionRecipients": "準備済みのメッセージ{count}件です。下書きも含み、同じ連絡先への複数回の配信も、それぞれ数えます。",

@@ -363,7 +363,7 @@ create bodies active. Set it to `true` only in the coupled release whose fronten
 nested person, company, and deal create bodies; the enabled backend rejects legacy flat bodies and
 has no compatibility fallback. Values other than the exact literals `true` and `false` fail backend
 startup.
-Record review and Record preparation missions remain disabled independently of ordinary AI. V232 requires draining all older backends and background message writers, applying the durable sequence backfill, and starting only compatible readers/writers. See [the V232 upgrade cutover](UPGRADING.md#v232-mission-privacy-and-message-sequence-cutover). Activation additionally requires `connex.ai.missions-enabled=true`, `connex.ai.missions-single-jvm-confirmed=true`, successful routed initialization, and an exact `connex.ai.mission-capabilities` declaration containing provider, endpoint, model and `capability: missions_v1`. Absence or loss of any gate refuses execution; stopping and privacy maintenance remain available. Keep disabled until #2101 contains the required MySQL, trajectory, browser and approved synthetic staging evidence. Control V246 is the release-wide rollback floor even while AI and mission flags are off; see [the consent-version cutover](UPGRADING.md#contact-channel-consent-versions-tenant-v245) and [the workspace-currency cutover](UPGRADING.md#workspace-default-deal-currency-control-v246). Apply control V236 → tenant V237 → tenant V238 in order. Drain serving binaries and mission workers for the singleton-proposal cutover, deploy compatible publication/decision/privacy/export paths together, and keep missions disabled until their evidence is complete; see [the V238 cutover](UPGRADING.md#mission-singleton-proposals-tenant-v238).
+Record review and Record preparation missions remain disabled independently of ordinary AI. V232 requires draining all older backends and background message writers, applying the durable sequence backfill, and starting only compatible readers/writers. See [the V232 upgrade cutover](UPGRADING.md#v232-mission-privacy-and-message-sequence-cutover). Activation additionally requires `connex.ai.missions-enabled=true`, `connex.ai.missions-single-jvm-confirmed=true`, successful routed initialization, and an exact `connex.ai.mission-capabilities` declaration containing provider, endpoint, model and `capability: missions_v1`. Absence or loss of any gate refuses execution; stopping and privacy maintenance remain available. Keep disabled until #2101 contains the required MySQL, trajectory, browser and approved synthetic staging evidence. Control V248 is the release-wide rollback floor even while AI and mission flags are off; see [the consent-version cutover](UPGRADING.md#contact-channel-consent-versions-tenant-v245) and [the workspace-currency cutover](UPGRADING.md#workspace-default-deal-currency-control-v246). Apply control V236 → tenant V237 → tenant V238 in order. Drain serving binaries and mission workers for the singleton-proposal cutover, deploy compatible publication/decision/privacy/export paths together, and keep missions disabled until their evidence is complete; see [the V238 cutover](UPGRADING.md#mission-singleton-proposals-tenant-v238).
 
 AI remains instance-disabled unless `CONNEX_AI_ENABLED=true`. When the master switch is enabled,
 operators may independently disable deal briefs, deal-risk rationales, introduction rationales,
@@ -1048,7 +1048,7 @@ resubmit rather than retry inside the transaction.
 Drain incompatible serving JVMs, scheduled workers and in-flight chat writers before control V236
 and tenant V237, followed by tenant V238. Only binaries compatible with organization privacy and
 runtime-3 proposal holdings may start afterward, with one serving JVM until #941. V238 remains the singleton-proposal compatibility minimum; the release-wide rollback floor
-is control V246 even with AI/missions disabled, as described in
+is control V248 even with AI/missions disabled, as described in
 [the consent-version cutover](UPGRADING.md#contact-channel-consent-versions-tenant-v245), followed by
 [the workspace-currency cutover](UPGRADING.md#workspace-default-deal-currency-control-v246). Proposal-set emission remains
 disabled; runtime-3 mission singleton proposals use their separate source-linked storage. Bootstrap,
@@ -1056,3 +1056,11 @@ DSR all-chat cleanup and object cleanup include that storage independently of fe
 placements or unreceipted object deletions keep erasure pending. Before serving a restore, reconcile
 original organization operations, placement receipts and generation-0 holdings; never promote
 restored content into the current generation. Use forward fixes for normal recovery.
+
+### Export permission cutover (V248)
+
+After V247, drain all older backend replicas and custom-role writers before applying control
+V248. Deploy the permission-aware frontend and backend together; start only binaries enforcing
+export policy. Existing roles retain export access, while custom roles created after the one-time
+backfill default without it. The staging rollback floor is control V248 because older binaries
+ignore export revocations. See [the V248 upgrade procedure](UPGRADING.md#export-data-permission-control-v248).

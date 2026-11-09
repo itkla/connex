@@ -48,6 +48,7 @@ public class OrgAuditController {
             @RequestParam(defaultValue = "0") int offset,
             @RequestParam(required = false) List<Integer> ids) {
         orgMemberService.requireOrgAdmin(orgId, authService.getCurrentUser().getId());
+        orgMemberService.requireExportData(orgId, authService.getCurrentUser().getId());
         return csv("org-audit-log.csv", ids == null
             ? auditService.exportRecentForOrg(orgId, limit, offset)
             : auditService.exportSelectedForOrg(orgId, ids, limit, offset));

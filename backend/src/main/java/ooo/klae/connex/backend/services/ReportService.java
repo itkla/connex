@@ -817,16 +817,18 @@ public class ReportService {
     }
 
     /** Exports a live report appendix as RFC-4180 CSV. */
-    @RequirePermission(Permission.REPORT_READ)
+    @RequirePermission(Permission.EXPORT_DATA)
     public String exportCsv(int id, ReportGenerateRequest request) {
+        workspaceService.requirePermission(Permission.REPORT_READ);
         requireExportStepUp();
         ReportDocumentDto document = generateInternal(id, request, NarrativeMode.NONE);
         return completedCsv(id, document, false);
     }
 
     /** Exports a frozen report appendix as RFC-4180 CSV. */
-    @RequirePermission(Permission.REPORT_READ)
+    @RequirePermission(Permission.EXPORT_DATA)
     public String exportSnapshotCsv(int reportId, int snapshotId) {
+        workspaceService.requirePermission(Permission.REPORT_READ);
         requireExportStepUp();
         return completedCsv(reportId, getSnapshot(reportId, snapshotId).computedResult(), true);
     }
@@ -835,7 +837,7 @@ public class ReportService {
      * Records a client-prepared PNG release attempt without trusting client counts or image content.
      * Saved configuration supplies the widget count; no row count is claimed for the client image.
      */
-    @RequirePermission(Permission.REPORT_READ)
+    @RequirePermission(Permission.EXPORT_DATA)
     public void completeImageExport(int id, String format) {
         workspaceService.requirePermission(Permission.REPORT_READ);
         requireExportStepUp();

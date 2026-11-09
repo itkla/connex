@@ -57,7 +57,8 @@ function RefusedSection({ check }: { check: Exclude<PermissionCheck, "granted"> 
  * The page stays one coherent outline either way.
  *
  * The page itself is visible to any member, because the roster is. Its sections carry their own
- * gates, matching what the backend enforces: roles needs `ROLE_MANAGE` to read, allowed domains
+ * gates, matching what the backend enforces: custom roles need `ROLE_MANAGE`; built-in role
+ * summaries and export grants also admit `MEMBER_MANAGE`. Allowed domains
  * needs `WORKSPACE_SETTINGS`, and every write inside the roster is refused by the server as it
  * always was.
  *
@@ -78,6 +79,7 @@ export default function PeopleAccess({
     const { activeWorkspace } = useWorkspace();
     const { register, arrived } = useSectionArrival(PEOPLE_SECTIONS);
     const roles = usePermissionCheck("ROLE_MANAGE");
+    const memberManagement = usePermissionCheck("MEMBER_MANAGE");
     const domains = usePermissionCheck("WORKSPACE_SETTINGS");
 
     return (
@@ -96,7 +98,7 @@ export default function PeopleAccess({
             <SettingsSectionRegion section="roles" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection title={tRoles("title")} description={tRoles("subtitle")}>
-                        {roles === "granted" ? (
+                        {roles === "granted" || memberManagement === "granted" ? (
                             <RolesPanel presentation="section" />
                         ) : (
                             <RefusedSection check={roles} />

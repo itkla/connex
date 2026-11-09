@@ -37,6 +37,8 @@ import { AUDIT_EXPORT_SELECTION_LIMIT } from "@/app/lib/auditExport";
 import { workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePermissionCheck } from "@/app/hooks/usePermissions";
+import { useOrgExportPermissions } from "@/app/hooks/useOrgExportPermissions";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
@@ -271,6 +273,13 @@ export default function AuditLogBrowser({
     const t = useTranslations("AdminAuditLog");
     const showApiError = useApiErrorToast("AdminAuditLog");
     const { activeWorkspace } = useWorkspace();
+    const workspaceExport = usePermissionCheck("EXPORT_DATA");
+    const { permissions: orgExport } = useOrgExportPermissions(orgId);
+    const orgRole = activeWorkspace?.orgId === orgId ? activeWorkspace?.orgRole : null;
+    const exportPermission = orgId === undefined ? workspaceExport
+        : orgExport === null || orgRole == null ? "unavailable"
+            : orgExport[orgRole] ? "granted" : "denied";
+    const canExport = exportPermission === "granted";
     const locale = useLocale();
     const timeZone = useTimeZone() ?? 'UTC';
     const reduce = useReducedMotion() ?? false;
@@ -472,7 +481,7 @@ export default function AuditLogBrowser({
         .slice(0, AUDIT_EXPORT_SELECTION_LIMIT);
 
     async function exportRows() {
-        if (exporting || exportIds.length === 0) return;
+        if (!canExport || exporting || exportIds.length === 0) return;
         setExporting(true);
         try {
             await exportAuditRowsCsv(exportIds, orgId,
@@ -655,10 +664,11 @@ export default function AuditLogBrowser({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <p id={orgId === undefined ? "workspace-audit-export-scope" : "organization-audit-export-scope"}
                         className="max-w-xl text-xs text-muted-foreground">
-                        {t("exportScope", { count: exportIds.length, limit: AUDIT_EXPORT_SELECTION_LIMIT })}
+                        {canExport ? t("exportScope", { count: exportIds.length, limit: AUDIT_EXPORT_SELECTION_LIMIT })
+                            : t(exportPermission === "denied" ? "exportPermissionDenied" : "exportPermissionUnavailable")}
                     </p>
                     <Button variant="outline" onClick={exportRows}
-                        disabled={exporting || exportIds.length === 0}
+                        disabled={!canExport || exporting || exportIds.length === 0}
                         aria-busy={exporting}
                         aria-describedby={orgId === undefined ? "workspace-audit-export-scope" : "organization-audit-export-scope"}>
                         {exporting ? <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" /> : <ArrowDownTrayIcon className="size-4" />}

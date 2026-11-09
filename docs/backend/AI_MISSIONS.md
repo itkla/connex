@@ -411,9 +411,9 @@ JVM, initialized workspace and organization authority, completed active-attempt 
 and the full compatible reader/writer rollout. Drain incompatible serving binaries, scheduled
 workers and in-flight writers before control V236 → tenant V237 → tenant V238. Upgrades crossing V232 must also retain that
 version's stopped-writer sequence-backfill procedure.
-V238 remains the mission component minimum; control V246 is the current release-wide rollback floor,
+V238 remains the mission component minimum; control V248 is the current release-wide rollback floor,
 including with AI and missions disabled; see the
-[workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
+[export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
 Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 

@@ -352,7 +352,9 @@
         "markedNotDelivered": "Export marked as not delivered",
         "reconcileFailed": "Couldn't update the export",
         "exportUnavailable": "Campaign delivery is not enabled on this instance.",
-        "createFailed": "Couldn't create the export"
+        "createFailed": "Couldn't create the export",
+        "exportPermissionDenied": "Your role does not allow exporting data. Ask an administrator to grant access.",
+        "exportPermissionUnavailable": "Export permission could not be checked. Refresh this page to try again."
     },
     "CampaignRecipients": {
         "descriptionRecipients": "{count, plural, one {# message entry prepared} other {# message entries prepared}}, including drafts. Repeat sends to the same contact count separately.",

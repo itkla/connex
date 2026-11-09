@@ -228,6 +228,7 @@ export default function OrganizationOverviewPanel({
                             description={t("lifecycleDescription")}
                         >
                             <OrganizationLifecyclePanel
+                                key={state.organization.id}
                                 organization={state.organization}
                                 workspaces={state.workspaces}
                                 orgRole={orgRole}

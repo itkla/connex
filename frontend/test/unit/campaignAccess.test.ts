@@ -156,7 +156,7 @@ describe('the campaign surface consumes the resolved contract', () => {
         expect(source(DELIVERY_PANEL)).toContain('canCreateSend(access)');
         expect(source(DELIVERY_PANEL)).toContain('{canMaterializeSend && !messagesUnavailable && (');
         expect(source(EXPORT_PANEL)).toContain('canCreateExport(access)');
-        expect(source(EXPORT_PANEL)).toContain('{canPushExport && (');
+        expect(source(EXPORT_PANEL)).toContain('{canPushExport && canExportData && (');
     });
 
     it('gates campaign creation, which needs campaign management', () => {
@@ -177,7 +177,7 @@ describe('both delivery panels state availability to everyone who can see them',
 
         expect(panel.indexOf('{deliveryAvailability === "unavailable" ? (')).toBeGreaterThan(-1);
         expect(panel.indexOf('{deliveryAvailability === "unavailable" ? (')).toBeLessThan(
-            panel.indexOf('{canPushExport && ('),
+            panel.indexOf('{canPushExport && canExportData && ('),
         );
     });
 

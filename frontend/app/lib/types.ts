@@ -4706,6 +4706,9 @@ export type WorkspaceRole = "owner" | "admin" | "member";
 
 export type OrgRole = "owner" | "admin";
 
+/** Role-scoped export grants; organization member is always false. */
+export type ExportPermissions = { owner: boolean; admin: boolean; member: boolean };
+
 export type Workspace = {
     defaultCurrency?: string | null;
     id: number;
@@ -4865,6 +4868,7 @@ export type OwnershipOfferAcceptance = {
 };
 
 export type CustomRole = {
+    exportPermissionEditable?: boolean;
     id: number;
     name: string;
     permissions: string[];

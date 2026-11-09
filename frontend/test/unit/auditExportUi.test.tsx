@@ -2,7 +2,7 @@
 import type { PropsWithChildren } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AuditLogBrowser from "@/app/components/admin/AuditLogBrowser";
 import OrgAuditPanel from "@/app/components/organization/OrgAuditPanel";
@@ -15,14 +15,16 @@ import japaneseOrg from "@/messages/ja/organization.json";
 import englishCommon from "@/messages/en/common.json";
 import japaneseCommon from "@/messages/ja/common.json";
 
-const api = vi.hoisted(() => ({ exportRows: vi.fn(), getOrgAudit: vi.fn(), reportError: vi.fn() }));
+const api = vi.hoisted(() => ({ exportRows: vi.fn(), getOrgAudit: vi.fn(), getOrgExportPermissions: vi.fn(), reportError: vi.fn(), workspaceExport: "granted", orgExport: true }));
 vi.mock("@/app/lib/api", () => ({
     exportAuditRowsCsv: api.exportRows,
     getAuditLogs: vi.fn(),
     getOrgAudit: api.getOrgAudit,
+    getOrgExportPermissions: api.getOrgExportPermissions,
     ApiError: class extends Error { status = 403; },
 }));
-vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspace: { id: 5, orgId: 3 } }) }));
+vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspace: { id: 5, orgId: 3, orgRole: "owner" } }) }));
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: () => api.workspaceExport }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => api.reportError }));
 vi.mock("@/app/components/motion/Rise", () => ({ default: ({ children }: PropsWithChildren) => children }));
 vi.mock("@/app/components/PageShell", () => ({ PageShell: ({ children }: PropsWithChildren) => <main>{children}</main> }));
@@ -46,6 +48,12 @@ function view(locale: "en" | "ja", organization: boolean, rows = entries) {
         </NextIntlClientProvider>,
     );
 }
+
+beforeEach(() => {
+    api.workspaceExport = "granted";
+    api.orgExport = true;
+    api.getOrgExportPermissions.mockImplementation(async () => ({ owner: api.orgExport, admin: api.orgExport, member: false }));
+});
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -73,6 +81,7 @@ describe("audit export controls", () => {
         expect(screen.getAllByText(labels.exportScopeOrganization).length).toBeGreaterThan(1);
         fireEvent.keyDown(organization, { key: "Escape" });
         await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+        await waitFor(() => expect(screen.getByRole("button", { name: labels.exportCsv }).hasAttribute("disabled")).toBe(false));
         fireEvent.click(screen.getByRole("button", { name: labels.exportCsv }));
         await waitFor(() => expect(api.exportRows).toHaveBeenCalledWith([101], 3, expect.anything()));
     });
@@ -85,6 +94,7 @@ describe("audit export controls", () => {
         view(locale, organization);
         const search = await screen.findByRole("textbox", { name: admin.searchAria });
         fireEvent.change(search, { target: { value: organization ? "Current auditor" : "Auditor" } });
+        await waitFor(() => expect(screen.getByRole("button", { name: admin.exportCsv }).hasAttribute("disabled")).toBe(false));
         fireEvent.click(screen.getByRole("button", { name: admin.exportCsv }));
         await waitFor(() => expect(api.exportRows).toHaveBeenCalledOnce());
         const [ids, orgId, init] = api.exportRows.mock.calls[0];
@@ -96,6 +106,43 @@ describe("audit export controls", () => {
         );
         fireEvent.change(search, { target: { value: "no matching entry" } });
         expect(screen.getByRole("button", { name: admin.exportCsv }).hasAttribute("disabled")).toBe(true);
+    });
+
+    it.each(["en", "ja"] as const)("refuses workspace export without EXPORT_DATA in %s", (locale) => {
+        api.workspaceExport = "denied";
+        const labels = locale === "en" ? englishAdmin.AdminAuditLog : japaneseAdmin.AdminAuditLog;
+        view(locale, false);
+        expect(screen.getByText(labels.exportPermissionDenied)).toBeTruthy();
+        const button = screen.getByRole("button", { name: labels.exportCsv });
+        expect(button.hasAttribute("disabled")).toBe(true);
+        fireEvent.click(button);
+        expect(api.exportRows).not.toHaveBeenCalled();
+    });
+
+    it("uses organization grants even when workspace export is denied", async () => {
+        api.workspaceExport = "denied";
+        view("en", true);
+        const button = await screen.findByRole("button", { name: englishAdmin.AdminAuditLog.exportCsv });
+        await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+        fireEvent.click(button);
+        await waitFor(() => expect(api.exportRows).toHaveBeenCalledOnce());
+    });
+
+    it("refuses organization exports even when workspace export is granted", async () => {
+        api.orgExport = false;
+        view("en", true);
+        expect(await screen.findByText(englishAdmin.AdminAuditLog.exportPermissionDenied)).toBeTruthy();
+        const button = screen.getByRole("button", { name: englishAdmin.AdminAuditLog.exportCsv });
+        expect(button.hasAttribute("disabled")).toBe(true);
+        fireEvent.click(button);
+        expect(api.exportRows).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when organization policy cannot be checked", async () => {
+        api.getOrgExportPermissions.mockRejectedValueOnce(new Error("Unavailable"));
+        view("en", true);
+        expect(await screen.findByText(englishAdmin.AdminAuditLog.exportPermissionUnavailable)).toBeTruthy();
+        expect(screen.getByRole("button", { name: englishAdmin.AdminAuditLog.exportCsv }).hasAttribute("disabled")).toBe(true);
     });
 
     it("caps the selection at 200 rows in the displayed order and states that scope", async () => {

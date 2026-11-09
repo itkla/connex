@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.ExportPermissions;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.MemberRoleChange;
@@ -159,6 +160,45 @@ public class OrgMemberService {
         if (OrgRole.of(orgMemberMapper.getRoleForUpdate(orgId, userId)) == null) {
             throw new ForbiddenException("Requires an organization administrator role");
         }
+    }
+
+    /** Requires the organization's current role policy as well as organization administration. */
+    public void requireExportData(int orgId, int userId) {
+        requireOrgAdmin(orgId, userId);
+        var policy = organizationMapper.getExportPermissions(orgId);
+        String role = orgMemberMapper.getRole(orgId, userId);
+        if (policy == null || role == null || !policy.allows(role)) {
+            throw new ForbiddenException("Requires the EXPORT_DATA permission in this organization");
+        }
+    }
+
+    /** Returns organization export policy without deriving authority from a workspace. */
+    public ExportPermissions exportPermissions(int orgId, int actorId) {
+        requireOrgAdmin(orgId, actorId);
+        var policy = organizationMapper.getExportPermissions(orgId);
+        if (policy == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        return policy;
+    }
+
+    /** Changes export-only organization policy while retaining current administration authority. */
+    @Transactional
+    public ExportPermissions updateExportPermission(
+            int orgId, int actorId, String role, boolean enabled) {
+        if (!Set.of("owner", "admin").contains(role)) {
+            throw new BadRequestException("Unknown organization role");
+        }
+        requireOrgAdmin(orgId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        if (userMapper.lockById(actorId) == null || organizationMapper.lockActiveById(orgId) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        requireOrgAdminForUpdate(orgId, actorId);
+        organizationMapper.updateExportPermission(orgId, role, enabled);
+        auditService.recordScoped("org.role.export_permission", "organization", orgId, null, orgId, null,
+            "Updated organization role export permission", java.util.Map.of("role", role, "enabled", enabled));
+        return organizationMapper.getExportPermissions(orgId);
     }
 
     /** Requires the user to hold org {@code owner} in the organization. */

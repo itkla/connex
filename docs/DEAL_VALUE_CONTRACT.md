@@ -111,7 +111,7 @@ parent's version through that trigger without making the confirmation request st
 Only current booking value changes; the existing realized-value resolver and win-time freeze remain
 unchanged. Old clients can read the additive response fields but cannot take over a nonzero manual
 value without the new flag. Earlier serving binaries bypass that guard and restoration, so V243 is
-the deal-value component minimum; control V246 is the current release-wide rollback floor.
+the deal-value component minimum; control V248 is the current release-wide rollback floor.
 Leave the nullable column in place and roll forward with a compatible
 binary rather than rolling back to an unsafe writer.
 

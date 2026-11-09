@@ -75,6 +75,10 @@ class WorkspaceNotificationLockOrderTest {
 
     @org.junit.jupiter.api.BeforeEach
     void ownershipTransactionContext() {
+        org.mockito.Mockito.lenient().when(workspaceMapper.getExportPermissions(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(new ooo.klae.connex.backend.dto.ExportPermissions(true, true, true));
+        org.mockito.Mockito.lenient().when(workspaceMapper.getExportPermissionsForShare(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(new ooo.klae.connex.backend.dto.ExportPermissions(true, true, true));
         org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
         org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
             java.sql.Connection.TRANSACTION_READ_COMMITTED);

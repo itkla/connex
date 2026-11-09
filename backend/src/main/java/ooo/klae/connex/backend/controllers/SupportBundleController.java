@@ -108,6 +108,7 @@ public class SupportBundleController {
             throw new ResourceNotFoundException("Workspace not found in this organization");
         }
         workspaceService.requirePermission(Permission.AUDIT_READ);
+        workspaceService.requirePermission(Permission.EXPORT_DATA);
         return workspaceId;
     }
 
