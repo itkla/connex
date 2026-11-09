@@ -24,11 +24,13 @@ public class AiAgentStartupRecoveryService {
     private final PlatformTransactionManager transactionManager;
 
     /** Refuses inconsistent active linkage and settles a bounded batch of unowned attempts. */
-    public void reconcile(int workspaceId) {
+    public int reconcile(int workspaceId) {
         if (read(() -> runs.countInconsistentActiveRuns(workspaceId)) != 0) {
             throw new IllegalStateException("Mission active attempt linkage requires repair");
         }
+        int attempted = 0;
         for (var lease : read(() -> leases.findExpiredLeases(workspaceId, List.of("agent_run"), 50))) {
+            attempted++;
             var orphan = read(() -> runs.getRun(workspaceId, Math.toIntExact(lease.getSubjectId())));
             if (orphan != null && "running".equals(orphan.getStatus())) {
                 persistence.settleOrphan(orphan, new AiRunLeaseKey(workspaceId, AiRunLeaseSubject.AGENT_RUN,
@@ -47,6 +49,7 @@ public class AiAgentStartupRecoveryService {
                 codec.validateExecutable(run, snapshot);
             }
         }
+        return attempted + candidates.size();
     }
 
     /** Ends each routed snapshot before settlement so one run never retains a lease ahead of the next run's roots. */

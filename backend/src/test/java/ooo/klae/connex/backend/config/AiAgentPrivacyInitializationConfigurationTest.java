@@ -104,7 +104,7 @@ class AiAgentPrivacyInitializationConfigurationTest {
             assertTrue(tenantContext.getWorkspaceScopes() != null);
             started.countDown();
             assertTrue(release.await(5, TimeUnit.SECONDS));
-            return null;
+            return 0;
         }).when(privacy).initialize(7);
 
         runner.withPropertyValues("connex.maintenance.mode=" + maintenanceMode).run(context -> {

@@ -1,12 +1,14 @@
 package ooo.klae.connex.backend.observability;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +62,7 @@ class JobRunRecorderTest {
     private JobRunMapper mapper;
     private ObjectMapper objectMapper;
     private JobRunRecorder recorder;
+    private Clock clock;
 
     @BeforeEach
     void setUp() {
@@ -68,7 +71,106 @@ class JobRunRecorderTest {
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any()))
                 .thenReturn(mock(TransactionStatus.class));
-        recorder = new JobRunRecorder(mapper, objectMapper, CLOCK, transactionManager);
+        clock = mock(Clock.class);
+        when(clock.instant()).thenReturn(CLOCK.instant());
+        recorder = new JobRunRecorder(mapper, objectMapper, clock, transactionManager);
+    }
+
+    @Test
+    void repeatedIdleTicksWriteOnlyTheFirstSampleAndKeepTheLatestLocalTick() {
+        for (int tick = 0; tick < 8; tick++) {
+            when(clock.instant()).thenReturn(CLOCK.instant().plusSeconds(tick));
+            recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+                JobRunDetail.started(clock, Map.of("attemptedCount", 0)));
+        }
+
+        verify(mapper, times(1)).insert(any());
+        verify(mapper, times(1)).deleteBeyondRetention(
+            JobRunRecorder.AI_AGENT_SCHEDULER, 7, "succeeded", 50);
+        assertEquals(CLOCK.instant().plusSeconds(7).atOffset(ZoneOffset.UTC).toLocalDateTime(),
+            recorder.latestIdleRuns(List.of(7)).getFirst().getStartedAt());
+        assertTrue(recorder.latestIdleRuns(List.of(8)).isEmpty());
+    }
+
+    @Test
+    void idleSamplesResumeAtFifteenMinutesAndRemainIndependentPerWorkspace() {
+        for (int minutes : List.of(0, 14, 15, 16)) {
+            when(clock.instant()).thenReturn(CLOCK.instant().plusSeconds(minutes * 60L));
+            recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+                JobRunDetail.started(clock, Map.of("attemptedCount", 0)));
+        }
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 8, JobRunStatus.SUCCEEDED,
+            JobRunDetail.started(clock, Map.of("attemptedCount", 0)));
+
+        verify(mapper, times(3)).insert(any());
+    }
+
+    @Test
+    void workFailuresUnknownCountersAndRecoveryAreNeverSuppressed() {
+        JobRunDetail idle = JobRunDetail.started(CLOCK, Map.of("attemptedCount", 0));
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED, idle);
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED, idle);
+        for (int tick = 0; tick < 2; tick++) {
+            recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+                JobRunDetail.started(CLOCK, Map.of("attemptedCount", 1)));
+            recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.FAILED, idle);
+        }
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED, idle);
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+            JobRunDetail.started(CLOCK, Map.of("attemptedCount", 0, "dueCount", 1)));
+        recorder.record(JobRunRecorder.NOTIFICATION_RECONCILIATION, 7, JobRunStatus.SUCCEEDED,
+            JobRunDetail.started(CLOCK, Map.of("purgedCount", 0)));
+
+        verify(mapper, times(8)).insert(any());
+    }
+
+    @Test
+    void failedIdlePersistenceIsRetriedOnTheNextTick() {
+        org.mockito.Mockito.doThrow(new IllegalStateException("unavailable"))
+            .doNothing().when(mapper).insert(any());
+        JobRunDetail idle = JobRunDetail.started(CLOCK, Map.of("attemptedCount", 0));
+
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED, idle);
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED, idle);
+
+        verify(mapper, times(2)).insert(any());
+        verify(mapper).deleteBeyondRetention(JobRunRecorder.AI_AGENT_SCHEDULER, 7, "succeeded", 50);
+    }
+
+    @Test
+    void aFailureKeepsTheLatestLocalIdleSuccessForDiagnostics() {
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+            JobRunDetail.started(CLOCK, Map.of("attemptedCount", 0)));
+        when(clock.instant()).thenReturn(CLOCK.instant().plusSeconds(5));
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+            JobRunDetail.started(clock, Map.of("attemptedCount", 0)));
+        recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.FAILED,
+            JobRunDetail.started(clock, Map.of("attemptedCount", 0)));
+
+        assertEquals(CLOCK.instant().plusSeconds(5).atOffset(ZoneOffset.UTC).toLocalDateTime(),
+            recorder.latestIdleRuns(List.of(7)).getFirst().getStartedAt());
+        verify(mapper, times(2)).insert(any());
+    }
+
+    @Test
+    void concurrentIdleTicksShareOneProcessSample() throws Exception {
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try (var workers = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            var results = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int index = 0; index < 8; index++) {
+                results.add(workers.submit(() -> {
+                    start.await();
+                    recorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+                        JobRunDetail.started(CLOCK, Map.of("attemptedCount", 0)));
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (var result : results) {
+                result.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        }
+        verify(mapper, times(1)).insert(any());
     }
 
     @Test

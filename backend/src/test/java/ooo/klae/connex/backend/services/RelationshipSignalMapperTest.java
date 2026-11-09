@@ -144,6 +144,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             "relationship_decay:person:53",
             "newer");
         newer.setSourceStateHash("n".repeat(64));
+        newer.setEvidenceAsOf(newerAttempt);
         writer.replaceFamily(
             workspace.getId(),
             RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
@@ -158,6 +159,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             "relationship_decay:person:53",
             "older");
         older.setSourceStateHash("o".repeat(64));
+        older.setEvidenceAsOf(olderAttempt);
 
         writer.replaceFamily(
             workspace.getId(),

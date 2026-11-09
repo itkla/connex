@@ -751,6 +751,26 @@
       #{contextLabel}, #{actionUrl}, #{data}, #{dedupeKey}, #{triggeredAt}
     ) AS incoming
     ON DUPLICATE KEY UPDATE
+      updated_at = IF(
+        notification.resolved_at IS NULL
+          AND BINARY notification.type &lt;=&gt; BINARY incoming.type
+          AND BINARY notification.category &lt;=&gt; BINARY incoming.category
+          AND BINARY notification.severity &lt;=&gt; BINARY incoming.severity
+          AND notification.template_version &lt;=&gt; incoming.template_version
+          AND BINARY notification.title &lt;=&gt; BINARY incoming.title
+          AND BINARY notification.body &lt;=&gt; BINARY incoming.body
+          AND notification.actor_id &lt;=&gt; incoming.actor_id
+          AND BINARY notification.actor_label &lt;=&gt; BINARY incoming.actor_label
+          AND BINARY notification.source_type &lt;=&gt; BINARY incoming.source_type
+          AND notification.source_id &lt;=&gt; incoming.source_id
+          AND BINARY notification.source_label &lt;=&gt; BINARY incoming.source_label
+          AND BINARY notification.context_type &lt;=&gt; BINARY incoming.context_type
+          AND notification.context_id &lt;=&gt; incoming.context_id
+          AND BINARY notification.context_label &lt;=&gt; BINARY incoming.context_label
+          AND BINARY notification.action_url &lt;=&gt; BINARY incoming.action_url
+          AND notification.data &lt;=&gt; CAST(incoming.data AS JSON),
+        notification.updated_at, CURRENT_TIMESTAMP
+      ),
       read_at = IF(
         notification.severity &lt;&gt; incoming.severity
           OR notification.resolved_at IS NOT NULL,

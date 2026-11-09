@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 
@@ -39,6 +41,61 @@ class JobRunRecorderIntegrationTest {
     @Autowired private JobRunRecorder recorder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private JobRunMapper jobRunMapper;
+    @Autowired private Clock clock;
+
+    @Test
+    void idleSweepOutcomesHaveConstantDurableRowsWhileWorkAndFailuresRemainComplete() {
+        Map<String, Map<String, Integer>> jobs = Map.of(
+            JobRunRecorder.AI_AGENT_SCHEDULER, Map.of("attemptedCount", 0),
+            JobRunRecorder.AI_AGENT_PRIVACY_INITIALIZATION, Map.of("attemptedCount", 0),
+            JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION, Map.of("failedCount", 0, "changedCount", 0),
+            JobRunRecorder.NOTIFICATION_RECONCILIATION, Map.of("purgedCount", 0, "changedCount", 0),
+            JobRunRecorder.LEAD_RESPONSE_SLA, Map.of("attemptedCount", 0, "failedCount", 0),
+            JobRunRecorder.APPROVAL_RECONCILIATION, Map.of("attemptedCount", 0, "failedCount", 0),
+            JobRunRecorder.AI_BRIEF_DELIVERY,
+                Map.of("attemptedCount", 0, "startedCount", 0, "deliveredCount", 0, "failedCount", 0),
+            JobRunRecorder.AI_WATCH_EVALUATION, Map.of("evaluatedCount", 0, "firedCount", 0, "failedCount", 0));
+        JobRunRecorder firstInstance = new JobRunRecorder(
+            jobRunMapper, new tools.jackson.databind.ObjectMapper(), clock, transactionManager);
+        JobRunRecorder secondInstance = new JobRunRecorder(
+            jobRunMapper, new tools.jackson.databind.ObjectMapper(), clock, transactionManager);
+        for (var job : jobs.entrySet()) {
+            String name = job.getKey();
+            jdbcTemplate.update("DELETE FROM job_run WHERE workspace_id = ? AND job_name = ?", WORKSPACE_ONE, name);
+            try {
+                firstInstance.record(name, WORKSPACE_ONE, JobRunStatus.SUCCEEDED,
+                    JobRunDetail.started(clock, job.getValue()));
+                List<Integer> firstSample = jobIds(name);
+                assertEquals(1, firstSample.size(), name);
+                for (int tick = 0; tick < 8; tick++) {
+                    firstInstance.record(name, WORKSPACE_ONE, JobRunStatus.SUCCEEDED,
+                        JobRunDetail.started(clock, job.getValue()));
+                }
+                assertEquals(firstSample, jobIds(name), name + " idle ticks must neither replace nor append rows");
+                for (int tick = 0; tick < 3; tick++) {
+                    secondInstance.record(name, WORKSPACE_ONE, JobRunStatus.SUCCEEDED,
+                        JobRunDetail.started(clock, job.getValue()));
+                }
+                assertEquals(2, jobIds(name).size(), name + " samples are bounded independently per process");
+                for (int tick = 0; tick < 2; tick++) {
+                    firstInstance.record(name, WORKSPACE_ONE, JobRunStatus.SUCCEEDED,
+                        JobRunDetail.started(clock, Map.of("attemptedCount", 1)));
+                    firstInstance.record(name, WORKSPACE_ONE, JobRunStatus.FAILED,
+                        JobRunDetail.started(clock, Map.of("phase", "sweep_failed")));
+                }
+                assertEquals(6, jobIds(name).size(), name + " work and failures must each persist");
+            } finally {
+                jdbcTemplate.update("DELETE FROM job_run WHERE workspace_id = ? AND job_name = ?", WORKSPACE_ONE, name);
+            }
+        }
+    }
+
+    private List<Integer> jobIds(String name) {
+        return jdbcTemplate.queryForList(
+            "SELECT id FROM job_run WHERE workspace_id = ? AND job_name = ? ORDER BY id",
+            Integer.class, WORKSPACE_ONE, name);
+    }
 
     @BeforeEach
     @AfterEach

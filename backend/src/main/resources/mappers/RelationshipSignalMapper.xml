@@ -57,6 +57,18 @@
     st.version AS state_version
   </sql>
 
+  <sql id="SignalUnchanged">
+    BINARY source_state_hash &lt;=&gt; BINARY VALUES(source_state_hash)
+      AND BINARY source_model_version &lt;=&gt; BINARY VALUES(source_model_version)
+      AND BINARY subject_label &lt;=&gt; BINARY VALUES(subject_label)
+      AND BINARY priority &lt;=&gt; BINARY VALUES(priority)
+      AND priority_rank &lt;=&gt; VALUES(priority_rank)
+      AND rank_value &lt;=&gt; VALUES(rank_value)
+      AND evidence_json &lt;=&gt; VALUES(evidence_json)
+      AND rank_explanation_json &lt;=&gt; VALUES(rank_explanation_json)
+      AND resolved_at IS NULL
+  </sql>
+
   <insert id="upsertSignal" parameterType="ooo.klae.connex.backend.beans.RelationshipSignal" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO relationship_signal (
       workspace_id, family, subject_type, subject_id, subject_label, priority,
@@ -69,24 +81,18 @@
     )
     ON DUPLICATE KEY UPDATE
       id = LAST_INSERT_ID(id),
-      version = IF(
-        source_state_hash = VALUES(source_state_hash)
-        AND priority = VALUES(priority)
-        AND priority_rank = VALUES(priority_rank)
-        AND rank_value = VALUES(rank_value)
-        AND resolved_at IS NULL,
-        version,
-        version + 1),
+      updated_at = IF(<include refid="SignalUnchanged"/>, updated_at, CURRENT_TIMESTAMP(6)),
+      version = IF(<include refid="SignalUnchanged"/>, version, version + 1),
+      evidence_as_of = IF(<include refid="SignalUnchanged"/>, evidence_as_of, VALUES(evidence_as_of)),
+      generation_token = IF(<include refid="SignalUnchanged"/>, generation_token, VALUES(generation_token)),
       subject_label = VALUES(subject_label),
       priority = VALUES(priority),
       priority_rank = VALUES(priority_rank),
       rank_value = VALUES(rank_value),
       evidence_json = VALUES(evidence_json),
       rank_explanation_json = VALUES(rank_explanation_json),
-      evidence_as_of = VALUES(evidence_as_of),
       source_state_hash = VALUES(source_state_hash),
       source_model_version = VALUES(source_model_version),
-      generation_token = VALUES(generation_token),
       resolved_at = NULL
   </insert>
 
@@ -115,6 +121,19 @@
       AND family = #{family}
       AND resolved_at IS NULL
       AND generation_token &lt;&gt; #{generationToken}
+  </update>
+
+  <update id="resolveMissingExcept">
+    UPDATE relationship_signal
+    SET resolved_at = #{resolvedAt}, version = version + 1
+    WHERE workspace_id = #{workspaceId}
+      AND family = #{family}
+      AND resolved_at IS NULL
+      AND generation_token &lt;&gt; #{generationToken}
+      <if test="!dedupeKeys.isEmpty()">
+        AND dedupe_key NOT IN
+        <foreach collection="dedupeKeys" item="key" open="(" separator="," close=")">#{key}</foreach>
+      </if>
   </update>
 
   <update id="resolveByIds">

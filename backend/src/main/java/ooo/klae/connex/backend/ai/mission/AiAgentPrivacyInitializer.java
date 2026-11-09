@@ -133,17 +133,20 @@ public class AiAgentPrivacyInitializer {
                 workspaceId, systemActor.user(), "system", () -> {
             JobRunDetail started = JobRunDetail.startedUtc();
             JobRunStatus outcome = JobRunStatus.SUCCEEDED;
+            int attempted = 0;
             try {
-                privacyService.initialize(workspaceId);
-                privacyService.reconcileLegacyTurns(workspaceId);
-                startupRecovery.reconcile(workspaceId);
+                attempted += privacyService.initialize(workspaceId);
+                attempted += privacyService.reconcileLegacyTurns(workspaceId);
+                attempted += startupRecovery.reconcile(workspaceId);
                 return null;
             } catch (RuntimeException failure) {
                 outcome = JobRunStatus.FAILED;
                 throw failure;
             } finally {
                 jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_INITIALIZATION, workspaceId,
-                        outcome, new JobRunDetail(started.startedAt(), Map.of("phase", "initialization")));
+                        outcome, new JobRunDetail(started.startedAt(), outcome == JobRunStatus.SUCCEEDED
+                            ? Map.of("attemptedCount", attempted)
+                            : Map.of("phase", "initialization", "attemptedCount", attempted)));
             }
         }));
     }

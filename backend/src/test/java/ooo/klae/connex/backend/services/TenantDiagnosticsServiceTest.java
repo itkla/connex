@@ -58,6 +58,7 @@ class TenantDiagnosticsServiceTest {
     private BusinessCardService businessCardService;
     private ProviderCaptureMapper providerCaptureMapper;
     private JobRunMapper jobRunMapper;
+    private JobRunRecorder jobRunRecorder;
     private OrganizationWorkspaceScopeControlAccess scopeControlAccess;
     private TenantDiagnosticsTenantAccess tenantAccess;
     private SecretStoreLifecycleService secretStoreLifecycleService;
@@ -79,6 +80,7 @@ class TenantDiagnosticsServiceTest {
         businessCardService = mock(BusinessCardService.class);
         providerCaptureMapper = mock(ProviderCaptureMapper.class);
         jobRunMapper = mock(JobRunMapper.class);
+        jobRunRecorder = mock(JobRunRecorder.class);
         scopeControlAccess = mock(OrganizationWorkspaceScopeControlAccess.class);
         tenantAccess = mock(TenantDiagnosticsTenantAccess.class);
         secretStoreLifecycleService = mock(SecretStoreLifecycleService.class);
@@ -91,6 +93,7 @@ class TenantDiagnosticsServiceTest {
                 businessCardService,
                 providerCaptureMapper,
                 jobRunMapper,
+                jobRunRecorder,
                 scopeControlAccess,
                 tenantAccess,
                 secretStoreLifecycleService,
@@ -108,6 +111,55 @@ class TenantDiagnosticsServiceTest {
         when(jobRunMapper.findLatestVisible(anyInt(), any(), isNull())).thenReturn(List.of());
         when(jobRunMapper.findLatestVisible(anyInt(), any(), eq("succeeded"))).thenReturn(List.of());
         when(jobRunMapper.findLatestVisible(anyInt(), any(), eq("failed"))).thenReturn(List.of());
+    }
+
+    @Test
+    void localIdleRecoveryKeepsLastFailureAndDoesNotHideAnotherWorkspacesFailure() {
+        when(scopeControlAccess.getForOrg(ORG_ID))
+            .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID, 12), "[11,12]"));
+        JobRun firstFailure = run(2, "failed", "{\"attemptedCount\":0}");
+        firstFailure.setJobName(JobRunRecorder.AI_AGENT_SCHEDULER);
+        JobRun otherFailure = run(4, "failed", "{}");
+        otherFailure.setJobName(JobRunRecorder.AI_AGENT_SCHEDULER);
+        otherFailure.setWorkspaceId(12);
+        JobRun recovered = run(3, "succeeded", "{\"attemptedCount\":0}");
+        recovered.setJobName(JobRunRecorder.AI_AGENT_SCHEDULER);
+        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11,12]", null))
+            .thenReturn(List.of(firstFailure, otherFailure));
+        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11,12]", "failed"))
+            .thenReturn(List.of(firstFailure, otherFailure));
+        when(jobRunRecorder.latestIdleRuns(List.of(WORKSPACE_ID, 12))).thenReturn(List.of(recovered));
+
+        Job job = service.forOrganization(ORG_ID, ACTOR_ID).jobs().stream()
+            .filter(value -> JobRunRecorder.AI_AGENT_SCHEDULER.equals(value.jobName()))
+            .findFirst().orElseThrow();
+
+        assertEquals("failed", job.last().status());
+        assertEquals(otherFailure.getStartedAt(), job.last().startedAt());
+        assertEquals(recovered.getStartedAt(), job.lastSuccess().startedAt());
+        assertEquals(otherFailure.getStartedAt(), job.lastFailure().startedAt());
+        assertEquals(1, job.workspacesFailingLatest());
+    }
+
+    @Test
+    void aNewerDurableFailureFromAnotherInstanceWinsOverLocalIdleState() {
+        when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
+            .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID), "[11]"));
+        JobRun failure = run(4, "failed", "{}");
+        failure.setJobName(JobRunRecorder.AI_AGENT_SCHEDULER);
+        JobRun idle = run(3, "succeeded", "{\"attemptedCount\":0}");
+        idle.setJobName(JobRunRecorder.AI_AGENT_SCHEDULER);
+        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", null)).thenReturn(List.of(failure));
+        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", "failed")).thenReturn(List.of(failure));
+        when(jobRunRecorder.latestIdleRuns(List.of(WORKSPACE_ID))).thenReturn(List.of(idle));
+
+        Job job = service.forWorkspace(WORKSPACE_ID, ACTOR_ID).jobs().stream()
+            .filter(value -> JobRunRecorder.AI_AGENT_SCHEDULER.equals(value.jobName()))
+            .findFirst().orElseThrow();
+
+        assertEquals("failed", job.last().status());
+        assertEquals(1, job.workspacesFailingLatest());
+        verify(jobRunRecorder).latestIdleRuns(List.of(WORKSPACE_ID));
     }
 
     @Test

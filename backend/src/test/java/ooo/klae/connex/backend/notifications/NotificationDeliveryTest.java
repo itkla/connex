@@ -71,7 +71,8 @@ class NotificationDeliveryTest {
         delivery = new NotificationDelivery(
                 List.of(inApp, email), notificationMapper, preferenceMapper, pushPublisher,
                 stateVersionService, quietHoursControlAccess, bypassPolicy,
-                Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC),
+                new tools.jackson.databind.ObjectMapper());
     }
 
     private Notification notification() {
@@ -266,6 +267,22 @@ class NotificationDeliveryTest {
 
         verify(stateVersionService).markChangedWithDetailedPush(9);
         verify(pushPublisher).updated(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
+    }
+
+    @Test
+    void equivalentJsonDoesNotAdvanceRecipientStateOrPush() {
+        Notification incoming = notification();
+        incoming.setData("{\"taskId\":7,\"kind\":\"due\"}");
+        Notification existing = existingRow(77, "info", null);
+        existing.setData("{\"kind\": \"due\", \"taskId\": 7}");
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey())).thenReturn(existing);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        verify(inApp).dispatch(incoming);
+        verify(notificationMapper, never()).findById(anyInt(), anyInt());
+        verify(stateVersionService, never()).markChangedWithDetailedPush(anyInt());
+        verify(stateVersionService, never()).markChanged(anyInt());
     }
 
     @Test

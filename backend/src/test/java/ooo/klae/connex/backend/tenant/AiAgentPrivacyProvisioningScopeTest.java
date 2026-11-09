@@ -94,7 +94,7 @@ class AiAgentPrivacyProvisioningScopeTest {
             assertEquals(catalog, context.getCatalog());
             assertEquals("system", context.getRole());
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
-            return null;
+            return 0;
         }).when(privacy).initialize(7);
 
         if (committedCallback) {
