@@ -17,6 +17,7 @@
     "rangeCustomEnd": "End",
     "rangeCustomDays": "{count, plural, one {# day} other {# days}}",
     "rangeCustomActivities": "{count, plural, one {# activity} other {# activities}}",
+    "rangeCustomPreviewUnavailable": "Activity previews are unavailable. You can still choose and apply a date range.",
     "rangeCustomGrid": "Date range calendar",
     "rangeCustomPrevious": "Earlier dates",
     "rangeCustomNext": "Later dates",

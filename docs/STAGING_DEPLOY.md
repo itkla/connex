@@ -40,6 +40,17 @@ deployed by logic loaded from the older commit. The candidate
    unexplained mismatch is refused and alerted; the backend-is-target shortcut from #829 no
    longer exists. Only an absent frontend marker is eligible for the one-time legacy transition;
    a malformed marker is a refusal.
+
+   Before any new build, the filesystem containing `.staging` must have the 4 GiB
+   `STAGING_MIN_FREE_BYTES` floor **plus** the measured size (`du -sb`) of
+   `.staging/releases/<deployed-sha>` **plus 256 MiB** for cache growth. The deployed sealed pair
+   is the estimate for the next pair; the extra margin allows package/build caches to grow without
+   consuming the activation floor. A missing, unreadable, symlinked, or unmeasurable deployed tree
+   uses a conservative **512 MiB** footprint instead (over twice the observed 200–220 MB pair),
+   still adding the 256 MiB margin. Logs report the footprint, its `deployed` or `fallback` source,
+   cache margin, available bytes and the full required byte count before building. Activation
+   still independently requires exactly the bare 4 GiB floor. An interrupted transaction is
+   recovered before either new-work headroom check, so low space cannot prevent recovery.
 2. **Builds outside the live checkout.** The target commit is exported into an isolated temporary
    source tree. The frontend gets a frozen install and clean Next build, its generated route assets
    are checked by `frontend/ci/verify_build_chunks.mjs`, and the backend gets `clean bootJar` with
@@ -76,6 +87,26 @@ deployed by logic loaded from the older commit. The candidate
    boundary against a process already running as the deploy user. Such a process can rewrite the
    artifacts, embedded identities, and writable manifest together and recompute the hashes. Strong
    tamper evidence would require a signature or digest anchored outside the deploy user's control.
+
+   If a successful target build is refused or fails before a transaction is recorded (including
+   pair verification, activation headroom, or transaction-write failure), EXIT/INT/TERM cleanup
+   atomically renames that target into `.staging/release-quarantine/<sha>`. It never moves a target
+   protected by `deployed-sha`, `rollback-sha`, `frontend-release` or the attested `frontend-running`
+   record. It also retains the tree when a visible process references its cwd, root, executable,
+   descriptors or mappings, or deployment-user process inspection is indeterminate. Invalid
+   serving state, symlinked release paths, an existing quarantine destination, or a failed atomic
+   rename produces a loud refusal and retains the tree. Once a transaction exists, its recovery
+   path owns the target instead. A later attempt at the same sha builds again: only
+   `releases/<sha>` participates in sealing/reuse; quarantine is never a ready-release source.
+   If that retry commits, the old quarantine copy is deferred while the sha remains deployed,
+   rollback or attested-running. The deploy compares device/inode identities to prove it is a
+   separate directory from `releases/<sha>`; a missing, aliased or uninspectable protected tree
+   still fails closed. Deferring a stale duplicate is successful cleanup, so commit and no-change
+   runs do not leave `prune-needed` pending. The independent pruner keeps protecting that sha,
+   then reclaims the old copy once it is no longer protected and its other gates pass.
+   If the rebuilt tree itself becomes a retirement candidate first, its move is deferred without
+   failing the deploy; `prune-needed` stays pending until the old quarantine copy is reclaimed,
+   then a later pass can retire the rebuilt tree with the usual atomic rename.
 4. **Records a recoverable transaction.** `.staging/deploy-transaction` atomically records the
    validated prior sha, target sha, pre-deploy retained rollback sha, and phase (`prepared`,
    `frontend_stopped`, `backend_live`, `frontend_live`, or `committed`). EXIT/INT/TERM restore the
@@ -130,9 +161,9 @@ deployed by logic loaded from the older commit. The candidate
    reason above. Reclaiming the space is a separate program on its own schedule,
    `connex-staging-prune`, described under "Reclaiming quarantine" below. Every timer run logs
    quarantine entry and byte occupancy; more than four entries or more than 1 GiB emits a sanitized
-   warning `ALERT`. Those thresholds sit below the 5 GiB free-space preflight on purpose — set
-   above it, the warning could never fire before the deploy gate had already blocked. Before recovery or build work, the script also
-   requires at least 5 GiB free on the filesystem containing `.staging`, failing closed before
+   warning `ALERT`. The 1 GiB byte threshold remains below the 4 GiB free-space floor on purpose — set
+   above it, the warning could never fire before the deploy gate had already blocked. New work
+   fails closed at the footprint-inclusive pre-build headroom gate described above, before
    transaction, marker, rollback, or release writes begin under insufficient headroom.
    `.staging/prune-needed` persists only when a candidate could not be moved safely, while a
    non-empty quarantine still causes no-change runs to repeat the advisory usage report. This is
@@ -218,7 +249,7 @@ copies it there — so a host keeps its old script and its old timer schedule un
 change out by hand. Do that whenever `connex-staging-prune.sh` or either unit file changes:
 
 ```bash
-# On the staging host, as the deploy user. Verify first, then install.
+# On the staging host, in a root maintenance session. Verify first, then install.
 sudo install -m 0755 deploy/staging/connex-staging-prune.sh /usr/local/bin/connex-staging-prune
 sudo install -m 0644 deploy/staging/systemd/connex-staging-prune.service \
     deploy/staging/systemd/connex-staging-prune.timer /etc/systemd/system/
@@ -263,8 +294,8 @@ close to 900 MB. The reaper removes such a directory once it is past the minimum
 deploy lock, and no live process references it.
 
 ```bash
-# Report what would be reclaimed, without touching anything.
-sudo -u dev connex-staging-prune --dry-run
+# Run as dev: report what would be reclaimed, without touching anything.
+connex-staging-prune --dry-run
 ```
 
 A `release-quarantine/<sha>` entry means the deploy script retired that release from the public
@@ -274,20 +305,59 @@ processes the timer can inspect; it is useful evidence, but never proof that ano
 cwd, or open file does not use the tree. The deploy timer path never unlinks the entry: committed cross-version recovery stays in current
 logic, while recorded logic is used only to interpret nonterminal transactions. A timer invocation
 already running an older script is outside that guarantee, so complete the rollout before relying
-on it. More than eight entries or more than 8 GiB produces a warning `ALERT`; schedule deliberate
-reclamation at or before either threshold. A deploy also refuses to begin recovery or build work
-with less than 5 GiB free on the `.staging` filesystem.
+on it. More than four entries or more than 1 GiB produces a warning `ALERT`; inspect reclamation
+at or before either threshold. New builds require the footprint-inclusive reserve described above.
 
-To reclaim one entry, first identify its owning release and prove that neither Connex nor an
-out-of-band process serves it. Run the following on staging in an interactive maintenance window,
-substituting the quarantined 40-character sha:
+### Operator note: headroom refusals and failed target builds
+
+A pre-build refusal logs one complete requirement, for example:
+
+```text
+Staging build reserve: release_bytes=230686720 source=deployed cache_margin_bytes=268435456
+Staging filesystem headroom: 4500000000 bytes available; preflight requires at least 4794089472 bytes
+Deploy refused: staging filesystem has insufficient free-space headroom
+```
+
+Clear enough space to reach the **reported requirement**, rather than just the bare 4 GiB floor.
+With the fallback footprint the requirement is 5,100,273,664 bytes. This is a build estimate, not
+a guarantee against unrelated disk growth or a much larger target; the unchanged activation gate
+can still refuse with `insufficient free-space headroom before activation`.
+
+After a pre-transaction failure, expect `Quarantined unactivated target <sha>; live release
+untouched`. Markers and deployed/rollback trees remain in place. Quarantining is a rename: it does
+not itself free bytes. The independent hourly prune timer reclaims eligible entries under its
+existing age, retention, frontend-start and process-reference gates; it does not require a
+successful deploy. Inspect `journalctl -u connex-staging-prune` and run the installed pruner's
+`--dry-run` as its service user before expecting space to return. A newly quarantined target may
+remain because the current frontend predates it, or because it is among the two retained entries.
+
+If space is still insufficient, use the deliberate marker and deploy-user process checks below to reclaim
+an eligible quarantine entry in a maintenance window, or free unrelated space / expand the
+filesystem. Do not delete deployed or rollback trees or lower the floor to force activation.
+`Unactivated target quarantine refused` means the target remains under `releases/`; resolve the
+reported serving-state, consumer, destination-collision or atomic-move blocker first. A retry can
+rebuild the same sha even while its earlier tree is quarantined, but a second refused build cannot
+overwrite that quarantine entry. Older unreferenced trees stranded in `releases/` by earlier
+deploy logic are not swept by this change or by the independent pruner; escalate them for owner-led
+inspection rather than bulk-deleting releases. SIGKILL and power loss before transaction creation
+also bypass EXIT cleanup and require that inspection.
+
+To reclaim one entry, first identify its owning release and establish which services could use it.
+Run the following as `dev` in one interactive maintenance shell, substituting the quarantined
+40-character sha. The trees are dev-owned, so inspection of dev's processes and removal need no
+sudo. Hold the deploy lock through inspection and deletion so markers cannot change between them:
 
 ```bash
 sha=0123456789abcdef0123456789abcdef01234567
 state=/opt/connex-staging/.staging
 entry="$state/release-quarantine/$sha"
+exec 9>>/tmp/connex-staging-deploy.lock || exit 1
+flock -n 9 || { echo 'deploy or prune is running; retry later' >&2; exit 1; }
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid sha' >&2; exit 1; }
-[ -d "$entry" ] && [ ! -L "$entry" ] || { echo 'invalid quarantine entry' >&2; exit 1; }
+if [ ! -d "$entry" ] || [ -L "$entry" ]; then
+    echo 'invalid quarantine entry' >&2
+    exit 1
+fi
 for marker in deployed-sha rollback-sha frontend-release; do
     marker_sha="$(cat "$state/$marker")" || { echo "cannot read $marker" >&2; exit 1; }
     [[ "$marker_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "$marker is invalid" >&2; exit 1; }
@@ -295,36 +365,71 @@ for marker in deployed-sha rollback-sha frontend-release; do
 done
 IFS=$'\t' read -r running_sha running_pid running_extra < "$state/frontend-running" \
     || { echo 'cannot read frontend-running' >&2; exit 1; }
-[[ "$running_sha" =~ ^[0-9a-f]{40}$ ]] && [[ "$running_pid" =~ ^[1-9][0-9]*$ ]] \
-    && [ -z "$running_extra" ] || { echo 'frontend-running is invalid' >&2; exit 1; }
-[ "$running_sha" != "$sha" ] || { echo "frontend still serves $sha" >&2; exit 1; }
-lsof_report="$(mktemp)" || exit 1
-lsof_errors="$(mktemp)" || { rm -f "$lsof_report"; exit 1; }
-trap 'rm -f "$lsof_report" "$lsof_errors"' EXIT
-sudo lsof -nP > "$lsof_report" 2> "$lsof_errors" || { cat "$lsof_errors" >&2; exit 1; }
-[ ! -s "$lsof_errors" ] || { cat "$lsof_errors" >&2; exit 1; }
-if grep -F -- "$entry" "$lsof_report"; then
-    echo "a process still references $sha" >&2
+if ! [[ "$running_sha" =~ ^[0-9a-f]{40}$ ]] || ! [[ "$running_pid" =~ ^[1-9][0-9]*$ ]] \
+    || [ -n "$running_extra" ]; then
+    echo 'frontend-running is invalid' >&2
     exit 1
 fi
+[ "$running_sha" != "$sha" ] || { echo "frontend still serves $sha" >&2; exit 1; }
+dev_references_entry() {
+    local deploy_uid process process_uid link reference state scan_status
+    deploy_uid="$(id -u)" || return 2
+    for process in /proc/[0-9]*; do
+        [ -d "$process" ] || continue
+        if ! process_uid="$(stat -c %u -- "$process" 2>/dev/null)"; then
+            [ ! -d "$process" ] && continue
+            return 2
+        fi
+        [ "$process_uid" = "$deploy_uid" ] || continue
+        state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' "$process/status" 2>/dev/null)" || return 2
+        [ "$state" != Z ] || continue
+        for link in "$process/cwd" "$process/root" "$process/exe" "$process"/fd/*; do
+            if reference="$(readlink -- "$link" 2>/dev/null)"; then
+                case "$reference" in "$entry"|"$entry"/*) return 0 ;; esac
+            elif [ -d "$process" ]; then
+                case "$link" in
+                    "$process"/fd/*) [ ! -L "$link" ] || return 2 ;;
+                    *) return 2 ;;
+                esac
+            fi
+        done
+        [ -d "$process" ] || continue
+        [ -r "$process/fd" ] && [ -x "$process/fd" ] || return 2
+        scan_status=0
+        grep -F -- "$entry" "$process/maps" 2>/dev/null || scan_status=$?
+        [ "$scan_status" -ne 0 ] || return 0
+        [ "$scan_status" -eq 1 ] || { [ ! -d "$process" ] || return 2; }
+    done
+    return 1
+}
+scan_status=0
+dev_references_entry || scan_status=$?
+[ "$scan_status" -eq 1 ] || { echo 'referenced or uninspectable; retain entry' >&2; exit 1; }
 ```
 
-The full root-visible `lsof` scan must complete without warnings and contain no quarantine-entry
-path. Unlike `lsof +D`, this scans processes rather than walking only the existing directory tree,
-so textual paths such as `<entry>/removed-child (deleted)` remain visible. If it reports any cwd,
-executable, mapped file, or open file, stop or restart that process through its owning service and
-repeat the checks. If the inspection emits a warning, cannot complete, or the deploy journal
-reports an indeterminate advisory scan, retain the entry and escalate to the staging owner. After
-all marker checks still pass and a fresh full-process scan reports no matching path, remove exactly
-that validated entry deliberately:
+The scan reads dev-owned processes' cwd, root, executable and descriptor links, plus their mapped
+file paths; it also catches references whose child pathname is marked `(deleted)`. If it finds a
+reference or cannot inspect a dev process, retain the entry and stop or restart the consumer
+through its owning service before repeating the checks. Do not assume passwordless sudo grants
+`lsof` or removal privileges: the deploy account's sudo rules cover only the specified application
+service operations.
+
+**Other users' processes cannot be fully inspected without root.** A clean dev-only scan cannot
+exclude those consumers. This visibility limit is why the deploy keeps quarantine as an atomic
+rename: any unseen consumer retains the complete tree through its existing handles. If another
+user or an out-of-band service may use the entry, keep it and ask the staging owner to arrange a
+root inspection. Once ownership of all consumers is established, all marker checks still pass,
+and a fresh scan is clean, remove exactly the validated dev-owned entry deliberately in the same
+shell holding the lock:
 
 ```bash
-sudo rm -rf -- "$entry"
+rm -rf -- "$entry"
+flock -u 9
+exec 9>&-
 ```
 
-This manual proof is intentionally stronger than the timer's advisory scan. Automatic disk
-reclamation cannot justify risking a live release tree; operator reclamation is scheduled
-maintenance, while unlinking a serving runtime is an outage.
+Operator reclamation is scheduled maintenance; a clean dev-only scan is evidence within that
+user's visibility, not proof that no other user holds the tree. Never unlink a serving runtime.
 
 ## Operator preflight for maintenance releases
 
