@@ -160,6 +160,14 @@ export function visibleSpan(zoom: CalendarZoom, anchor: Date, panelCount: number
 }
 
 /**
+ * Preview coverage shared by the opener and calendar navigation. Day previews cover both desktop
+ * panels even on mobile, so crossing the breakpoint needs no refetch and still fits one request.
+ */
+export function calendarPreviewSpan(zoom: CalendarZoom, anchor: Date): DateRange {
+    return visibleSpan(zoom, anchor, 2);
+}
+
+/**
  * Splits a span into consecutive windows of at most `maxDays`, covering it exactly. A year grid
  * shows twelve years at once, far past what a windowed analytics endpoint will accept, so the
  * caller has to request it in pieces rather than have one oversized call rejected.
@@ -177,7 +185,7 @@ export function splitIntoWindows(range: DateRange, maxDays: number): DateRange[]
 }
 
 /**
- * Loads only the visible preview: daily buckets for day/month views, monthly buckets for years.
+ * Loads preview coverage with daily buckets for day/month views and monthly buckets for years.
  * Two complete calendar years fit AnalyticsPeriods' 731-day window and 120-bucket limits.
  * Month-aligned boundaries preserve full monthly totals without overlapping partial buckets.
  */

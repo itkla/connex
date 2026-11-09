@@ -4,13 +4,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CustomRangePopover, { type CustomRangeLabels } from '@/app/components/overview/analytics/CustomRangePopover';
+import { RangeCalendar } from '@/components/ui/range-calendar';
 import { getActivityVolume } from '@/app/lib/api';
-import { rangeDays } from '@/app/lib/rangeCalendar';
+import { calendarPreviewSpan, rangeDays } from '@/app/lib/rangeCalendar';
 import type { ActivityVolumeBucket, MemberScopeParams } from '@/app/lib/types';
 import en from '@/messages/en/analytics.json';
 
 vi.mock('@/app/lib/api', () => ({ getActivityVolume: vi.fn() }));
-vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
+const viewport = vi.hoisted(() => ({ mobile: false }));
+vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => viewport.mobile }));
 vi.mock('motion/react', () => ({
     useReducedMotion: () => true,
     AnimatePresence: ({ children }: { children: ReactNode }) => children,
@@ -75,12 +77,46 @@ function assertServerLimits() {
 }
 
 beforeEach(() => {
+    viewport.mobile = false;
     vi.mocked(getActivityVolume).mockReset().mockResolvedValue([]);
     onApply.mockClear();
 });
 afterEach(cleanup);
 
 describe('CustomRangePopover previews', () => {
+    it('notifies the parent only from navigation, without reporting on mount or callback changes', () => {
+        const onVisibleRangeChange = vi.fn();
+        const props = { value, onChange: vi.fn(), locale: 'en', labels, maxDays: 731 };
+        const mounted = render(<RangeCalendar {...props} onVisibleRangeChange={onVisibleRangeChange} />);
+        expect(onVisibleRangeChange).not.toHaveBeenCalled();
+        const replacement = vi.fn();
+        mounted.rerender(<RangeCalendar {...props} onVisibleRangeChange={replacement} />);
+        expect(replacement).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: labels.next }));
+        expect(replacement).toHaveBeenCalledExactlyOnceWith(calendarPreviewSpan('day', new Date(2026, 8, 1)), 'day');
+        expect(onVisibleRangeChange).not.toHaveBeenCalled();
+    });
+
+    it('loads both day panels on open so resizing from mobile to desktop needs no new request', async () => {
+        viewport.mobile = true;
+        const mounted = render(popover());
+        await open();
+        await screen.findByText('2 days · 0 activities');
+        expect(screen.getAllByRole('grid')).toHaveLength(1);
+        expect(getActivityVolume).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(getActivityVolume).mock.calls[0][2]).toEqual({
+            from: '2026-07-26', to: '2026-10-10', granularity: 'day', timezone: 'Asia/Tokyo',
+        });
+        viewport.mobile = false;
+        mounted.rerender(popover());
+        expect(screen.getAllByRole('grid')).toHaveLength(2);
+        expect(getActivityVolume).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole('button', { name: labels.next }));
+        await waitFor(() => expect(getActivityVolume).toHaveBeenCalledTimes(2));
+        expect(vi.mocked(getActivityVolume).mock.calls[1][2]).toMatchObject(calendarPreviewSpan('day', new Date(2026, 8, 1)));
+        assertServerLimits();
+    });
+
     it('bounds requests on open, month zoom, year zoom and year paging without a request burst', async () => {
         render(popover(scope, 'Asia/Tokyo', { from: '2026-05-14', to: '2026-08-11' }));
         await open();

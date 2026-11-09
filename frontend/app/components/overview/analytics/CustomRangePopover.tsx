@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/popover';
 import { RangeCalendar } from '@/components/ui/range-calendar';
 import { getActivityVolume } from '@/app/lib/api';
-import { calendarPreviewRequests, rangeDays, sumSeries, type CalendarZoom, type DateRange, type DaySeries } from '@/app/lib/rangeCalendar';
+import { calendarPreviewRequests, calendarPreviewSpan, parseDayKey, rangeDays, sumSeries, type CalendarZoom, type DateRange, type DaySeries } from '@/app/lib/rangeCalendar';
 import {
     MAX_CUSTOM_RANGE_DAYS,
     parseCustomAnalyticsWindow,
@@ -155,8 +155,9 @@ export default function CustomRangePopover({
 
     const setOpenWithDraft = (next: boolean) => {
         if (next) {
+            const anchor = parseDayKey(value.from);
             setDraft(value);
-            setView(null);
+            setView(anchor ? { range: calendarPreviewSpan('day', anchor), zoom: 'day' } : null);
             setPreview(null);
         } else {
             requestRef.current?.abort();

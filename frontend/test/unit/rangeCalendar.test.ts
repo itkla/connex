@@ -9,6 +9,7 @@ import {
     endOfMonth,
     endOfYear,
     cellSeries,
+    calendarPreviewSpan,
     calendarPreviewRequests,
     monthCellsForYear,
     parseDayKey,
@@ -325,6 +326,17 @@ describe("sumSeries", () => {
 });
 
 describe("visibleSpan", () => {
+    it("shares preview coverage for both responsive layouts within one daily request", () => {
+        for (let month = 0; month < 48; month++) {
+            const anchor = new Date(2024, month, 1);
+            const preview = calendarPreviewSpan("day", anchor);
+            const mobile = visibleSpan("day", anchor, 1);
+            expect(preview).toEqual(visibleSpan("day", anchor, 2));
+            expect(preview.from <= mobile.from && preview.to >= mobile.to).toBe(true);
+            expect(rangeDays(preview)).toBeLessThanOrEqual(120);
+        }
+    });
+
     it("covers both six-week day grids of a two-panel view", () => {
         expect(visibleSpan("day", parseDayKey("2026-08-01")!, 2)).toEqual({
             from: "2026-07-26",

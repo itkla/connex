@@ -12,6 +12,7 @@ import { easeOut, instant } from '@/app/lib/motion';
 import {
     YEAR_PAGE_SIZE,
     bandCaps,
+    calendarPreviewSpan,
     cellSeries,
     monthCellsForYear,
     parseDayKey,
@@ -19,7 +20,6 @@ import {
     periodRange,
     spanPeriods,
     withinSpanLimit,
-    visibleSpan,
     yearCellsForPage,
     yearPageStart,
     DAY_GRID_CELLS,
@@ -579,7 +579,7 @@ export function RangeCalendar({
     series?: DaySeries;
     /** Full monthly totals keyed by month start, used only by year sparklines. */
     monthlySeries?: DaySeries;
-    /** Fires with the span the grid is showing, so the caller can load `series` to cover it. */
+    /** Navigation reports preview coverage for either panel layout. The caller loads the initial span. */
     onVisibleRangeChange?: (range: DateRange, zoom: CalendarZoom) => void;
     className?: string;
 }) {
@@ -656,13 +656,10 @@ export function RangeCalendar({
         (nextZoom: CalendarZoom, nextAnchor: Date) => {
             setZoom(nextZoom);
             setAnchorMonth(nextAnchor);
+            onVisibleRangeChange?.(calendarPreviewSpan(nextZoom, nextAnchor), nextZoom);
         },
-        [],
+        [onVisibleRangeChange],
     );
-
-    useEffect(() => {
-        onVisibleRangeChange?.(visibleSpan(zoom, anchorMonth, panelCount), zoom);
-    }, [anchorMonth, onVisibleRangeChange, panelCount, zoom]);
 
     const step = useCallback(
         (delta: number, silent: boolean) => {
