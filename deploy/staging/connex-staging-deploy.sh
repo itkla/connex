@@ -1325,9 +1325,19 @@ prune_backlog_present() {
         || quarantine_has_entries
 }
 
+quarantine_has_distinct_copy() {
+    local sha="$1" quarantine="$RELEASE_QUARANTINE_DIR/$1" release="$RELEASES_DIR/$1"
+    local quarantine_identity release_identity
+    is_git_sha "$sha" && [ -d "$quarantine" ] && [ ! -L "$quarantine" ] \
+        && [ -d "$release" ] && [ ! -L "$release" ] || return 1
+    quarantine_identity="$(stat -c '%d:%i' -- "$quarantine" 2>/dev/null)" || return 1
+    release_identity="$(stat -c '%d:%i' -- "$release" 2>/dev/null)" || return 1
+    [ "$quarantine_identity" != "$release_identity" ]
+}
+
 prune_releases() {
     local deployed rollback running running_sha running_pid extra control_group paths path sha usage kept=0
-    local quarantine_paths quarantine blocked=0 quarantined=0
+    local quarantine_paths quarantine blocked=0 deferred=0 quarantined=0
     if ! atomic_quarantine_move_supported; then
         log "Release pruning refused: mv does not support atomic no-copy quarantine moves"
         return 1
@@ -1359,11 +1369,20 @@ prune_releases() {
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         sha="$(basename "$path")" || return 1
-        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ] \
-            || [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] \
-            || [ "$sha" = "$running_sha" ]; then
+        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ]; then
             log "Release pruning refused: quarantine contains an invalid or protected entry"
             return 1
+        fi
+        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] || [ "$sha" = "$running_sha" ]; then
+            # A retry seals a fresh tree without reviving the quarantined one. Only
+            # distinct directory identities prove this is a stale duplicate; the
+            # independent pruner still protects its SHA until both copies retire.
+            if quarantine_has_distinct_copy "$sha"; then
+                log "Release quarantine deferred: stale duplicate of protected release $sha"
+            else
+                log "Release pruning refused: quarantine contains an invalid or protected entry"
+                return 1
+            fi
         fi
     done <<< "$quarantine_paths"
     while IFS= read -r path; do
@@ -1406,8 +1425,13 @@ prune_releases() {
             fi
             quarantine="$RELEASE_QUARANTINE_DIR/$sha"
             if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
-                log "Release pruning refused: quarantine destination already exists for $sha"
-                blocked=1
+                if quarantine_has_distinct_copy "$sha"; then
+                    log "Release pruning deferred: stale quarantine duplicate must be reclaimed before retiring $sha"
+                    deferred=1
+                else
+                    log "Release pruning refused: quarantine destination already exists for $sha"
+                    blocked=1
+                fi
                 continue
             fi
             # rename(2) within .staging is atomic. Existing cwd and open handles
@@ -1430,7 +1454,7 @@ prune_releases() {
             fi
         fi
     done <<< "$paths"
-    if [ "$blocked" -eq 0 ]; then
+    if [ "$blocked" -eq 0 ] && [ "$deferred" -eq 0 ]; then
         rm -f -- "$PRUNE_NEEDED_MARKER" || return 1
     fi
     if [ "$quarantined" -eq 1 ]; then

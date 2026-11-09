@@ -1502,6 +1502,161 @@ case_pretransaction_failures_quarantine_only_target_and_retry_rebuilds() (
     done
 )
 
+case_quarantined_sha_retry_commits_and_duplicate_reclaims_after_retirement() (
+    local root="$SANDBOX/quarantined-retry-lifecycle" previous rollback target next final output status
+    local refuse_activation=1 quarantined_identity rebuilt_identity quarantined_at
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    target=3333333333333333333333333333333333333333
+    next=4444444444444444444444444444444444444444
+    final=5555555555555555555555555555555555555555
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    : > "$root/deploy.lock"
+    df() {
+        if [ "$refuse_activation" = 1 ] && [ -e "$RELEASES_DIR/$target" ]; then
+            printf 'Avail\n%s\n' "$((STAGING_MIN_FREE_BYTES - 1))"
+        else
+            printf 'Avail\n99999999999\n'
+        fi
+    }
+    quiesce_frontend_and_switch_checkout() { ROLLBACK_ARMED=1; write_transaction frontend_stopped; }
+    activate_backend() { cp "$RELEASES_DIR/$1/backend.jar" "$LIVE_JAR"; }
+    activate_frontend() {
+        write_sha_marker "$FRONTEND_RELEASE_MARKER" "$1" \
+            && printf '%s\t%s\n' "$1" "$$" > "$FRONTEND_RUNNING_MARKER" \
+            && ln -sfn "$RELEASES_DIR/$1/frontend" "$PROC_ROOT/$$/cwd"
+    }
+    post_deploy_smoke() { return 0; }
+    run_lifecycle_pruner() {
+        quarantined_at="$(stat -c %Z -- "$RELEASE_QUARANTINE_DIR/$target")" || return 1
+        touch -d "@$((quarantined_at + 1))" "$PROC_ROOT/$$" || return 1
+        CONNEX_STAGING_DIR="$STAGING_DIR" PROC_ROOT="$PROC_ROOT" \
+            CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+            CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS=0 CONNEX_STAGING_PRUNE_KEEP_RECENT=0 \
+            bash "$STAGING_DEPLOY_DIR/connex-staging-prune.sh"
+    }
+
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_first_attempt_refused 1 "$status" || return 1
+    assert_file_exists lifecycle_first_target_quarantined "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+    assert_file_missing lifecycle_first_target_not_ready "$RELEASES_DIR/$target" || return 1
+    quarantined_identity="$(stat -c '%d:%i' -- "$RELEASE_QUARANTINE_DIR/$target")"
+    refuse_activation=0
+
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_retry_commits_and_prunes_cleanly 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_retry_committed_target "$target" "$(read_sha_file "$MARKER")" || return 1
+    assert_equals lifecycle_retry_rebuilt_target 2 "$(wc -l < "$root/build.log")" || return 1
+    rebuilt_identity="$(stat -c '%d:%i' -- "$RELEASES_DIR/$target")"
+    [ "$quarantined_identity" != "$rebuilt_identity" ] || return 1
+    assert_contains lifecycle_duplicate_deferral_is_reported \
+        "Release quarantine deferred: stale duplicate of protected release $target" <(printf '%s\n' "$output") || return 1
+    assert_file_missing lifecycle_retry_clears_transaction "$TRANSACTION_FILE" || return 1
+    assert_file_missing lifecycle_retry_clears_prune_needed "$PRUNE_NEEDED_MARKER" || return 1
+    run_lifecycle_pruner > "$root/prune-deployed.log" 2>&1 || return 1
+    assert_contains deployed_duplicate_is_protected "Skipped $target: protected release" "$root/prune-deployed.log" || return 1
+    assert_file_exists deployed_duplicate_survives_pruner "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+
+    output="$(CONNEX_DEPLOY_TARGET="$target" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_no_change_succeeds 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_no_change_does_not_build 2 "$(wc -l < "$root/build.log")" || return 1
+    assert_file_missing lifecycle_no_change_has_no_pending_prune "$PRUNE_NEEDED_MARKER" || return 1
+
+    output="$(CONNEX_DEPLOY_TARGET="$next" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_next_deploy_succeeds 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_retained_target "$target" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    run_lifecycle_pruner > "$root/prune-rollback.log" 2>&1 || return 1
+    assert_file_exists rollback_duplicate_survives_pruner "$RELEASE_QUARANTINE_DIR/$target/manifest.tsv" || return 1
+
+    output="$(CONNEX_DEPLOY_TARGET="$final" CONNEX_DEPLOY_LOCK_HELD=1 main 2>&1)"
+    status=$?
+    assert_status lifecycle_retirement_deploy_succeeds 0 "$status" || { printf '%s\n' "$output"; return 1; }
+    assert_equals lifecycle_target_no_longer_retained "$next" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    run_lifecycle_pruner > "$root/prune-retired.log" 2>&1 || return 1
+    assert_file_missing retired_duplicate_is_reclaimed "$RELEASE_QUARANTINE_DIR/$target" || return 1
+    assert_file_exists retired_public_tree_is_untouched "$RELEASES_DIR/$target/manifest.tsv" || return 1
+    assert_file_missing lifecycle_retirement_has_no_pending_prune "$PRUNE_NEEDED_MARKER" || return 1
+    verify_release_bundle "$next" && verify_release_bundle "$final" || return 1
+    assert_equals duplicate_retirement_keeps_rebuilt_tree "$rebuilt_identity" \
+        "$(stat -c '%d:%i' -- "$RELEASES_DIR/$target")" || return 1
+)
+
+case_retiring_rebuilt_tree_defers_until_older_quarantine_copy_is_reclaimed() (
+    local root="$SANDBOX/retiring-duplicate" previous rollback candidate sha status output
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    candidate=3333333333333333333333333333333333333333
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    make_bundle "$root" "$candidate" || return 1
+    cp -a "$RELEASES_DIR/$candidate" "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    touch -d @10 "$RELEASES_DIR/$candidate"
+    for sha in 4444444444444444444444444444444444444444 \
+        5555555555555555555555555555555555555555 6666666666666666666666666666666666666666; do
+        mkdir -p "$RELEASES_DIR/$sha"
+        touch -d @20 "$RELEASES_DIR/$sha"
+    done
+    output="$(prune_releases 2>&1)"
+    status=$?
+    assert_status retired_duplicate_wait_is_successful 0 "$status" || return 1
+    assert_contains retired_duplicate_wait_is_reported \
+        "Release pruning deferred: stale quarantine duplicate must be reclaimed before retiring $candidate" \
+        <(printf '%s\n' "$output") || return 1
+    assert_file_exists deferred_public_tree_stays_complete "$RELEASES_DIR/$candidate/manifest.tsv" || return 1
+    assert_file_exists deferred_quarantine_stays_complete "$RELEASE_QUARANTINE_DIR/$candidate/manifest.tsv" || return 1
+    assert_file_exists deferred_move_stays_pending "$PRUNE_NEEDED_MARKER" || return 1
+    : > "$root/deploy.lock"
+    local quarantined_at
+    quarantined_at="$(stat -c %Z -- "$RELEASE_QUARANTINE_DIR/$candidate")" || return 1
+    touch -d "@$((quarantined_at + 1))" "$PROC_ROOT/$$" || return 1
+    CONNEX_STAGING_DIR="$STAGING_DIR" PROC_ROOT="$PROC_ROOT" \
+        CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+        CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS=0 CONNEX_STAGING_PRUNE_KEEP_RECENT=0 \
+        bash "$STAGING_DEPLOY_DIR/connex-staging-prune.sh" > "$root/prune.log" 2>&1 || return 1
+    assert_file_missing old_duplicate_reclaimed_before_move "$RELEASE_QUARANTINE_DIR/$candidate" || return 1
+    prune_releases >/dev/null 2>&1 || return 1
+    assert_file_missing deferred_public_tree_can_retire "$RELEASES_DIR/$candidate" || return 1
+    assert_file_exists rebuilt_tree_retires_by_rename "$RELEASE_QUARANTINE_DIR/$candidate/manifest.tsv" || return 1
+    assert_file_missing deferred_move_pending_clears "$PRUNE_NEEDED_MARKER" || return 1
+)
+
+case_protected_quarantine_duplicate_requires_distinct_directory_identity() (
+    local root="$SANDBOX/duplicate-identity" previous rollback variant output status
+    previous=1111111111111111111111111111111111111111
+    rollback=2222222222222222222222222222222222222222
+    setup_pretransaction_fixture "$root" "$previous" "$rollback" || return 1
+    cp -a "$RELEASES_DIR/$rollback" "$RELEASE_QUARANTINE_DIR/$rollback" || return 1
+    for variant in missing same_identity unreadable; do
+        if [ "$variant" = missing ]; then
+            mv "$RELEASES_DIR/$rollback" "$root/saved-rollback" || return 1
+        fi
+        stat() {
+            if [ "${2:-}" = '%d:%i' ]; then
+                case "$variant" in
+                    same_identity) printf '1:2\n'; return 0 ;;
+                    unreadable) return 1 ;;
+                esac
+            fi
+            command stat "$@"
+        }
+        output="$(prune_releases 2>&1)"
+        status=$?
+        assert_status "${variant}_protected_quarantine_refused" 1 "$status" || return 1
+        assert_file_exists "${variant}_protected_quarantine_remains" "$RELEASE_QUARANTINE_DIR/$rollback/manifest.tsv" || return 1
+        assert_file_exists "${variant}_refusal_remains_pending" "$PRUNE_NEEDED_MARKER" || return 1
+        if [ "$variant" = missing ]; then
+            mv "$root/saved-rollback" "$RELEASES_DIR/$rollback" || return 1
+        fi
+    done
+    unset -f stat
+    prune_releases >/dev/null 2>&1 || return 1
+    assert_file_missing distinct_duplicate_does_not_leave_pending_prune "$PRUNE_NEEDED_MARKER" || return 1
+    assert_file_exists distinct_duplicate_stays_quarantined "$RELEASE_QUARANTINE_DIR/$rollback/manifest.tsv" || return 1
+)
+
 case_pretransaction_signal_quarantines_built_target() (
     local root="$SANDBOX/pretransaction-signal" previous rollback target output status
     previous=1111111111111111111111111111111111111111
@@ -3442,6 +3597,9 @@ run_case case_main_rechecks_staging_disk_before_initial_activation
 run_case case_prebuild_headroom_includes_deployed_footprint
 run_case case_prebuild_headroom_falls_back_for_unmeasurable_deployed_tree
 run_case case_pretransaction_failures_quarantine_only_target_and_retry_rebuilds
+run_case case_quarantined_sha_retry_commits_and_duplicate_reclaims_after_retirement
+run_case case_retiring_rebuilt_tree_defers_until_older_quarantine_copy_is_reclaimed
+run_case case_protected_quarantine_duplicate_requires_distinct_directory_identity
 run_case case_pretransaction_signal_quarantines_built_target
 run_case case_unactivated_target_quarantine_preserves_protected_and_referenced_trees
 run_case case_isolated_frontend_build_preserves_working_directory

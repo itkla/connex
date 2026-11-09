@@ -60,7 +60,9 @@ setup() {
     done
 
     # The reaper only trusts the marker PID if it is running out of the committed release tree.
-    mkdir -p "$state/releases/$DEPLOYED"
+    mkdir -p "$state/releases/$DEPLOYED" "$state/releases/$ROLLBACK"
+    printf 'rebuilt-deployed\n' > "$state/releases/$DEPLOYED/file"
+    printf 'rebuilt-rollback\n' > "$state/releases/$ROLLBACK/file"
     ln -sfn "$state/releases/$DEPLOYED" "$root/proc/$$/cwd"
 
     printf '%s\n' "$frontend_start" > "$root/frontend-start"
@@ -109,6 +111,14 @@ main() {
     assert_dir_missing second_old_entry_is_pruned "$q/$OLD_TWO"
     assert_dir_exists committed_release_survives "$q/$DEPLOYED"
     assert_dir_exists rollback_release_survives "$q/$ROLLBACK"
+    assert_dir_exists rebuilt_deployed_tree_survives "$root/staging/.staging/releases/$DEPLOYED"
+    assert_dir_exists rebuilt_rollback_tree_survives "$root/staging/.staging/releases/$ROLLBACK"
+    if [ "$q/$DEPLOYED" -ef "$root/staging/.staging/releases/$DEPLOYED" ] \
+        || [ "$q/$ROLLBACK" -ef "$root/staging/.staging/releases/$ROLLBACK" ]; then
+        fail protected_duplicates_are_distinct "expected separate quarantine and rebuilt directories"
+    else
+        ok protected_duplicates_are_distinct
+    fi
     assert_dir_exists young_entry_survives "$q/$YOUNG"
     assert_dir_exists newest_kept_entry_survives "$q/$KEEP_ONE"
     assert_dir_missing older_kept_entry_is_pruned "$q/$KEEP_TWO"
