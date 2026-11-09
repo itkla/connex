@@ -40,6 +40,17 @@ deployed by logic loaded from the older commit. The candidate
    unexplained mismatch is refused and alerted; the backend-is-target shortcut from #829 no
    longer exists. Only an absent frontend marker is eligible for the one-time legacy transition;
    a malformed marker is a refusal.
+
+   Before any new build, the filesystem containing `.staging` must have the 4 GiB
+   `STAGING_MIN_FREE_BYTES` floor **plus** the measured size (`du -sb`) of
+   `.staging/releases/<deployed-sha>` **plus 256 MiB** for cache growth. The deployed sealed pair
+   is the estimate for the next pair; the extra margin allows package/build caches to grow without
+   consuming the activation floor. A missing, unreadable, symlinked, or unmeasurable deployed tree
+   uses a conservative **512 MiB** footprint instead (over twice the observed 200–220 MB pair),
+   still adding the 256 MiB margin. Logs report the footprint, its `deployed` or `fallback` source,
+   cache margin, available bytes and the full required byte count before building. Activation
+   still independently requires exactly the bare 4 GiB floor. An interrupted transaction is
+   recovered before either new-work headroom check, so low space cannot prevent recovery.
 2. **Builds outside the live checkout.** The target commit is exported into an isolated temporary
    source tree. The frontend gets a frozen install and clean Next build, its generated route assets
    are checked by `frontend/ci/verify_build_chunks.mjs`, and the backend gets `clean bootJar` with
@@ -76,6 +87,17 @@ deployed by logic loaded from the older commit. The candidate
    boundary against a process already running as the deploy user. Such a process can rewrite the
    artifacts, embedded identities, and writable manifest together and recompute the hashes. Strong
    tamper evidence would require a signature or digest anchored outside the deploy user's control.
+
+   If a successful target build is refused or fails before a transaction is recorded (including
+   pair verification, activation headroom, or transaction-write failure), EXIT/INT/TERM cleanup
+   atomically renames that target into `.staging/release-quarantine/<sha>`. It never moves a target
+   protected by `deployed-sha`, `rollback-sha`, `frontend-release` or the attested `frontend-running`
+   record. It also retains the tree when a visible process references its cwd, root, executable,
+   descriptors or mappings, or deployment-user process inspection is indeterminate. Invalid
+   serving state, symlinked release paths, an existing quarantine destination, or a failed atomic
+   rename produces a loud refusal and retains the tree. Once a transaction exists, its recovery
+   path owns the target instead. A later attempt at the same sha builds again: only
+   `releases/<sha>` participates in sealing/reuse; quarantine is never a ready-release source.
 4. **Records a recoverable transaction.** `.staging/deploy-transaction` atomically records the
    validated prior sha, target sha, pre-deploy retained rollback sha, and phase (`prepared`,
    `frontend_stopped`, `backend_live`, `frontend_live`, or `committed`). EXIT/INT/TERM restore the
@@ -130,9 +152,9 @@ deployed by logic loaded from the older commit. The candidate
    reason above. Reclaiming the space is a separate program on its own schedule,
    `connex-staging-prune`, described under "Reclaiming quarantine" below. Every timer run logs
    quarantine entry and byte occupancy; more than four entries or more than 1 GiB emits a sanitized
-   warning `ALERT`. Those thresholds sit below the 5 GiB free-space preflight on purpose — set
-   above it, the warning could never fire before the deploy gate had already blocked. Before recovery or build work, the script also
-   requires at least 5 GiB free on the filesystem containing `.staging`, failing closed before
+   warning `ALERT`. The 1 GiB byte threshold remains below the 4 GiB free-space floor on purpose — set
+   above it, the warning could never fire before the deploy gate had already blocked. New work
+   fails closed at the footprint-inclusive pre-build headroom gate described above, before
    transaction, marker, rollback, or release writes begin under insufficient headroom.
    `.staging/prune-needed` persists only when a candidate could not be moved safely, while a
    non-empty quarantine still causes no-change runs to repeat the advisory usage report. This is
@@ -274,9 +296,42 @@ processes the timer can inspect; it is useful evidence, but never proof that ano
 cwd, or open file does not use the tree. The deploy timer path never unlinks the entry: committed cross-version recovery stays in current
 logic, while recorded logic is used only to interpret nonterminal transactions. A timer invocation
 already running an older script is outside that guarantee, so complete the rollout before relying
-on it. More than eight entries or more than 8 GiB produces a warning `ALERT`; schedule deliberate
-reclamation at or before either threshold. A deploy also refuses to begin recovery or build work
-with less than 5 GiB free on the `.staging` filesystem.
+on it. More than four entries or more than 1 GiB produces a warning `ALERT`; inspect reclamation
+at or before either threshold. New builds require the footprint-inclusive reserve described above.
+
+### Operator note: headroom refusals and failed target builds
+
+A pre-build refusal logs one complete requirement, for example:
+
+```text
+Staging build reserve: release_bytes=230686720 source=deployed cache_margin_bytes=268435456
+Staging filesystem headroom: 4500000000 bytes available; preflight requires at least 4794089472 bytes
+Deploy refused: staging filesystem has insufficient free-space headroom
+```
+
+Clear enough space to reach the **reported requirement**, rather than just the bare 4 GiB floor.
+With the fallback footprint the requirement is 5,100,273,664 bytes. This is a build estimate, not
+a guarantee against unrelated disk growth or a much larger target; the unchanged activation gate
+can still refuse with `insufficient free-space headroom before activation`.
+
+After a pre-transaction failure, expect `Quarantined unactivated target <sha>; live release
+untouched`. Markers and deployed/rollback trees remain in place. Quarantining is a rename: it does
+not itself free bytes. The independent hourly prune timer reclaims eligible entries under its
+existing age, retention, frontend-start and process-reference gates; it does not require a
+successful deploy. Inspect `journalctl -u connex-staging-prune` and run the installed pruner's
+`--dry-run` as its service user before expecting space to return. A newly quarantined target may
+remain because the current frontend predates it, or because it is among the two retained entries.
+
+If space is still insufficient, use the deliberate marker and full-process checks below to reclaim
+an eligible quarantine entry in a maintenance window, or free unrelated space / expand the
+filesystem. Do not delete deployed or rollback trees or lower the floor to force activation.
+`Unactivated target quarantine refused` means the target remains under `releases/`; resolve the
+reported serving-state, consumer, destination-collision or atomic-move blocker first. A retry can
+rebuild the same sha even while its earlier tree is quarantined, but a second refused build cannot
+overwrite that quarantine entry. Older unreferenced trees stranded in `releases/` by earlier
+deploy logic are not swept by this change or by the independent pruner; escalate them for owner-led
+inspection rather than bulk-deleting releases. SIGKILL and power loss before transaction creation
+also bypass EXIT cleanup and require that inspection.
 
 To reclaim one entry, first identify its owning release and prove that neither Connex nor an
 out-of-band process serves it. Run the following on staging in an interactive maintenance window,
