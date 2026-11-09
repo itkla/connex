@@ -190,6 +190,7 @@ function useCalendarLayout({
     panelCount,
     locale,
     series,
+    monthlySeries,
     today,
 }: {
     zoom: CalendarZoom;
@@ -197,6 +198,7 @@ function useCalendarLayout({
     panelCount: number;
     locale: string;
     series: DaySeries;
+    monthlySeries?: DaySeries;
     today?: string;
 }): { panels: CalendarPanel[]; peak: number; weekdays: { short: string; full: string }[] } {
     const formatters = useMemo(() => ({
@@ -223,7 +225,7 @@ function useCalendarLayout({
                 value: period.from,
                 label,
                 description,
-                bars: cellSeries(cellZoom, date, series),
+                bars: cellSeries(cellZoom, date, series, monthlySeries),
                 muted,
                 today: today != null && today >= period.from && today <= period.to,
                 date,
@@ -267,7 +269,7 @@ function useCalendarLayout({
                 build('year', date, formatters.year.format(date), formatters.year.format(date), false),
             ),
         }];
-    }, [anchorMonth, formatters, panelCount, series, today, zoom]);
+    }, [anchorMonth, formatters, monthlySeries, panelCount, series, today, zoom]);
 
     const peak = useMemo(
         () =>
@@ -561,7 +563,8 @@ export function RangeCalendar({
     labels,
     maxDays,
     today,
-    series = EMPTY_SERIES,
+    series,
+    monthlySeries,
     onVisibleRangeChange,
     className,
 }: {
@@ -574,8 +577,10 @@ export function RangeCalendar({
     today?: string;
     /** Daily magnitudes plotted behind the grid. Omit for a calendar with no data layer. */
     series?: DaySeries;
+    /** Full monthly totals keyed by month start, used only by year sparklines. */
+    monthlySeries?: DaySeries;
     /** Fires with the span the grid is showing, so the caller can load `series` to cover it. */
-    onVisibleRangeChange?: (range: DateRange) => void;
+    onVisibleRangeChange?: (range: DateRange, zoom: CalendarZoom) => void;
     className?: string;
 }) {
     const reduce = useReducedMotion() ?? false;
@@ -597,7 +602,8 @@ export function RangeCalendar({
         anchorMonth,
         panelCount,
         locale,
-        series,
+        series: series ?? EMPTY_SERIES,
+        monthlySeries,
         today,
     });
 
@@ -650,10 +656,13 @@ export function RangeCalendar({
         (nextZoom: CalendarZoom, nextAnchor: Date) => {
             setZoom(nextZoom);
             setAnchorMonth(nextAnchor);
-            onVisibleRangeChange?.(visibleSpan(nextZoom, nextAnchor, panelCount));
         },
-        [onVisibleRangeChange, panelCount],
+        [],
     );
+
+    useEffect(() => {
+        onVisibleRangeChange?.(visibleSpan(zoom, anchorMonth, panelCount), zoom);
+    }, [anchorMonth, onVisibleRangeChange, panelCount, zoom]);
 
     const step = useCallback(
         (delta: number, silent: boolean) => {
@@ -813,6 +822,7 @@ export function RangeCalendar({
                                         columns={columns}
                                         peak={peak}
                                         tall={zoom !== 'day'}
+                                        showPreview={series != null || (zoom === 'year' && monthlySeries != null)}
                                         tabValue={tabValue}
                                         onActivate={onCellClick}
                                         onFocusCell={setFocusValue}
@@ -832,6 +842,7 @@ function CellGrid({
     columns,
     peak,
     tall,
+    showPreview,
     tabValue,
     onActivate,
     onFocusCell,
@@ -840,6 +851,7 @@ function CellGrid({
     columns: number;
     peak: number;
     tall: boolean;
+    showPreview: boolean;
     tabValue: string;
     onActivate: (value: string) => void;
     onFocusCell: (value: string) => void;
@@ -918,7 +930,7 @@ function CellGrid({
                                             {cell.label}
                                         </span>
                                     </span>
-                                    {tall ? (
+                                    {tall && showPreview ? (
                                         <Sparkline
                                             values={cell.bars}
                                             peak={peak}

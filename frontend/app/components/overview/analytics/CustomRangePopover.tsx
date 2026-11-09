@@ -14,8 +14,7 @@ import {
 } from '@/components/ui/popover';
 import { RangeCalendar } from '@/components/ui/range-calendar';
 import { getActivityVolume } from '@/app/lib/api';
-import { addDays, dayKeyOf } from '@/app/lib/calendar';
-import { parseDayKey, rangeDays, splitIntoWindows, sumSeries, type DateRange } from '@/app/lib/rangeCalendar';
+import { calendarPreviewRequests, rangeDays, sumSeries, type CalendarZoom, type DateRange, type DaySeries } from '@/app/lib/rangeCalendar';
 import {
     MAX_CUSTOM_RANGE_DAYS,
     parseCustomAnalyticsWindow,
@@ -34,6 +33,7 @@ export type CustomRangeLabels = {
     days: (count: number) => string;
     /** Pluralized count of activities inside the drafted range. */
     activities: (count: number) => string;
+    previewUnavailable: string;
     grid: string;
     previous: string;
     next: string;
@@ -43,8 +43,13 @@ export type CustomRangeLabels = {
     apply: string;
 };
 
-/** Extra context loaded either side of the visible months so paging rarely waits on a fetch. */
-const PREFETCH_DAYS = 120;
+type PreviewView = { range: DateRange; zoom: CalendarZoom };
+
+type PreviewResult = {
+    view: PreviewView;
+    scope: MemberScopeParams;
+    timezone: string;
+} & ({ status: 'ready'; series: DaySeries } | { status: 'unavailable' });
 
 function formatDay(day: string, formatter: Intl.DateTimeFormat): string {
     return formatter.format(new Date(`${day}T00:00:00Z`));
@@ -56,8 +61,8 @@ function formatWindow(window: AnalyticsWindow, formatter: Intl.DateTimeFormat): 
 
 /**
  * Anchored custom-range calendar for the Analytics period control. The calendar is backed by the
- * same day-bucketed activity volume the board charts, so the grid shows where the workspace was
- * actually busy and the drafted range reports what it contains before it is applied.
+ * same activity volume the board charts, using daily buckets for day/month views and monthly
+ * totals for year previews. A drafted range reports its activity count only when fully loaded.
  */
 export default function CustomRangePopover({
     active,
@@ -85,8 +90,8 @@ export default function CustomRangePopover({
 }) {
     const [open, setOpen] = useState(false);
     const [draft, setDraft] = useState<AnalyticsWindow>(value);
-    const [series, setSeries] = useState<ReadonlyMap<string, number>>(() => new Map());
-    const loadedRef = useRef<DateRange | null>(null);
+    const [view, setView] = useState<PreviewView | null>(null);
+    const [preview, setPreview] = useState<PreviewResult | null>(null);
     const requestRef = useRef<AbortController | null>(null);
 
     const formatters = useMemo(() => ({
@@ -100,65 +105,61 @@ export default function CustomRangePopover({
     }), [locale]);
     const parsed = useMemo(() => parseCustomAnalyticsWindow(draft.from, draft.to), [draft]);
     const days = rangeDays(draft);
-    const activities = useMemo(() => sumSeries(series, draft), [draft, series]);
+    const current = open && preview?.view === view && preview.scope === scope && preview.timezone === timezone
+        ? preview
+        : null;
+    const series = current?.status === 'ready' && view?.zoom !== 'year' ? current.series : undefined;
+    const monthlySeries = current?.status === 'ready' && view?.zoom === 'year' ? current.series : undefined;
+    const activities = series && view && view.range.from <= draft.from && view.range.to >= draft.to
+        ? sumSeries(series, draft)
+        : null;
 
     useEffect(() => {
-        if (open) return;
-        loadedRef.current = null;
-        requestRef.current?.abort();
-        requestRef.current = null;
-    }, [open]);
-
-    useEffect(() => () => requestRef.current?.abort(), []);
+        if (!open || !view) return;
+        const controller = new AbortController();
+        requestRef.current = controller;
+        Promise.all(
+            calendarPreviewRequests(view.range, view.zoom).map((window) =>
+                getActivityVolume(undefined, scope, { ...window, timezone }, { signal: controller.signal }),
+            ),
+        )
+            .then((pages) => {
+                if (controller.signal.aborted) return;
+                const next = new Map<string, number>();
+                for (const buckets of pages) {
+                    for (const bucket of buckets) {
+                        if (!bucket.periodStart) continue;
+                        next.set(
+                            bucket.periodStart,
+                            bucket.call + bucket.email + bucket.meeting + bucket.note + bucket.other,
+                        );
+                    }
+                }
+                setPreview({ view, scope, timezone, status: 'ready', series: next });
+            })
+            .catch(() => {
+                if (controller.signal.aborted) return;
+                setPreview({ view, scope, timezone, status: 'unavailable' });
+            });
+        return () => controller.abort();
+    }, [open, scope, timezone, view]);
 
     const loadSeries = useCallback(
-        (visible: DateRange) => {
-            const loaded = loadedRef.current;
-            if (loaded && loaded.from <= visible.from && loaded.to >= visible.to) return;
-            const start = parseDayKey(visible.from);
-            const end = parseDayKey(visible.to);
-            if (!start || !end) return;
-            const window = {
-                from: dayKeyOf(addDays(start, -PREFETCH_DAYS)),
-                to: dayKeyOf(addDays(end, PREFETCH_DAYS)),
-            };
-            loadedRef.current = window;
-            requestRef.current?.abort();
-            const controller = new AbortController();
-            requestRef.current = controller;
-            Promise.all(
-                splitIntoWindows(window, MAX_CUSTOM_RANGE_DAYS).map((chunk) =>
-                    getActivityVolume(undefined, scope, { ...chunk, granularity: 'day', timezone }, {
-                        signal: controller.signal,
-                    }),
-                ),
-            )
-                .then((pages) => {
-                    setSeries((current) => {
-                        const next = new Map(current);
-                        for (const buckets of pages) {
-                            for (const bucket of buckets) {
-                                if (!bucket.periodStart) continue;
-                                next.set(
-                                    bucket.periodStart,
-                                    bucket.call + bucket.email + bucket.meeting + bucket.note + bucket.other,
-                                );
-                            }
-                        }
-                        return next;
-                    });
-                })
-                .catch(() => {
-                    loadedRef.current = loaded;
-                });
+        (range: DateRange, zoom: CalendarZoom) => {
+            setView((current) => current?.zoom === zoom && current.range.from === range.from && current.range.to === range.to
+                ? current
+                : { range, zoom });
         },
-        [scope, timezone],
+        [],
     );
 
     const setOpenWithDraft = (next: boolean) => {
         if (next) {
             setDraft(value);
-            loadSeries(value);
+            setView(null);
+            setPreview(null);
+        } else {
+            requestRef.current?.abort();
         }
         setOpen(next);
     };
@@ -182,23 +183,29 @@ export default function CustomRangePopover({
                 <PopoverDescription className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     {labels.description}
                 </PopoverDescription>
-                <RangeCalendar
-                    className="mt-3"
-                    value={draft}
-                    onChange={setDraft}
-                    locale={locale}
-                    today={today}
-                    maxDays={MAX_CUSTOM_RANGE_DAYS}
-                    series={series}
-                    onVisibleRangeChange={loadSeries}
-                    labels={{
-                        grid: labels.grid,
-                        previous: labels.previous,
-                        next: labels.next,
-                        zoomMonths: labels.zoomMonths,
-                        zoomYears: labels.zoomYears,
-                    }}
-                />
+                {open ? (
+                    <RangeCalendar
+                        className="mt-3"
+                        value={draft}
+                        onChange={setDraft}
+                        locale={locale}
+                        today={today}
+                        maxDays={MAX_CUSTOM_RANGE_DAYS}
+                        series={series}
+                        monthlySeries={monthlySeries}
+                        onVisibleRangeChange={loadSeries}
+                        labels={{
+                            grid: labels.grid,
+                            previous: labels.previous,
+                            next: labels.next,
+                            zoomMonths: labels.zoomMonths,
+                            zoomYears: labels.zoomYears,
+                        }}
+                    />
+                ) : null}
+                {current?.status === 'unavailable' ? (
+                    <p role="status" className="mt-2 text-xs text-muted-foreground">{labels.previewUnavailable}</p>
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
                     <div aria-live="polite">
                         <p className="text-sm font-medium text-foreground">
@@ -210,11 +217,11 @@ export default function CustomRangePopover({
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
                             {labels.days(days)}
-                            {series.size > 0 ? ` · ${labels.activities(activities)}` : ''}
+                            {activities != null ? ` · ${labels.activities(activities)}` : ''}
                         </p>
                     </div>
                     <div className="ml-auto flex gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+                        <Button variant="ghost" size="sm" onClick={() => setOpenWithDraft(false)}>
                             {labels.cancel}
                         </Button>
                         <Button
@@ -224,7 +231,7 @@ export default function CustomRangePopover({
                             onClick={() => {
                                 if (!parsed) return;
                                 onApply(parsed);
-                                setOpen(false);
+                                setOpenWithDraft(false);
                             }}
                         >
                             {labels.apply}

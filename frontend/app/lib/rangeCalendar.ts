@@ -21,6 +21,12 @@ export const WEEK_STARTS_ON = 0;
 /** Cells in a month's fixed six-week grid, so panel height never changes between months. */
 export const DAY_GRID_CELLS = 42;
 
+/**
+ * AnalyticsPeriods.MAX_BUCKETS permits 120 day buckets, counting both civil-date bounds.
+ * The request timezone determines UTC boundaries, not this inclusive calendar-day count.
+ */
+export const MAX_DAILY_PREVIEW_DAYS = 120;
+
 const DAY_MS = 86_400_000;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -170,15 +176,45 @@ export function splitIntoWindows(range: DateRange, maxDays: number): DateRange[]
     return windows;
 }
 
+/**
+ * Loads only the visible preview: daily buckets for day/month views, monthly buckets for years.
+ * Two complete calendar years fit AnalyticsPeriods' 731-day window and 120-bucket limits.
+ * Month-aligned boundaries preserve full monthly totals without overlapping partial buckets.
+ */
+export function calendarPreviewRequests(range: DateRange, zoom: CalendarZoom): (DateRange & {
+    granularity: 'day' | 'month';
+})[] {
+    if (zoom !== 'year') {
+        return splitIntoWindows(range, MAX_DAILY_PREVIEW_DAYS).map((window) => ({
+            ...window,
+            granularity: 'day',
+        }));
+    }
+    const start = parseDayKey(range.from);
+    const end = parseDayKey(range.to);
+    if (!start || !end || start > end) return [];
+    const requests: (DateRange & { granularity: 'month' })[] = [];
+    for (let from = startOfMonth(start); from <= end; from = new Date(from.getFullYear() + 2, from.getMonth(), 1)) {
+        const to = new Date(from.getFullYear() + 2, from.getMonth(), 0);
+        requests.push({
+            from: dayKeyOf(from),
+            to: dayKeyOf(to < end ? to : endOfMonth(end)),
+            granularity: 'month',
+        });
+    }
+    return requests;
+}
+
 /** Daily magnitudes keyed by `YYYY-MM-DD`. Days with no entry count as zero. */
 export type DaySeries = ReadonlyMap<string, number>;
 
 /**
  * The bars one cell plots: a day contributes its own magnitude, a month one bar per day, a year
  * one bar per month. Every zoom therefore charts the same daily series at its own grain, so the
- * shape a user sees while zoomed out is the shape they find when they zoom in.
+ * shape a user sees while zoomed out is the shape they find when they zoom in. Year cells can
+ * instead read full monthly totals from `monthlySeries`, without treating them as daily data.
  */
-export function cellSeries(zoom: CalendarZoom, date: Date, series: DaySeries): number[] {
+export function cellSeries(zoom: CalendarZoom, date: Date, series: DaySeries, monthlySeries?: DaySeries): number[] {
     if (zoom === 'day') return [series.get(dayKeyOf(date)) ?? 0];
     if (zoom === 'month') {
         const days = endOfMonth(date).getDate();
@@ -188,6 +224,7 @@ export function cellSeries(zoom: CalendarZoom, date: Date, series: DaySeries): n
         );
     }
     return Array.from({ length: 12 }, (_, month) => {
+        if (monthlySeries) return monthlySeries.get(dayKeyOf(new Date(date.getFullYear(), month, 1))) ?? 0;
         const days = endOfMonth(new Date(date.getFullYear(), month, 1)).getDate();
         let total = 0;
         for (let day = 1; day <= days; day++) {
