@@ -460,7 +460,7 @@ test.describe("anonymous and presentation document acceptance", () => {
     });
 });
 
-test("print totals use the frozen document locale under a different UI language @mobile", async ({ browser }, testInfo) => {
+test("fractional-yen adjustments reconcile screen and print under a different UI language @mobile", async ({ browser }, testInfo) => {
     test.setTimeout(120_000);
     const unique = randomUUID().replaceAll("-", "").slice(0, 16);
     const context = await browser.newContext({
@@ -497,16 +497,17 @@ test("print totals use the frozen document locale under a different UI language 
             },
         }), "quote locale deal");
         const dealId = numberField(deal, "id", "quote locale deal");
-        await jsonObject(await api.post(`/api/deals/${dealId}/line-items`, {
-            headers,
-            data: { name: "Quoted service", unitPrice: 100, quantity: 2, taxRate: 10, billingFrequency: "one_time" },
-        }), "quote locale line");
+        for (const name of ["Quoted service A", "Quoted service B"]) {
+            await jsonObject(await api.post(`/api/deals/${dealId}/line-items`, {
+                headers,
+                data: { name, unitPrice: 100.5, quantity: 1, taxRate: 0, billingFrequency: "one_time" },
+            }), "quote locale line");
+        }
         const page = await context.newPage();
         await page.addInitScript(() => { window.print = () => undefined; });
-        await page.emulateMedia({ media: "print", reducedMotion: "reduce" });
         const scenarios: readonly { documentLocale: "en" | "ja"; uiLocale: "en" | "ja"; expected: string }[] = [
-            { documentLocale: "ja", uiLocale: "en", expected: "￥220" },
-            { documentLocale: "en", uiLocale: "ja", expected: "¥220" },
+            { documentLocale: "ja", uiLocale: "en", expected: "￥201" },
+            { documentLocale: "en", uiLocale: "ja", expected: "¥201" },
         ];
         for (const { documentLocale, uiLocale, expected } of scenarios) {
             const template = await jsonObject(await api.post("/api/document-templates", {
@@ -520,15 +521,31 @@ test("print totals use the frozen document locale under a different UI language 
                 headers, data: { templateId: numberField(template, "id", "quote locale template") },
             }), "quote locale document");
             const documentId = numberField(generated, "id", "quote locale document");
+            expect(generated.content).toMatchObject({
+                lineItems: [{ lineTotal: 100.5 }, { lineTotal: 100.5 }],
+                totals: { subtotal: 201, tax: 0, oneTimeTotal: 201, grandTotal: 201 },
+            });
+            await page.emulateMedia({ media: "screen", reducedMotion: "reduce" });
             await setUiLocale(page, uiLocale);
             await page.goto(`/records/deals/${dealId}/documents/${documentId}/print`);
 
             await expect(page.locator("html")).toHaveAttribute("lang", uiLocale);
             await expect(page.getByText(`Frozen total: ${expected}`, { exact: true })).toBeVisible();
+            const mobile = testInfo.project.name === "mobile-chromium";
+            const screenItems = page.getByTestId(mobile ? "document-line-items-stacked" : "document-line-items-table");
+            const label = message(uiLocale, "deals", "DealsDocuments.print.roundingAdjustment");
+            const adjustment = documentLocale === "ja" ? "−￥1" : "−¥1";
+            await expect(screenItems.getByText(label, { exact: true })).toBeVisible();
+            await expect(screenItems.getByText(adjustment, { exact: true })).toBeVisible();
+            await page.emulateMedia({ media: "print", reducedMotion: "reduce" });
             const table = page.getByTestId("document-line-items-table");
             await expect(table).toBeVisible();
             await expect(table.locator("tfoot tr:last-child td:last-child")).toHaveText(expected);
-            await expect(table.locator("tbody tr td:last-child")).toHaveText(expected);
+            await expect(table.locator("tfoot tr:nth-last-child(2)")).toHaveText(`${label}${adjustment}`);
+            const lineAmount = documentLocale === "ja" ? "￥101" : "¥101";
+            await expect(table.locator("tbody tr td:last-child")).toHaveText([lineAmount, lineAmount]);
+            const reread = await jsonObject(await api.get(`/api/deals/${dealId}/documents/${documentId}`), "frozen document");
+            expect(reread.content).toEqual(generated.content);
         }
     } finally {
         await context.close();

@@ -62,7 +62,11 @@ STABILITY_INTERVAL=15
 POLL_INTERVAL=5
 QUARANTINE_ALERT_THRESHOLD=4
 QUARANTINE_BYTES_ALERT_THRESHOLD=1073741824
-STAGING_MIN_FREE_BYTES=5368709120
+STAGING_MIN_FREE_BYTES=4294967296
+# Reserve cache growth separately from the sealed pair; 512 MiB covers more than
+# twice the observed 200–220 MB pair when no deployed tree can be measured.
+STAGING_BUILD_CACHE_MARGIN_BYTES=268435456
+STAGING_RELEASE_FALLBACK_BYTES=536870912
 
 SMOKE_COOKIE_JAR=
 SMOKE_SESSION_ACTIVE=0
@@ -70,6 +74,7 @@ ROLLBACK_ARMED=0
 ROLLBACK_IN_PROGRESS=0
 ROLLBACK_STATE=not_attempted
 RELEASE_COMMITTED=0
+PRE_TRANSACTION_TARGET_BUILT=0
 FAILURE_ACTIVE=0
 FAILURE_GATE=none
 FAILURE_COMPONENT=release
@@ -1219,11 +1224,100 @@ report_quarantine_occupancy() {
 }
 
 staging_disk_headroom_sufficient() {
-    local available
+    local available required="${1:-$STAGING_MIN_FREE_BYTES}"
     available="$(df --output=avail -B1 "$STATE_DIR" | awk 'NR == 2 { print $1 }')" || return 1
     [[ "$available" =~ ^[0-9]+$ ]] || return 1
-    log "Staging filesystem headroom: $available bytes available; preflight requires at least $STAGING_MIN_FREE_BYTES bytes"
-    [ "$available" -ge "$STAGING_MIN_FREE_BYTES" ]
+    log "Staging filesystem headroom: $available bytes available; preflight requires at least $required bytes"
+    [ "$available" -ge "$required" ]
+}
+
+staging_build_headroom_sufficient() {
+    local deployed footprint="$STAGING_RELEASE_FALLBACK_BYTES" measured source=fallback required
+    if deployed="$(read_sha_file "$MARKER" 2>/dev/null)" \
+        && [ -d "$RELEASES_DIR/$deployed" ] && [ ! -L "$RELEASES_DIR/$deployed" ] \
+        && measured="$(du -sb -- "$RELEASES_DIR/$deployed" 2>/dev/null | awk 'NR == 1 { print $1 }')" \
+        && [[ "$measured" =~ ^[1-9][0-9]{0,17}$ ]]; then
+        footprint="$measured"
+        source=deployed
+    fi
+    required=$((STAGING_MIN_FREE_BYTES + footprint + STAGING_BUILD_CACHE_MARGIN_BYTES))
+    log "Staging build reserve: release_bytes=$footprint source=$source cache_margin_bytes=$STAGING_BUILD_CACHE_MARGIN_BYTES"
+    staging_disk_headroom_sufficient "$required"
+}
+
+# Inspect every visible reference, including descriptors and mappings whose cwd is
+# elsewhere. Other UIDs may hide /proc details; the atomic rename preserves any
+# unseen consumer's inodes, just as it does for retired releases.
+release_tree_has_visible_references() {
+    local path="$1" process_dirs process_dir process_uid deploy_uid link reference maps state
+    local indeterminate=0
+    path="$(readlink -f -- "$path")" || return 2
+    deploy_uid="$(id -u)" || return 2
+    process_dirs="$(list_process_directories)" || return 2
+    while IFS= read -r process_dir; do
+        [ -n "$process_dir" ] || continue
+        if ! process_uid="$(stat -c '%u' -- "$process_dir" 2>/dev/null)"; then
+            [ ! -d "$process_dir" ] || indeterminate=1
+            continue
+        fi
+        state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' "$process_dir/status" 2>/dev/null)" || state=
+        [ "$state" != Z ] || continue
+        for link in "$process_dir/cwd" "$process_dir/root" "$process_dir/exe" "$process_dir"/fd/*; do
+            if reference="$(readlink -- "$link" 2>/dev/null)"; then
+                case "$reference" in "$path"|"$path"/*) return 0 ;; esac
+            elif [ "$process_uid" = "$deploy_uid" ] && [ -d "$process_dir" ]; then
+                # Descriptors can close during the scan; a missing fixed link on a
+                # live process instead means its references could not be inspected.
+                case "$link" in "$process_dir"/fd/*) ;; *) indeterminate=1 ;; esac
+            fi
+        done
+        if maps="$(cat "$process_dir/maps" 2>/dev/null)"; then
+            if [[ "$maps" = *"$path"* ]]; then return 0; fi
+        elif [ "$process_uid" = "$deploy_uid" ] && [ -d "$process_dir" ]; then
+            indeterminate=1
+        fi
+        if [ "$process_uid" = "$deploy_uid" ] && [ -d "$process_dir" ] \
+            && { [ ! -r "$process_dir/fd" ] || [ ! -x "$process_dir/fd" ]; }; then
+            indeterminate=1
+        fi
+    done <<< "$process_dirs"
+    [ "$indeterminate" -eq 0 ] || return 2
+    return 1
+}
+
+quarantine_unactivated_target() {
+    local target="$DEPLOY_TARGET" path quarantine deployed rollback frontend running running_sha pid extra usage=0
+    is_git_sha "$target" || return 1
+    path="$RELEASES_DIR/$target"
+    quarantine="$RELEASE_QUARANTINE_DIR/$target"
+    if [ ! -d "$path" ] || [ -L "$path" ] \
+        || [ -L "$RELEASES_DIR" ] || [ -L "$RELEASE_QUARANTINE_DIR" ] \
+        || ! deployed="$(read_sha_file "$MARKER" 2>/dev/null)" \
+        || ! rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)" \
+        || ! frontend="$(read_sha_file "$FRONTEND_RELEASE_MARKER" 2>/dev/null)" \
+        || ! running="$(read_frontend_running 2>/dev/null)"; then
+        log "Unactivated target quarantine refused: release path or protected serving state is invalid"
+        return 1
+    fi
+    IFS=$'\t' read -r running_sha pid extra <<< "$running"
+    if [ "$target" = "$deployed" ] || [ "$target" = "$rollback" ] \
+        || [ "$target" = "$frontend" ] || [ "$target" = "$running_sha" ]; then
+        log "Unactivated target retained: protected release $target"
+        return 0
+    fi
+    release_tree_has_visible_references "$path" || usage=$?
+    if [ "$usage" -ne 1 ]; then
+        log "Unactivated target quarantine refused: process references exist or could not be inspected for $target"
+        return 1
+    fi
+    if [ -e "$quarantine" ] || [ -L "$quarantine" ] \
+        || ! atomic_quarantine_move_supported \
+        || ! command mv --no-copy -T -- "$path" "$quarantine"; then
+        log "Unactivated target quarantine refused: destination exists or atomic move failed for $target"
+        return 1
+    fi
+    log "Quarantined unactivated target $target; live release untouched"
+    report_quarantine_occupancy
 }
 
 prune_backlog_present() {
@@ -1231,9 +1325,19 @@ prune_backlog_present() {
         || quarantine_has_entries
 }
 
+quarantine_has_distinct_copy() {
+    local sha="$1" quarantine="$RELEASE_QUARANTINE_DIR/$1" release="$RELEASES_DIR/$1"
+    local quarantine_identity release_identity
+    is_git_sha "$sha" && [ -d "$quarantine" ] && [ ! -L "$quarantine" ] \
+        && [ -d "$release" ] && [ ! -L "$release" ] || return 1
+    quarantine_identity="$(stat -c '%d:%i' -- "$quarantine" 2>/dev/null)" || return 1
+    release_identity="$(stat -c '%d:%i' -- "$release" 2>/dev/null)" || return 1
+    [ "$quarantine_identity" != "$release_identity" ]
+}
+
 prune_releases() {
     local deployed rollback running running_sha running_pid extra control_group paths path sha usage kept=0
-    local quarantine_paths quarantine blocked=0 quarantined=0
+    local quarantine_paths quarantine blocked=0 deferred=0 quarantined=0
     if ! atomic_quarantine_move_supported; then
         log "Release pruning refused: mv does not support atomic no-copy quarantine moves"
         return 1
@@ -1265,11 +1369,20 @@ prune_releases() {
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         sha="$(basename "$path")" || return 1
-        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ] \
-            || [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] \
-            || [ "$sha" = "$running_sha" ]; then
+        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ]; then
             log "Release pruning refused: quarantine contains an invalid or protected entry"
             return 1
+        fi
+        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] || [ "$sha" = "$running_sha" ]; then
+            # A retry seals a fresh tree without reviving the quarantined one. Only
+            # distinct directory identities prove this is a stale duplicate; the
+            # independent pruner still protects its SHA until both copies retire.
+            if quarantine_has_distinct_copy "$sha"; then
+                log "Release quarantine deferred: stale duplicate of protected release $sha"
+            else
+                log "Release pruning refused: quarantine contains an invalid or protected entry"
+                return 1
+            fi
         fi
     done <<< "$quarantine_paths"
     while IFS= read -r path; do
@@ -1312,8 +1425,13 @@ prune_releases() {
             fi
             quarantine="$RELEASE_QUARANTINE_DIR/$sha"
             if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
-                log "Release pruning refused: quarantine destination already exists for $sha"
-                blocked=1
+                if quarantine_has_distinct_copy "$sha"; then
+                    log "Release pruning deferred: stale quarantine duplicate must be reclaimed before retiring $sha"
+                    deferred=1
+                else
+                    log "Release pruning refused: quarantine destination already exists for $sha"
+                    blocked=1
+                fi
                 continue
             fi
             # rename(2) within .staging is atomic. Existing cwd and open handles
@@ -1336,7 +1454,7 @@ prune_releases() {
             fi
         fi
     done <<< "$paths"
-    if [ "$blocked" -eq 0 ]; then
+    if [ "$blocked" -eq 0 ] && [ "$deferred" -eq 0 ]; then
         rm -f -- "$PRUNE_NEEDED_MARKER" || return 1
     fi
     if [ "$quarantined" -eq 1 ]; then
@@ -1365,6 +1483,10 @@ deployment_exit() {
     local status="$1" cleanup_status=0
     trap - EXIT INT TERM
     cleanup_smoke_on_exit || cleanup_status=1
+    if [ "$status" -ne 0 ] && [ "$PRE_TRANSACTION_TARGET_BUILT" = 1 ] \
+        && [ ! -e "$TRANSACTION_FILE" ] && [ ! -L "$TRANSACTION_FILE" ]; then
+        quarantine_unactivated_target || cleanup_status=1
+    fi
     if [ "$status" -ne 0 ] && [ "$ROLLBACK_ARMED" = "1" ] && [ "$ROLLBACK_IN_PROGRESS" != "1" ] \
         && [ "$RELEASE_COMMITTED" != "1" ]; then
         rollback_release "$DEPLOY_PREVIOUS" || cleanup_status=1
@@ -1566,7 +1688,7 @@ main() {
 
     # Disk headroom gates only new deploy work. Existing transactions must recover
     # first because activation may already have stopped or replaced live components.
-    if ! staging_disk_headroom_sufficient; then
+    if ! staging_build_headroom_sufficient; then
         set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom"
         return 1
     fi
@@ -1613,6 +1735,7 @@ main() {
 
     set_failure_context build release "Deploy FAILED while building the isolated target release; live release untouched"
     build_target_release "$DEPLOY_TARGET" || return 1
+    PRE_TRANSACTION_TARGET_BUILT=1
 
     set_failure_context bundle release "Deploy FAILED while verifying the target release pair"
     verify_release_bundle "$DEPLOY_PREVIOUS" && verify_release_bundle "$DEPLOY_TARGET" || return 1
@@ -1624,6 +1747,7 @@ main() {
         return 1
     fi
     write_transaction prepared || return 1
+    PRE_TRANSACTION_TARGET_BUILT=0
 
     set_failure_context frontend_quiesce frontend "Deploy FAILED while quiescing or switching the checkout; prior release remains committed"
     quiesce_frontend_and_switch_checkout "$DEPLOY_TARGET" || return 1
