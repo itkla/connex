@@ -4,6 +4,8 @@ import { Fragment, type CSSProperties, type ReactNode } from 'react';
 import { useTimeZone, useTranslations } from 'next-intl';
 
 import { formatCurrency, formatUtcDateTime } from '@/app/lib/utils';
+import { documentTotalGroups } from '@/app/lib/documentRounding';
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import type {
     DocumentBodyMark,
     DocumentBodyNode,
@@ -34,14 +36,19 @@ type Props = {
  * Canonical rendering of a commercial document's resolved content. Renders the block body when the
  * template used the block builder, expanding the {@code lineItems} placeholder into the frozen table;
  * otherwise it falls back to the legacy intro/terms/footer sections. Presentational only — it renders
- * the paper body, not page or print chrome, and never computes money (totals come pre-computed).
+ * the paper body, not page or print chrome. Canonical totals come pre-computed; rounding
+ * reconciliation is derived only for display and never written into the frozen content.
  * Money and generated dates use the frozen document locale independently of the viewer's UI locale.
  */
 export default function DocumentView({ content, type, documentLocale, title, status, version, generatedAt }: Props) {
     const timeZone = useTimeZone();
     const t = useTranslations('DealsDocuments');
     const tp = useTranslations('DealsDocuments.print');
-    const money = (value: number) => formatCurrency(value, content.deal.currency, documentLocale);
+    const money = (value: number | bigint) => typeof value === 'bigint'
+        ? getNumberFormatter(documentLocale, { style: 'currency', currency: content.deal.currency }).format(value)
+        : formatCurrency(value, content.deal.currency, documentLocale);
+    const totalGroups = documentTotalGroups(content);
+    const signedMoney = (value: number | bigint) => `${value < 0 ? '−' : '+'}${money(value < 0 ? -value : value)}`;
     const watermark = status === 'superseded'
         ? tp('supersededWatermark')
         : status != null && status !== 'final' ? tp('draftWatermark') : null;
@@ -80,17 +87,17 @@ export default function DocumentView({ content, type, documentLocale, title, sta
                         </li>
                     ))}
                 </ul>
-                <dl className="mt-4 space-y-2">
-                    <MobileTotalRow label={tp('subtotal')} value={money(content.totals.subtotal)} />
-                    <MobileTotalRow label={tp('tax')} value={money(content.totals.tax)} />
-                    {content.totals.recurringTotal > 0 && (
-                        <>
-                            <MobileTotalRow label={tp('oneTimeTotal')} value={money(content.totals.oneTimeTotal)} muted />
-                            <MobileTotalRow label={tp('recurringTotal')} value={money(content.totals.recurringTotal)} muted />
-                        </>
-                    )}
-                    <MobileTotalRow label={tp('grandTotal')} value={money(content.totals.grandTotal)} emphasis />
-                </dl>
+                {totalGroups.map((group) => (
+                    <section key={group.label ?? 'totals'} className="mt-4">
+                        {group.label && <h2 className="mb-2 text-xs font-medium text-muted-foreground">{tp(group.label)}</h2>}
+                        <dl className="space-y-2">
+                            {group.rows.map((row) => (
+                                <MobileTotalRow key={row.label} {...row} label={tp(row.label)}
+                                    value={row.signed ? signedMoney(row.value) : money(row.value)} />
+                            ))}
+                        </dl>
+                    </section>
+                ))}
             </div>
             <div className="hidden sm:block print:block" data-testid="document-line-items-table">
                 <table className="w-full table-fixed text-sm">
@@ -121,15 +128,21 @@ export default function DocumentView({ content, type, documentLocale, title, sta
                         ))}
                     </tbody>
                     <tfoot className="border-t border-border">
-                        <TotalRow label={tp('subtotal')} value={money(content.totals.subtotal)} />
-                        <TotalRow label={tp('tax')} value={money(content.totals.tax)} />
-                        {content.totals.recurringTotal > 0 && (
-                            <>
-                                <TotalRow label={tp('oneTimeTotal')} value={money(content.totals.oneTimeTotal)} muted />
-                                <TotalRow label={tp('recurringTotal')} value={money(content.totals.recurringTotal)} muted />
-                            </>
-                        )}
-                        <TotalRow label={tp('grandTotal')} value={money(content.totals.grandTotal)} emphasis />
+                        {totalGroups.map((group) => (
+                            <Fragment key={group.label ?? 'totals'}>
+                                {group.label && (
+                                    <tr className="border-t border-border">
+                                        <th colSpan={4} className="pt-4 pb-2 text-left text-xs font-medium text-muted-foreground">
+                                            {tp(group.label)}
+                                        </th>
+                                    </tr>
+                                )}
+                                {group.rows.map((row) => (
+                                    <TotalRow key={row.label} {...row} label={tp(row.label)}
+                                        value={row.signed ? signedMoney(row.value) : money(row.value)} />
+                                ))}
+                            </Fragment>
+                        ))}
                     </tfoot>
                 </table>
             </div>
