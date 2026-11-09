@@ -14,6 +14,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,7 @@ class InvitationPrivacyTest extends AbstractServiceTest {
     @Autowired private InviteService inviteService;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private RoleService roleService;
+    @Autowired private JdbcTemplate jdbc;
 
     @BeforeEach
     void isolateCommittedInvitationFixtures() {
@@ -111,7 +113,7 @@ class InvitationPrivacyTest extends AbstractServiceTest {
         assertEquals(recipient.getEmail(), pending.getEmail());
         assertEquals("pending", pending.getStatus());
         assertTrue(pending.getId().matches("[a-f0-9]{64}"));
-        assertNull(pending.getExpiresAt());
+        assertNotNull(pending.getExpiresAt());
         assertNull(pending.getToken());
         assertNull(pending.getInvitedByLabel());
         workspaceService.approveMembership(target.getId(), recipient.getId());
@@ -170,6 +172,36 @@ class InvitationPrivacyTest extends AbstractServiceTest {
         assertTrue(inviteService.listInvites(target.getId(), currentUser.getId()).isEmpty());
         assertThrows(ResourceNotFoundException.class,
             () -> workspaceService.approveMembership(target.getId(), recipient.getId()));
+    }
+
+    @Test
+    void expiredHistoricalInvitationCanBeResentWithoutRestoringItsOldGrant() {
+        var target = workspaceService.createWorkspace("Expired invitation", currentUser.getId());
+        User recipient = newUser();
+        workspaceService.addPendingMember(target.getId(), currentUser, recipient, "member");
+        jdbc.update("""
+            UPDATE workspace_member SET expires_at = UTC_TIMESTAMP() - INTERVAL 1 SECOND
+            WHERE workspace_id = ? AND user_id = ?
+            """, target.getId(), recipient.getId());
+        String oldReference = inviteService.listInvites(target.getId(), currentUser.getId()).getFirst().getId();
+
+        var replacement = afterFixtureCommit(() -> {
+            assertThrows(ResourceNotFoundException.class,
+                () -> workspaceService.approveMembership(target.getId(), recipient.getId()));
+            assertTrue(workspaceService.pendingMemberships(recipient.getId()).isEmpty());
+            return inviteService.createInvite(target.getId(), currentUser, recipient.getEmail(), "member");
+        });
+
+        assertNull(workspaceMapper.getMember(target.getId(), recipient.getId()));
+        assertNotNull(replacement.getInvite().getExpiresAt());
+        assertNotEquals(oldReference, replacement.getInvite().getId());
+        assertThrows(ResourceNotFoundException.class,
+            () -> inviteService.revokeInvite(target.getId(), oldReference, currentUser.getId()));
+        assertEquals(replacement.getInvite().getId(),
+            inviteService.listInvites(target.getId(), currentUser.getId()).getFirst().getId());
+        String digest = inviteService.exchangeToken(replacement.getInvite().getToken(), "expiry-replacement-owner");
+        inviteService.acceptInviteByHash(digest, recipient, () -> { });
+        assertTrue(workspaceMapper.isMember(target.getId(), recipient.getId()));
     }
 
     @Test

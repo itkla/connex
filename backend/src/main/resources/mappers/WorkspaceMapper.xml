@@ -502,15 +502,16 @@
 
   <insert id="addPendingMember">
     INSERT INTO workspace_member (
-      workspace_id, user_id, role, status, grant_authorization_version
+      workspace_id, user_id, role, status, grant_authorization_version, expires_at
     )
-    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1)
+    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1, UTC_TIMESTAMP() + INTERVAL 14 DAY)
   </insert>
 
   <update id="activateMember">
     UPDATE workspace_member SET status = 'active'
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
       AND grant_authorization_version &gt;= 1
+      AND expires_at &gt; UTC_TIMESTAMP()
   </update>
 
   <select id="getPendingMemberships" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
@@ -523,6 +524,7 @@
     JOIN organization o ON o.id = w.org_id
     LEFT JOIN org_member om ON om.org_id = w.org_id AND om.user_id = wm.user_id
     WHERE wm.user_id = #{userId} AND wm.status = 'pending'
+      AND wm.expires_at &gt; UTC_TIMESTAMP()
       AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
     ORDER BY w.name, w.id
   </select>

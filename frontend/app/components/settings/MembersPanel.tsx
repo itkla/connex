@@ -968,6 +968,17 @@ function MembersWorkspacePanel({
                                                                     : t("inviteNoExpiry")}
                                                             </p>
                                                         </div>
+                                                        {!invite.token && grantableInviteRoles.includes(invite.role) && (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="inline"
+                                                                disabled={sending || busy}
+                                                                onClick={() => void sendInvite(invite.email, invite.role)}
+                                                            >
+                                                                {t("replaceInvite")}
+                                                            </Button>
+                                                        )}
                                                         {busy ? (
                                                             <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
                                                         ) : (
@@ -992,11 +1003,6 @@ function MembersWorkspacePanel({
                                                                         >
                                                                             <LinkIcon className="size-4" />
                                                                             {t("copyLink")}
-                                                                        </DropdownMenuItem>
-                                                                    ) : grantableInviteRoles.includes(invite.role) ? (
-                                                                        <DropdownMenuItem disabled={sending} onSelect={() => void sendInvite(invite.email, invite.role)}>
-                                                                            <EnvelopeIcon className="size-4" />
-                                                                            {t("replaceInvite")}
                                                                         </DropdownMenuItem>
                                                                     ) : null}
                                                                     <DropdownMenuItem

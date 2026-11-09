@@ -64,7 +64,8 @@ vi.mock("@/components/ui/tabs", async () => {
 vi.mock("@/components/ui/dropdown-menu", () => {
     const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
     return {
-        DropdownMenu: Pass, DropdownMenuTrigger: Pass, DropdownMenuContent: Pass,
+        DropdownMenu: ({ children }: { children?: ReactNode }) => <div data-invitation-menu>{children}</div>,
+        DropdownMenuTrigger: Pass, DropdownMenuContent: Pass,
         DropdownMenuItem: ({ children, onSelect, disabled }: { children?: ReactNode; onSelect?: () => void; disabled?: boolean }) =>
             <button disabled={disabled} onClick={onSelect}>{children}</button>,
     };
@@ -203,6 +204,31 @@ describe("invitation disclosure in the member-management panel", () => {
         const row = [...host.querySelectorAll("li")].find((item) => item.textContent?.includes("historical@example.test"));
         expect(row?.textContent).toContain(copy.inviteNoExpiry);
         expect(row?.textContent).not.toContain("undefined");
+    });
+
+    it.each(["en", "ja"] as const)("shows a historical deadline and resends its original role in one click in %s", async (language) => {
+        const copy = (language === "en" ? english : japanese).WorkspaceMembers;
+        vi.mocked(getBuiltInRoles).mockResolvedValue([
+            { id: 0, name: "member", permissions: [] }, { id: 1, name: "admin", permissions: [] },
+        ]);
+        vi.mocked(getWorkspaceInvites).mockResolvedValue([{
+            id: "b".repeat(64), email: pending.email, role: "admin", status: "pending",
+            expiresAt: "2026-12-09T00:00:00Z", createdAt: "2026-10-01T00:00:00Z",
+        }]);
+        vi.mocked(createWorkspaceInvite).mockResolvedValue({ invite: { ...pending, role: "admin" }, emailDelivery: "ACCEPTED" });
+        await render(language);
+        const row = [...host.querySelectorAll("li")].find((item) => item.textContent?.includes(pending.email));
+        expect(row?.textContent).toContain(copy.expires.replace("{date}", "2026-12-09"));
+        const replace = [...(row?.querySelectorAll("button") ?? [])].find((button) => button.textContent === copy.replaceInvite);
+        expect(replace).toBeDefined();
+        expect(replace?.closest("[data-invitation-menu]")).toBeNull();
+
+        await act(async () => replace?.click());
+
+        expect(createWorkspaceInvite).toHaveBeenCalledExactlyOnceWith(9, pending.email, "admin");
+        expect(clipboard).toHaveBeenCalledWith(expect.stringContaining("/invite#token=new-token"));
+        expect(host.querySelector('[role="status"]')?.textContent).toBe(copy.emailAccepted);
+        expect([...host.querySelectorAll("li")].filter((item) => item.textContent?.includes(pending.email))).toHaveLength(1);
     });
 });
 

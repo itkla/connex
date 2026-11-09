@@ -1,5 +1,5 @@
 # Generated perimeter and authorization source SHA-256 ledger
-../frontend/next.config.ts	e61fc77798d0202dbf4ed58555cfead278eec3fc9fb2ccb7c998a018fb8da343
+../frontend/next.config.ts	ae76eaceaac81765e1ce44f2d9387446d70d949b59e5ee9908d10d51efc72e14
 build.gradle	bb0f390ac30b3e5e2ffd9d8a00514bbc819abd9f028bf530b29d53c71ab4be0c
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlAccess.java	fcc5f6751f1678b33f54198095adff37b4126717ae7813093a31d067f3c6e1e7
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlOperations.java	33f580c9fb3f51439d7359bf8d2f433f091ec91f72d35b79860f52347e1018f8

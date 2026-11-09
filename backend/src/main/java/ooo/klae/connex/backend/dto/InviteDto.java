@@ -6,7 +6,7 @@ import lombok.NoArgsConstructor;
 /**
  * An address-only invitation for workspace administrators. The opaque id identifies an
  * invitation, never an account. A raw token is available only at creation. Historical pending
- * membership invitations have no expiry.
+ * membership invitations carry the deadline assigned at the expiry cutover.
  */
 @Data
 @NoArgsConstructor
