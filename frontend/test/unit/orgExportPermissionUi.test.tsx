@@ -69,6 +69,31 @@ describe.each(["en", "ja"] as const)("organization export grants in %s", (locale
         await waitFor(() => expect(screen.queryByRole("link", { name: copy.downloadExport })).toBeNull());
         expect(screen.getByRole("button", { name: copy.exportWorkspace }).hasAttribute("disabled")).toBe(true);
     });
+
+    it.each(["resolve", "reject"] as const)("keeps a saved withdrawal when an older policy read later %ss", async (outcome) => {
+        const pending = Promise.withResolvers<{ owner: boolean; admin: boolean; member: boolean }>();
+        render(view(locale));
+        const copy = locale === "en" ? english.OrgDataLifecycle : japanese.OrgDataLifecycle;
+        const label = copy.exportPermissionLabel.replace("{role}", copy.roleAdmin);
+        const toggle = screen.getByRole("switch", { name: label });
+        await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+        api.get.mockReturnValueOnce(pending.promise);
+        fireEvent.focus(window);
+        await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+        fireEvent.click(toggle);
+        await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+        await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+
+        await act(async () => {
+            if (outcome === "resolve") pending.resolve({ owner: true, admin: true, member: false });
+            else pending.reject(new Error("Earlier refresh failed"));
+        });
+
+        expect(toggle.getAttribute("aria-checked")).toBe("false");
+        expect(toggle.hasAttribute("disabled")).toBe(false);
+        expect(screen.getByRole("button", { name: copy.exportWorkspace }).hasAttribute("disabled")).toBe(true);
+        expect(screen.getByText(copy.exportPermissionDenied)).toBeTruthy();
+    });
 });
 
 it("does not apply a pending policy update to another organization", async () => {

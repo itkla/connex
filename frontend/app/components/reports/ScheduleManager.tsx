@@ -30,11 +30,13 @@ export default function ScheduleManager({
     reportId,
     reportName,
     canManage,
+    canExport,
     defaultTimezone,
 }: {
     reportId: number;
     reportName: string;
     canManage: boolean;
+    canExport: boolean;
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
@@ -58,7 +60,7 @@ export default function ScheduleManager({
         setMembersFailed(false);
 
         const scheduleRequest = resolveOutcome(getReportSchedule(reportId));
-        const membersRequest: Promise<LoadOutcome<WorkspaceMember[]>> = canManage
+        const membersRequest: Promise<LoadOutcome<WorkspaceMember[]>> = canManage && canExport
             ? resolveOutcome(getActiveWorkspaceMembers().then((data) =>
                 data.filter((member) => member.status === 'active')))
             : Promise.resolve({ ok: true, data: [] });
@@ -85,6 +87,10 @@ export default function ScheduleManager({
     };
 
     const save = async (payload: ReportScheduleRequest) => {
+        if (!canManage || !canExport) {
+            toastError(t('schedule.exportRequired'));
+            throw new Error(t('schedule.exportRequired'));
+        }
         const scheduleExisted = schedule !== null;
         try {
             const saved = await saveReportSchedule(reportId, payload, scheduleExisted);
@@ -149,6 +155,7 @@ export default function ScheduleManager({
                 schedule={schedule}
                 members={members}
                 canManage={canManage}
+                canExport={canExport}
                 loading={loading}
                 loadFailed={loadFailed}
                 membersFailed={membersFailed}

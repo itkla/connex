@@ -186,6 +186,11 @@ public class ReportDeliveryScheduler {
             }
             return;
         }
+        ScheduleService.DeliveryAccess finalAccess = scheduleService.deliveryAccess(claimed);
+        if (!finalAccess.allowed()) {
+            auditSkip(ref, finalAccess.denialReason(), runDetail);
+            return;
+        }
         for (User recipient : recipients) {
             send(recipient, claimed, snapshot);
         }
@@ -309,7 +314,8 @@ public class ReportDeliveryScheduler {
             return null;
         }));
         record(ref, JobRunStatus.SKIPPED, runDetail, Map.of(
-                "phase", "delivery_skipped",
+                "phase", ScheduleService.EXPORT_PERMISSION_DENIED.equals(reason)
+                    ? "export_permission_withdrawn" : "delivery_skipped",
                 "scheduleId", ref.scheduleId()));
     }
 

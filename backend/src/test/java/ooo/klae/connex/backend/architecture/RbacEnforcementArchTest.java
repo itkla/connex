@@ -114,7 +114,13 @@ class RbacEnforcementArchTest {
             ooo.klae.connex.backend.services.ReportService.class, Map.of(
                 "exportCsv", Permission.EXPORT_DATA,
                 "exportSnapshotCsv", Permission.EXPORT_DATA,
-                "completeImageExport", Permission.EXPORT_DATA));
+                "completeImageExport", Permission.EXPORT_DATA),
+            ooo.klae.connex.backend.controllers.ScheduleController.class, Map.of(
+                "create", Permission.REPORT_UPDATE,
+                "update", Permission.REPORT_UPDATE),
+            ooo.klae.connex.backend.services.ScheduleService.class, Map.of(
+                "create", Permission.EXPORT_DATA,
+                "update", Permission.EXPORT_DATA));
         for (Map.Entry<Class<?>, Map<String, Permission>> surface : surfaces.entrySet()) {
             int matched = 0;
             for (Method method : surface.getKey().getDeclaredMethods()) {

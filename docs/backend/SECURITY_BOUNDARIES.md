@@ -43,12 +43,17 @@ owner/admin exports use organization export flags, independently of any active w
 Only un-overlaid built-in workspace administrators/owners can change built-in export policy,
 under existing member-management locks and recent authentication. Organization policy mutations
 retain account → organization → membership lock order. Policy administration remains available
-after self-revocation, while custom-role grants keep their existing permission ceiling.
+after self-revocation, while custom-role grants keep their existing permission ceiling. Enabling
+owner exports must also leave an active, unreserved owner able to restore the proposed owner
+bundle. The policy change refuses under owner/overlay locks instead of silently adding export
+grants to custom roles; restore a built-in owner before retrying.
 
 | Export operation | Additional retained authority |
 | --- | --- |
 | GET `/api/exports/persons`, `/companies`, `/products`, `/deals`; POST `/api/exports/deals/segment` | Active workspace membership, scoped filters/privacy exclusions; existing step-up |
 | POST `/api/reports/{id}/export.csv`, `/snapshots/{snapshotId}/export.csv`, `/export-completion` | `REPORT_READ`, report visibility and underlying domain permissions, step-up |
+| POST and PUT `/api/reports/{id}/schedule` | Workspace `EXPORT_DATA` plus `REPORT_UPDATE`, report/domain read permissions, active eligible recipients, existing privileged-account step-up; locked grants are rechecked before saving |
+| Unattended report delivery | The saved run-as member's current workspace `EXPORT_DATA` and report/domain read permissions, checked before generation and again before email enqueueing; recipients keep their report/domain read requirements |
 | GET `/api/audit/export` | `AUDIT_READ`, bounded authorized scope, step-up |
 | GET `/api/orgs/{orgId}/audit/export` | Organization admin/owner, bounded organization-only audit scope, step-up |
 | POST and GET `/api/orgs/{orgId}/workspaces/{workspaceId}/export` | Organization admin/owner, target-workspace lifecycle, recent authentication at grant issuance, session-bound one-use grant at redemption |
@@ -61,6 +66,12 @@ policy with `FOR SHARE`; nonlocking snapshot authorization retains its consisten
 Ordinary attachments/document artifacts and statutory data-subject disclosure retain their own
 access/privacy contracts; they are not bulk-export endpoints. Existing export completion audit
 semantics and passkey step-up are unchanged. See [V248 deployment](../UPGRADING.md#export-data-permission-control-v248).
+
+Schedule reads and deletion retain their existing report permissions; withdrawing export access
+does not prevent stopping a saved delivery channel. A withdrawn run-as export grant skips the
+occurrence, advances its next run, records the reason in the audit log, and records the
+`export_permission_withdrawn` job phase. The enqueue-time check also catches withdrawal during
+snapshot generation. It does not cancel mail already queued after a successful final check.
 
 ### Workspace invitation disclosure
 

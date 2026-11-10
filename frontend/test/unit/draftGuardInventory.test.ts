@@ -827,6 +827,7 @@ const ownerScenarios: Record<string, OwnerScenario> = {
                 schedule: null,
                 members: [],
                 canManage: true,
+                canExport: true,
                 loading: false,
                 loadFailed: false,
                 membersFailed: false,

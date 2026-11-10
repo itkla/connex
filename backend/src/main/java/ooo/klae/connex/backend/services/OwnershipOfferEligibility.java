@@ -1,8 +1,6 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.Arrays;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.OwnershipOffer;
@@ -14,7 +12,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.dto.ExportPermissions;
 
 /** Live control-plane eligibility for cards, locked acceptance rechecks and invalidation hooks. */
 @Component
@@ -54,7 +52,7 @@ public class OwnershipOfferEligibility {
             && canOfferWorkspaceOwnership(offer.getWorkspaceId(), offer.getOfferorUserId());
     }
 
-    /** Checks raw ownership and the full grant ceiling without relying on a current session. */
+    /** Checks raw ownership and the effective workspace owner ceiling without a current session. */
     public boolean canOfferWorkspaceOwnership(int workspaceId, int userId) {
         WorkspaceMember actor = workspaceMapper.getAuthorizationMembership(workspaceId, userId);
         if (actor == null || !"active".equals(actor.getStatus()) || !"owner".equals(actor.getRole())) {
@@ -63,8 +61,12 @@ public class OwnershipOfferEligibility {
         if (actor.getRoleId() == null) {
             return true;
         }
+        ExportPermissions policy = workspaceMapper.getExportPermissions(workspaceId);
+        if (policy == null) {
+            return false;
+        }
         Set<String> permissions = Set.copyOf(roleMapper.findPermissions(workspaceId, actor.getRoleId()));
-        return permissions.containsAll(Arrays.stream(Permission.values()).filter(Permission::isGrantable)
-            .map(Enum::name).collect(Collectors.toSet()));
+        return WorkspaceService.effectiveOwnerPermissions(policy).stream()
+            .allMatch(permission -> permissions.contains(permission.name()));
     }
 }

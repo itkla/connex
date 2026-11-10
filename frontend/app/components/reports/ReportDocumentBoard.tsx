@@ -469,6 +469,7 @@ export default function ReportDocumentBoard({
                         reportId={definition.id}
                         reportName={definition.name}
                         canManage={canUpdateReports}
+                        canExport={canExport}
                         defaultTimezone={defaultTimezone}
                     />
                     <Button variant="outline" onClick={createSnapshot} disabled={!document || snapshotting}>

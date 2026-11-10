@@ -1394,3 +1394,8 @@ Organization administrators and owners configure organization export flags under
 locks and recent authentication. Withdrawing one's own export access leaves these narrow policy
 administration paths available for recovery; it does not restore export access by itself.
 Organization policy never derives authority from the active workspace.
+
+Before re-enabling owner exports, at least one active, unreserved owner must be able to restore
+the proposed owner bundle, including `EXPORT_DATA`. If every owner's overlay lacks it, restore
+an owner's built-in Owner role while owner exports are still disabled, then retry the policy
+change. An unsafe enable is refused; it does not silently widen any custom role's grants.

@@ -663,7 +663,7 @@ class ReportIntegrationTest {
         role.setWorkspaceId(workspace.getId());
         role.setName("Scheduled report reader " + UUID.randomUUID().toString().substring(0, 8));
         roleMapper.insertRole(role);
-        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("REPORT_READ"));
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("REPORT_READ", "EXPORT_DATA"));
         workspaceMapper.setMemberCustomRole(workspace.getId(), reader.getId(), role.getId());
 
         forceScheduledDelivery(workspace.getId(), scheduleId);
@@ -759,7 +759,7 @@ class ReportIntegrationTest {
         reportManager.setName("Report manager " + UUID.randomUUID().toString().substring(0, 8));
         roleMapper.insertRole(reportManager);
         roleMapper.insertPermissions(workspace.getId(), reportManager.getId(),
-                List.of("REPORT_READ", "REPORT_CREATE", "REPORT_UPDATE"));
+                List.of("REPORT_READ", "REPORT_CREATE", "REPORT_UPDATE", "EXPORT_DATA"));
         MockHttpSession session = login(member.getUsername());
         int reportId = createReport(session, workspace);
         workspaceMapper.setMemberCustomRole(workspace.getId(), member.getId(), reportManager.getId());

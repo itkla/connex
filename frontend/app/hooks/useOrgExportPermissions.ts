@@ -10,13 +10,15 @@ type PolicyRead = { orgId: number; permissions: ExportPermissions };
 export function useOrgExportPermissions(orgId: number | undefined) {
     const [read, setRead] = useState<PolicyRead | null>(null);
     const currentOrg = useRef(orgId);
+    const readGeneration = useRef(0);
     useLayoutEffect(() => { currentOrg.current = orgId; }, [orgId]);
     const refresh = useCallback((signal?: AbortSignal) => {
         if (orgId === undefined) return;
+        const generation = ++readGeneration.current;
         return getOrgExportPermissions(orgId, { signal }).then((permissions) => {
-            if (!signal?.aborted && currentOrg.current === orgId) setRead({ orgId, permissions });
+            if (generation === readGeneration.current && !signal?.aborted && currentOrg.current === orgId) setRead({ orgId, permissions });
         }).catch(() => {
-            if (!signal?.aborted && currentOrg.current === orgId) setRead(null);
+            if (generation === readGeneration.current && !signal?.aborted && currentOrg.current === orgId) setRead(null);
         });
     }, [orgId]);
 
@@ -30,6 +32,7 @@ export function useOrgExportPermissions(orgId: number | undefined) {
         window.addEventListener("focus", whenVisible);
         document.addEventListener("visibilitychange", whenVisible);
         return () => {
+            readGeneration.current += 1;
             controller.abort();
             window.removeEventListener("focus", whenVisible);
             document.removeEventListener("visibilitychange", whenVisible);
@@ -38,7 +41,10 @@ export function useOrgExportPermissions(orgId: number | undefined) {
 
     const permissions = read !== null && read.orgId === orgId ? read.permissions : null;
     const replace = useCallback((permissions: ExportPermissions) => {
-        if (orgId !== undefined && currentOrg.current === orgId) setRead({ orgId, permissions });
+        if (orgId !== undefined && currentOrg.current === orgId) {
+            readGeneration.current += 1;
+            setRead({ orgId, permissions });
+        }
     }, [orgId]);
     return { permissions, replace };
 }

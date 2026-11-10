@@ -4,6 +4,8 @@ Control migration V229 creates the `ownership_offer` table. Closure attribution 
 
 Issue #1534 decision 4 makes an existing-scope owner promotion consent-based. Creation preserves the offeree's raw role and custom overlay. Admin changes, founding, owner repairs, last-owner/recovery guards, invitations and SSO admission retain their existing behavior. Acceptance clears a workspace overlay or an organization founder flag; it grants no credential coverage.
 
+Workspace issuance, live card eligibility, acceptance and reconciliation use the same workspace-specific effective built-in owner bundle. With owner exports disabled, an overlaid owner may omit `EXPORT_DATA` while retaining every other permission in that bundle. Membership, raw ownership, reservation, generation and MFA checks remain mandatory. An unavailable export-policy read does not relax an overlaid owner's grant ceiling.
+
 ## HTTP contract
 
 All routes require the authenticated session; mutations retain CSRF. IDs in paths are decimal integers. Offer IDs in JSON are lossless decimal strings. Self-list, acceptance and decline ignore stale workspace selection.

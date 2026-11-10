@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
     run: vi.fn(),
     snapshotCsv: vi.fn(),
     exportPng: vi.fn(),
+    schedule: vi.fn<(props: { canExport: boolean }) => void>(),
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/records/contacts", useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: () => state.permission }));
@@ -34,7 +35,10 @@ vi.mock("@/app/lib/api", () => ({
     exportReportCsv: vi.fn(),
     generateReport: vi.fn(),
 }));
-vi.mock("@/app/components/reports/ScheduleManager", () => ({ default: () => null }));
+vi.mock("@/app/components/reports/ScheduleManager", () => ({ default: (props: { canExport: boolean }) => {
+    state.schedule(props);
+    return null;
+} }));
 vi.mock("@/app/components/import/LazyImportDialog", () => ({ default: () => null }));
 vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
 vi.mock("@/components/ui/split-button", () => ({ SplitButton: ({ children }: PropsWithChildren) => <div>{children}</div> }));
@@ -113,6 +117,7 @@ describe.each(["en", "ja"] as const)("export permission controls in %s", (locale
         }
         expect(state.snapshotCsv).not.toHaveBeenCalled();
         expect(state.exportPng).not.toHaveBeenCalled();
+        expect(state.schedule.mock.lastCall?.[0].canExport).toBe(false);
     });
 
     it("allows a frozen report CSV export when granted", () => {
@@ -122,6 +127,7 @@ describe.each(["en", "ja"] as const)("export permission controls in %s", (locale
         expect(button.hasAttribute("disabled")).toBe(false);
         fireEvent.click(button);
         expect(state.snapshotCsv).toHaveBeenCalledWith(1, 2);
+        expect(state.schedule.mock.lastCall?.[0].canExport).toBe(true);
     });
 
     it("fails closed and distinguishes unavailable permissions", () => {

@@ -53,6 +53,20 @@ class RoleServiceLockOrderTest {
     }
 
     @Test
+    void builtInExportPolicyChecksLockedRecoveryBeforeItsSuccessAudit() {
+        when(workspaceService.permissionsFor(7, 1)).thenReturn(Set.of(Permission.MEMBER_MANAGE));
+        service.updateBuiltInExportPermission(7, 1, "owner", true);
+
+        InOrder order = inOrder(workspaceService, sessionSecurityService, auditService);
+        order.verify(workspaceService).requirePermission(7, 1, Permission.MEMBER_MANAGE);
+        order.verify(sessionSecurityService).requireRecentAuthentication(1);
+        order.verify(workspaceService).lockBuiltInExportPolicyAuthorization(7, 1, "owner", true);
+        order.verify(workspaceService).updateBuiltInExportPermission(7, "owner", true);
+        order.verify(auditService).record("workspace.role.update", "workspace", 7, null,
+            "Updated built-in role export permission", java.util.Map.of("role", "owner", "enabled", true));
+    }
+
+    @Test
     void customRoleUpdateLocksCurrentAuthorizationAndRoleBeforeMutation() {
         when(roleMapper.updateRoleName(7, 5, "Analyst")).thenReturn(1);
 

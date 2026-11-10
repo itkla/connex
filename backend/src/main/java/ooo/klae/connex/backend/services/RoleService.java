@@ -58,7 +58,7 @@ public class RoleService {
         }
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        workspaceService.lockBuiltInExportPolicyAuthorization(workspaceId, actorId);
+        workspaceService.lockBuiltInExportPolicyAuthorization(workspaceId, actorId, role, enabled);
         workspaceService.updateBuiltInExportPermission(workspaceId, role, enabled);
         auditService.record("workspace.role.update", "workspace", workspaceId, null,
             "Updated built-in role export permission", java.util.Map.of("role", role, "enabled", enabled));

@@ -1147,6 +1147,11 @@ public class WorkspaceService {
         return permissions;
     }
 
+    /** Effective owner grant ceiling shared with session-independent ownership-offer eligibility. */
+    static Set<Permission> effectiveOwnerPermissions(ExportPermissions policy) {
+        return applyExportPolicy(Role.OWNER, policy);
+    }
+
     /** The fixed permission bundle backing a built-in role. */
     private static Set<Permission> builtInPermissions(Role role) {
         return switch (role) {
@@ -1385,19 +1390,31 @@ public class WorkspaceService {
             && workspaceMapper.getMemberRoleId(workspaceId, actorId) == null;
     }
 
-    /** Persists export policy while the caller retains the workspace authorization locks. */
+    /** Persists export policy after the caller's complete authorization and recovery check. */
     void updateBuiltInExportPermission(int workspaceId, String role, boolean enabled) {
         workspaceMapper.updateExportPermission(workspaceId, role, enabled);
     }
 
     /** Locks role administration; builtin policy recovery does not require export authority. */
-    void lockBuiltInExportPolicyAuthorization(int workspaceId, int actorId) {
+    void lockBuiltInExportPolicyAuthorization(int workspaceId, int actorId, String role, boolean enabled) {
+        boolean enablingOwnerExports = "owner".equals(role) && enabled;
         LockedRoleMutation locks = lockRoleMutation(
-            workspaceId, actorId, null, Permission.MEMBER_MANAGE, null, null);
+            workspaceId, actorId, null, Permission.MEMBER_MANAGE, null, null, null, enablingOwnerExports);
         if (locks.actorMembership().getRoleId() != null) {
             throw permissionRequired(Permission.MEMBER_MANAGE);
         }
         requireLockedRole(locks.actorMembership(), Role.ADMIN);
+        OwnerRecovery recovery = locks.ownerRecovery();
+        if (enablingOwnerExports && !recovery.ownerPermissions().contains(Permission.EXPORT_DATA)) {
+            Set<Permission> proposed = EnumSet.copyOf(recovery.ownerPermissions());
+            proposed.add(Permission.EXPORT_DATA);
+            Set<Integer> reserved = accountDeletionReservationRead.reservedUserIds(
+                recovery.ownerIdsExcept(null));
+            if (!recovery.withOwnerPermissions(proposed).hasRestorer(null, reserved)) {
+                throw new WorkspaceRecoveryOwnerRequiredException(
+                    "Restore the built-in owner role for at least one active owner before enabling owner exports");
+            }
+        }
     }
 
     private static WorkspaceRole builtInRole(String name, Set<Permission> permissions) {
@@ -2067,6 +2084,19 @@ public class WorkspaceService {
             Integer requestedRoleId,
             String missingRequestedRoleMessage,
             Integer recipientMembershipUserId) {
+        return lockRoleMutation(workspaceId, actorId, targetUserId, requiredPermission, requestedRoleId,
+            missingRequestedRoleMessage, recipientMembershipUserId, false);
+    }
+
+    private LockedRoleMutation lockRoleMutation(
+            int workspaceId,
+            int actorId,
+            Integer targetUserId,
+            Permission requiredPermission,
+            Integer requestedRoleId,
+            String missingRequestedRoleMessage,
+            Integer recipientMembershipUserId,
+            boolean ownerPolicyAffected) {
         TreeSet<Integer> userIds = new TreeSet<>();
         userIds.add(actorId);
         if (targetUserId != null) {
@@ -2111,7 +2141,7 @@ public class WorkspaceService {
         List<WorkspaceMember> roleAssignees = requestedRoleId != null && targetUserId == null
             ? lockWithoutWaiting(() -> workspaceMapper.lockRoleAssignees(workspaceId, requestedRoleId))
             : List.<WorkspaceMember>of();
-        boolean ownerAffected =
+        boolean ownerAffected = ownerPolicyAffected ||
             (targetMembership != null && "owner".equals(targetMembership.getRole()))
                 || roleAssignees.stream().anyMatch(member -> "owner".equals(member.getRole())
                     && "active".equals(member.getStatus()));
@@ -2688,6 +2718,11 @@ public class WorkspaceService {
             Map<Integer, Set<Permission>> replaced = new LinkedHashMap<>(permissionsByRole);
             replaced.put(roleId, Set.copyOf(permissions));
             return new OwnerRecovery(overlayByOwner, replaced, ownerPermissions);
+        }
+
+        /** The same locked owners and overlays evaluated against a proposed built-in owner bundle. */
+        OwnerRecovery withOwnerPermissions(Set<Permission> permissions) {
+            return new OwnerRecovery(overlayByOwner, permissionsByRole, Set.copyOf(permissions));
         }
 
         /**
