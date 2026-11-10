@@ -223,7 +223,8 @@ describe("a role change re-seeds the shell it was made from", () => {
 
     const changeRole = handler(members, "const changeRole = async", "const assignCustom = async");
     const assignCustom = handler(members, "const assignCustom = async", "const confirmRemove = async");
-    const submitRole = handler(roles, "const submitRole = async", "const confirmRemove = async");
+    const submitRole = handler(roles, "const submitRole = async", "const setBuiltInExport = async");
+    const builtInExport = handler(roles, "const setBuiltInExport = async", "const confirmRemove = async");
     const deleteRole = handler(roles, "const confirmRemove = async", "if (accessDenied)");
 
     it("refreshes after a member's built-in role changes", () => {
@@ -245,13 +246,19 @@ describe("a role change re-seeds the shell it was made from", () => {
         );
     });
 
+    it("refreshes after a built-in role export grant changes in the same workspace", () => {
+        expect(builtInExport).toContain("await updateBuiltInRoleExportPermission(");
+        expect(builtInExport).toContain("if (workspaceEpoch.current !== originEpoch) return;");
+        expect(builtInExport.match(/router\.refresh\(\)/g) ?? []).toHaveLength(1);
+    });
+
     it("refreshes after a custom role is deleted", () => {
         expect(deleteRole).toContain("await deleteWorkspaceRole(");
         expect(deleteRole).toContain("router.refresh()");
     });
 
     it("does not refresh from a failed mutation, which changed nothing", () => {
-        for (const body of [changeRole, assignCustom, submitRole, deleteRole]) {
+        for (const body of [changeRole, assignCustom, submitRole, builtInExport, deleteRole]) {
             expect(body).not.toMatch(/catch \([\s\S]*?router\.refresh\(\)/);
         }
     });

@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.dto.ExportPermissions;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
@@ -192,4 +193,11 @@ public interface WorkspaceMapper {
         @Param("userId") int userId,
         @Param("role") String role
     );
+    /** Returns export access for built-in roles in this exact control-plane scope. */
+    ExportPermissions getExportPermissions(@Param("workspaceId") int workspaceId);
+    /** Reads current policy while retaining the workspace root through transaction completion. */
+    ExportPermissions getExportPermissionsForShare(@Param("workspaceId") int workspaceId);
+    /** Replaces only the named built-in role's export access. */
+    int updateExportPermission(@Param("workspaceId") int workspaceId, @Param("role") String role,
+        @Param("enabled") boolean enabled);
 }

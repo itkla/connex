@@ -10,6 +10,8 @@ import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 import type { CampaignAccess } from "@/app/lib/campaignAccess";
 import type { Campaign, InstanceCapabilities, User } from "@/app/lib/types";
 
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: () => "granted" }));
+
 vi.mock("next/headers", () => ({
     cookies: async () => ({ get: () => ({ value: "7" }) }),
     headers: () => Promise.resolve(new Headers({

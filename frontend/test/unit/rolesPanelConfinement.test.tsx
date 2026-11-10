@@ -5,7 +5,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RolesPanel from "@/app/components/settings/RolesPanel";
-import { ApiError, PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE } from "@/app/lib/api";
+import { ApiError, getWorkspaceRoles, PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE } from "@/app/lib/api";
 import enSettings from "@/messages/en/settings.json";
 import enWorkspace from "@/messages/en/workspace.json";
 import jaWorkspace from "@/messages/ja/workspace.json";
@@ -15,19 +15,24 @@ const spies = vi.hoisted(() => ({
     showApiError: vi.fn(),
     toastSuccess: vi.fn(),
     refresh: vi.fn(),
+    canManageRoles: true,
+    workspaceId: 5,
+    updateBuiltInExport: vi.fn(),
 }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
     getWorkspaceRoles: vi.fn(async () => [{ id: 4, name: "Ops", permissions: ["MEMBER_MANAGE"] }]),
     getBuiltInRoles: vi.fn(async () => [
-        { id: 0, name: "member", permissions: ["MEMBER_MANAGE"] },
+        { id: 0, name: "member", permissions: ["MEMBER_MANAGE", "EXPORT_DATA"], exportPermissionEditable: true },
     ]),
-    getPermissionCatalog: vi.fn(async () => ["MEMBER_MANAGE", "ROLE_MANAGE"]),
+    getPermissionCatalog: vi.fn(async () => ["MEMBER_MANAGE", "ROLE_MANAGE", "EXPORT_DATA"]),
+    updateBuiltInRoleExportPermission: spies.updateBuiltInExport,
     updateWorkspaceRole: spies.updateWorkspaceRole,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: spies.refresh }) }));
-vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: 5 }) }));
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => spies.canManageRoles }));
+vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: spies.workspaceId }) }));
 vi.mock("@/app/hooks/usePasskeyStepUpError", () => ({ usePasskeyStepUpErrorHandler: () => () => false }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => spies.showApiError }));
 vi.mock("@/app/lib/toast", () => ({ toastSuccess: spies.toastSuccess, toastError: vi.fn() }));
@@ -101,6 +106,9 @@ async function openEditAndSubmit() {
 }
 
 beforeEach(() => {
+    spies.canManageRoles = true;
+    spies.workspaceId = 5;
+    spies.updateBuiltInExport.mockResolvedValue([{ id: 0, name: "member", permissions: ["MEMBER_MANAGE"], exportPermissionEditable: true }]);
     vi.stubGlobal("matchMedia", (query: string) => ({
         matches: false,
         media: query,
@@ -186,8 +194,56 @@ describe.each(["en", "ja"] as const)("localized role explanations in %s", (local
         expect(checkbox).not.toBeNull();
         expect(document.getElementById(checkbox?.getAttribute("aria-describedby") ?? "")?.textContent)
             .toBe(copy.permissionLabels.ROLE_MANAGE.description);
+        expect(container.querySelector<HTMLInputElement>('input[aria-labelledby="role-action-EXPORT_DATA"]')?.checked).toBe(false);
         await act(async () => checkbox?.click());
         expect(checkbox?.checked).toBe(true);
         expect(spies.updateWorkspaceRole).not.toHaveBeenCalled();
+    });
+});
+
+
+describe("built-in export permission controls", () => {
+    it("allows an administrator to change export access without custom-role management", async () => {
+        spies.canManageRoles = false;
+        await act(async () => root.render(
+            <NextIntlClientProvider locale="en" messages={{ ...enWorkspace, ...enSettings }}>
+                <RolesPanel />
+            </NextIntlClientProvider>,
+        ));
+        await flush();
+        expect(getWorkspaceRoles).not.toHaveBeenCalled();
+        expect(container.textContent).not.toContain(enWorkspace.WorkspaceRoles.newRole);
+        const toggle = container.querySelector<HTMLButtonElement>("#built-in-export-member");
+        expect(toggle?.getAttribute("aria-checked")).toBe("true");
+        await act(async () => toggle?.click());
+        await flush();
+        expect(spies.updateBuiltInExport).toHaveBeenCalledWith(5, "member", false);
+        expect(container.querySelector("#built-in-export-member")?.getAttribute("aria-checked")).toBe("false");
+    });
+});
+
+
+describe("pending built-in export policy updates", () => {
+    it("does not replace another workspace's policy after switching", async () => {
+        const pending = Promise.withResolvers<Array<{ id: number; name: string; permissions: string[]; exportPermissionEditable: boolean }>>();
+        spies.updateBuiltInExport.mockReturnValueOnce(pending.promise);
+        const view = () => (
+            <NextIntlClientProvider locale="en" messages={{ ...enWorkspace, ...enSettings }}>
+                <RolesPanel />
+            </NextIntlClientProvider>
+        );
+        await act(async () => root.render(view()));
+        await flush();
+        await act(async () => container.querySelector<HTMLButtonElement>("#built-in-export-member")?.click());
+        expect(spies.updateBuiltInExport).toHaveBeenCalledWith(5, "member", false);
+        spies.workspaceId = 9;
+        await act(async () => root.render(view()));
+        await flush();
+        expect(container.querySelector("#built-in-export-member")?.getAttribute("aria-checked")).toBe("true");
+        await act(async () => pending.resolve([{ id: 0, name: "member", permissions: [], exportPermissionEditable: true }]));
+        await flush();
+        expect(container.querySelector("#built-in-export-member")?.getAttribute("aria-checked")).toBe("true");
+        expect(spies.refresh).not.toHaveBeenCalled();
+        expect(spies.toastSuccess).not.toHaveBeenCalled();
     });
 });

@@ -39,6 +39,7 @@ import {
 } from '@/app/lib/api';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { renderReportPng } from '@/app/lib/reportPng';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
@@ -172,6 +173,8 @@ export default function ReportDocumentBoard({
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
+    const exportPermission = usePermissionCheck('EXPORT_DATA');
+    const canExport = exportPermission === 'granted';
     const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
     const timeZone = useTimeZone();
@@ -414,6 +417,7 @@ export default function ReportDocumentBoard({
     };
 
     const exportCsv = async () => {
+        if (!canExport) return;
         const input = activeSnapshot ? null : generationInput();
         if (!activeSnapshot && !input) return;
         setExporting(true);
@@ -431,7 +435,7 @@ export default function ReportDocumentBoard({
     };
 
     const exportPng = async () => {
-        if (!paperRef.current) return;
+        if (!canExport || !paperRef.current) return;
         setExportingPng(true);
         try {
             const element = paperRef.current;
@@ -465,6 +469,7 @@ export default function ReportDocumentBoard({
                         reportId={definition.id}
                         reportName={definition.name}
                         canManage={canUpdateReports}
+                        canExport={canExport}
                         defaultTimezone={defaultTimezone}
                     />
                     <Button variant="outline" onClick={createSnapshot} disabled={!document || snapshotting}>
@@ -473,27 +478,32 @@ export default function ReportDocumentBoard({
                     </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" disabled={!document || exporting || exportingPng}>
+                            <Button variant="outline" disabled={!canExport || !document || exporting || exportingPng}>
                                 <ArrowDownTrayIcon />
                                 {exporting || exportingPng ? t('document.exporting') : t('document.export')}
                                 <ChevronDownIcon className="size-4 opacity-60" />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => void exportCsv()} disabled={exporting}>
+                            <DropdownMenuItem onSelect={() => void exportCsv()} disabled={!canExport || exporting}>
                                 <ArrowDownTrayIcon />
                                 {t('document.csv')}
                             </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => void exportPng()} disabled={exportingPng}>
+                            <DropdownMenuItem onSelect={() => void exportPng()} disabled={!canExport || exportingPng}>
                                 <PhotoIcon />
                                 {t('document.png')}
                             </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => window.print()}>
+                            <DropdownMenuItem disabled={!canExport} onSelect={() => canExport && window.print()}>
                                 <PrinterIcon />
                                 {t('document.pdf')}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
+                    {!canExport && (
+                        <p className="max-w-xs text-xs text-muted-foreground">
+                            {t(exportPermission === 'denied' ? 'exportPermissionDenied' : 'exportPermissionUnavailable')}
+                        </p>
+                    )}
                     {canUpdateReports ? (
                         <Button asChild variant="brand">
                             <Link href={`/insights/reports/${definition.id}/edit`}>

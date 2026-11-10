@@ -54,6 +54,7 @@ public class AuditController {
         @RequestParam(required = false) List<Integer> ids
     ) {
         workspaceService.requirePermission(Permission.AUDIT_READ);
+        workspaceService.requirePermission(Permission.EXPORT_DATA);
         String body = ids != null
             ? auditService.exportSelected(entityType, entityId, ids, limit, offset)
             : entityType != null && entityId != null

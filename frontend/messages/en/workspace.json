@@ -337,7 +337,7 @@
         "defaultRolesLabel": "Built-in roles",
         "customRolesLabel": "Custom roles",
         "builtInBadge": "Built-in",
-        "builtInSubtitle": "Standard access levels. These can't be edited.",
+        "builtInSubtitle": "Standard access levels. Export data can be changed for each role.",
         "fullAccess": "Full access",
         "noPermissions": "No permissions",
         "createTitle": "New role",
@@ -562,6 +562,10 @@
             "TEAM_MANAGE": {
                 "action": "Manage teams",
                 "description": "Create teams and manage their members and managers. Team membership does not grant workspace permissions."
+            },
+            "EXPORT_DATA": {
+                "action": "Export data",
+                "description": "Export data you can access. Existing record, report, audit, and security requirements still apply."
             }
         },
         "confinementSubjectRoleEdit": "Save changes to the {name} role",
@@ -592,7 +596,8 @@
             "CONSENT": "Contact preferences",
             "AI": "Ask Connex and AI features",
             "SEQUENCE": "Sequences",
-            "TEAM": "Teams"
+            "TEAM": "Teams",
+            "EXPORT": "Data exports"
         },
         "accessDetails": "View allowed and unavailable actions",
         "accessScopeHint": "Only actions marked Allowed are granted. Record visibility, organization authority, and security checks still apply.",
@@ -614,7 +619,9 @@
                 "name": "Member",
                 "description": "Work with contacts, deals, activities, notes, comments, tasks, files, and reports. Cannot manage workspace settings, members, roles, or workflows, or use AI features."
             }
-        }
+        },
+        "exportPermissionSaving": "Saving export permission…",
+        "exportPermissionLabel": "Allow {role} to export data"
     },
     "WorkflowAuthoring": {
         "noAccess": "You can't manage workflows in this workspace. Ask a workspace admin if you need access.",

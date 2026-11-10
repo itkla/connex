@@ -89,7 +89,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         approveForStepUp(provisioningOwner);
         var lifecycleRole = roleService.createRole(
             workspace.getId(), provisioningOwner.getId(), "Lifecycle manager " + unique(),
-            List.of("PERSON_UPDATE", "PERSON_DELETE", "WORKSPACE_SETTINGS"));
+            List.of("PERSON_UPDATE", "PERSON_DELETE", "WORKSPACE_SETTINGS", "EXPORT_DATA"));
         workspaceService.assignCustomRole(
             workspace.getId(), provisioningOwner.getId(), lifecycleMember.getId(),
             lifecycleRole.getId());

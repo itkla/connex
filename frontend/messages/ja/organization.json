@@ -102,7 +102,14 @@
         "deletePermanently": "完全に削除",
         "deleting": "削除中",
         "workspaceDeleted": "{name} を完全に削除しました。",
-        "organizationDeleted": "{name} を完全に削除しました。"
+        "organizationDeleted": "{name} を完全に削除しました。",
+        "exportPermissionDenied": "現在のロールではデータをエクスポートできません。管理者に権限の付与を依頼してください。",
+        "exportPermissionUnavailable": "エクスポート権限を確認できませんでした。ページを再読み込みしてお試しください。",
+        "exportPermissionsTitle": "エクスポート権限",
+        "exportPermissionsDescription": "ワークスペースのアーカイブと組織の監査データをエクスポートできる組織ロールを選択します。",
+        "exportPermissionLabel": "{role}によるデータのエクスポートを許可",
+        "exportPermissionSaved": "エクスポート権限を更新しました",
+        "exportPermissionSaveFailed": "エクスポート権限を更新できませんでした"
     },
     "OrgAi": {
         "title": "AIプロバイダー",
@@ -256,6 +263,9 @@
             "org": {
                 "create": "組織を作成しました",
                 "rename": "組織名を変更しました",
+                "role": {
+                    "export_permission": "組織の役割のデータエクスポート権限を変更"
+                },
                 "member": {
                     "set": "組織管理者の権限を変更しました",
                     "remove": "組織管理者を解除しました",

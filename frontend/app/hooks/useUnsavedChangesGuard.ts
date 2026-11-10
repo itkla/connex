@@ -272,7 +272,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
         setConfirmOpen(false);
     }, []);
     const onDiscard = useCallback(() => {
-        const navigate = pendingNavigation.current?.navigate ?? onClose;
+        const navigate: NavigationAction = pendingNavigation.current?.navigate ?? onClose;
         pendingNavigation.current = null;
         if (push) allowNavigation(() => {
             const pending = navigate();

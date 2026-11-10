@@ -117,13 +117,11 @@ export type SettingsAccess = {
     /**
      * Whether every required permission must be held, or any one of them.
      *
-     * `"all"` for a destination that serves one job, which is every destination that existed before
-     * the scope groups: lacking the permission its content needs leaves nothing to render. `"any"`
-     * is what consolidation introduces — a destination that absorbed two independently gated jobs
-     * is reachable by a reader who can read either of them, and refuses the other section in place.
-     * Without it a merge would have to pick one of the two permissions and hide the page from a
-     * role holding only the other, which is how a workspace's auditor would lose the audit log to a
-     * destination named for it.
+     * `"all"` is the default for one permissioned job. `"any"` requires a named, reviewed
+     * alternative: a consolidated destination may admit readers of either independently gated
+     * section, and Roles admits custom-role managers or built-in role/export administrators.
+     * Each panel and operation retains its own authority checks. `settingsManifest.test.ts` pins
+     * these alternatives and rejects additional permissions or unreviewed destinations.
      */
     permissionMatch: "all" | "any";
     /** Capability requirements the destination's content depends on. */
@@ -1383,8 +1381,8 @@ export const SETTINGS_ENTRIES = [
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabRoles",
         access: {
-            permissions: ["ROLE_MANAGE"],
-            permissionMatch: "all",
+            permissions: ["ROLE_MANAGE", "MEMBER_MANAGE"],
+            permissionMatch: "any",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,

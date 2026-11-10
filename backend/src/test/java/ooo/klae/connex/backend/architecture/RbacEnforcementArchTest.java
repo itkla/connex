@@ -99,6 +99,46 @@ class RbacEnforcementArchTest {
     }
 
     @Test
+    void crmAndReportExportEntryPointsRequireExportDataWithoutReplacingReportRead() {
+        Map<Class<?>, Map<String, Permission>> surfaces = Map.of(
+            ooo.klae.connex.backend.controllers.ExportController.class, Map.of(
+                "exportPersons", Permission.EXPORT_DATA,
+                "exportCompanies", Permission.EXPORT_DATA,
+                "exportProducts", Permission.EXPORT_DATA,
+                "exportDeals", Permission.EXPORT_DATA,
+                "exportSegmentDeals", Permission.EXPORT_DATA),
+            ooo.klae.connex.backend.controllers.ReportController.class, Map.of(
+                "export", Permission.REPORT_READ,
+                "exportSnapshot", Permission.REPORT_READ,
+                "completeImageExport", Permission.REPORT_READ),
+            ooo.klae.connex.backend.services.ReportService.class, Map.of(
+                "exportCsv", Permission.EXPORT_DATA,
+                "exportSnapshotCsv", Permission.EXPORT_DATA,
+                "completeImageExport", Permission.EXPORT_DATA),
+            ooo.klae.connex.backend.controllers.ScheduleController.class, Map.of(
+                "create", Permission.REPORT_UPDATE,
+                "update", Permission.REPORT_UPDATE),
+            ooo.klae.connex.backend.services.ScheduleService.class, Map.of(
+                "create", Permission.EXPORT_DATA,
+                "update", Permission.EXPORT_DATA));
+        for (Map.Entry<Class<?>, Map<String, Permission>> surface : surfaces.entrySet()) {
+            int matched = 0;
+            for (Method method : surface.getKey().getDeclaredMethods()) {
+                Permission expected = surface.getValue().get(method.getName());
+                if (expected == null || !Modifier.isPublic(method.getModifiers())) {
+                    continue;
+                }
+                matched++;
+                RequirePermission annotation = method.getAnnotation(RequirePermission.class);
+                assertTrue(annotation != null && annotation.value() == expected,
+                    surface.getKey().getSimpleName() + "." + method.getName() + " requires " + expected);
+            }
+            assertEquals(surface.getValue().size(), matched,
+                surface.getKey().getSimpleName() + " export surface changed without updating the RBAC guard");
+        }
+    }
+
+    @Test
     void recordCreationTemplateAdminSurfaceRequiresCustomFieldManage() {
         List<String> violations = new ArrayList<>();
         int publicMethods = 0;

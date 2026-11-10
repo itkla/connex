@@ -328,6 +328,8 @@
     "refreshingCustomFields": "項目を読み込み中…",
     "unavailableCustomField": "利用できない項目",
     "unavailableCustomFieldHint": "この項目は現在利用できません。有効な項目を選ぶか、この列を「無視する」にしてください。",
-    "currencyInvalid": "対応していない通貨です。JPYやUSDなどの3文字の通貨コードに修正して、ファイルを再度取り込んでください。"
+    "currencyInvalid": "対応していない通貨です。JPYやUSDなどの3文字の通貨コードに修正して、ファイルを再度取り込んでください。",
+    "exportPermissionDenied": "現在のロールではデータをエクスポートできません。管理者に権限の付与を依頼してください。",
+    "exportPermissionUnavailable": "エクスポート権限を確認できませんでした。ページを再読み込みしてお試しください。"
   }
 }

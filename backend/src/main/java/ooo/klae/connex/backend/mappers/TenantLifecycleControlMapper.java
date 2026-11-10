@@ -50,6 +50,9 @@ public interface TenantLifecycleControlMapper {
         @Param("orgId") int orgId,
         @Param("userId") int userId);
 
+    /** Revalidates current organization export policy without affecting privacy-disclosure authority. */
+    Integer lockOrgExportMembershipForUpdate(@Param("orgId") int orgId, @Param("userId") int userId);
+
     Integer lockOrgAdminMembershipForUpdate(
         @Param("orgId") int orgId,
         @Param("userId") int userId);

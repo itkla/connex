@@ -65,6 +65,47 @@ class OrgMemberServiceLockOrderTest {
     @InjectMocks private OrgMemberService service;
 
     @Test
+    void organizationExportPolicyUsesOnlyTheExactOrganizationAndRole() {
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("admin");
+        when(organizationMapper.getExportPermissions(7))
+            .thenReturn(new ooo.klae.connex.backend.dto.ExportPermissions(true, false, false));
+        assertThrows(ForbiddenException.class, () -> service.requireExportData(7, 9));
+        when(orgMemberMapper.getRole(8, 9)).thenReturn("owner");
+        when(organizationMapper.getExportPermissions(8))
+            .thenReturn(new ooo.klae.connex.backend.dto.ExportPermissions(true, true, false));
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> service.requireExportData(8, 9));
+        assertThrows(ForbiddenException.class, () -> service.requireExportData(7, 12));
+    }
+
+    @Test
+    void organizationExportPolicyUpdateRevalidatesMembershipAfterAccountAndOrganizationLocks() {
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("admin");
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
+        when(orgMemberMapper.getRoleForUpdate(7, 9)).thenReturn(null);
+        assertThrows(ForbiddenException.class, () -> service.updateExportPermission(7, 9, "admin", true));
+        verify(organizationMapper, never()).updateExportPermission(anyInt(), any(), org.mockito.ArgumentMatchers.anyBoolean());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void organizationAdministratorCanRecoverOwnExportPolicyWhileExportIsWithdrawn() {
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("admin");
+        when(organizationMapper.getExportPermissions(7))
+            .thenReturn(new ooo.klae.connex.backend.dto.ExportPermissions(true, false, false));
+        assertThrows(ForbiddenException.class, () -> service.requireExportData(7, 9));
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
+        when(orgMemberMapper.getRoleForUpdate(7, 9)).thenReturn("admin");
+        service.updateExportPermission(7, 9, "admin", true);
+        InOrder order = inOrder(userMapper, organizationMapper, orgMemberMapper);
+        order.verify(userMapper).lockById(9);
+        order.verify(organizationMapper).lockActiveById(7);
+        order.verify(orgMemberMapper).getRoleForUpdate(7, 9);
+        order.verify(organizationMapper).updateExportPermission(7, "admin", true);
+    }
+
+    @Test
     void finalErasureRetainsAdminMembershipsAndChecksCurrentCompletenessAfterTheRootUnion() {
         when(userMapper.lockById(9)).thenReturn(9);
         when(orgMemberMapper.orgIdsOwnedBy(9)).thenReturn(List.of(7));

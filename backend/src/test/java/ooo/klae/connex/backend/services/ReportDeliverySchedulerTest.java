@@ -362,6 +362,55 @@ class ReportDeliverySchedulerTest {
     }
 
     @Test
+    void withdrawnExportPermissionSkipsBeforeGenerationWithVisibleReason() {
+        stubSweep();
+        stubAuditScope();
+        ReportSchedule schedule = schedule();
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenReturn(schedule);
+        when(scheduleService.deliveryAccess(schedule))
+            .thenReturn(ScheduleService.DeliveryAccess.denied(ScheduleService.EXPORT_PERMISSION_DENIED));
+        when(scheduleService.skipDue(WORKSPACE_ID, SCHEDULE_ID, USER_ID,
+            LocalDateTime.ofInstant(NOW, ZoneOffset.UTC))).thenReturn(true);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        verifyNoInteractions(reportService, mailService, automationExecutor);
+        assertExportWithdrawalRecorded();
+    }
+
+    @Test
+    void exportWithdrawalDuringGenerationSkipsBeforeMailIsQueued() {
+        stubAuditScope();
+        ReportSnapshotDto snapshot = snapshotWithContent();
+        User runAs = user();
+        ReportSchedule schedule = stubClaimedDelivery(List.of(user()), runAs);
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult()))
+            .thenReturn(List.of(user()));
+        when(scheduleService.deliveryAccess(schedule)).thenReturn(
+            ScheduleService.DeliveryAccess.allowed(runAs, "owner"),
+            ScheduleService.DeliveryAccess.allowed(runAs, "owner"),
+            ScheduleService.DeliveryAccess.denied(ScheduleService.EXPORT_PERMISSION_DENIED));
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        verify(reportService).createDeliverySnapshot(REPORT_ID, SCHEDULE_ID);
+        verifyNoInteractions(mailService);
+        assertExportWithdrawalRecorded();
+    }
+
+    private void assertExportWithdrawalRecorded() {
+        verify(auditService).recordFailureScoped("report.schedule.skip", "report_schedule", SCHEDULE_ID,
+            WORKSPACE_ID, 77, null, "Skipped scheduled report delivery", ScheduleService.EXPORT_PERMISSION_DENIED);
+        ArgumentCaptor<JobRunDetail> detail = ArgumentCaptor.forClass(JobRunDetail.class);
+        verify(jobRunRecorder).record(eq(JobRunRecorder.REPORT_DELIVERY), eq(WORKSPACE_ID),
+            eq(JobRunStatus.SKIPPED), detail.capture());
+        assertEquals("export_permission_withdrawn", detail.getValue().metadata().get("phase"));
+    }
+
+    @Test
     void failureRecoveryAuditIsAttributedToReportDelivery() {
         stubSweep();
         stubAuditScope();
@@ -492,9 +541,12 @@ class ReportDeliverySchedulerTest {
     }
 
     private ReportSchedule stubClaimedDelivery(List<User> beforeGeneration) {
+        return stubClaimedDelivery(beforeGeneration, user());
+    }
+
+    private ReportSchedule stubClaimedDelivery(List<User> beforeGeneration, User runAs) {
         LocalDateTime now = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         ReportScheduleRef ref = new ReportScheduleRef(WORKSPACE_ID, SCHEDULE_ID);
-        User runAs = user();
         ReportSchedule schedule = schedule();
 
         when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));

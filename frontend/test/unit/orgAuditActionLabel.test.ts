@@ -57,6 +57,7 @@ const ORG_PLANE_AUDIT_ACTIONS = [
     "org.member.remove",
     "org.member.set",
     "org.rename",
+    "org.role.export_permission",
     "org.sso_config.save",
     "org.sso_user.provision",
     "org.support_bundle.completed",
@@ -142,6 +143,18 @@ describe("organization audit action labels", () => {
         const stale = ORG_PLANE_AUDIT_ACTIONS.filter((action) => !source.includes(`"${action}"`));
 
         expect(stale, "these actions no longer exist in the backend; drop or rename them").toEqual([]);
+    });
+
+    it("includes export policy changes written to the organization audit scope", () => {
+        const service = readFileSync(path.join(BACKEND_SOURCE, "ooo/klae/connex/backend/services/OrgMemberService.java"), "utf8");
+        const mapper = readFileSync(path.resolve(process.cwd(), "..", "backend/src/main/resources/mappers/AuditLogMapper.xml"), "utf8");
+        const query = mapper.slice(mapper.indexOf('<select id="findRecentByOrg"'), mapper.indexOf('</select>', mapper.indexOf('<select id="findRecentByOrg"')));
+        expect(service).toMatch(/recordScoped\("org\.role\.export_permission",\s*"organization",\s*orgId,\s*null,\s*orgId/);
+        expect(query).toContain("al.org_id = #{orgId}");
+        expect(query).toContain("al.workspace_id IS NULL");
+        for (const locale of LOCALES) {
+            expect(sentence(locale, "org.role.export_permission")).toBeTruthy();
+        }
     });
 
     it("re-derives the entity-typed org-plane actions from the backend", async () => {

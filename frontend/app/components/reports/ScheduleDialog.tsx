@@ -59,6 +59,7 @@ type ScheduleDialogProps = {
     schedule: ReportSchedule | null;
     members: WorkspaceMember[];
     canManage: boolean;
+    canExport: boolean;
     loading: boolean;
     loadFailed: boolean;
     membersFailed: boolean;
@@ -75,6 +76,7 @@ export default function ScheduleDialog({
     schedule,
     members,
     canManage,
+    canExport,
     loading,
     loadFailed,
     membersFailed,
@@ -113,7 +115,7 @@ export default function ScheduleDialog({
         }
     };
 
-    const managementAvailable = canManage && !membersFailed;
+    const managementAvailable = canManage && canExport && !membersFailed;
 
     return (
         <>
@@ -139,8 +141,10 @@ export default function ScheduleDialog({
                             <ScheduleReadOnly
                                 schedule={schedule}
                                 canManage={canManage}
+                                canExport={canExport}
                                 membersFailed={membersFailed}
                                 onRetry={onRetry}
+                                onRequestDelete={onRequestDelete}
                             />
                         )
                     ) : null}
@@ -448,13 +452,17 @@ function ScheduleForm({
 function ScheduleReadOnly({
     schedule,
     canManage,
+    canExport,
     membersFailed,
     onRetry,
+    onRequestDelete,
 }: {
     schedule: ReportSchedule | null;
     canManage: boolean;
+    canExport: boolean;
     membersFailed: boolean;
     onRetry: () => void;
+    onRequestDelete: () => void;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
@@ -466,6 +474,10 @@ function ScheduleReadOnly({
                 <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
                     {t('schedule.readOnly')}
                 </div>
+            ) : null}
+
+            {!canExport ? (
+                <p className="text-sm text-muted-foreground">{t('schedule.exportRequired')}</p>
             ) : null}
 
             {membersFailed ? (
@@ -529,6 +541,11 @@ function ScheduleReadOnly({
             )}
 
             <ResponsiveDialogFooter>
+                {schedule && canManage ? (
+                    <Button type="button" variant="destructive" onClick={onRequestDelete}>
+                        {t('schedule.delete')}
+                    </Button>
+                ) : null}
                 <ResponsiveDialogClose asChild>
                     <Button type="button" variant="outline">{t('schedule.close')}</Button>
                 </ResponsiveDialogClose>

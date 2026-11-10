@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.mappers;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.dto.ExportPermissions;
 import ooo.klae.connex.backend.beans.Organization;
 
 /**
@@ -21,4 +22,9 @@ public interface OrganizationMapper {
     int lockDuplicateDecision(int id);
     Integer lockByIdForShare(int id);
     Integer lockActiveByIdForShare(int id);
+    /** Returns export access for built-in roles in this exact control-plane scope. */
+    ExportPermissions getExportPermissions(@Param("id") int id);
+    /** Replaces only the named built-in role's export access. */
+    int updateExportPermission(@Param("id") int id, @Param("role") String role,
+        @Param("enabled") boolean enabled);
 }

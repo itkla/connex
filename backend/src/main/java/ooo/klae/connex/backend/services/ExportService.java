@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.util.CsvFormulaGuard;
+import ooo.klae.connex.backend.tenant.Permission;
 
 /**
  * Builds RFC-4180 CSV exports for contacts, companies, deals, and products, scoped to the active
@@ -271,6 +272,7 @@ public class ExportService {
     }
 
     private void requireExportStepUp() {
+        workspaceService.requirePermission(Permission.EXPORT_DATA);
         try {
             sessionSecurityService.requireExportStepUp();
         } catch (RecentAuthenticationRequiredException exception) {

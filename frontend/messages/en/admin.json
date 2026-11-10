@@ -179,7 +179,9 @@
     "loadMore": "Load more",
     "loadMoreLoading": "Loading…",
     "loadMoreRetry": "Try again",
-    "loadMoreError": "Couldn't load more events."
+    "loadMoreError": "Couldn't load more events.",
+    "exportPermissionDenied": "Your role does not allow exporting data. Ask an administrator to grant access.",
+    "exportPermissionUnavailable": "Export permission could not be checked. Refresh this page to try again."
   },
   "AdminLogsLayout": {
     "title": "Audit log",

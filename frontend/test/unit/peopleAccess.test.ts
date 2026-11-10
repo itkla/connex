@@ -369,8 +369,8 @@ describe("people & access gates its sections without hiding them", () => {
         expect(roles?.redirectsTo).toBe("/settings/workspace/people#roles");
         expect(
             roles?.access.permissions,
-            "the entry keeps naming ROLE_MANAGE after the redirect, because the permission did not move with the address: it is what the roles section refuses in place, and the navigation reads it to decide whether to name that section at all",
-        ).toEqual(["ROLE_MANAGE"]);
+            "the entry admits custom-role management or built-in role summaries and export grants",
+        ).toEqual(["ROLE_MANAGE", "MEMBER_MANAGE"]);
     });
 
     it("uses effective permissions for delegated member and role management", () => {

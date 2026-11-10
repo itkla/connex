@@ -58,6 +58,7 @@ class TenantLifecycleControlOperationsTest {
         operations = new TenantLifecycleControlOperations(mapper, userMapper, org.mockito.Mockito.mock(OwnershipOfferWriter.class), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class),
                 org.mockito.Mockito.mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class));
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        lenient().when(mapper.lockOrgExportMembershipForUpdate(ORG_ID, ACTOR_ID)).thenReturn(ACTOR_ID);
     }
 
     @Test
@@ -75,6 +76,7 @@ class TenantLifecycleControlOperationsTest {
         order.verify(mapper).lockWorkspaceForShare(WORKSPACE_ID);
         order.verify(mapper).lockActiveOrganizationForShare(ORG_ID);
         order.verify(mapper).lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID);
+        order.verify(mapper).lockOrgExportMembershipForUpdate(ORG_ID, ACTOR_ID);
         order.verify(mapper).lockExportAdmissionCapacityNowait();
         order.verify(mapper).countGlobalExportLeases();
         order.verify(mapper).insertOperationLease(
@@ -127,6 +129,7 @@ class TenantLifecycleControlOperationsTest {
         order.verify(mapper).lockWorkspaceForShare(WORKSPACE_ID);
         order.verify(mapper).lockActiveOrganizationForShare(ORG_ID);
         order.verify(mapper).lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID);
+        order.verify(mapper).lockOrgExportMembershipForUpdate(ORG_ID, ACTOR_ID);
         order.verify(mapper).deleteExpiredExportGrants(now, 100);
         order.verify(mapper).deleteExportGrantForBinding(
             ORG_ID,
@@ -171,6 +174,7 @@ class TenantLifecycleControlOperationsTest {
         order.verify(mapper).lockWorkspaceForShare(WORKSPACE_ID);
         order.verify(mapper).lockActiveOrganizationForShare(ORG_ID);
         order.verify(mapper).lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID);
+        order.verify(mapper).lockOrgExportMembershipForUpdate(ORG_ID, ACTOR_ID);
         order.verify(mapper).consumeExportGrant(
             tokenHash,
             sessionHash,
@@ -481,6 +485,18 @@ class TenantLifecycleControlOperationsTest {
             () -> operations.deleteOrganizationRoot(ORG_ID, ACTOR_ID));
 
         verify(mapper, never()).deleteOrganization(ORG_ID);
+    }
+
+    @Test
+    void exportPolicyWithdrawalRefusesLockedAdmissionBeforeAnyLeaseOrGrant() {
+        stubExportLocks();
+        when(mapper.lockOrgExportMembershipForUpdate(ORG_ID, ACTOR_ID)).thenReturn(null);
+        assertThrows(ooo.klae.connex.backend.exceptions.ForbiddenException.class,
+            () -> operations.acquireExport(ORG_ID, WORKSPACE_ID, ACTOR_ID));
+        verify(mapper, never()).lockExportAdmissionCapacityNowait();
+        verify(mapper, never()).insertOperationLease(
+            org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
 
     private void stubExportLocks() {

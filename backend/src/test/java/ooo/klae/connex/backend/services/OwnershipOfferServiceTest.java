@@ -64,6 +64,8 @@ class OwnershipOfferServiceTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PrivilegedMfaProperties mfa;
     @Autowired private SystemActor system;
+    @Autowired private RoleService roleService;
+    @Autowired private OwnershipOfferEligibility eligibility;
     @MockitoSpyBean private AuditService audit;
     @MockitoSpyBean private UserMapper reservationUsers;
     private int ownerCredential;
@@ -119,6 +121,49 @@ class OwnershipOfferServiceTest extends AbstractServiceTest {
         assertEquals("owner", workspaceMapper.getRole(workspace.getId(), target.getId()));
         assertTrue(offers.listForSelf(target.getId()).isEmpty());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM privileged_credential_attestation p JOIN webauthn_credential c ON c.id = p.credential_row_id JOIN webauthn_user_entity u ON u.id = c.user_entity_user_id WHERE u.user_id = ?", Integer.class, target.getId()));
+    }
+
+    @Test void ownerWithoutExportCanCreateAnOfferAgainstTheEffectiveOwnerBundle() {
+        ownerWithoutExport();
+        User target = newUser();
+        var created = offer(target);
+
+        assertEquals("OPEN", created.offer().state());
+        assertEquals("member", created.currentMember().getBuiltInRole());
+        assertTrue(eligibility.isValid(offerMapper.findById(id(created.offer()))));
+    }
+
+    @Test void ownerWithoutExportKeepsItsOfferVisibleToTheOffereeAndScopeOwners() {
+        ownerWithoutExport();
+        User target = newUser();
+        var created = offer(target);
+
+        assertEquals(List.of(created.offer().id()), offers.listForSelf(target.getId()).stream()
+            .map(OwnershipOfferDto::id).toList());
+        assertEquals(List.of(created.offer().id()), offers.listForScope("WORKSPACE", workspace.getId(),
+            currentUser.getId()).stream().map(OwnershipOfferDto::id).toList());
+    }
+
+    @Test void ownerWithoutExportHasItsOfferAcceptedWithoutAddingExportAuthority() {
+        ownerWithoutExport();
+        User target = newUser();
+        var created = offer(target);
+        asOfferee(target);
+
+        var accepted = offers.accept(id(created.offer()), target.getId(), false);
+
+        assertEquals("ACCEPTED", accepted.offer().state());
+        assertEquals("owner", workspaceMapper.getRole(workspace.getId(), target.getId()));
+        assertNull(workspaceMapper.getMemberRoleId(workspace.getId(), target.getId()));
+        assertFalse(workspaces.permissionsFor(workspace.getId(), target.getId()).contains(Permission.EXPORT_DATA));
+    }
+
+    private void ownerWithoutExport() {
+        roleService.updateBuiltInExportPermission(workspace.getId(), currentUser.getId(), "owner", false);
+        WorkspaceRole overlay = roleService.createRole(workspace.getId(), currentUser.getId(),
+            "Owner without export " + unique(), Permission.grantableNames().stream()
+                .filter(name -> !name.equals("EXPORT_DATA")).toList());
+        workspaces.assignCustomRole(workspace.getId(), currentUser.getId(), currentUser.getId(), overlay.getId());
     }
 
     @Test void offeredPromotionPreservesOverlayAndAcceptanceClearsIt() {

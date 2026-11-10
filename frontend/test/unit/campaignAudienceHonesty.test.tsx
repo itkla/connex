@@ -39,6 +39,8 @@ const { reconcileCampaignExportMock, setCampaignAudienceMock, updateCampaignMock
     setCampaignAudienceMock: vi.fn(async () => {}),
 }));
 
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: () => "granted" }));
+
 vi.mock("next/navigation", () => ({
     useRouter: () => ({
         back: vi.fn(),

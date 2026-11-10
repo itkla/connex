@@ -33,7 +33,7 @@ import zipfile
 root, releases = map(pathlib.Path, sys.argv[1:])
 floor = [line.strip() for line in (root / "deploy/staging/rollback-floor").read_text().splitlines()
          if line.strip() and not line.lstrip().startswith("#")]
-assert floor == ["control/V247__pending_invitation_expiry.sql"]
+assert floor == ["control/V248__export_data_permission.sql"]
 assert (root / "backend/src/main/resources/db/migration" / floor[0]).is_file()
 singleton_chain = ["tenant/V232__ai_agent_runs.sql", "tenant/V233__ai_assistant_proposal_set_storage.sql", "tenant/V234__deal_document_recency_index.sql", "tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql", "tenant/V237__ai_assistant_privacy_cutover.sql", "tenant/V238__ai_agent_singleton_proposals.sql"]
 workflow_chain = [*singleton_chain, "tenant/V239__rule_execution_workspace_history_index.sql"]
@@ -44,9 +44,10 @@ deal_value_chain = [*contact_edit_chain, "tenant/V243__deal_prior_manual_value.s
 record_search_chain = [*deal_value_chain, "tenant/V244__record_search_keys.sql"]
 consent_chain = [*record_search_chain, "tenant/V245__contact_consent_version.sql"]
 currency_chain = [*consent_chain, "control/V246__workspace_default_currency.sql"]
+invitation_chain = [*currency_chain, "control/V247__pending_invitation_expiry.sql"]
 for name, migrations in (
-    ("compatible", [*currency_chain, floor[0]]),
-    ("compatible-root", [*currency_chain, floor[0]]),
+    ("compatible", [*invitation_chain, floor[0]]),
+    ("compatible-root", [*invitation_chain, floor[0]]),
     ("singleton-v238", singleton_chain),
     ("workflow-history-v239", workflow_chain),
     ("task-warmth-v240", task_chain),
@@ -56,6 +57,7 @@ for name, migrations in (
     ("record-search-v244", record_search_chain),
     ("consent-v245", consent_chain),
     ("workspace-currency-v246", currency_chain),
+    ("invitation-expiry-v247", invitation_chain),
     ("expiry-only", ["tenant/V231__ai_proposal_review_expiry_cutover.sql"]),
     ("privacy-control-v236", ["tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql"]),
     ("privacy-cutover-v237", ["tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql", "tenant/V237__ai_assistant_privacy_cutover.sql"]),
@@ -72,16 +74,16 @@ for name, migrations in (
             archive.writestr(prefix + "db/migration/" + migration, "SELECT 1;")
 PY
 
-for predecessor in expiry-only slice-one slice-one-v233 slice-one-v234 slice-two-v235 privacy-control-v236 privacy-cutover-v237 singleton-v238 workflow-history-v239 task-warmth-v240 deal-edit-v241 contact-edit-v242 deal-value-v243 record-search-v244 consent-v245 workspace-currency-v246; do
+for predecessor in expiry-only slice-one slice-one-v233 slice-one-v234 slice-two-v235 privacy-control-v236 privacy-cutover-v237 singleton-v238 workflow-history-v239 task-warmth-v240 deal-edit-v241 contact-edit-v242 deal-value-v243 record-search-v244 consent-v245 workspace-currency-v246 invitation-expiry-v247; do
     if rollback_floor_allows_release "$predecessor"; then
-        printf '%s\n' "FAIL: $predecessor binary passed the V247 rollback floor" >&2
+        printf '%s\n' "FAIL: $predecessor binary passed the V248 rollback floor" >&2
         exit 1
     fi
 done
 rollback_floor_allows_release compatible
 rollback_floor_allows_release compatible-root
-if DEPLOY_TARGET=workspace-currency-v246 rollback_floor_allows_release compatible; then
-    printf '%s\n' 'FAIL: target binary without V247 passed the rollback floor' >&2
+if DEPLOY_TARGET=invitation-expiry-v247 rollback_floor_allows_release compatible; then
+    printf '%s\n' 'FAIL: target binary without V248 passed the rollback floor' >&2
     exit 1
 fi
-printf '%s\n' 'PASS: pendingInvitationExpiryRollbackFloorPreservesEarlierCutoversAndRejectsOlderBinaries'
+printf '%s\n' 'PASS: exportPermissionRollbackFloorPreservesEarlierCutoversAndRejectsV247'

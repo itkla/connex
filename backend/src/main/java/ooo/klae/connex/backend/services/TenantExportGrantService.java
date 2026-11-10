@@ -68,6 +68,7 @@ public class TenantExportGrantService {
             int actorId,
             String sessionId) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
+        orgMemberService.requireExportData(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         Instant now = clock.instant();
         Instant expiresAt = now.plus(GRANT_LIFETIME);
@@ -90,6 +91,7 @@ public class TenantExportGrantService {
             String sessionId,
             String rawToken) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
+        orgMemberService.requireExportData(orgId, actorId);
         if (rawToken == null || rawToken.length() != TOKEN_BYTES * 2) {
             throw new ForbiddenException("Tenant export download grant is invalid or expired");
         }

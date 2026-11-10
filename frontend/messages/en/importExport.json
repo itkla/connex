@@ -328,6 +328,8 @@
     "refreshingCustomFields": "Refreshing fields…",
     "unavailableCustomField": "Field unavailable",
     "unavailableCustomFieldHint": "This field is no longer available. Select an active field or set this column to Ignore.",
-    "currencyInvalid": "The currency is not supported. Enter a three-letter currency code such as JPY or USD and import the file again."
+    "currencyInvalid": "The currency is not supported. Enter a three-letter currency code such as JPY or USD and import the file again.",
+    "exportPermissionDenied": "Your role does not allow exporting data. Ask an administrator to grant access.",
+    "exportPermissionUnavailable": "Export permission could not be checked. Refresh this page to try again."
   }
 }

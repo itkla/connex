@@ -227,6 +227,7 @@ public class AudienceExportService {
      */
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignAudienceExportDto createExport(int campaignId, CampaignAudienceExportRequest request) {
+        workspaceService.requirePermission(Permission.EXPORT_DATA);
         requireExportStepUp();
         if (request == null) {
             throw new BadRequestException("Campaign audience export is required");
@@ -362,7 +363,11 @@ public class AudienceExportService {
 
     private Optional<PreparedExport> prepareExport(
             int workspaceId, int actorId, int campaignId, int snapshotVersion, String connector) {
-        requireExportPermissions(workspaceService.lockedMemberPermissionsFor(workspaceId, actorId));
+        Set<Permission> permissions = workspaceService.lockedMemberPermissionsFor(workspaceId, actorId);
+        requireExportPermissions(permissions);
+        if (!permissions.contains(Permission.EXPORT_DATA)) {
+            throw new ForbiddenException("Requires the EXPORT_DATA permission in this workspace");
+        }
         Campaign campaign = requireCampaignForUpdate(workspaceId, campaignId);
         CampaignAudienceSnapshot snapshot =
                 campaignMapper.getSnapshotForShare(workspaceId, campaignId, snapshotVersion);
@@ -417,7 +422,11 @@ public class AudienceExportService {
             int campaignId,
             PreparedExport prepared,
             ResolvedAudienceTarget target, String personWorkspaceIdsJson) {
-        requireExportPermissions(workspaceService.lockedMemberPermissionsFor(workspaceId, actorId));
+        Set<Permission> permissions = workspaceService.lockedMemberPermissionsFor(workspaceId, actorId);
+        requireExportPermissions(permissions);
+        if (!permissions.contains(Permission.EXPORT_DATA)) {
+            throw new ForbiddenException("Requires the EXPORT_DATA permission in this workspace");
+        }
         requireCampaignForUpdate(workspaceId, campaignId);
         CampaignAudienceSnapshot snapshot = campaignMapper.getSnapshotForShare(
                 workspaceId, campaignId, prepared.snapshotVersion());

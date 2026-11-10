@@ -91,7 +91,7 @@ scopes and adds object obligations. Separate explicit INSTANT column operations 
 operations must fail if unsupported; no retained-content UPDATE backfill, COPY fallback or disabled
 FK validation is authorized. Scope triggers precede replacement of affected legacy work checks.
 The historical privacy component floor is tenant V237; the current release-wide floor is
-control V247, as documented in [UPGRADING.md](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).
+control V248, as documented in [UPGRADING.md](../UPGRADING.md#export-data-permission-control-v248).
 
 Recent serving compatibility minima, in migration order:
 
@@ -101,6 +101,8 @@ Recent serving compatibility minima, in migration order:
   [the workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
 - Control V247 prevents older membership writers from accepting expired historical invitations; see
   [the invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).
+- Control V248 introduces revocable export access while preserving existing role access. Older
+  binaries ignore revocations and cannot serve safely; see [the export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
 
 ## Historical invitation deadline backfill
 

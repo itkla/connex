@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AccessDenied from "@/app/components/AccessDenied";
 import { useTranslations } from "next-intl";
@@ -21,8 +21,10 @@ import {
     getPermissionCatalog,
     getWorkspaceRoles,
     updateWorkspaceRole,
+    updateBuiltInRoleExportPermission,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePermission } from "@/app/hooks/usePermissions";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import {
     ConfinementAcknowledgementDeclined,
@@ -39,6 +41,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
@@ -115,6 +118,7 @@ export type RolesPresentation = "page" | "section";
 
 export default function RolesPanel({ presentation = "page" }: { presentation?: RolesPresentation } = {}) {
     const t = useTranslations("WorkspaceRoles");
+    const canManageRoles = usePermission("ROLE_MANAGE");
     const showApiError = useApiErrorToast("WorkspaceRoles");
     const headingLevel = presentation === "section" ? 3 : 2;
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
@@ -122,6 +126,11 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
     const confinement = useConfinementAcknowledgement();
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
+    const workspaceEpoch = useRef(0);
+    useLayoutEffect(() => {
+        workspaceEpoch.current += 1;
+        return () => { workspaceEpoch.current += 1; };
+    }, [workspaceId]);
 
     const [roles, setRoles] = useState<CustomRole[]>([]);
     const [builtIn, setBuiltIn] = useState<CustomRole[]>([]);
@@ -133,6 +142,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
     const [editing, setEditing] = useState<CustomRole | null>(null);
     const [removeTarget, setRemoveTarget] = useState<CustomRole | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [savingExportRole, setSavingExportRole] = useState<string | null>(null);
 
     const groups = useMemo(() => groupPermissions(catalog, t), [catalog, t]);
 
@@ -141,9 +151,10 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         let cancelled = false;
         (async () => {
             setLoading(true);
+            setSavingExportRole(null);
             try {
                 const [loadedRoles, loadedBuiltIn, loadedCatalog] = await Promise.all([
-                    getWorkspaceRoles(workspaceId),
+                    canManageRoles ? getWorkspaceRoles(workspaceId) : Promise.resolve([]),
                     getBuiltInRoles(workspaceId),
                     getPermissionCatalog(),
                 ]);
@@ -166,7 +177,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         return () => {
             cancelled = true;
         };
-    }, [workspaceId, t]);
+    }, [workspaceId, canManageRoles, t]);
 
     const openCreate = () => {
         setEditing(null);
@@ -203,6 +214,23 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         }
     };
 
+    const setBuiltInExport = async (role: CustomRole, enabled: boolean) => {
+        if (!workspaceId || savingExportRole !== null) return;
+        const originEpoch = workspaceEpoch.current;
+        setSavingExportRole(role.name);
+        try {
+            const updated = await updateBuiltInRoleExportPermission(workspaceId, role.name, enabled);
+            if (workspaceEpoch.current !== originEpoch) return;
+            setBuiltIn(updated);
+            router.refresh();
+            toastSuccess(t("updated"));
+        } catch (err) {
+            if (workspaceEpoch.current === originEpoch && !handlePasskeyStepUpError(err)) showApiError(err, "saveFailed");
+        } finally {
+            if (workspaceEpoch.current === originEpoch) setSavingExportRole(null);
+        }
+    };
+
     const confirmRemove = async () => {
         if (!workspaceId || !removeTarget) return;
         setIsRemoving(true);
@@ -235,7 +263,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                     title={t("defaultRolesLabel")}
                     description={t("builtInSubtitle")}
                     action={
-                        !loading && (
+                        !loading && canManageRoles && (
                             <Button onClick={openCreate} variant="brand">
                                 <PlusIcon className="size-4" />
                                 {t("newRole")}
@@ -262,6 +290,19 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                                         </Badge>
                                     </div>
                                     <p className="text-sm text-muted-foreground">{t(`builtInRoles.${role.name}.description`)}</p>
+                                    <div className="flex items-center justify-between gap-4 py-2">
+                                        <label htmlFor={`built-in-export-${role.name}`} className="text-sm text-foreground">
+                                            {t("permissionLabels.EXPORT_DATA.action")}
+                                        </label>
+                                        <Switch
+                                            id={`built-in-export-${role.name}`}
+                                            aria-label={t("exportPermissionLabel", { role: t(`builtInRoles.${role.name}.name`) })}
+                                            checked={role.permissions.includes("EXPORT_DATA")}
+                                            disabled={role.exportPermissionEditable !== true || savingExportRole !== null}
+                                            onCheckedChange={(enabled) => void setBuiltInExport(role, enabled)}
+                                        />
+                                    </div>
+                                    {savingExportRole === role.name && <p className="text-xs text-muted-foreground">{t("exportPermissionSaving")}</p>}
                                     <PermissionSummary role={role} groups={groups} />
                                 </div>
                             </li>
@@ -270,7 +311,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                 )}
             </Rise>
 
-            <Rise className="space-y-4">
+            {canManageRoles && <Rise className="space-y-4">
                 <SettingsSection
                     headingLevel={headingLevel}
                     title={t("customRolesLabel")}
@@ -328,7 +369,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                         ))}
                     </ul>
                 )}
-            </Rise>
+            </Rise>}
 
             <RoleDialog
                 open={dialogOpen}

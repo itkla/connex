@@ -114,6 +114,31 @@ for (const locale of ["en", "ja"] as const) {
             await page.getByRole("textbox", { name: message(locale, "admin", "AdminAuditLog.searchAria") }).fill(action);
             await expect(page.getByRole("button", { name: message(locale, "admin", "AdminAuditLog.filterOutcome"), exact: true })).toBeVisible();
             await exportLoadedRows(page, locale, `${orgPath}/export`, orgExpected);
+
+            await page.goto("/settings/workspace/people#roles");
+            const workspaceExport = page.locator("#built-in-export-owner");
+            await expect(workspaceExport).toBeChecked();
+            const workspacePolicySaved = page.waitForResponse((response) => response.request().method() === "PUT"
+                && new URL(response.url()).pathname === `/api/workspaces/${workspaceId}/roles/built-in/owner/export-permission`);
+            await workspaceExport.click();
+            expect((await workspacePolicySaved).status()).toBe(200);
+            await expect(workspaceExport).not.toBeChecked();
+            await page.goto("/settings/workspace/audit-diagnostics");
+            await expect(page.getByText(message(locale, "admin", "AdminAuditLog.exportPermissionDenied"), { exact: true })).toBeVisible();
+            await expect(page.getByRole("button", { name: message(locale, "admin", "AdminAuditLog.exportCsv"), exact: true })).toBeDisabled();
+            expect((await context.request.get("/api/audit/export?limit=1", { headers })).status()).toBe(403);
+            await page.goto("/settings/organization/audit-diagnostics");
+            await expect(page.getByRole("button", { name: message(locale, "admin", "AdminAuditLog.exportCsv"), exact: true })).toBeEnabled();
+
+            const policyCsrf = await csrfBootstrap(context.request);
+            const denyOrgExport = await context.request.put(`/api/orgs/${workspace.orgId}/export-permissions/owner`, {
+                headers: { [policyCsrf.headerName]: policyCsrf.token }, data: { enabled: false },
+            });
+            expect(denyOrgExport.status()).toBe(200);
+            await page.reload();
+            await expect(page.getByText(message(locale, "admin", "AdminAuditLog.exportPermissionDenied"), { exact: true })).toBeVisible();
+            await expect(page.getByRole("button", { name: message(locale, "admin", "AdminAuditLog.exportCsv"), exact: true })).toBeDisabled();
+            expect((await context.request.get(`${orgPath}/export?limit=1`)).status()).toBe(403);
         } finally {
             await context.close();
         }

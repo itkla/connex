@@ -59,6 +59,8 @@ public enum Permission {
     MEMBER_MANAGE,
     ROLE_MANAGE,
     AUDIT_READ,
+    /** Required in addition to domain authority to export data from the current scope. */
+    EXPORT_DATA,
     WORKSPACE_SETTINGS,
     /** Permission to issue, inventory, and revoke personal API credentials. */
     API_CREDENTIAL_MANAGE,

@@ -387,16 +387,20 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         }
     }
 
-    @Test
-    void roleRevokedInTransactionAToTransactionBWindowAbortsTheExport() throws Exception {
+    @ParameterizedTest
+    @MethodSource("revokedExportPermissions")
+    void roleRevokedInTransactionAToTransactionBWindowAbortsTheExport(Permission revokedPermission) throws Exception {
         String prefix = "export-role-race-" + unique();
         person(newCompany(), prefix, prefix + "@example.com");
         CampaignDto campaign = campaignWithSnapshot(prefix, "Role race export");
-        CampaignActorRole target = newCampaignActor(workspace);
+        CampaignActorRole target = newCampaignActor(workspace, List.of(
+                Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE,
+                Permission.CONSENT_MANAGE, Permission.EXPORT_DATA));
         CampaignActorRole revoker = newCampaignActor(workspace, List.of(
                 Permission.CAMPAIGN_VIEW,
                 Permission.CAMPAIGN_MANAGE,
                 Permission.CONSENT_MANAGE,
+                Permission.EXPORT_DATA,
                 Permission.ROLE_MANAGE));
         CountDownLatch releaseFinalRevalidation = new CountDownLatch(1);
         CountDownLatch preparationCommitted = pauseAfterPreparation(releaseFinalRevalidation);
@@ -410,15 +414,17 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
             roleService.updateRole(
                     workspace.getId(), revoker.actor().getId(), target.role().getId(),
                     target.role().getName(), List.of(
-                            Permission.CAMPAIGN_VIEW.name(),
-                            Permission.CONSENT_MANAGE.name()));
+                            Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE,
+                            Permission.CONSENT_MANAGE, Permission.EXPORT_DATA).stream()
+                            .filter(permission -> permission != revokedPermission)
+                            .map(Permission::name).toList());
             releaseFinalRevalidation.countDown();
 
             ExecutionException failure = assertThrows(
                     ExecutionException.class, () -> export.get(20, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof ForbiddenException);
             assertEquals(
-                    "Requires the CAMPAIGN_MANAGE permission in this workspace",
+                    "Requires the " + revokedPermission.name() + " permission in this workspace",
                     failure.getCause().getMessage());
             verify(connector, never()).pushAudience(any(), any());
             authenticateAs(currentUser, workspace.getId());
@@ -701,11 +707,14 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         String prefix = "export-outcome-permission-" + unique();
         person(newCompany(), prefix, prefix + "@example.com");
         CampaignDto campaign = campaignWithSnapshot(prefix, "Outcome permission export");
-        CampaignActorRole target = newCampaignActor(workspace);
+        CampaignActorRole target = newCampaignActor(workspace, List.of(
+                Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE,
+                Permission.CONSENT_MANAGE, Permission.EXPORT_DATA));
         CampaignActorRole revoker = newCampaignActor(workspace, List.of(
                 Permission.CAMPAIGN_VIEW,
                 Permission.CAMPAIGN_MANAGE,
                 Permission.CONSENT_MANAGE,
+                Permission.EXPORT_DATA,
                 Permission.ROLE_MANAGE));
         CountDownLatch providerCallStarted = new CountDownLatch(1);
         CountDownLatch releaseProvider = new CountDownLatch(1);
@@ -725,7 +734,8 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                     workspace.getId(), revoker.actor().getId(), target.role().getId(),
                     target.role().getName(), List.of(
                             Permission.CAMPAIGN_VIEW.name(),
-                            Permission.CAMPAIGN_MANAGE.name()));
+                            Permission.CAMPAIGN_MANAGE.name(),
+                            Permission.EXPORT_DATA.name()));
             releaseProvider.countDown();
 
             CampaignAudienceExportDto result = pending.get(20, TimeUnit.SECONDS);
@@ -976,7 +986,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         assertFalse(storedChanges.has("pushed"));
         assertFalse(storedChanges.has("notPushed"));
 
-        CampaignActorRole auditReader = newCampaignActor(workspace, List.of(Permission.AUDIT_READ));
+        CampaignActorRole auditReader = newCampaignActor(workspace, List.of(Permission.AUDIT_READ, Permission.EXPORT_DATA));
         String auditJson = mockMvc.perform(authenticatedGet(auditReader.actor(), "/api/audit")
                         .param("entityType", "campaign")
                         .param("entityId", Integer.toString(campaign.id())))
@@ -1175,6 +1185,10 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         int snapshotId = campaignMapper.getSnapshot(
                 workspace.getId(), campaign.id(), snapshot.version()).getId();
         return new CampaignSnapshotFixture(campaign, snapshot.version(), snapshotId);
+    }
+
+    private static Stream<Permission> revokedExportPermissions() {
+        return Stream.of(Permission.CAMPAIGN_MANAGE, Permission.EXPORT_DATA);
     }
 
     private CampaignAudienceExportDto createExportAs(ooo.klae.connex.backend.beans.User actor, int campaignId) {

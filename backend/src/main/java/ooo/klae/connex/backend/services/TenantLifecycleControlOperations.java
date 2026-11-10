@@ -399,6 +399,9 @@ public class TenantLifecycleControlOperations {
         if (mapper.lockOrgAdminMembershipForUpdate(orgId, actorId) == null) {
             throw new ForbiddenException("Organization administrator access required");
         }
+        if (mapper.lockOrgExportMembershipForUpdate(orgId, actorId) == null) {
+            throw new ForbiddenException("Requires the EXPORT_DATA permission in this organization");
+        }
         return workspace;
     }
 

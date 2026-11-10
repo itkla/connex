@@ -37,6 +37,7 @@ import {
 } from "@/app/lib/types";
 import { canCreateExport, type CampaignAccess } from "@/app/lib/campaignAccess";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { usePermissionCheck } from "@/app/hooks/usePermissions";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
@@ -67,6 +68,8 @@ export default function CampaignExportPanel({
 }) {
     const timeZone = useTimeZone();
     const t = useTranslations("CampaignExports");
+    const exportPermission = usePermissionCheck("EXPORT_DATA");
+    const canExportData = exportPermission === "granted";
     const tCapability = useTranslations("CapabilityUnavailable");
     const showApiError = useApiErrorToast("CampaignExports");
     const locale = useLocale();
@@ -99,6 +102,7 @@ export default function CampaignExportPanel({
         connector === "http_list" ? t("connectorHttpList") : connector;
 
     const createExport = async () => {
+        if (!canExportData) return;
         const snapshotVersion = Number(exportSnapshot);
         if (!snapshotVersion || !exportConnector) return;
         if (chosenSnapshot?.channel !== "email") {
@@ -183,7 +187,12 @@ export default function CampaignExportPanel({
                         <p className="text-sm text-muted-foreground">{t("exportUnavailable")}</p>
                     </div>
                 ) : null}
-                {canPushExport && (
+                {canPushExport && !canExportData && (
+                    <p className="text-sm text-muted-foreground">
+                        {t(exportPermission === "denied" ? "exportPermissionDenied" : "exportPermissionUnavailable")}
+                    </p>
+                )}
+                {canPushExport && canExportData && (
                     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="grid gap-1.5">

@@ -16,6 +16,8 @@ import ooo.klae.connex.backend.beans.OwnershipOffer;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.WorkspaceRecoveryOwnerRequiredException;
+import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
@@ -33,6 +35,8 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
     @Autowired private OwnershipOfferDeliveryService delivery;
     @Autowired private TenantLifecycleControlOperations lifecycle;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private RoleService roleService;
+    @Autowired private OwnershipOfferTransaction offerTransaction;
     private final List<Integer> accounts = new ArrayList<>();
     private Organization org;
     private User target;
@@ -59,6 +63,55 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
         accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id)); accounts.clear();
     }
     private long workspaceOffer() { return Long.parseLong(workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id()); }
+
+    @Test
+    void enablingOwnerExportsCannotStrandTheOnlyOwnersOverlayAfterTheAdministratorLeaves() {
+        User admin = newUser();
+        User replacement = target;
+        workspaceMapper.updateMemberRole(workspace.getId(), admin.getId(), "admin");
+        roleService.updateBuiltInExportPermission(workspace.getId(), currentUser.getId(), "owner", false);
+        var permissions = Permission.grantableNames().stream().filter(name -> !name.equals("EXPORT_DATA")).toList();
+        var overlay = roleService.createRole(workspace.getId(), currentUser.getId(), "Owner recovery overlay", permissions);
+        workspaces.assignCustomRole(workspace.getId(), currentUser.getId(), currentUser.getId(), overlay.getId());
+        assertTrue(workspaces.permissionsFor(workspace.getId(), admin.getId()).contains(Permission.EXPORT_DATA));
+        assertTrue(workspaces.permissionsFor(workspace.getId(), replacement.getId()).contains(Permission.EXPORT_DATA));
+        authenticateAs(admin, workspace.getId());
+        approveForStepUp(admin);
+
+        WorkspaceRecoveryOwnerRequiredException refusal = assertThrows(WorkspaceRecoveryOwnerRequiredException.class,
+            () -> roleService.updateBuiltInExportPermission(workspace.getId(), admin.getId(), "owner", true));
+
+        assertTrue(refusal.getMessage().contains("before enabling owner exports"));
+        assertFalse(workspaces.permissionsFor(workspace.getId(), currentUser.getId()).contains(Permission.EXPORT_DATA));
+        assertEquals(overlay.getId(), workspaceMapper.getMemberRoleId(workspace.getId(), currentUser.getId()));
+        workspaces.leaveWorkspace(workspace.getId(), admin.getId());
+        assertNull(workspaceMapper.getRole(workspace.getId(), admin.getId()));
+        authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
+        workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), currentUser.getId(), "owner");
+        assertNull(workspaceMapper.getMemberRoleId(workspace.getId(), currentUser.getId()));
+        roleService.updateBuiltInExportPermission(workspace.getId(), currentUser.getId(), "owner", true);
+        assertTrue(workspaces.permissionsFor(workspace.getId(), currentUser.getId()).contains(Permission.EXPORT_DATA));
+        workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), replacement.getId(), "admin", true);
+        assertEquals("admin", workspaceMapper.getRole(workspace.getId(), replacement.getId()));
+    }
+
+    @Test void reconciliationKeepsOffersValidForTheEffectiveOwnerBundleWithoutExport() {
+        roleService.updateBuiltInExportPermission(workspace.getId(), currentUser.getId(), "owner", false);
+        var overlay = roleService.createRole(workspace.getId(), currentUser.getId(), "Owner without export",
+            Permission.grantableNames().stream()
+                .filter(name -> !name.equals("EXPORT_DATA")).toList());
+        workspaces.assignCustomRole(workspace.getId(), currentUser.getId(), currentUser.getId(), overlay.getId());
+        long offerId = workspaceOffer();
+        SecurityContextHolder.clearContext();
+
+        offerTransaction.reconcile(offerId);
+
+        assertEquals("OPEN", ledger.findById(offerId).getState());
+        assertEquals(List.of(Long.toString(offerId)), offers.listForSelf(target.getId()).stream()
+            .map(ooo.klae.connex.backend.dto.OwnershipOfferDto::id).toList());
+        assertEquals("member", workspaceMapper.getRole(workspace.getId(), target.getId()));
+    }
 
     @Test void organizationFenceClosesOnlyFiftyOffersAndTheScheduledPassDrainsTheRemainder() {
         bulkAccountPrefix = "ownership-fence-" + unique() + "-";

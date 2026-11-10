@@ -570,4 +570,28 @@
     DELETE FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
   </delete>
+  <select id="getExportPermissions" resultType="ooo.klae.connex.backend.dto.ExportPermissions" flushCache="true" useCache="false">
+    SELECT export_data_owner AS `owner`, export_data_admin AS `admin`, export_data_member AS `member`
+    FROM workspace
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+  </select>
+
+  <select id="getExportPermissionsForShare" resultType="ooo.klae.connex.backend.dto.ExportPermissions" flushCache="true" useCache="false">
+    SELECT export_data_owner AS `owner`, export_data_admin AS `admin`, export_data_member AS `member`
+    FROM workspace
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+    FOR SHARE
+  </select>
+
+  <update id="updateExportPermission">
+    UPDATE workspace
+    SET
+    <choose>
+      <when test="role == 'owner'">export_data_owner = #{enabled}</when>
+      <when test="role == 'admin'">export_data_admin = #{enabled}</when>
+      <when test="role == 'member'">export_data_member = #{enabled}</when>
+      <otherwise>id = id</otherwise>
+    </choose>
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+  </update>
 </mapper>

@@ -11,6 +11,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -98,12 +100,14 @@ class ScheduleServiceTest extends AbstractServiceTest {
         scheduleService.create(reportId, request("weekly", List.of(currentUser.getId()), 9, true));
         User reader = newUser();
         WorkspaceRole readOnly = roleService.createRole(
-                workspace.getId(), currentUser.getId(), "Report reader " + unique(), List.of("REPORT_READ"));
+                workspace.getId(), currentUser.getId(), "Report reader " + unique(), List.of("REPORT_READ", "EXPORT_DATA"));
         workspaceService.assignCustomRole(
                 workspace.getId(), currentUser.getId(), reader.getId(), readOnly.getId());
         authenticateAs(reader, workspace.getId());
 
         assertEquals(reportId, scheduleService.get(reportId).reportDefinitionId());
+        assertThrows(ForbiddenException.class, () -> scheduleService.create(
+                reportId, request("monthly", List.of(reader.getId()), 10, true)));
         assertThrows(ForbiddenException.class, () -> scheduleService.update(
                 reportId, request("monthly", List.of(reader.getId()), 10, true)));
         assertThrows(ForbiddenException.class, () -> scheduleService.delete(reportId));
@@ -117,7 +121,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         userMapper.updateLocale(manager.getId(), "ja");
         WorkspaceRole reportManager = roleService.createRole(
                 workspace.getId(), currentUser.getId(), "Report manager " + unique(),
-                List.of("REPORT_READ", "REPORT_UPDATE"));
+                List.of("REPORT_READ", "REPORT_UPDATE", "EXPORT_DATA"));
         workspaceService.assignCustomRole(
                 workspace.getId(), currentUser.getId(), manager.getId(), reportManager.getId());
         authenticateAs(manager, workspace.getId());
@@ -160,7 +164,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         User recipient = newUser();
         assignRole(recipient, "Report reader", List.of("REPORT_READ"));
         User manager = newUser();
-        assignRole(manager, "Report manager", List.of("REPORT_READ", "REPORT_UPDATE"));
+        assignRole(manager, "Report manager", List.of("REPORT_READ", "REPORT_UPDATE", "EXPORT_DATA"));
         authenticateAs(manager, workspace.getId());
 
         assertThrows(ForbiddenException.class, () -> scheduleService.create(
@@ -248,7 +252,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
     void anUnprivilegedReportManagerSchedulesWithoutAFreshStepUp() {
         int reportId = createReport("count").id();
         User manager = newUser();
-        assignRole(manager, "Report manager", List.of("REPORT_READ", "REPORT_UPDATE"));
+        assignRole(manager, "Report manager", List.of("REPORT_READ", "REPORT_UPDATE", "EXPORT_DATA"));
         authenticateAs(manager, workspace.getId());
         clearStepUp();
 
@@ -281,9 +285,8 @@ class ScheduleServiceTest extends AbstractServiceTest {
     }
 
     /**
-     * Delivery is deliberately not gated: an occurrence runs on a scheduler thread with no servlet
-     * session and no step-up stamp, so claiming, run-as resolution, and recipient re-derivation must
-     * all still succeed after the interactive session is gone.
+     * Delivery needs no interactive step-up: current export and report permissions still apply
+     * after the servlet session is gone.
      */
     @Test
     void anExistingScheduleKeepsDeliveringWithoutAnInteractiveSession() {
@@ -305,6 +308,48 @@ class ScheduleServiceTest extends AbstractServiceTest {
                 List.of(recipient.getId()),
                 scheduleService.activeRecipientsForDocument(claimed, document).stream()
                         .map(User::getId).toList());
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void withdrawnExportPermissionStopsExistingDeliveryAndScheduleChanges(boolean customRole) {
+        int reportId = createReport("count").id();
+        User recipient = newUser();
+        assignRole(recipient, "Recipient without export", List.of("REPORT_READ"));
+        User actor = customRole ? newUser() : currentUser;
+        WorkspaceRole managerRole = customRole
+            ? assignRole(actor, "Exporting report manager", List.of("REPORT_READ", "REPORT_UPDATE", "EXPORT_DATA"))
+            : null;
+        authenticateAs(actor, workspace.getId());
+        if (!customRole) approveForStepUp(actor);
+        scheduleService.create(reportId, request("weekly", List.of(recipient.getId()), 9, true));
+        ReportSchedule stored = scheduleMapper.getByReport(workspace.getId(), reportId);
+        assertTrue(scheduleService.deliveryAccess(stored).allowed());
+        assertEquals(List.of(recipient.getId()),
+            scheduleService.activeReportReaders(stored).stream().map(User::getId).toList());
+
+        authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
+        if (managerRole != null) {
+            roleService.updateRole(workspace.getId(), currentUser.getId(), managerRole.getId(),
+                managerRole.getName(), List.of("REPORT_READ", "REPORT_UPDATE"));
+        } else {
+            workspaceMapper.updateExportPermission(workspace.getId(), "owner", false);
+        }
+        authenticateAs(actor, workspace.getId());
+        if (!customRole) approveForStepUp(actor);
+
+        ScheduleService.DeliveryAccess access = scheduleService.deliveryAccess(stored);
+        assertFalse(access.allowed());
+        assertEquals(ScheduleService.EXPORT_PERMISSION_DENIED, access.denialReason());
+        assertThrows(ForbiddenException.class, () -> scheduleService.update(
+            reportId, request("monthly", List.of(actor.getId()), 10, true)));
+        assertThrows(ForbiddenException.class, () -> scheduleService.create(
+            reportId, request("monthly", List.of(actor.getId()), 10, true)));
+        assertEquals(List.of(recipient.getId()), scheduleService.get(reportId).recipientUserIds());
+        scheduleService.delete(reportId);
+        assertThrows(ResourceNotFoundException.class, () -> scheduleService.get(reportId));
     }
 
     private void clearStepUp() {

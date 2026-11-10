@@ -126,6 +126,14 @@ class SupportBundleServiceTest {
     }
 
     @Test
+    void missingOrganizationExportDataRefusesBeforeStepUpOrBundleAssembly() {
+        doThrow(new ForbiddenException("Requires EXPORT_DATA"))
+            .when(orgMemberService).requireExportData(ORG_ID, ACTOR_ID);
+        assertThrows(ForbiddenException.class, () -> service.generate(request(null), ACTOR_ID));
+        Mockito.verifyNoInteractions(sessionSecurityService, readinessService, auditService, clientErrorService);
+    }
+
+    @Test
     void checksOrgAdminBeforeRecentAuthentication() {
         service.generate(request(null), ACTOR_ID);
 

@@ -487,18 +487,18 @@ describe("settings manifest names real authorization", () => {
         expect(inconsistent).toEqual([]);
     });
 
-    it("keeps an any-of permission gate a named consolidation decision, not a default", () => {
+    it("keeps an any-of permission gate a named decision, not a default", () => {
         const loose = entries
             .filter((entry) => entry.access.permissionMatch === "any")
             .map((entry) => entry.id);
 
         expect(
             loose,
-            "loosening a destination's gate is how a consolidated page stays reachable by either of the roles it merged; each one is enumerated here",
-        ).toEqual(["workspace.audit-diagnostics"]);
+            "each alternative is pinned here and retains its per-section or per-operation authority",
+        ).toEqual(["workspace.roles", "workspace.audit-diagnostics"]);
     });
 
-    it("loosens a permission gate only where consolidation earned it", () => {
+    it("admits only consolidated jobs and the exact reviewed role-operation alternatives", () => {
         expect(unearnedLooseGates(entries)).toEqual([]);
     });
 });
@@ -506,15 +506,24 @@ describe("settings manifest names real authorization", () => {
 /**
  * Destinations whose any-of permission gate is not backed by what they consolidated.
  *
- * An any-of gate is only honest on a page that absorbed two independently gated jobs: it must name
- * more than one permission, hold more than one absorbed section, and name no permission that none
- * of those sections actually reads. Anything else is a strict gate wearing a looser name, which
- * would quietly widen who can reach a settings destination.
+ * Consolidated pages must name multiple independently gated sections and only permissions those
+ * sections read. Roles has one reviewed alternative: ROLE_MANAGE reads custom roles, while
+ * MEMBER_MANAGE reads built-in role/export controls. Its destination and exact two-permission
+ * set are pinned independently so unrelated permissions cannot widen either access path.
  */
 function unearnedLooseGates(candidates: readonly SettingsEntry[]): readonly string[] {
     return candidates
         .filter((entry) => entry.access.permissionMatch === "any")
         .filter((entry) => {
+            if (entry.id === "workspace.roles") {
+                return entry.kind !== "redirect"
+                    || entry.group !== "workspace.people"
+                    || entry.canonicalRoute !== "/settings/workspace/people"
+                    || entry.canonicalSection !== "roles"
+                    || entry.access.permissions.length !== 2
+                    || !entry.access.permissions.includes("ROLE_MANAGE")
+                    || !entry.access.permissions.includes("MEMBER_MANAGE");
+            }
             const absorbed = candidates.filter(
                 (candidate) =>
                     candidate.id !== entry.id
@@ -541,6 +550,18 @@ describe("the permission-match gate refuses a loosening it has not earned", () =
             { ...template, id: "test.loose", access: { ...template.access, ...access } },
         ];
     }
+
+    it.each([
+        { permissions: ["ROLE_MANAGE"] },
+        { permissions: ["MEMBER_MANAGE"] },
+        { permissions: ["ROLE_MANAGE", "ROLE_MANAGE"] },
+        { permissions: ["ROLE_MANAGE", "MEMBER_MANAGE", "WORKSPACE_SETTINGS"] },
+    ])("rejects unreviewed role-operation alternatives: $permissions", ({ permissions }) => {
+        const candidates = SETTINGS_ENTRIES.map((entry) => entry.id === "workspace.roles"
+            ? { ...entry, access: { ...entry.access, permissions } }
+            : entry);
+        expect(unearnedLooseGates(candidates)).toEqual(["workspace.roles"]);
+    });
 
     it("catches an any-of gate over a single permission", () => {
         expect(unearnedLooseGates(withLooseGate({ permissions: ["AUDIT_READ"] }))).toEqual([

@@ -84,7 +84,7 @@ reference a role (built-in or custom). Independent of tenant isolation — seque
 > V13 adds `workspace_role`, `workspace_role_permission`, and an additive nullable `workspace_member.role_id`
 > (custom role wins when set; assigned roles must be explicitly reassigned before deletion so the
 > underlying `ON DELETE SET NULL` cannot expose a broader built-in role). Built-in
-> roles map to fixed permission bundles; `WorkspaceService.requirePermission(...)` is wired into every entity
+> roles map to fixed permission bundles, with per-workspace revocable `EXPORT_DATA` flags from V248; `WorkspaceService.requirePermission(...)` is wired into every entity
 > mutation + structural/member/audit gate (replacing the `requireRole` sites). `RoleController`
 > (`/api/workspaces/{id}/roles` CRUD) + `GET /api/permissions` catalog + custom-role assignment via the
 > member PATCH. Reads stay membership-gated (not in the catalog). Frontend: a Roles tab in `/settings`
@@ -1012,3 +1012,16 @@ organization cleanup owns these tables. Missing workspace evidence still refuses
 The tenant object-obligation table participates in lifecycle/export/residual registries and is
 deleted before its privacy-work parent. No tenant query joins control privacy tables; services pass
 server-resolved organization generations between separately routed statements.
+
+### Export role policy (V248)
+
+Workspace custom roles store explicit `EXPORT_DATA` grants. Built-in workspace roles retain their
+code bundles with export-only owner/admin/member flags on `workspace`. Organization owner/admin
+exports use separate flags on `organization`; workspace privileges confer no organization export
+authority. V248 backfills existing custom roles and defaults all built-in flags to true. New custom
+roles start without an export grant. The authority and endpoint inventory are in
+[SECURITY_BOUNDARIES.md](backend/SECURITY_BOUNDARIES.md#export-authority); drain and rollback rules
+are in [UPGRADING.md](UPGRADING.md#export-data-permission-control-v248).
+The current release-wide rollback floor is control V248. Retain the
+[invitation-expiry cutover](UPGRADING.md#historical-pending-invitation-expiry-control-v247), then apply the
+[export-permission cutover](UPGRADING.md#export-data-permission-control-v248).

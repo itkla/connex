@@ -35,6 +35,63 @@ class RbacTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
 
     @Test
+    void exportPolicyCanBeWithdrawnAndRestoredWithoutChangingOtherWorkspaceOrDomainAuthority() {
+        var workspace = workspaceService.createWorkspace("Export policy", currentUser.getId());
+        var other = workspaceService.createWorkspace("Other export policy", currentUser.getId());
+        User admin = newUser();
+        User member = newUser();
+        workspaceMapper.addMember(workspace.getId(), admin.getId(), "admin");
+        workspaceMapper.addMember(workspace.getId(), member.getId(), "member");
+        workspaceMapper.addMember(other.getId(), member.getId(), "member");
+        authenticateAs(admin, workspace.getId());
+        approveForStepUp(admin);
+        assertTrue(workspaceService.permissionsFor(workspace.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        roleService.updateBuiltInExportPermission(workspace.getId(), admin.getId(), "member", false);
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        assertTrue(workspaceService.permissionsFor(workspace.getId(), member.getId()).contains(Permission.PERSON_CREATE));
+        assertTrue(workspaceService.permissionsFor(other.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        assertFalse(workspaceService.lockedMemberPermissionsFor(workspace.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        roleService.updateBuiltInExportPermission(workspace.getId(), admin.getId(), "admin", false);
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), admin.getId()).contains(Permission.EXPORT_DATA));
+        roleService.updateBuiltInExportPermission(workspace.getId(), admin.getId(), "admin", true);
+        assertTrue(workspaceService.permissionsFor(workspace.getId(), admin.getId()).contains(Permission.EXPORT_DATA));
+        authenticateAs(member, workspace.getId());
+        approveForStepUp(member);
+        assertThrows(ForbiddenException.class, () -> roleService.updateBuiltInExportPermission(
+            workspace.getId(), member.getId(), "member", true));
+    }
+
+    @Test
+    void newCustomRolesDoNotReceiveAnExportGrantAndCannotUseBuiltInPolicyRecovery() {
+        var workspace = workspaceService.createWorkspace("Custom export policy", currentUser.getId());
+        WorkspaceRole role = roleService.createRole(workspace.getId(), currentUser.getId(), "No export", null);
+        assertFalse(role.getPermissions().contains("EXPORT_DATA"));
+        User delegate = newUser();
+        workspaceMapper.addMember(workspace.getId(), delegate.getId(), "admin");
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("ROLE_MANAGE", "MEMBER_MANAGE"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), delegate.getId(), role.getId());
+        authenticateAs(delegate, workspace.getId());
+        approveForStepUp(delegate);
+        assertThrows(ForbiddenException.class, () -> roleService.updateBuiltInExportPermission(
+            workspace.getId(), delegate.getId(), "member", true));
+        assertThrows(ForbiddenException.class, () -> roleService.updateRole(workspace.getId(),
+            delegate.getId(), role.getId(), "Escalation", List.of("ROLE_MANAGE", "MEMBER_MANAGE", "EXPORT_DATA")));
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), delegate.getId()).contains(Permission.EXPORT_DATA));
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Test
+    void ownerRecoveryUsesTheEffectiveBuiltInOwnerBundleAfterExportWithdrawal() {
+        var workspace = workspaceService.createWorkspace("Owner export recovery", currentUser.getId());
+        roleService.updateBuiltInExportPermission(workspace.getId(), currentUser.getId(), "owner", false);
+        var permissions = Permission.grantableNames().stream().filter(name -> !name.equals("EXPORT_DATA")).toList();
+        WorkspaceRole role = roleService.createRole(workspace.getId(), currentUser.getId(), "Owner without export", permissions);
+        assertDoesNotThrow(() -> workspaceService.assignCustomRole(
+            workspace.getId(), currentUser.getId(), currentUser.getId(), role.getId()));
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), currentUser.getId()).contains(Permission.EXPORT_DATA));
+    }
+
+    @Test
     void builtInRolesMapToExpectedPermissions() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("RBAC WS", currentUser.getId());
         User member = newUser();
