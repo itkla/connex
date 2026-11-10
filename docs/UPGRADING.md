@@ -1378,14 +1378,27 @@ Apply control V247 after V246. The historical non-expiring invitations exposed b
 fourteen days. #2300 added address-only projections, not an inviter-label column. Shareable
 `workspace_invite_link` grants were unchanged by that change and are outside this backfill.
 
-V247 adds nullable `workspace_member.expires_at` with `ALGORITHM=INSTANT, LOCK=DEFAULT`, then
-assigns thirty days after migration to pending rows without a deadline. Active memberships are
-already-consumed grants and remain unchanged. Revoked pending grants were deleted and are not
-recreated. Existing future or expired deadlines are never extended. The column definition is
-verified on replay so a committed DDL prefix can safely resume the bounded update.
+V247 adds nullable `workspace_member.expires_at` with `ALGORITHM=INSTANT, LOCK=DEFAULT` and
+verifies the column definition on replay. It performs no catalog-wide data update. The fixed legacy
+deadline is the successful control V247 `flyway_schema_history.installed_on` plus thirty days,
+converted from TIMESTAMP to UTC independently of the connection time zone. Pending NULL deadlines
+use that deadline immediately in administrator projections, recipient pending lists, invitation
+inbox listing/counts/direct lookup, and the atomic activation claim. Missing successful cutover
+history fails closed. Correctness never depends on the backfill finishing, and restart/retry never
+extends the notice window.
 
-Recipient pending lists and the atomic activation update require a future deadline. A missing
-deadline fails closed. The retained internal pending-membership writer assigns fourteen days;
+`PendingInvitationExpiryBackfillRunner` persists the same deadline in at most four pages per sweep.
+Each independent ten-second READ COMMITTED transaction reads at most 100 memberships in one
+workspace's primary-key order, including active rows, without row locks. It updates only exact
+workspace/user/generation point keys still pending with NULL expiry. Active memberships are
+already-consumed grants and remain unchanged; revoked pending grants were deleted and are not
+recreated. Existing future or expired deadlines are never extended. Each page commits before the
+cursor advances; a failed page retries from its last committed cursor, and process restarts safely
+begin another sweep. No locking DML scans unrelated active membership rows. Maintenance mode
+suppresses scheduling; the fixed-deadline read fallback remains authoritative while it is paused.
+
+Recipient pending lists, invitation inbox access and the atomic activation update require a future
+effective deadline. The retained internal pending-membership writer assigns fourteen days;
 public email and compatibility member-add routes continue issuing fourteen-day email-token
 invitations. Administrators see the deadline on pending invitations, including expired ones,
 and can replace an invitation directly from its row. Replacement revokes the exact historical
@@ -1394,5 +1407,5 @@ The historical inviter label stays absent; no recipient profile or inviter is in
 
 V247 is the release-wide rollback floor. Earlier backends ignore the membership deadline and
 can activate expired grants, even though they can read the additive schema. Drain older serving
-backends before reopening invitation acceptance. The thirty-day notice starts when the migration
-runs; schedule application deployment with the migration so administrators receive that window.
+backends before reopening invitation acceptance. The thirty-day notice starts at successful migration
+installation; schedule application deployment with the migration so administrators receive that window.

@@ -101,3 +101,13 @@ Recent serving compatibility minima, in migration order:
   [the workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
 - Control V247 prevents older membership writers from accepting expired historical invitations; see
   [the invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).
+
+## Historical invitation deadline backfill
+
+Control V247 uses guarded additive DDL without a catalog-wide UPDATE. Its successful installation
+TIMESTAMP, converted to UTC, fixes the thirty-day legacy deadline. Runtime pages independently
+commit bounded workspace primary-key windows; reads and acceptance use the same fixed deadline
+for pending NULL rows until persistence completes. The invitation inbox receives the deadline
+through a suspended control read rather than reading tenant Flyway history. Pausing, retrying or
+restarting reconciliation cannot extend validity. The full deployment, replay and rollback contract
+is in [the V247 cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).

@@ -59,10 +59,42 @@ class PendingInvitationExpiryMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void missingDeadlineFailsClosed() {
+    void missingDeadlineUsesFixedCutoverUntilBackfilled() {
         User recipient = pendingRecipient();
         jdbc.update("UPDATE workspace_member SET expires_at = NULL WHERE workspace_id = ? AND user_id = ?",
             workspace.getId(), recipient.getId());
+
+        String cutoff = jdbc.queryForObject("""
+            SELECT CAST(installed_on AT TIME ZONE '+00:00' AS DATETIME) + INTERVAL 30 DAY
+            FROM flyway_schema_history WHERE version = '247' AND success = 1
+            """, String.class);
+        assertNotNull(cutoff);
+        assertEquals(cutoff, inviteMapper.findPendingByWorkspace(workspace.getId()).stream()
+            .filter(item -> item.getEmail().equals(recipient.getEmail())).findFirst().orElseThrow().getExpiresAt());
+        assertEquals(java.util.List.of(workspace.getId()), workspaceMapper.getPendingMemberships(recipient.getId())
+            .stream().map(item -> item.getId()).toList());
+        assertEquals(1, workspaceMapper.activateMember(workspace.getId(), recipient.getId()));
+    }
+
+    @Test
+    void unfinishedBackfillStillRejectsLegacyGrantAfterCutoverDeadline() {
+        User recipient = pendingRecipient();
+        jdbc.update("UPDATE workspace_member SET expires_at = NULL WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), recipient.getId());
+        jdbc.update("UPDATE flyway_schema_history SET installed_on = CURRENT_TIMESTAMP() - INTERVAL 31 DAY WHERE version = '247'");
+
+        assertTrue(workspaceMapper.getPendingMemberships(recipient.getId()).isEmpty());
+        assertEquals(0, workspaceMapper.activateMember(workspace.getId(), recipient.getId()));
+        assertNotNull(inviteMapper.findPendingByWorkspace(workspace.getId()).stream()
+            .filter(item -> item.getEmail().equals(recipient.getEmail())).findFirst().orElseThrow().getExpiresAt());
+    }
+
+    @Test
+    void missingSuccessfulCutoverHistoryFailsClosed() {
+        User recipient = pendingRecipient();
+        jdbc.update("UPDATE workspace_member SET expires_at = NULL WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), recipient.getId());
+        jdbc.update("UPDATE flyway_schema_history SET success = 0 WHERE version = '247'");
 
         assertTrue(workspaceMapper.getPendingMemberships(recipient.getId()).isEmpty());
         assertEquals(0, workspaceMapper.activateMember(workspace.getId(), recipient.getId()));

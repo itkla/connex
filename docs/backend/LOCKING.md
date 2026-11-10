@@ -2667,3 +2667,13 @@ Trusted unsubscribe/provider writers retain their upsert acquisition order
 and advance the database-owned V245 counter too. Privacy flag patches retain the existing
 organization duplicate mutex → owned person lock → authority revalidation order, merging omitted
 flags from that locked row before calculating any restriction side effects.
+
+### Historical invitation deadline reconciliation
+
+Control V247 is schema-only. Deadline reconciliation reads at most 100 workspace memberships in
+primary-key order without row locks, then uses exact workspace/user/generation compare-and-set
+updates only for pending NULL deadlines. Each page runs in an independent ten-second READ COMMITTED
+control transaction and commits before its cursor advances. Active rows outside the candidate point
+keys are never locked by scanning DML. The installed V247 UTC timestamp plus thirty days remains the
+read-time deadline until persisted, including during pauses and retries; no domain root locks or
+network calls are added. See [the cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).

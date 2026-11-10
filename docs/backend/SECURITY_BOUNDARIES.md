@@ -46,9 +46,11 @@ Authored reference labels for historical pending grants remain internal to menti
 assistant masking. Reader hydration and write-response reference projections filter pending targets;
 masking provenance never resolves or returns the recipient's account profile.
 
-Control V247 assigns historical pending-membership grants a deadline thirty days after migration.
-Recipient listing and the final activation claim require `expires_at > UTC_TIMESTAMP()`; missing
-deadlines fail closed. New internal pending grants expire after fourteen days. Administrators manage
+Control V247 gives historical pending-membership grants a fixed deadline thirty days after its
+successful installation. NULL deadlines use that UTC cutover deadline until bounded runtime pages
+persist it. Recipient pending lists, invitation inbox listing/counts/direct lookup and the final
+activation claim require a future effective deadline; missing successful migration history fails
+closed. See [the cutover and backfill contract](../UPGRADING.md#historical-pending-invitation-expiry-control-v247). New internal pending grants expire after fourteen days. Administrators manage
 them as address-only invitations using opaque membership-generation references and see the actual
 deadline, including after expiry so they can resend. Revocation rechecks pending status and the same generation under membership-removal locks,
 uses a generic audit description and cannot remove a membership that has since accepted. A historical

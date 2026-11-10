@@ -13,6 +13,21 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 
+import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.mapping.Environment;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSessionFactoryBuilder;
+import org.mybatis.spring.SqlSessionTemplate;
+import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.PendingInvitationExpiryBackfillTransaction;
+
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.BeforeAll;
@@ -47,6 +62,13 @@ class PendingInvitationExpiryV247MigrationIntegrationTest {
 
             assertEquals(1, flyway.migrate().migrationsExecuted);
 
+            Harness harness = harness(catalog);
+            try (Connection connection = connection(catalog)) {
+                assertNull(deadline(connection, 1), "The migration performs no backfill DML");
+                assertNull(deadline(connection, 4));
+            }
+            assertEquals(1, harness.page(1, 0).written());
+            assertEquals(1, harness.page(2, 0).written());
             try (Connection connection = connection(catalog)) {
                 assertThirtyDayDeadline(connection, 1, beforeMigration);
                 assertThirtyDayDeadline(connection, 4, beforeMigration);
@@ -78,6 +100,9 @@ class PendingInvitationExpiryV247MigrationIntegrationTest {
 
             assertEquals(1, migration(catalog, migrations).migrate().migrationsExecuted);
 
+            Harness harness = harness(catalog);
+            assertEquals(1, harness.page(1, 0).written());
+            assertEquals(0, harness.page(1, 0).written());
             try (Connection connection = connection(catalog)) {
                 assertThirtyDayDeadline(connection, 1, beforeMigration);
                 assertEquals("2099-01-01 00:00:00", deadline(connection, 5));
@@ -107,12 +132,137 @@ class PendingInvitationExpiryV247MigrationIntegrationTest {
         }
     }
 
+    @Test
+    void unfinishedBackfillUsesOneUtcDeadlineAndCannotOutliveIt(@TempDir Path migrations) throws Exception {
+        try (MySqlScratchCatalog catalog = catalog()) {
+            createLegacyRows(catalog);
+            migration(catalog, migrations).migrate();
+            Harness harness = harness(catalog);
+            String deadline = harness.jdbc().queryForObject("""
+                SELECT CAST(installed_on AT TIME ZONE '+00:00' AS DATETIME) + INTERVAL 30 DAY
+                FROM flyway_schema_history WHERE version = '247' AND success = 1
+                """, String.class);
+            assertNotNull(deadline);
+            assertEquals(1, harness.page(1, 0).written());
+            assertEquals(deadline, harness.jdbc().queryForObject(
+                "SELECT expires_at FROM workspace_member WHERE workspace_id = 1 AND user_id = 1", String.class));
+            assertEquals(1, harness.mapper().activateMember(2, 4));
+            harness.jdbc().update("UPDATE workspace_member SET status = 'pending' WHERE workspace_id = 2 AND user_id = 4");
+            harness.jdbc().update("UPDATE flyway_schema_history SET installed_on = CURRENT_TIMESTAMP() - INTERVAL 31 DAY WHERE version = '247'");
+            assertEquals(0, harness.mapper().activateMember(2, 4), "Unfilled legacy grants expire at the fixed cutover");
+            assertEquals(1, harness.page(2, 0).written());
+            assertEquals(0, harness.mapper().activateMember(2, 4), "Persisting an expired cutover cannot revive a grant");
+            assertEquals(deadline, harness.jdbc().queryForObject(
+                "SELECT expires_at FROM workspace_member WHERE workspace_id = 1 AND user_id = 1", String.class));
+        }
+    }
+
+    @Test
+    void pagesCommitIndependentlyRetryWithoutExtensionAndNeverLockUnrelatedActiveRows(@TempDir Path migrations)
+            throws Exception {
+        try (MySqlScratchCatalog catalog = catalog()) {
+            createLegacyRows(catalog);
+            migration(catalog, migrations).migrate();
+            Harness harness = harness(catalog);
+            for (int userId = 10; userId < 215; userId++) {
+                harness.jdbc().update("INSERT INTO workspace_member (workspace_id, user_id, status) VALUES (1, ?, 'pending')", userId);
+            }
+            try (Connection blocker = connection(catalog)) {
+                blocker.setAutoCommit(false);
+                try (var statement = blocker.createStatement()) {
+                    statement.executeQuery("SELECT * FROM workspace_member WHERE workspace_id = 1 AND user_id = 2 FOR UPDATE").close();
+                    var first = harness.page(1, 0);
+                    assertEquals(100, first.scanned());
+                    assertEquals(99, first.written());
+                    try (Connection observer = connection(catalog)) {
+                        assertNotNull(deadline(observer, 1), "The completed page is independently committed");
+                        assertNull(deadline(observer, 214));
+                    }
+                    assertEquals(0, harness.page(1, 0).written(), "A restart cannot extend completed deadlines");
+                    assertEquals(100, harness.page(1, first.lastUserId()).written());
+                    assertEquals(7, harness.page(1, first.lastUserId() + 100).written());
+                    blocker.rollback();
+                }
+            }
+            assertNull(harness.jdbc().queryForObject(
+                "SELECT expires_at FROM workspace_member WHERE workspace_id = 2 AND user_id = 4", String.class));
+            Long generation = harness.jdbc().queryForObject(
+                "SELECT membership_id FROM workspace_member WHERE workspace_id = 2 AND user_id = 4", Long.class);
+            assertNotNull(generation);
+            assertEquals(0, harness.mapper().backfillPendingDeadline(1, 4, generation));
+            harness.jdbc().update("DELETE FROM workspace_member WHERE workspace_id = 2 AND user_id = 4");
+            harness.jdbc().update("INSERT INTO workspace_member (workspace_id, user_id, status) VALUES (2, 4, 'pending')");
+            assertEquals(0, harness.mapper().backfillPendingDeadline(2, 4, generation), "A stale generation cannot change a replacement");
+        }
+    }
+
+    @Test
+    void failedPageRollsBackOnlyItsOwnChangesAndRetryUsesTheOriginalDeadline(@TempDir Path migrations) throws Exception {
+        try (MySqlScratchCatalog catalog = catalog()) {
+            createLegacyRows(catalog);
+            migration(catalog, migrations).migrate();
+            Harness harness = harness(catalog);
+            harness.page(2, 0);
+            String committedDeadline = harness.jdbc().queryForObject(
+                "SELECT expires_at FROM workspace_member WHERE workspace_id = 2 AND user_id = 4", String.class);
+            Long generation = harness.jdbc().queryForObject(
+                "SELECT membership_id FROM workspace_member WHERE workspace_id = 1 AND user_id = 1", Long.class);
+            assertNotNull(generation);
+            assertThrows(IllegalStateException.class, () -> harness.transaction().executeWithoutResult(status -> {
+                assertEquals(1, harness.mapper().backfillPendingDeadline(1, 1, generation));
+                throw new IllegalStateException("Simulated interrupted page");
+            }));
+            assertNull(harness.jdbc().queryForObject(
+                "SELECT expires_at FROM workspace_member WHERE workspace_id = 1 AND user_id = 1", String.class));
+            assertEquals(1, harness.page(1, 0).written());
+            assertEquals(committedDeadline, harness.jdbc().queryForObject(
+                "SELECT expires_at FROM workspace_member WHERE workspace_id = 1 AND user_id = 1", String.class));
+        }
+    }
+
+    private static Harness harness(MySqlScratchCatalog catalog) throws Exception {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(catalog.url(), username, password) {
+            @Override
+            public Connection getConnection() throws SQLException {
+                Connection connection = super.getConnection();
+                try (var statement = connection.createStatement()) {
+                    statement.execute("SET SESSION time_zone = '+09:00'");
+                    statement.execute("SET SESSION innodb_lock_wait_timeout = 1");
+                }
+                return connection;
+            }
+        };
+        var configuration = new Configuration(new Environment("invitation-expiry",
+            new SpringManagedTransactionFactory(), dataSource));
+        configuration.setMapUnderscoreToCamelCase(true);
+        configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
+        String resource = "mappers/WorkspaceMapper.xml";
+        try (var input = PendingInvitationExpiryV247MigrationIntegrationTest.class.getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+        WorkspaceMapper mapper = new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(configuration)).getMapper(WorkspaceMapper.class);
+        var transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        transaction.setTimeout(10);
+        return new Harness(new JdbcTemplate(dataSource), mapper, transaction);
+    }
+
+    private record Harness(JdbcTemplate jdbc, WorkspaceMapper mapper, TransactionTemplate transaction) {
+        PendingInvitationExpiryBackfillTransaction.Batch page(int workspaceId, int afterUserId) {
+            return transaction.execute(status -> new PendingInvitationExpiryBackfillTransaction(mapper).backfillPage(workspaceId, afterUserId));
+        }
+    }
+
     private static void createLegacyRows(MySqlScratchCatalog catalog) throws SQLException {
         try (Connection connection = connection(catalog); var statement = connection.createStatement()) {
             statement.execute("""
                 CREATE TABLE workspace_member (
                     workspace_id INT NOT NULL, user_id INT NOT NULL,
-                    status VARCHAR(16) NOT NULL, PRIMARY KEY (workspace_id, user_id)
+                    status VARCHAR(16) NOT NULL, grant_authorization_version INT NOT NULL DEFAULT 1,
+                    membership_id BIGINT NOT NULL AUTO_INCREMENT,
+                    PRIMARY KEY (workspace_id, user_id), UNIQUE KEY (membership_id)
                 )
                 """);
             statement.executeUpdate("""

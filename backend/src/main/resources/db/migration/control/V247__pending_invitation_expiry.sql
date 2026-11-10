@@ -15,7 +15,5 @@ PREPARE pending_invitation_v247_statement FROM @pending_invitation_v247_ddl;
 EXECUTE pending_invitation_v247_statement;
 DEALLOCATE PREPARE pending_invitation_v247_statement;
 
--- Give historical pending grants thirty days of notice without extending an existing deadline.
-UPDATE workspace_member
-SET expires_at = UTC_TIMESTAMP() + INTERVAL 30 DAY
-WHERE expires_at IS NULL AND status = 'pending';
+-- Historical deadlines use the successful installation instant plus thirty days.
+-- Runtime pages persist that fixed deadline; eligibility uses it even before a page commits.

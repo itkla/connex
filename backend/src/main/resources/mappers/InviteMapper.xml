@@ -46,7 +46,7 @@
     UNION ALL
     SELECT SHA2(CONCAT('pending-membership:', wm.membership_id), 256) AS id,
            u.email, wm.role, 'pending' AS status,
-           wm.expires_at AS expiresAt, wm.created_at AS createdAt, NULL AS invitedByLabel
+           COALESCE(wm.expires_at, <include refid="ooo.klae.connex.backend.mappers.WorkspaceMapper.pendingInvitationCutoverDeadline"/>) AS expiresAt, wm.created_at AS createdAt, NULL AS invitedByLabel
     FROM workspace_member wm
     JOIN app_user u ON u.id = wm.user_id
     WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'pending'
