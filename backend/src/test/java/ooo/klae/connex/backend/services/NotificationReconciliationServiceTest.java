@@ -499,6 +499,17 @@ class NotificationReconciliationServiceTest {
         verify(dispatcher, never()).dispatch(any());
     }
 
+    @Test
+    void aFailedManagedPassRemainsNonIdleOnEveryRetry() {
+        ReconciliationFixture fixture = ReconciliationFixture.mockedDelivery();
+        when(fixture.notificationMapper.findTaskReminderCandidates(7))
+            .thenThrow(new IllegalStateException("Task snapshot unavailable"));
+        var service = fixture.service();
+
+        assertTrue(service.reconcileWorkspace(7, false) > 0);
+        assertTrue(service.reconcileWorkspace(7, false) > 0);
+    }
+
     private static final class ReconciliationFixture {
         private final NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
         private final PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
@@ -579,7 +590,7 @@ class NotificationReconciliationServiceTest {
             Mockito.mock(NotificationPushPublisher.class), stateVersions(notificationMapper),
             quietHoursControlAccess,
             Mockito.mock(ooo.klae.connex.backend.notifications.NotificationQuietHoursBypassPolicy.class),
-            Clock.systemUTC());
+            Clock.systemUTC(), new ObjectMapper());
     }
 
     /** A deal-risk service that flags nothing, so the deal-risk pass is a no-op in unrelated tests. */

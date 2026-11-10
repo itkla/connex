@@ -1,9 +1,11 @@
 package ooo.klae.connex.backend.observability;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -63,6 +65,17 @@ public class JobRunRecorder {
     private static final int MAX_METADATA_KEYS = 8;
     private static final int MAX_DETAIL_LENGTH = 1024;
     private static final int MAX_STRING_LENGTH = 64;
+    private static final Duration IDLE_SAMPLE_INTERVAL = Duration.ofMinutes(15);
+    private static final int MAX_IDLE_SCOPES = 20_000;
+    private static final Map<String, Set<String>> IDLE_COUNTERS = Map.of(
+        AI_AGENT_SCHEDULER, Set.of("attemptedCount"),
+        AI_AGENT_PRIVACY_INITIALIZATION, Set.of("attemptedCount"),
+        RELATIONSHIP_SIGNAL_RECONCILIATION, Set.of("failedCount", "changedCount"),
+        NOTIFICATION_RECONCILIATION, Set.of("purgedCount", "changedCount"),
+        LEAD_RESPONSE_SLA, Set.of("attemptedCount", "failedCount"),
+        APPROVAL_RECONCILIATION, Set.of("attemptedCount", "failedCount"),
+        AI_BRIEF_DELIVERY, Set.of("attemptedCount", "startedCount", "deliveredCount", "failedCount"),
+        AI_WATCH_EVALUATION, Set.of("evaluatedCount", "firedCount", "failedCount"));
     private static final Set<String> JOB_NAMES = Set.of(
         NOTIFICATION_RECONCILIATION,
         REPORT_DELIVERY,
@@ -87,6 +100,7 @@ public class JobRunRecorder {
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",
+        "changedCount",
         "completedCadences",
         "failedCadences",
         "deletedCount",
@@ -109,6 +123,7 @@ public class JobRunRecorder {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final TransactionTemplate transaction;
+    private final Map<IdleScope, IdleSample> idleSamples = new LinkedHashMap<>(16, 0.75f, true);
 
     public JobRunRecorder(
             JobRunMapper mapper,
@@ -124,7 +139,8 @@ public class JobRunRecorder {
     }
 
     /**
-     * Persists one stable job outcome and suppresses every runtime recording failure.
+     * Persists work and failures, sampling explicitly empty successful sweeps every fifteen minutes.
+     * Local idle ticks remain available to authorized diagnostics between durable samples.
      *
      * @param jobName stable scheduler name
      * @param workspaceId tenant scope, or {@code null} for an instance phase
@@ -154,10 +170,23 @@ public class JobRunRecorder {
             jobRun.setStartedAt(startedAt);
             jobRun.setFinishedAt(finishedAt);
             jobRun.setDetail(sanitizeDetail(workspaceId, detail));
-            transaction.executeWithoutResult(transactionStatus -> {
-                mapper.insert(jobRun);
-                mapper.deleteBeyondRetention(jobName, workspaceId, status.token(), KEEP_COUNT);
-            });
+            IdleScope scope = new IdleScope(jobName, workspaceId);
+            boolean idle = isIdle(jobName, workspaceId, status, detail);
+            if (idle && !sampleIdle(scope, jobRun)) {
+                return;
+            }
+            if (!idle) {
+                requireNextIdleSample(scope);
+            }
+            try {
+                transaction.executeWithoutResult(transactionStatus -> {
+                    mapper.insert(jobRun);
+                    mapper.deleteBeyondRetention(jobName, workspaceId, status.token(), KEEP_COUNT);
+                });
+            } catch (RuntimeException exception) {
+                requireNextIdleSample(scope);
+                throw exception;
+            }
         } catch (RuntimeException exception) {
             log.warn(
                 "Job run recording failed jobName={} status={} exceptionClass={}",
@@ -166,6 +195,63 @@ public class JobRunRecorder {
                 exception.getClass().getSimpleName());
         }
     }
+
+    /** Returns process-local idle outcomes only for the caller's already authorized workspaces. */
+    public List<JobRun> latestIdleRuns(List<Integer> workspaceIds) {
+        Set<Integer> visible = Set.copyOf(workspaceIds);
+        synchronized (idleSamples) {
+            return idleSamples.values().stream()
+                .map(IdleSample::latest)
+                .filter(run -> visible.contains(run.getWorkspaceId()))
+                .map(JobRunRecorder::copyRun)
+                .toList();
+        }
+    }
+
+    private static JobRun copyRun(JobRun source) {
+        JobRun copy = new JobRun();
+        copy.setJobName(source.getJobName());
+        copy.setWorkspaceId(source.getWorkspaceId());
+        copy.setStatus(source.getStatus());
+        copy.setStartedAt(source.getStartedAt());
+        copy.setFinishedAt(source.getFinishedAt());
+        copy.setDetail(source.getDetail());
+        return copy;
+    }
+
+    private boolean sampleIdle(IdleScope scope, JobRun run) {
+        synchronized (idleSamples) {
+            IdleSample previous = idleSamples.get(scope);
+            boolean persist = previous == null || previous.persistedAt() == null
+                || !run.getFinishedAt().isBefore(previous.persistedAt().plus(IDLE_SAMPLE_INTERVAL));
+            JobRun latest = previous != null && previous.latest().getStartedAt().isAfter(run.getStartedAt())
+                ? previous.latest() : copyRun(run);
+            idleSamples.put(scope, new IdleSample(
+                persist ? run.getFinishedAt() : previous.persistedAt(), latest));
+            if (idleSamples.size() > MAX_IDLE_SCOPES) {
+                idleSamples.remove(idleSamples.keySet().iterator().next());
+            }
+            return persist;
+        }
+    }
+
+    private void requireNextIdleSample(IdleScope scope) {
+        synchronized (idleSamples) {
+            idleSamples.computeIfPresent(scope, (key, previous) -> new IdleSample(null, previous.latest()));
+        }
+    }
+
+    private static boolean isIdle(
+            String jobName, Integer workspaceId, JobRunStatus status, JobRunDetail detail) {
+        Set<String> counters = IDLE_COUNTERS.get(jobName);
+        return workspaceId != null && status == JobRunStatus.SUCCEEDED && counters != null
+            && detail != null && counters.equals(detail.metadata().keySet())
+            && detail.metadata().values().stream().allMatch(value -> value instanceof Integer count && count == 0);
+    }
+
+    private record IdleScope(String jobName, Integer workspaceId) {}
+
+    private record IdleSample(LocalDateTime persistedAt, JobRun latest) {}
 
     /** Stable scheduler-boundary outcomes. */
     public enum JobRunStatus {

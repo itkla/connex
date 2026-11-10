@@ -49,6 +49,24 @@ class RelationshipSignalWriteServiceTest {
     }
 
     @Test
+    void familyFreshnessNeverExceedsItsOldestAdmittedEvidence() {
+        RelationshipSignalMapper mapper = mock(RelationshipSignalMapper.class);
+        RelationshipSignalWriteService service = new RelationshipSignalWriteService(mapper);
+        LocalDateTime at = LocalDateTime.of(2026, 8, 8, 13, 0);
+        when(mapper.lockFamilyState(9, "relationship_decay")).thenReturn(familyState(at.minusMinutes(1)));
+        RelationshipSignal older = new RelationshipSignal();
+        older.setDedupeKey("older");
+        older.setEvidenceAsOf(at.minusHours(1));
+        RelationshipSignal newer = new RelationshipSignal();
+        newer.setDedupeKey("newer");
+        newer.setEvidenceAsOf(at);
+
+        service.replaceFamily(9, "relationship_decay", "generation", List.of(older, newer), at, at);
+
+        verify(mapper).upsertFamilyAvailable(9, "relationship_decay", at, at.minusHours(1));
+    }
+
+    @Test
     void olderSuccessfulAttemptCannotReplaceNewerFamilyState() {
         RelationshipSignalMapper mapper = mock(RelationshipSignalMapper.class);
         RelationshipSignalWriteService service = new RelationshipSignalWriteService(mapper);
@@ -66,8 +84,8 @@ class RelationshipSignalWriteServiceTest {
             olderAttempt);
 
         verify(mapper, never()).upsertSignal(any(RelationshipSignal.class));
-        verify(mapper, never()).resolveMissing(
-            anyInt(), anyString(), anyString(), any(LocalDateTime.class));
+        verify(mapper, never()).resolveMissingExcept(
+            anyInt(), anyString(), anyString(), any(LocalDateTime.class), org.mockito.ArgumentMatchers.anyList());
         verify(mapper, never()).upsertFamilyAvailable(
             anyInt(), anyString(), any(LocalDateTime.class), any(LocalDateTime.class));
     }

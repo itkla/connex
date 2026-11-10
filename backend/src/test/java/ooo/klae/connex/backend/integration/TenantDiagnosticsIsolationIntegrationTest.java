@@ -1,11 +1,16 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -26,6 +31,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
@@ -35,13 +41,19 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
+import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
+import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.secrets.StoredSecret;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Full-stack diagnostics authorization, active-workspace routing, and redaction backstop.
@@ -65,6 +77,9 @@ class TenantDiagnosticsIsolationIntegrationTest {
     @Autowired private MailConfigMapper mailConfigMapper;
     @Autowired private SecretValueMapper secretValueMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private JobRunRecorder jobRunRecorder;
+    @Autowired private JobRunMapper jobRunMapper;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     private MockMvc mockMvc;
     private final List<Integer> createdWorkspaceIds = new ArrayList<>();
@@ -82,6 +97,7 @@ class TenantDiagnosticsIsolationIntegrationTest {
     @AfterEach
     void removeCommittedFixtures() {
         for (Integer workspaceId : createdWorkspaceIds) {
+            jdbcTemplate.update("DELETE FROM job_run WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM workspace_mail_config WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM secret_value WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspaceId);
@@ -97,6 +113,43 @@ class TenantDiagnosticsIsolationIntegrationTest {
         createdWorkspaceIds.clear();
         createdOrganizationIds.clear();
         createdUserIds.clear();
+    }
+
+    @Test
+    void sameSecondRemoteFailureSurvivesAnEarlierFractionalCachedSuccess() throws Exception {
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspace(organization);
+        User actor = newUser();
+        workspaceMapper.addMember(workspace.getId(), actor.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), actor.getId(), "owner");
+        LocalDateTime second = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1).withNano(0);
+        jobRunRecorder.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspace.getId(), JobRunStatus.SUCCEEDED,
+            new JobRunDetail(second.withNano(100_000_000), java.util.Map.of("attemptedCount", 0)));
+        Clock remoteClock = Clock.fixed(second.withNano(300_000_000).toInstant(ZoneOffset.UTC),
+            ZoneId.of("Asia/Tokyo"));
+        JobRunRecorder remote = new JobRunRecorder(jobRunMapper, new ObjectMapper(), remoteClock, transactionManager);
+        remote.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspace.getId(), JobRunStatus.FAILED,
+            JobRunDetail.started(remoteClock, java.util.Map.of("phase", "remote_failure")));
+        assertEquals(second, jdbcTemplate.queryForObject(
+            "SELECT started_at FROM job_run WHERE workspace_id=? AND status='failed'",
+            LocalDateTime.class, workspace.getId()));
+        assertEquals(second.withNano(100_000_000), jobRunRecorder.latestIdleRuns(
+            List.of(workspace.getId())).getFirst().getStartedAt());
+
+        MockHttpSession session = login(actor.getUsername());
+        String response = okBody(mockMvc.perform(get("/api/workspaces/" + workspace.getId() + "/diagnostics")
+            .header("X-Workspace-Id", workspace.getId()).session(session)).andReturn(), "fractional diagnostics");
+
+        JsonNode jobs = new ObjectMapper().readTree(response).path("jobs");
+        JsonNode mission = null;
+        for (JsonNode job : jobs) {
+            if (JobRunRecorder.AI_AGENT_SCHEDULER.equals(job.path("jobName").asString())) mission = job;
+        }
+        assertNotNull(mission);
+        assertEquals("failed", mission.path("last").path("status").asString());
+        assertEquals("succeeded", mission.path("lastSuccess").path("status").asString());
+        assertEquals("failed", mission.path("lastFailure").path("status").asString());
+        assertEquals(1, mission.path("workspacesFailingLatest").asInt());
     }
 
     @Test

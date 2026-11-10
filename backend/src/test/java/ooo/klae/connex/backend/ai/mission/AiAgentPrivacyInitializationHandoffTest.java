@@ -84,7 +84,7 @@ class AiAgentPrivacyInitializationHandoffTest {
         User actor = new User();
         actor.setId(1);
         when(system.user()).thenReturn(actor);
-        doThrow(new IllegalStateException("first initialization failed")).doNothing().when(privacy).initialize(7);
+        when(privacy.initialize(7)).thenThrow(new IllegalStateException("first initialization failed")).thenReturn(0);
         var initializer = initializer();
         DataSource dataSource = mock(DataSource.class);
         Connection connection = mock(Connection.class);
@@ -162,7 +162,7 @@ class AiAgentPrivacyInitializationHandoffTest {
         doAnswer(call -> {
             assertEquals(7, context.getWorkspaceId());
             assertSame(prepared, context.getWorkspaceScopes());
-            return null;
+            return 0;
         }).when(privacy).initialize(7);
 
         var initializer = initializer(transactions);
