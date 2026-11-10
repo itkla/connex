@@ -1,4 +1,6 @@
 #!/bin/bash
+# Test stubs are invoked indirectly by the sourced scripts.
+# shellcheck disable=SC2329
 #
 # Offline regression tests for the staging release transaction. The harness sources
 # the real deploy script with its trailing main call removed, creates signed-looking
