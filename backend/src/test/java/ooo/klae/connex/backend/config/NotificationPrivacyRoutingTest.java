@@ -48,11 +48,18 @@ class NotificationPrivacyRoutingTest {
             assertNull(context.getCatalog());
             return List.of(new AiAssistantWorkspacePrivacy(7, 3, 1));
         });
-        var scope = new TenantWorkScope(context, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
-        var beans = new StaticListableBeanFactory(Map.of("authority", authority, "scope", scope, "transactions", transactions));
+        var workspaces = mock(WorkspaceMapper.class);
+        when(workspaces.findPendingInvitationCutoverDeadline()).thenAnswer(call -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertNull(context.getCatalog());
+            return "2030-01-01 00:00:00";
+        });
+        var scope = new TenantWorkScope(context, mock(TenantCatalogResolver.class), workspaces);
+        var beans = new StaticListableBeanFactory(Map.of("authority", authority, "scope", scope,
+            "transactions", transactions, "workspaces", workspaces));
         var interceptor = new MyBatisConfig().notificationPrivacyInterceptor(
                 beans.getBeanProvider(AiAssistantPrivacyService.class), beans.getBeanProvider(TenantWorkScope.class),
-                beans.getBeanProvider(PlatformTransactionManager.class));
+                beans.getBeanProvider(PlatformTransactionManager.class), beans.getBeanProvider(WorkspaceMapper.class));
         var statement = new MappedStatement.Builder(new Configuration(),
                 "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
                 new StaticSqlSource(new Configuration(), "SELECT 1"), SqlCommandType.SELECT).build();
@@ -60,6 +67,11 @@ class NotificationPrivacyRoutingTest {
         when(executor.query(eq(statement), any(), any(), any())).thenAnswer(call -> {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
             assertEquals("cnx_tenant_privacy", context.getCatalog());
+            Object parameters = call.getArgument(1);
+            assertTrue(parameters instanceof Map<?, ?>);
+            if (parameters instanceof Map<?, ?> captured) {
+                assertEquals("2030-01-01 00:00:00", captured.get("pendingInvitationCutoverDeadline"));
+            }
             return List.of();
         });
         var method = Executor.class.getMethod("query", MappedStatement.class, Object.class,
@@ -76,7 +88,8 @@ class NotificationPrivacyRoutingTest {
                 assertEquals("cnx_tenant_privacy", context.getCatalog());
             });
             verify(authority).notificationWorkspaceGenerations(11, null);
-            assertEquals(1, transactions.suspendCount());
+            verify(workspaces).findPendingInvitationCutoverDeadline();
+            assertEquals(2, transactions.suspendCount());
         } finally {
             context.clear();
         }

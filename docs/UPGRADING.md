@@ -11,12 +11,13 @@ The active rollback floor for this release is control V248, including with AI an
 Earlier floors in version-specific sections below describe historical component contracts and do not
 permit rollback after V248. Apply control V236 → tenant V237 → tenant V238 → tenant V239 →
 tenant V240 → tenant V241 → tenant V242 → tenant V243 → tenant V244 → tenant V245 → control V246
-→ V247 → control V248 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
+→ control V247 → control V248 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
 [the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
 [the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
 [the deal-value cutover](#deal-line-value-takeover-tenant-v243), and
 [the consent-version cutover](#contact-channel-consent-versions-tenant-v245), and
 [the workspace-currency cutover](#workspace-default-deal-currency-control-v246), and
+[the invitation-expiry cutover](#historical-pending-invitation-expiry-control-v247), and
 [the export-permission cutover](#export-data-permission-control-v248).
 
 ## Campaign engagement response compatibility (#2257)
@@ -984,7 +985,7 @@ and restart all backend replicas with the attributed change.
 **Rollback:** policy rollback uses the same `false` plus accountable actor and a backend restart.
 It needs no schema rollback. The **V225 component minimum is unchanged**: no binary older than the
 release carrying V225 and its switch-independent grantor checks may serve. The current release-wide
-rollback floor is control V248.
+rollback floor is control V248. See [the export-permission cutover](#export-data-permission-control-v248).
 
 **What confined users see:** Security and onboarding show the passkey-approval confinement card,
 with approval-code entry and the organizations still needing approval. A covered grantor can issue
@@ -1195,7 +1196,7 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-V235 established the continuation compatibility minimum; V248 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors.
+V235 established the continuation compatibility minimum; V248 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors. See [the export-permission cutover](#export-data-permission-control-v248).
 
 ## V236/V237: retained Ask Connex privacy cutover
 
@@ -1212,7 +1213,7 @@ serving JVM. Proposal-set production remains disabled.
 V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
 republish invalidated content despite accepting the additive schema. V248 is the active rollback
 floor for this release, including when AI and missions are disabled. Recovery below the active
-floor requires a separately reviewed procedure; normal recovery is a forward fix.
+floor requires a separately reviewed procedure; normal recovery is a forward fix. See [the export-permission cutover](#export-data-permission-control-v248).
 
 Inaccessible placements and incomplete managed-object deletion keep cleanup pending. Restore
 procedures must reconcile privacy authority and old-generation holdings before enabling service.
@@ -1266,7 +1267,7 @@ the higher release-wide rollback floor is now `control/V248__export_data_permiss
 when missions are disabled. Pre-V238 binaries still cannot safely purge/export source-linked
 proposals or preserve frozen-review invariants. Returning below that V238 component minimum
 requires a separately reviewed drain, settlement, complete enrolled privacy purge and unconditional
-residual verification. Those procedures do not waive the V240 task-writer component minimum or the higher V248 release-wide floor.
+residual verification. Those procedures do not waive the V240 task-writer component minimum or the higher V248 release-wide floor. See [the export-permission cutover](#export-data-permission-control-v248).
 
 Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
 fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
@@ -1286,13 +1287,13 @@ board-move and completion writers do not maintain `completed_at`: a task complet
 and completed at T2 under an older binary can retain T1. A later compatible binary would then score
 that stale instant. Rollback candidates must retain completion stamping and clearing on reopen;
 copying only the migration resource into an older binary does not make it compatible. The existing
-proven-not-started exception in the staging rollback procedure is unchanged.
+proven-not-started exception in the staging rollback procedure is unchanged. See [the export-permission cutover](#export-data-permission-control-v248).
 
 This historical component cutover raised the previous V238 floor and keeps the V236/V237 privacy and V238 singleton-proposal
 constraints in force. Binaries that contain V238 or V239 but lack V240 are refused, even if they
 satisfy the older component floors. Recover forward with a compatible binary. A scoring-policy
 change remains possible in a forward release that preserves the V240 task-writer component
-minimum and the current V248 release-wide floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change.
+minimum and the current V248 release-wide floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change. See [the export-permission cutover](#export-data-permission-control-v248).
 
 ## Deal line value takeover (tenant V243)
 
@@ -1308,7 +1309,7 @@ The V243 component minimum preserves takeover confirmation and restoration; the 
 Rollback must use a compatible serving binary; retain the additive column and roll forward.
 INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
 inspect the column and Flyway history before following the deployment recovery procedure.
-Do not edit an applied migration or blindly rerun a partially committed ALTER.
+Do not edit an applied migration or blindly rerun a partially committed ALTER. See [the export-permission cutover](#export-data-permission-control-v248).
 
 ## Record search projections (tenant V244)
 
@@ -1323,7 +1324,8 @@ the component rollback floor remains V243. V245 then establishes the consent-wri
 minimum because older binaries can overwrite a newer revocation from a stale confirmation.
 Control V248 is the current release-wide floor. Follow the
 [consent-version cutover](#contact-channel-consent-versions-tenant-v245), then the
-[workspace-currency cutover](#workspace-default-deal-currency-control-v246), and the
+[workspace-currency cutover](#workspace-default-deal-currency-control-v246), then the
+[invitation-expiry cutover](#historical-pending-invitation-expiry-control-v247), and the
 [export-permission cutover](#export-data-permission-control-v248) for the serving drain
 and forward-recovery requirements. See
 [record-search operation and recovery](backend/RECORD_SEARCH.md) for page bounds, cursor wrap,
@@ -1347,7 +1349,7 @@ remain schema-compatible and their writes advance the trigger, but do not enforc
 consent precondition. V245 establishes the consent-writer component minimum: older binaries can
 overwrite a newer revocation from a stale manual confirmation. The current release-wide rollback
 floor is control V248. Drain older serving backends before admitting these conditional writes;
-recover forward with a compatible binary and retain the additive schema.
+recover forward with a compatible binary and retain the additive schema. See [the export-permission cutover](#export-data-permission-control-v248).
 
 ## Workspace default deal currency (control V246)
 
@@ -1371,6 +1373,47 @@ Flyway history, reconcile any committed prefix through the normal migration reco
 and retain the online-DDL guards before retrying. The column needs a brief metadata lock; deploy
 outside long-running workspace-settings transactions. The current release-wide rollback floor is
 control V248; see the [export-permission cutover](#export-data-permission-control-v248).
+
+## Historical pending invitation expiry (control V247)
+
+Apply control V247 after V246. The historical non-expiring invitations exposed by #2300 are
+`workspace_member` rows with `status = 'pending'`. They are not email-token invitations:
+`workspace_invite.expires_at` has always been required, and new email invitations expire after
+fourteen days. #2300 added address-only projections, not an inviter-label column. Shareable
+`workspace_invite_link` grants were unchanged by that change and are outside this backfill.
+
+V247 adds nullable `workspace_member.expires_at` with `ALGORITHM=INSTANT, LOCK=DEFAULT` and
+verifies the column definition on replay. It performs no catalog-wide data update. The fixed legacy
+deadline is the successful control V247 `flyway_schema_history.installed_on` plus thirty days,
+converted from TIMESTAMP to UTC independently of the connection time zone. Pending NULL deadlines
+use that deadline immediately in administrator projections, recipient pending lists, invitation
+inbox listing/counts/direct lookup, and the atomic activation claim. Missing successful cutover
+history fails closed. Correctness never depends on the backfill finishing, and restart/retry never
+extends the notice window.
+
+`PendingInvitationExpiryBackfillRunner` persists the same deadline in at most four pages per sweep.
+Each independent ten-second READ COMMITTED transaction reads at most 100 memberships in one
+workspace's primary-key order, including active rows, without row locks. It updates only exact
+workspace/user/generation point keys still pending with NULL expiry. Active memberships are
+already-consumed grants and remain unchanged; revoked pending grants were deleted and are not
+recreated. Existing future or expired deadlines are never extended. Each page commits before the
+cursor advances; a failed page retries from its last committed cursor, and process restarts safely
+begin another sweep. No locking DML scans unrelated active membership rows. Maintenance mode
+suppresses scheduling; the fixed-deadline read fallback remains authoritative while it is paused.
+
+Recipient pending lists, invitation inbox access and the atomic activation update require a future
+effective deadline. The retained internal pending-membership writer assigns fourteen days;
+public email and compatibility member-add routes continue issuing fourteen-day email-token
+invitations. Administrators see the deadline on pending invitations, including expired ones,
+and can replace an invitation directly from its row. Replacement revokes the exact historical
+membership generation and returns a new email-bound link using the existing authorization flow.
+The historical inviter label stays absent; no recipient profile or inviter is invented.
+
+V247 is the invitation-expiry serving minimum; the current release-wide rollback floor is
+control V248 (see [the export-permission cutover](#export-data-permission-control-v248)). Earlier
+backends ignore the membership deadline and can activate expired grants, even though they can read the additive schema. Drain older serving
+backends before reopening invitation acceptance. The thirty-day notice starts at successful migration
+installation; schedule application deployment with the migration so administrators receive that window.
 
 ## Export data permission (control V248)
 

@@ -141,9 +141,8 @@ public class RadarService {
         Set<String> requestedStates = validatedStates(stateFilters);
         String normalizedQuery = normalizeQuery(query);
         Instant now = clock.instant();
-        Map<String, Boolean> unavailable = new LinkedHashMap<>();
-        familyStates.forEach(state -> unavailable.put(
-            state.getFamily(), "unavailable".equals(state.getStatus())));
+        Map<String, RelationshipSignalFamilyState> familyByName = new LinkedHashMap<>();
+        familyStates.forEach(state -> familyByName.put(state.getFamily(), state));
 
         List<RelationshipSignal> activeSignals = scopedSubjectType == null
             ? signalMapper.findActiveForActor(workspaceId, userId)
@@ -171,9 +170,10 @@ public class RadarService {
                     && !subject.label().toLowerCase(Locale.ROOT).contains(normalizedQuery)) {
                 continue;
             }
+            RelationshipSignalFamilyState family = familyByName.get(signal.getFamily());
             RadarResponseDto.Signal item = toDto(
                 workspaceId, signal, subject, state, position + 1, now,
-                unavailable.getOrDefault(signal.getFamily(), false),
+                family != null && "unavailable".equals(family.getStatus()), checkedAt(signal, family),
                 processablePersonIds, personLabels, visibleEdgeIds, operationVisibilityScope);
             if (item.evidence().isEmpty()) {
                 continue;
@@ -265,7 +265,9 @@ public class RadarService {
         RelationshipSignal signal = requireLocked(
             workspaceId, signalId, userId, expectedVersion);
         requireCurrentSubject(workspaceId, signal, operationVisibilityScope);
-        if (isStale(signal, clock.instant())) {
+        RelationshipSignalFamilyState family = signalMapper.findFamilyStates(workspaceId).stream()
+            .filter(candidate -> signal.getFamily().equals(candidate.getFamily())).findFirst().orElse(null);
+        if (isStale(checkedAt(signal, family), clock.instant())) {
             throw new ConflictException("Radar evidence is stale; refresh before creating a task");
         }
         if (signal.getTaskId() != null) {
@@ -518,6 +520,7 @@ public class RadarService {
             int position,
             Instant now,
             boolean familyUnavailable,
+            @Nullable Instant checkedAt,
             Set<Integer> processablePersonIds,
             Map<Integer, String> personLabels,
             Set<Integer> visibleEdgeIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
@@ -533,8 +536,8 @@ public class RadarService {
             signal.getTaskId(),
             signal.getVersion() + ":"
                 + (signal.getStateVersion() == null ? 0 : signal.getStateVersion()),
-            instant(signal.getEvidenceAsOf()),
-            familyUnavailable || isStale(signal, now),
+            checkedAt,
+            familyUnavailable || isStale(checkedAt, now),
             currentEvidence(
                 workspaceId,
                 parseEvidence(signal.getEvidenceJson()),
@@ -756,8 +759,15 @@ public class RadarService {
         return signal.getDisposition();
     }
 
-    private static boolean isStale(RelationshipSignal signal, Instant now) {
-        return instant(signal.getEvidenceAsOf()).isBefore(now.minus(STALE_AFTER));
+    private static @Nullable Instant checkedAt(
+            RelationshipSignal signal, @Nullable RelationshipSignalFamilyState family) {
+        Instant original = instant(signal.getEvidenceAsOf());
+        Instant evaluated = family == null ? null : instant(family.getEvidenceAsOf());
+        return original == null || (evaluated != null && evaluated.isAfter(original)) ? evaluated : original;
+    }
+
+    private static boolean isStale(@Nullable Instant checkedAt, Instant now) {
+        return checkedAt == null || checkedAt.isBefore(now.minus(STALE_AFTER));
     }
 
     private static VersionToken versionToken(String value) {

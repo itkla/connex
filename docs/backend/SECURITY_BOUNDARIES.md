@@ -65,7 +65,9 @@ organization root lock before grant/lease writes. Locked workspace authorization
 policy with `FOR SHARE`; nonlocking snapshot authorization retains its consistent-read semantics.
 Ordinary attachments/document artifacts and statutory data-subject disclosure retain their own
 access/privacy contracts; they are not bulk-export endpoints. Existing export completion audit
-semantics and passkey step-up are unchanged. See [V248 deployment](../UPGRADING.md#export-data-permission-control-v248).
+semantics and passkey step-up are unchanged. The current release-wide rollback floor is control V248;
+retain the [V247 invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247),
+then follow the [V248 export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
 
 Schedule reads and deletion retain their existing report permissions; withdrawing export access
 does not prevent stopping a saved delivery channel. A withdrawn run-as export grant skips the
@@ -85,14 +87,18 @@ Authored reference labels for historical pending grants remain internal to menti
 assistant masking. Reader hydration and write-response reference projections filter pending targets;
 masking provenance never resolves or returns the recipient's account profile.
 
-Historical pending-membership grants remain acceptable by their recipients. Administrators manage
-them as address-only invitations using opaque membership-generation references, with no invented
-expiry. Revocation rechecks pending status and the same generation under membership-removal locks,
+Control V247 gives historical pending-membership grants a fixed deadline thirty days after its
+successful installation. NULL deadlines use that UTC cutover deadline until bounded runtime pages
+persist it. Recipient pending lists, invitation inbox listing/counts/direct lookup and the final
+activation claim require a future effective deadline; missing successful migration history fails
+closed. See [the cutover and backfill contract](../UPGRADING.md#historical-pending-invitation-expiry-control-v247). New internal pending grants expire after fourteen days. Administrators manage
+them as address-only invitations using opaque membership-generation references and see the actual
+deadline, including after expiry so they can resend. Revocation rechecks pending status and the same generation under membership-removal locks,
 uses a generic audit description and cannot remove a membership that has since accepted. A historical
 owner-role grant retains the owner-only revocation check. Resending
 supersedes the historical pending grant in the token-creation transaction. These historical grants
-remain distinguishable by their absent expiry; the new contract prevents new account probes but
-does not erase information disclosed before this change or conceal the historical invitation format.
+retain their historical format without an inviter label; the new contract prevents new account probes
+but does not erase information disclosed before this change or conceal the historical invitation format.
 Invite-link redemption and removed-member rejoin policy are unchanged.
 
 Invitation creation also reports `emailDelivery`, uniformly for every addressed email: `ACCEPTED`

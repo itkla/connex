@@ -359,7 +359,13 @@ workspace teardown; audit retention must preserve these records if introduced la
 ## Initialization and lifecycle
 
 Startup and periodic reconciliation enumerate control-plane workspace IDs, resolve each
-placement, and initialize only an empty workspace. Existing barriers are preserved.
+placement, and initialize only an empty workspace. Existing barriers are preserved. The periodic
+initializer defaults to a sixty-second fixed delay; approximately nine passes per workspace in a
+ten-minute interval is expected once execution time is included. Empty successful initialization
+passes sample job history every fifteen minutes per process; new barriers, pending/enrolled privacy
+work, legacy turns and startup recovery candidates retain individual records, as do failures.
+The work counts are observations under the existing locks and transactions; they never skip a
+privacy check or replace an authority generation.
 Missing barriers with run/segment/v1-work/taint evidence fail readiness. An incomplete v1 work
 record under an unblocked barrier also fails readiness. V2 work does not block that barrier.
 Pre-V232 active ordinary turns
@@ -413,6 +419,7 @@ workers and in-flight writers before control V236 → tenant V237 → tenant V23
 version's stopped-writer sequence-backfill procedure.
 V238 remains the mission component minimum; control V248 is the current release-wide rollback floor,
 including with AI and missions disabled; see the
+[invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247), then the
 [export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
 Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.

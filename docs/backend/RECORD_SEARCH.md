@@ -73,7 +73,8 @@ callback or data reconciliation inside migration execution. Earlier binaries rem
 V244 alone, whose component rollback floor stays V243. V245 establishes the consent-writer
 component minimum; control V248 is the active release-wide floor. Follow the
 [consent-version cutover](../UPGRADING.md#contact-channel-consent-versions-tenant-v245), then the
-[workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246), and the
+[workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246), then the
+[invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247), and the
 [export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
 
 `RecordSearchReconciler.sweep()` starts without an initial delay and runs every 60 seconds. It reads

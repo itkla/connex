@@ -99,6 +99,17 @@ Recent serving compatibility minima, in migration order:
   [the consent-version cutover](../UPGRADING.md#contact-channel-consent-versions-tenant-v245).
 - Control V246 prevents older deal writers from ignoring an explicit workspace currency setting; see
   [the workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
-
+- Control V247 prevents older membership writers from accepting expired historical invitations; see
+  [the invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).
 - Control V248 introduces revocable export access while preserving existing role access. Older
   binaries ignore revocations and cannot serve safely; see [the export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
+
+## Historical invitation deadline backfill
+
+Control V247 uses guarded additive DDL without a catalog-wide UPDATE. Its successful installation
+TIMESTAMP, converted to UTC, fixes the thirty-day legacy deadline. Runtime pages independently
+commit bounded workspace primary-key windows; reads and acceptance use the same fixed deadline
+for pending NULL rows until persistence completes. The invitation inbox receives the deadline
+through a suspended control read rather than reading tenant Flyway history. Pausing, retrying or
+restarting reconciliation cannot extend validity. The full deployment, replay and rollback contract
+is in [the V247 cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).

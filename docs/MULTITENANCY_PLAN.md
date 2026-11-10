@@ -450,7 +450,10 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   refuse an account that has not proven its address. Both workspace email invitation creation and
   the compatibility `/members` entry point now use token invitations uniformly, without resolving
   recipient account existence or verification state. Historical pending grants retain their
-  address-only management and acceptance path; see the
+  address-only management and acceptance path, with control V247 assigning a thirty-day deadline
+  and recipient listing, invitation inbox access and activation enforcing the fixed cutover deadline
+  even while bounded control-plane backfill pages remain unfinished. Expired grants remain available for administrator
+  resend; see the
   [invitation disclosure contract](backend/SECURITY_BOUNDARIES.md#workspace-invitation-disclosure). The org check covers the grant only: a user
   who already holds an `org_member` row can still be re-roled or removed.
   Every one of those refusals is conditioned on registration verification being **enabled**, exactly like
@@ -1019,3 +1022,6 @@ authority. V248 backfills existing custom roles and defaults all built-in flags 
 roles start without an export grant. The authority and endpoint inventory are in
 [SECURITY_BOUNDARIES.md](backend/SECURITY_BOUNDARIES.md#export-authority); drain and rollback rules
 are in [UPGRADING.md](UPGRADING.md#export-data-permission-control-v248).
+The current release-wide rollback floor is control V248. Retain the
+[invitation-expiry cutover](UPGRADING.md#historical-pending-invitation-expiry-control-v247), then apply the
+[export-permission cutover](UPGRADING.md#export-data-permission-control-v248).

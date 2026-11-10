@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -67,9 +68,11 @@ public class AiAgentScheduler {
                 scope.inWorkspace(workspaceId, () -> {
                     JobRunDetail detail = JobRunDetail.startedUtc();
                     JobRunStatus outcome = JobRunStatus.SUCCEEDED;
+                    int attemptedCount = 0;
                     try {
                         for (var expired : java.util.stream.Stream.concat(runs.expiredRuns(workspaceId, 25).stream(),
                                 runs.reviewExpiredRuns(workspaceId, 25).stream()).toList()) {
+                            attemptedCount++;
                             if (persistence.expire(expired)) {
                                 var current = runs.getRun(workspaceId, expired.getId());
                                 if (current != null) {
@@ -79,6 +82,7 @@ public class AiAgentScheduler {
                         }
                         if (properties.isMissionsEnabled()) {
                             for (var interrupted : runs.interruptedReadRuns(workspaceId, 25)) {
+                                attemptedCount++;
                                 try {
                                     runner.recoverInterrupted(interrupted);
                                 } catch (RuntimeException refusal) {
@@ -89,6 +93,7 @@ public class AiAgentScheduler {
                                 }
                             }
                             for (var candidate : runs.dueRuns(workspaceId, 1)) {
+                                attemptedCount++;
                                 try {
                                     runner.run(candidate);
                                 } catch (RuntimeException refusal) {
@@ -105,7 +110,8 @@ public class AiAgentScheduler {
                             throw snapshot;
                         }
                     } finally {
-                        jobs.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspaceId, outcome, detail);
+                        jobs.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspaceId, outcome,
+                            new JobRunDetail(detail.startedAt(), Map.of("attemptedCount", attemptedCount)));
                     }
                     return null;
                 });

@@ -113,7 +113,7 @@
        a mention queued while pending — but surfaces only once their membership activates, so workspace
        content is never disclosed to a not-yet-joined invitee. The sole exception is the
        'workspace.join' invitation itself, which carries no workspace content and must reach the
-       pending member so they can accept. Member removal deletes a member's notifications in the service layer
+       pending member while its effective deadline is still in the future. Member removal deletes a member's notifications in the service layer
        (UserOffboardingService.detachMemberContent; the FK cascade was dropped in #440 increment 3). -->
   <sql id="inboxScope">
     n.recipient_id = #{recipientId}
@@ -131,6 +131,7 @@
             WHERE pending_wm.workspace_id = n.workspace_id
               AND pending_wm.user_id = n.recipient_id
               AND pending_wm.status = 'pending'
+              AND COALESCE(pending_wm.expires_at, #{pendingInvitationCutoverDeadline,jdbcType=VARCHAR}) &gt; UTC_TIMESTAMP()
           )
         )
       )
@@ -751,6 +752,26 @@
       #{contextLabel}, #{actionUrl}, #{data}, #{dedupeKey}, #{triggeredAt}
     ) AS incoming
     ON DUPLICATE KEY UPDATE
+      updated_at = IF(
+        notification.resolved_at IS NULL
+          AND BINARY notification.type &lt;=&gt; BINARY incoming.type
+          AND BINARY notification.category &lt;=&gt; BINARY incoming.category
+          AND BINARY notification.severity &lt;=&gt; BINARY incoming.severity
+          AND notification.template_version &lt;=&gt; incoming.template_version
+          AND BINARY notification.title &lt;=&gt; BINARY incoming.title
+          AND BINARY notification.body &lt;=&gt; BINARY incoming.body
+          AND notification.actor_id &lt;=&gt; incoming.actor_id
+          AND BINARY notification.actor_label &lt;=&gt; BINARY incoming.actor_label
+          AND BINARY notification.source_type &lt;=&gt; BINARY incoming.source_type
+          AND notification.source_id &lt;=&gt; incoming.source_id
+          AND BINARY notification.source_label &lt;=&gt; BINARY incoming.source_label
+          AND BINARY notification.context_type &lt;=&gt; BINARY incoming.context_type
+          AND notification.context_id &lt;=&gt; incoming.context_id
+          AND BINARY notification.context_label &lt;=&gt; BINARY incoming.context_label
+          AND BINARY notification.action_url &lt;=&gt; BINARY incoming.action_url
+          AND notification.data &lt;=&gt; CAST(incoming.data AS JSON),
+        notification.updated_at, CURRENT_TIMESTAMP
+      ),
       read_at = IF(
         notification.severity &lt;&gt; incoming.severity
           OR notification.resolved_at IS NOT NULL,

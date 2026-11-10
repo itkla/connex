@@ -762,6 +762,65 @@ volume, so **a run of failures cannot evict the last known good run**. Do not si
 per-job cap. Statuses are `succeeded`, `failed` and `skipped`; detail payloads are key-whitelisted
 and capped, and instance-scoped rows (no workspace) retain only `phase`.
 
+Explicitly empty successful mission, privacy-initialization, lead-SLA, approval, brief, watch,
+notification and Radar sweeps persist
+one idle sample per job/workspace every fifteen minutes per process. Their complete zero-counter
+metadata identifies an idle pass; positive counters, unknown metadata, failures and skipped outcomes
+always retain the ordinary recording path. A failure or work run resets sampling, so the next idle
+success records recovery immediately. A failed recording is retried at the next tick. Retention
+still partitions by status. Privacy counts new barriers, enrollment/pending work, legacy turns and
+startup recovery candidates; existing empty barriers do not count as work. Notification and Radar
+passes report material changes, resolutions and baseline writes. Degraded notification passes count
+conservatively as work so their existing outcome records are never sampled away. Positive counts
+always record.
+
+Diagnostics merges process-local last-idle ticks with durable history by job and workspace, inside
+the existing authorized workspace scope. Both workspace merging and organization aggregation compare
+starts as UTC instants truncated to whole seconds, matching `job_run`'s `DATETIME` precision. Durable
+rows win ties over cached ticks, whose IDs are unset; durable ties use the higher row ID as in the
+database query. This deliberately keeps a durable failure visible ahead of a same-second cached
+success until a later-second cached tick establishes recovery. A newer durable outcome can still
+establish recovery by row ID. This avoids inferring order from fractions discarded by storage. A newer
+durable failure from another instance wins over an older local tick, and one workspace's success
+cannot hide another workspace's failure. Another
+instance sees the most recent durable idle sample, which may lag fifteen minutes. The support
+bundle currently omits `job-runs.json` with `job_run_not_available`; it does not merge local ticks.
+Restarting a process takes a new first sample. The local cache retains at most 20,000
+job/workspace pairs; evicting an older pair causes its next tick to take a fresh durable sample.
+There is no deployment-wide sampling lock, so idle sampling scales with the number of processes.
+
+The mission scheduler intentionally polls one page of at most 100 workspaces every five seconds,
+with a separate single worker and no queued pages while that worker is busy. An empty page resets
+the cursor and takes a poll of its own. The measured approximately nineteen-second workspace
+cadence in #2381 is consistent with paging and sweep duration; the five-second delay is not applied
+independently to each workspace. Privacy initialization defaults to sixty seconds; notification,
+Radar, lead-SLA and brief sweeps default to five minutes; watch and approval sweeps default to
+fifteen minutes. These timing defaults are unchanged. The maintenance scheduling tests pin the
+mission timer defaults; changing product timing requires a separate decision.
+
+Signal upserts preserve their generation, evidence timestamp, row version and update timestamp when
+source hash, model, label, ranking and JSON evidence are unchanged. Missing-row resolution retains
+all currently admitted candidate keys, including unchanged rows carrying an earlier generation.
+Admission ranks all computed families and persisted active candidates from failed detectors before
+selecting the canonical top fifty. Unchanged overflow is never revived just to be resolved again;
+a changed rank can re-enter. The final persisted-row cap remains a concurrency backstop. Each family
+still advances its locked attempt/success watermark: these three bounded metadata updates per
+workspace/pass retain stale-attempt rejection across processes. Radar freshness uses that family's
+persisted evidence time together with the row's last material evidence time. The family time never
+exceeds the oldest admitted candidate's evidence, so unchanged rows stay actionable after a fresh
+check while genuinely stale evidence still refuses task creation. Feed reads reuse their bulk family
+state; task admission adds one non-locking family read without acquiring a family lock after a signal.
+Detector/write failure remains
+isolated by family; a write failure can temporarily leave admission underfilled until a successful
+pass repairs it.
+
+Notification upserts preserve `updated_at` for identical material payloads and preserve existing
+read/dismiss/snooze/trigger state as before. Structural JSON comparison prevents MySQL's JSON
+formatting from advancing recipient versions or pushing unchanged reminders. SQL still executes
+after the dedupe pre-read, preserving protection against a concurrent change; affected-row counts
+catch that race. Notification email claims remain separate, one-use writes and are never reset by
+reconciliation. Auto-increment reservation by an unchanged upsert is not a changed row.
+
 ### Support bundle
 
 A redacted support bundle is the sanctioned way to move diagnostic state out of a deployment Connex

@@ -19,8 +19,9 @@ import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWorkspacePrivacy;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 
-/** Hydrates scoped generations for SQL filtering of content-free assistant notification pointers. */
+/** Binds server-owned invitation deadlines and assistant generations before inbox filtering. */
 @Intercepts({
     @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}),
     @Signature(type = Executor.class, method = "query",
@@ -40,9 +41,13 @@ public final class NotificationPrivacyInterceptor implements Interceptor {
             "findInaccessibleNotificationRecipientIds", "resolveInaccessibleNotifications");
     private final BiFunction<Integer, Integer, List<AiAssistantWorkspacePrivacy>> authority;
 
+    private final ControlPlaneRead<String> invitationCutoverDeadline;
+
     /** Defers control mapper resolution until after SqlSessionFactory construction. */
-    public NotificationPrivacyInterceptor(BiFunction<Integer, Integer, List<AiAssistantWorkspacePrivacy>> authority) {
+    public NotificationPrivacyInterceptor(BiFunction<Integer, Integer, List<AiAssistantWorkspacePrivacy>> authority,
+            ControlPlaneRead<String> invitationCutoverDeadline) {
         this.authority = java.util.Objects.requireNonNull(authority);
+        this.invitationCutoverDeadline = java.util.Objects.requireNonNull(invitationCutoverDeadline);
     }
 
     @Override
@@ -72,6 +77,7 @@ public final class NotificationPrivacyInterceptor implements Interceptor {
         List<AiAssistantWorkspacePrivacy> captured = authority.apply(recipientId, workspaceId);
         parameters.put("assistantWorkspaceGenerations", captured.stream().collect(Collectors.toUnmodifiableMap(
                 AiAssistantWorkspacePrivacy::workspaceId, AiAssistantWorkspacePrivacy::generation)));
+        parameters.put("pendingInvitationCutoverDeadline", invitationCutoverDeadline.read());
         arguments[1] = parameters;
         if (arguments.length == 6) {
             BoundSql bound = statement.getBoundSql(parameters);

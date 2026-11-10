@@ -66,7 +66,7 @@ public class RelationshipSignalScheduler {
                 workspaceId,
                 status,
                 new JobRunDetail(
-                    started.startedAt(), Map.of("failedCount", result.failedCount())));
+                    started.startedAt(), Map.of("failedCount", result.failedCount(), "changedCount", result.changedCount())));
         } catch (TenantScopeSnapshotException exception) {
             throw exception;
         } catch (RuntimeException exception) {

@@ -114,9 +114,15 @@ for (const locale of ["en", "ja"] as const) {
             await recovery.getByRole("button", { name: copy("close"), exact: true }).first().click();
             await page.reload();
             const pending = section.locator("li").filter({ hasText: `flow_invited_${marker}@example.test` });
-            await pending.hover();
-            await pending.getByRole("button", { name: copy("inviteActions"), exact: true }).click();
-            await expect(page.getByRole("menuitem", { name: copy("replaceInvite"), exact: true })).toBeVisible();
+            const replacementResponse = page.waitForResponse((response) => response.request().method() === "POST"
+                && /\/api\/workspaces\/\d+\/invites$/.test(new URL(response.url()).pathname));
+            await pending.getByRole("button", { name: copy("replaceInvite"), exact: true }).click();
+            const replacement = await replacementResponse;
+            expect(replacement.status()).toBe(200);
+            const replaced: unknown = await replacement.json();
+            expect(replaced).toHaveProperty("invite.expiresAt", expect.any(String));
+            expect(replaced).toHaveProperty("invite.email", `flow_invited_${marker}@example.test`);
+            await expect(pending).toHaveCount(1);
         } finally {
             await authenticator.send("WebAuthn.disable");
             await authenticator.detach();

@@ -24,11 +24,14 @@ public class RelationshipSignalWriteService {
 
     private final RelationshipSignalMapper signalMapper;
 
-    /** Replaces one successfully computed family without disturbing failed families. */
+    /**
+     * Replaces a computed family and returns inserted, changed or resolved signal rows.
+     * Unchanged duplicate matches can report one JDBC found row; they count as zero changes.
+     */
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
         isolation = Isolation.READ_COMMITTED)
-    public void replaceFamily(
+    public int replaceFamily(
             int workspaceId,
             String family,
             String generationToken,
@@ -40,20 +43,33 @@ public class RelationshipSignalWriteService {
             workspaceId, family, normalizedAttemptedAt) == 1;
         if (staleAttempt(
                 workspaceId, family, normalizedAttemptedAt, familyStateCreated)) {
-            return;
+            return 0;
         }
+        int changedCount = 0;
         for (RelationshipSignal candidate : candidates) {
             RelationshipSignal previous = signalMapper.lockByDedupeKey(workspaceId, candidate.getDedupeKey());
-            signalMapper.upsertSignal(candidate);
+            int affected = signalMapper.upsertSignal(candidate);
+            if (previous == null || affected > 1) {
+                changedCount++;
+            }
             if (previous != null && !candidate.getSourceModelVersion().equals(previous.getSourceModelVersion())) {
                 signalMapper.rebaseModelState(workspaceId, previous.getId(), previous.getSourceStateHash(),
                     candidate.getSourceStateHash());
             }
         }
-        signalMapper.resolveMissing(
-            workspaceId, family, generationToken, normalizedAttemptedAt);
+        changedCount += signalMapper.resolveMissingExcept(
+            workspaceId, family, generationToken, normalizedAttemptedAt,
+            candidates.stream().map(RelationshipSignal::getDedupeKey).toList());
+        LocalDateTime oldestEvidence = evidenceAsOf;
+        for (RelationshipSignal candidate : candidates) {
+            LocalDateTime candidateEvidence = candidate.getEvidenceAsOf();
+            if (candidateEvidence != null && (oldestEvidence == null || candidateEvidence.isBefore(oldestEvidence))) {
+                oldestEvidence = candidateEvidence;
+            }
+        }
         signalMapper.upsertFamilyAvailable(
-            workspaceId, family, normalizedAttemptedAt, evidenceAsOf);
+            workspaceId, family, normalizedAttemptedAt, oldestEvidence);
+        return changedCount;
     }
 
     /** Records detector failure while preserving the family's last known signals and success time. */
@@ -90,23 +106,29 @@ public class RelationshipSignalWriteService {
             && !attemptedAt.isAfter(locked.getLastAttemptAt());
     }
 
+    /** Loads the last-known active candidates once for cross-family admission after detector failures. */
+    public List<RelationshipSignal> activeCandidates(int workspaceId) {
+        return signalMapper.findActiveForActor(workspaceId, 0);
+    }
+
     /** Applies the hard workspace cap over the canonical global deterministic order. */
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
         isolation = Isolation.READ_COMMITTED)
-    public void enforceWorkspaceCap(
+    public int enforceWorkspaceCap(
             int workspaceId,
             LocalDateTime resolvedAt) {
         List<RelationshipSignal> ranked = signalMapper.findActiveForActor(workspaceId, 0);
         if (ranked.size() <= WORKSPACE_CAP) {
-            return;
+            return 0;
         }
         List<Long> overflow = new ArrayList<>();
         for (int index = WORKSPACE_CAP; index < ranked.size(); index++) {
             overflow.add(ranked.get(index).getId());
         }
         if (!overflow.isEmpty()) {
-            signalMapper.resolveByIds(workspaceId, overflow, resolvedAt);
+            return signalMapper.resolveByIds(workspaceId, overflow, resolvedAt);
         }
+        return 0;
     }
 }
