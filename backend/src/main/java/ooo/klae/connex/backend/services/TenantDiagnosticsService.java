@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -59,6 +61,9 @@ import tools.jackson.databind.ObjectMapper;
 public class TenantDiagnosticsService {
     private static final TypeReference<Map<String, Object>> DETAIL_TYPE = new TypeReference<>() {
     };
+    private static final Comparator<JobRun> JOB_RUN_ORDER = Comparator
+            .comparing((JobRun run) -> run.getStartedAt().toInstant(ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS))
+            .thenComparingInt(JobRun::getId);
     /**
      * The scheduled jobs whose last run, last success, and last failure this surface reports.
      *
@@ -260,7 +265,7 @@ public class TenantDiagnosticsService {
         for (JobRun run : idle) {
             JobScope key = new JobScope(run.getJobName(), run.getWorkspaceId());
             JobRun previous = latest.get(key);
-            if (previous == null || run.getStartedAt().isAfter(previous.getStartedAt())) {
+            if (previous == null || JOB_RUN_ORDER.compare(run, previous) > 0) {
                 latest.put(key, run);
             }
         }
@@ -389,7 +394,7 @@ public class TenantDiagnosticsService {
         Map<String, JobRun> byName = new LinkedHashMap<>();
         for (JobRun run : runs) {
             JobRun current = byName.get(run.getJobName());
-            if (current != null && !run.getStartedAt().isAfter(current.getStartedAt())) {
+            if (current != null && JOB_RUN_ORDER.compare(run, current) <= 0) {
                 continue;
             }
             byName.put(run.getJobName(), run);

@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
@@ -90,6 +93,27 @@ class JobRunRecorderTest {
         assertEquals(CLOCK.instant().plusSeconds(7).atOffset(ZoneOffset.UTC).toLocalDateTime(),
             recorder.latestIdleRuns(List.of(7)).getFirst().getStartedAt());
         assertTrue(recorder.latestIdleRuns(List.of(8)).isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"UTC", "Pacific/Honolulu", "Asia/Tokyo"})
+    void storedAndCachedTimestampsUseUtcRegardlessOfClockZone(String zone) {
+        Clock zoned = Clock.fixed(Instant.parse("2026-07-20T12:00:00.100Z"), ZoneId.of(zone));
+        PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
+        when(transactions.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+        JobRunRecorder instance = new JobRunRecorder(mapper, objectMapper, zoned, transactions);
+
+        instance.record(JobRunRecorder.AI_AGENT_SCHEDULER, 7, JobRunStatus.SUCCEEDED,
+            JobRunDetail.started(zoned, Map.of("attemptedCount", 0)));
+
+        ArgumentCaptor<JobRun> stored = ArgumentCaptor.forClass(JobRun.class);
+        verify(mapper).insert(stored.capture());
+        var utc = zoned.instant().atOffset(ZoneOffset.UTC).toLocalDateTime();
+        assertEquals(utc, stored.getValue().getStartedAt());
+        assertEquals(utc, stored.getValue().getFinishedAt());
+        assertEquals(utc, instance.latestIdleRuns(List.of(7)).getFirst().getStartedAt());
+        assertEquals(utc, instance.latestIdleRuns(List.of(7)).getFirst().getFinishedAt());
+        assertEquals(0, instance.latestIdleRuns(List.of(7)).getFirst().getId());
     }
 
     @Test

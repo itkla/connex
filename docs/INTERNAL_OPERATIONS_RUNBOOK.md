@@ -775,8 +775,14 @@ conservatively as work so their existing outcome records are never sampled away.
 always record.
 
 Diagnostics merges process-local last-idle ticks with durable history by job and workspace, inside
-the existing authorized workspace scope. A newer durable failure from another instance wins over
-an older local tick, and one workspace's success cannot hide another workspace's failure. Another
+the existing authorized workspace scope. Both workspace merging and organization aggregation compare
+starts as UTC instants truncated to whole seconds, matching `job_run`'s `DATETIME` precision. Durable
+rows win ties over cached ticks, whose IDs are unset; durable ties use the higher row ID as in the
+database query. This deliberately keeps a durable failure visible ahead of a same-second cached
+success until a later-second cached tick establishes recovery. A newer durable outcome can still
+establish recovery by row ID. This avoids inferring order from fractions discarded by storage. A newer
+durable failure from another instance wins over an older local tick, and one workspace's success
+cannot hide another workspace's failure. Another
 instance sees the most recent durable idle sample, which may lag fifteen minutes. The support
 bundle currently omits `job-runs.json` with `job_run_not_available`; it does not merge local ticks.
 Restarting a process takes a new first sample. The local cache retains at most 20,000
