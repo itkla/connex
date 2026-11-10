@@ -17,6 +17,8 @@ import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The single fan-out point for a generated notification. The {@code in_app}
@@ -63,13 +65,15 @@ public class NotificationDelivery {
     private final NotificationQuietHoursControlAccess quietHoursControlAccess;
     private final NotificationQuietHoursBypassPolicy bypassPolicy;
     private final Clock clock;
+    private final ObjectMapper objectMapper;
 
     /**
      * Delivers a notification across every eligible channel.
      * @param notification the generated notification
+     * @return whether delivery observed a new or materially changed notification
      */
     @Transactional
-    public void deliver(Notification notification) {
+    public boolean deliver(Notification notification) {
         Notification existing = findExisting(notification);
         boolean firstOccurrence = existing == null;
         boolean changed = firstOccurrence || isVisibleChange(existing, notification);
@@ -90,7 +94,7 @@ public class NotificationDelivery {
         }
 
         if (!firstOccurrence || quietHoursActive || !recipientCanAccess) {
-            return;
+            return persistedChange;
         }
         for (NotificationDispatcher dispatcher : dispatchers) {
             if (IN_APP.equals(dispatcher.channel())) {
@@ -104,6 +108,7 @@ public class NotificationDelivery {
                 dispatchAfterCommit(dispatcher, notification);
             }
         }
+        return persistedChange;
     }
 
     private boolean claimEmailDelivery(Notification notification) {
@@ -172,7 +177,17 @@ public class NotificationDelivery {
                 || !Objects.equals(existing.getContextId(), incoming.getContextId())
                 || !Objects.equals(existing.getContextLabel(), incoming.getContextLabel())
                 || !Objects.equals(existing.getActionUrl(), incoming.getActionUrl())
-                || !Objects.equals(existing.getData(), incoming.getData());
+                || !sameData(existing.getData(), incoming.getData());
+    }
+
+    private boolean sameData(String existing, String incoming) {
+        if (Objects.equals(existing, incoming)) return true;
+        if (existing == null || incoming == null) return false;
+        try {
+            return Objects.equals(objectMapper.readTree(existing), objectMapper.readTree(incoming));
+        } catch (JacksonException exception) {
+            return false;
+        }
     }
 
     private void safeDispatch(NotificationDispatcher dispatcher, Notification notification) {

@@ -359,7 +359,13 @@ workspace teardown; audit retention must preserve these records if introduced la
 ## Initialization and lifecycle
 
 Startup and periodic reconciliation enumerate control-plane workspace IDs, resolve each
-placement, and initialize only an empty workspace. Existing barriers are preserved.
+placement, and initialize only an empty workspace. Existing barriers are preserved. The periodic
+initializer defaults to a sixty-second fixed delay; approximately nine passes per workspace in a
+ten-minute interval is expected once execution time is included. Empty successful initialization
+passes sample job history every fifteen minutes per process; new barriers, pending/enrolled privacy
+work, legacy turns and startup recovery candidates retain individual records, as do failures.
+The work counts are observations under the existing locks and transactions; they never skip a
+privacy check or replace an authority generation.
 Missing barriers with run/segment/v1-work/taint evidence fail readiness. An incomplete v1 work
 record under an unblocked barrier also fails readiness. V2 work does not block that barrier.
 Pre-V232 active ordinary turns

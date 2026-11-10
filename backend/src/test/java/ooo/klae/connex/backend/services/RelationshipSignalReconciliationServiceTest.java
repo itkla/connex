@@ -51,7 +51,7 @@ class RelationshipSignalReconciliationServiceTest {
                 .thenReturn(new Detection(List.of(), NOW, "warm"));
             var service = service(detectors, writes, fixture);
 
-            assertEquals(new RelationshipSignalReconciliationService.Result(Set.of("warm_path"), 2),
+            assertEquals(new RelationshipSignalReconciliationService.Result(Set.of("warm_path"), 2, 0),
                 service.reconcileWorkspace(7));
 
             verify(writes).markUnavailable(eq(7), eq("relationship_decay"), any(), eq("detector_failed"));
@@ -98,7 +98,7 @@ class RelationshipSignalReconciliationServiceTest {
             when(detectors.detectWarmPaths(eq(7), anyString(), eq(NOW)))
                 .thenReturn(new Detection(List.of(), NOW, "warm"));
 
-            assertEquals(new RelationshipSignalReconciliationService.Result(Set.of("deal_risk", "warm_path"), 1),
+            assertEquals(new RelationshipSignalReconciliationService.Result(Set.of("deal_risk", "warm_path"), 1, 0),
                 service(detectors, writes, fixture).reconcileWorkspace(7));
             verify(writes).markUnavailable(eq(7), eq("relationship_decay"), any(), eq("detector_failed"));
             verifyNoInteractions(fixture.control);

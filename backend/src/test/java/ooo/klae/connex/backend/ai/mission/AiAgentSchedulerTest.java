@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -94,7 +95,33 @@ class AiAgentSchedulerTest {
             verify(runs, never()).getRun(7, 12);
             verify(runs, never()).dueRuns(7, 1);
             verify(jobs).record(eq(JobRunRecorder.AI_AGENT_SCHEDULER), eq(7),
-                    eq(JobRunRecorder.JobRunStatus.SUCCEEDED), any());
+                    eq(JobRunRecorder.JobRunStatus.SUCCEEDED), org.mockito.ArgumentMatchers.argThat(
+                        detail -> Integer.valueOf(3).equals(detail.metadata().get("attemptedCount"))));
+        } finally {
+            scheduler.shutdown();
+        }
+    }
+
+    @Test
+    void anEmptyWorkspaceReportsAnExplicitZeroWorkCount() throws Exception {
+        CountDownLatch completed = new CountDownLatch(1);
+        when(initializer.isReady()).thenReturn(true);
+        when(scope.unroutedRead(any())).thenReturn(List.of(7));
+        when(scope.inWorkspace(eq(7), ArgumentMatchers.<Supplier<Object>>any())).thenAnswer(invocation -> {
+            Supplier<Object> work = invocation.getArgument(1);
+            try {
+                return work.get();
+            } finally {
+                completed.countDown();
+            }
+        });
+        try {
+            scheduler.sweep();
+            assertTrue(completed.await(5, TimeUnit.SECONDS));
+            var detail = org.mockito.ArgumentCaptor.forClass(JobRunRecorder.JobRunDetail.class);
+            verify(jobs).record(eq(JobRunRecorder.AI_AGENT_SCHEDULER), eq(7),
+                eq(JobRunRecorder.JobRunStatus.SUCCEEDED), detail.capture());
+            assertEquals(java.util.Map.of("attemptedCount", 0), detail.getValue().metadata());
         } finally {
             scheduler.shutdown();
         }

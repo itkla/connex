@@ -301,9 +301,26 @@ class RadarServiceTest {
     }
 
     @Test
+    void anUnchangedRowUsesFreshFamilyEvidenceWithoutChangingItsVersion() {
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        signal.setEvidenceAsOf(LocalDateTime.ofInstant(NOW.minusSeconds(3600), ZoneOffset.UTC));
+        currentPerson(signal.getSubjectId(), "Visible");
+        when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
+
+        RadarResponseDto.Signal item = service.get(List.of(), List.of(), null).items().getFirst();
+
+        assertFalse(item.stale());
+        assertEquals(NOW, item.evidenceAsOf());
+        assertEquals("1:0", item.version());
+    }
+
+    @Test
     void staleEvidenceRefusesTaskBeforeAnyTaskMutation() {
         RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
         signal.setEvidenceAsOf(LocalDateTime.ofInstant(NOW.minusSeconds(16 * 60), ZoneOffset.UTC));
+        RelationshipSignalFamilyState staleFamily = availableFamily();
+        staleFamily.setEvidenceAsOf(signal.getEvidenceAsOf());
+        when(signalMapper.findFamilyStates(WORKSPACE_ID)).thenReturn(List.of(staleFamily));
         currentPerson(signal.getSubjectId(), "Visible");
         memberLock();
         when(signalMapper.getActiveForActorForUpdate(
@@ -337,6 +354,7 @@ class RadarServiceTest {
     @Test
     void standardTaskDelegatesWithSubjectLinkAndBindsIdempotently() {
         RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        signal.setEvidenceAsOf(LocalDateTime.ofInstant(NOW.minusSeconds(3600), ZoneOffset.UTC));
         currentPerson(signal.getSubjectId(), "Visible");
         memberLock();
         when(signalMapper.getActiveForActorForUpdate(
@@ -372,6 +390,8 @@ class RadarServiceTest {
             new RadarTaskRequestDto("Call", "2026-08-10", USER_ID, signal.getSubjectId(), null, null));
 
         assertEquals(66, updated.taskId());
+        assertFalse(updated.stale());
+        assertEquals(NOW, updated.evidenceAsOf());
         verify(taskService).create(any(Task.class));
     }
 

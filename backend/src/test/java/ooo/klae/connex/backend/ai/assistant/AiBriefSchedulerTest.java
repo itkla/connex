@@ -36,6 +36,7 @@ class AiBriefSchedulerTest {
 
     private final AiBriefScheduleMapper scheduleMapper = mock(AiBriefScheduleMapper.class);
     private final AiBriefRunService runService = mock(AiBriefRunService.class);
+    private final JobRunRecorder jobs = mock(JobRunRecorder.class);
 
     /** 2026-08-24 is a Monday; 07:00 UTC is 16:00 in Tokyo and 00:00 in Los Angeles. */
     private static final Instant MONDAY_0700_UTC = Instant.parse("2026-08-24T07:00:00Z");
@@ -46,8 +47,25 @@ class AiBriefSchedulerTest {
                 runService,
                 mock(WorkspaceMapper.class),
                 mock(TenantWorkScope.class),
-                mock(JobRunRecorder.class),
+                jobs,
                 clock);
+    }
+
+    @Test
+    void skippedPendingDeliveryStillCountsAsAttemptedWork() {
+        AiBriefSchedule pending = schedule("Asia/Tokyo");
+        when(scheduleMapper.findPendingDelivery(7)).thenReturn(List.of(pending));
+        when(runService.deliverPending(pending)).thenReturn(AiBriefRunService.Outcome.SKIPPED);
+
+        scheduler(Clock.fixed(MONDAY_0700_UTC, ZoneOffset.UTC)).sweepWorkspace(7);
+
+        var detail = org.mockito.ArgumentCaptor.forClass(JobRunRecorder.JobRunDetail.class);
+        verify(jobs).record(eq(JobRunRecorder.AI_BRIEF_DELIVERY), eq(7),
+            eq(JobRunRecorder.JobRunStatus.SUCCEEDED), detail.capture());
+        assertEquals(1, detail.getValue().metadata().get("attemptedCount"));
+        assertEquals(0, detail.getValue().metadata().get("startedCount"));
+        assertEquals(0, detail.getValue().metadata().get("deliveredCount"));
+        assertEquals(0, detail.getValue().metadata().get("failedCount"));
     }
 
     private static AiBriefSchedule schedule(String zone) {

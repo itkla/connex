@@ -72,29 +72,31 @@ public class AiAgentPrivacyService {
     private final ooo.klae.connex.backend.storage.ManagedObjectService managedObjectService;
     private final ConcurrentMap<Integer, Integer> ownerCursors = new ConcurrentHashMap<>();
 
-    /** Initializes only a previously empty workspace, preserving every existing barrier. */
-    public void initialize(int workspaceId) {
+    /** Initializes an empty workspace and returns the number of admitted initialization/recovery work units. */
+    public int initialize(int workspaceId) {
         for (int attempt = 0; attempt < 2; attempt++) {
             try {
-                initializeOnce(workspaceId);
-                reconcileAssistantOperations(workspaceId);
-                return;
+                int initialized = initializeOnce(workspaceId);
+                return initialized + reconcileAssistantOperations(workspaceId);
             } catch (org.springframework.dao.DuplicateKeyException race) {
                 if (attempt != 0) {
                     throw race;
                 }
             }
         }
+        throw unavailable();
     }
 
-    /** Settles legacy executions before readiness; no expired process-local token is adopted. */
-    public void reconcileLegacyTurns(int workspaceId) {
+    /** Settles legacy executions before readiness and returns how many turns were examined. */
+    public int reconcileLegacyTurns(int workspaceId) {
+        int attempted = 0;
         while (true) {
             var legacy = Objects.requireNonNull(transaction().execute(
                     status -> privacyMapper.legacyActiveTurns(workspaceId, BATCH_SIZE)));
             if (legacy.isEmpty()) {
-                return;
+                return attempted;
             }
+            attempted += legacy.size();
             for (var turn : legacy) {
                 transaction().executeWithoutResult(status -> {
                     if (chatMapper.getSessionByIdForMaintenanceUpdate(workspaceId, turn.sessionId()) == null) {
@@ -110,20 +112,21 @@ public class AiAgentPrivacyService {
         }
     }
 
-    private void initializeOnce(int workspaceId) {
-        transaction().executeWithoutResult(status -> {
+    private int initializeOnce(int workspaceId) {
+        return Objects.requireNonNull(transaction().execute(status -> {
             AiAgentPrivacyBarrier existing = privacyMapper.lockBarrier(workspaceId);
             if (existing != null) {
                 if (!existing.isBlocked() && privacyMapper.countIncompleteWork(workspaceId) != 0) {
                     throw unavailable();
                 }
-                return;
+                return 0;
             }
             if (privacyMapper.countInitializationEvidence(workspaceId) != 0) {
                 throw unavailable();
             }
             privacyMapper.insertBarrier(workspaceId);
-        });
+            return 1;
+        }));
     }
 
     /**
@@ -212,7 +215,7 @@ public class AiAgentPrivacyService {
      * cleanup owns the full residual scan and C2 waits for workspace root deletion.
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void enrollOperation(int workspaceId, ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation operation) {
+    public int enrollOperation(int workspaceId, ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation operation) {
         int organizationId = organizationId(workspaceId);
         if (!Objects.equals(catalogResolver.resolveCatalog(organizationId), tenantContext.getCatalog())
                 || operation.getOrganizationId() != organizationId
@@ -224,12 +227,12 @@ public class AiAgentPrivacyService {
             throw unavailable();
         }
         if (assistantControlMapper.verifiedTeardownWorkspace(organizationId, operation.getOperationKey(), workspaceId)) {
-            return;
+            return 0;
         }
         if (privacyMapper.lockBarrierForShare(workspaceId) == null) {
             throw unavailable();
         }
-        assistantControlMapper.reconcileWorkspaceIntents(organizationId, operation.getOperationKey());
+        int attempted = assistantControlMapper.reconcileWorkspaceIntents(organizationId, operation.getOperationKey());
         assistantControlMapper.lockOperation(organizationId, operation.getOperationKey());
         if (assistantControlMapper.lockWorkspaceIntent(organizationId, operation.getOperationKey(), workspaceId) == null) {
             throw unavailable();
@@ -245,6 +248,7 @@ public class AiAgentPrivacyService {
         }
         if (existing == null || !"complete".equals(existing.getPhase())
                 || privacyMapper.allChatResidualCount(workspaceId, existing.getCutoffGeneration(), existing.getOperationKey()) != 0) {
+            attempted++;
             assistantControlMapper.reopenOperation(organizationId, operation.getOperationKey());
             assistantControlMapper.reopenBootstrap(organizationId, operation.getOperationKey());
             assistantControlMapper.reopenWorkspace(organizationId, operation.getOperationKey(), workspaceId);
@@ -256,7 +260,7 @@ public class AiAgentPrivacyService {
             }
         }
         if (existing != null) {
-            return;
+            return attempted;
         }
         AiAgentPrivacyWatermarks bounds = privacyMapper.watermarks(workspaceId);
         AiAgentPrivacyWork work = new AiAgentPrivacyWork();
@@ -278,6 +282,7 @@ public class AiAgentPrivacyService {
         work.setRevision(1);
         work.setNextAttemptAt(now());
         privacyMapper.insertWork(work);
+        return attempted + 1;
     }
 
     /** Retains existing restriction stripes before advancing the unconditional organization fence. */
@@ -292,15 +297,18 @@ public class AiAgentPrivacyService {
         }
     }
 
-    /** Re-enumerates organization operations without replacing their accepted cutoff or identity. */
-    public void reconcileAssistantOperations(int workspaceId) {
+    /** Re-enumerates original organization authority and returns pending or newly enrolled work units. */
+    public int reconcileAssistantOperations(int workspaceId) {
         int organizationId = organizationId(workspaceId);
+        int attempted = 0;
         for (var operation : assistantPrivacy.operations(organizationId)) {
-            transaction().executeWithoutResult(status -> {
-                enrollOperation(workspaceId, operation);
-            });
+            attempted += Objects.requireNonNull(transaction().execute(status -> enrollOperation(workspaceId, operation)));
+            if (operation.getCompletedAt() == null) {
+                attempted++;
+            }
             reconcileAssistantCompletion(workspaceId, operation.getOperationKey());
         }
+        return attempted;
     }
 
     private void reconcileAssistantCompletion(int workspaceId, String operationKey) {

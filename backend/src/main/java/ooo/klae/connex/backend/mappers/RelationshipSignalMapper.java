@@ -26,6 +26,14 @@ public interface RelationshipSignalMapper {
             @Param("generationToken") String generationToken,
             @Param("resolvedAt") LocalDateTime resolvedAt);
 
+    /** Resolves absent candidates while retaining unchanged rows from earlier generations. */
+    int resolveMissingExcept(
+            @Param("workspaceId") int workspaceId,
+            @Param("family") String family,
+            @Param("generationToken") String generationToken,
+            @Param("resolvedAt") LocalDateTime resolvedAt,
+            @Param("dedupeKeys") List<String> dedupeKeys);
+
     int resolveByIds(
             @Param("workspaceId") int workspaceId,
             @Param("ids") List<Long> ids,
