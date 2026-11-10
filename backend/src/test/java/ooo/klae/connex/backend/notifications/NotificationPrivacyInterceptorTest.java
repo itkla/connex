@@ -39,7 +39,7 @@ class NotificationPrivacyInterceptorTest {
     @Test
     void sourceEligibilityUsesFreshControlGenerationBeforePagination() throws Throwable {
         AtomicLong generation = new AtomicLong(1);
-        var interceptor = new NotificationPrivacyInterceptor((recipientId, workspaceId) -> {
+        var interceptor = interceptor((recipientId, workspaceId) -> {
             assertEquals(11, recipientId);
             return List.of(new AiAssistantWorkspacePrivacy(7, 3, generation.get()));
         });
@@ -51,18 +51,18 @@ class NotificationPrivacyInterceptorTest {
             return List.of();
         });
         Map<String, Object> supplied = Map.of("recipientId", 11,
-                "assistantWorkspaceGenerations", Map.of(7, 999L));
+                "assistantWorkspaceGenerations", Map.of(7, 999L), "pendingInvitationCutoverDeadline", "2099-01-01 00:00:00");
         invoke(interceptor, executor, statement, supplied);
-        assertEquals(Map.of("recipientId", 11, "assistantWorkspaceGenerations", Map.of(7, 1L)), captured.get());
+        assertEquals(Map.of("recipientId", 11, "assistantWorkspaceGenerations", Map.of(7, 1L), "pendingInvitationCutoverDeadline", "2030-01-01 00:00:00"), captured.get());
         generation.set(2);
         invoke(interceptor, executor, statement, supplied);
-        assertEquals(Map.of("recipientId", 11, "assistantWorkspaceGenerations", Map.of(7, 2L)), captured.get());
+        assertEquals(Map.of("recipientId", 11, "assistantWorkspaceGenerations", Map.of(7, 2L), "pendingInvitationCutoverDeadline", "2030-01-01 00:00:00"), captured.get());
         assertEquals(Map.of(7, 999L), supplied.get("assistantWorkspaceGenerations"));
     }
 
     @Test
     void unrelatedStatementsKeepTheirParametersAndDoNotReadAuthority() throws Throwable {
-        var interceptor = new NotificationPrivacyInterceptor((recipientId, workspaceId) -> {
+        var interceptor = interceptor((recipientId, workspaceId) -> {
             throw new AssertionError("An unrelated statement must not resolve chat authority");
         });
         Executor executor = mock(Executor.class);
@@ -82,7 +82,7 @@ class NotificationPrivacyInterceptorTest {
         AtomicLong generation = new AtomicLong(1);
         CountDownLatch beforeQuery = new CountDownLatch(1);
         CountDownLatch committed = new CountDownLatch(1);
-        var interceptor = new NotificationPrivacyInterceptor((recipientId, workspaceId) ->
+        var interceptor = interceptor((recipientId, workspaceId) ->
                 List.of(new AiAssistantWorkspacePrivacy(7, 3, generation.get())));
         Executor executor = mock(Executor.class);
         var statement = statement("findByIdForUpdate");
@@ -116,7 +116,7 @@ class NotificationPrivacyInterceptorTest {
         var database = new ReentrantReadWriteLock();
         var beforeQuery = new CountDownLatch(1);
         var invalidationRetained = new CountDownLatch(1);
-        var interceptor = new NotificationPrivacyInterceptor((recipientId, workspaceId) ->
+        var interceptor = interceptor((recipientId, workspaceId) ->
                 List.of(new AiAssistantWorkspacePrivacy(7, 3, 1)));
         Executor executor = mock(Executor.class);
         var statement = statement("findById");
@@ -157,9 +157,32 @@ class NotificationPrivacyInterceptorTest {
 
     @Test
     void invalidScopeCannotSupplyCallerSelectedGenerations() {
-        var interceptor = new NotificationPrivacyInterceptor((recipientId, workspaceId) -> List.of());
+        var interceptor = interceptor((recipientId, workspaceId) -> List.of());
         assertThrows(IllegalStateException.class,
                 () -> invoke(interceptor, mock(Executor.class), statement("findPage"), Map.of("recipientId", -1)));
+    }
+
+    @Test
+    void unavailableCutoverCannotFallBackToCallerSuppliedDeadline() throws Throwable {
+        var interceptor = new NotificationPrivacyInterceptor((recipientId, workspaceId) -> List.of(), () -> null);
+        Executor executor = mock(Executor.class);
+        var statement = statement("findPage");
+        when(executor.query(eq(statement), any(), any(), any())).thenAnswer(call -> {
+            Object parameters = call.getArgument(1);
+            assertTrue(parameters instanceof Map<?, ?>);
+            if (parameters instanceof Map<?, ?> captured) {
+                assertTrue(captured.containsKey("pendingInvitationCutoverDeadline"));
+                org.junit.jupiter.api.Assertions.assertNull(captured.get("pendingInvitationCutoverDeadline"));
+            }
+            return List.of();
+        });
+        invoke(interceptor, executor, statement,
+            Map.of("recipientId", 11, "pendingInvitationCutoverDeadline", "2099-01-01 00:00:00"));
+    }
+
+    private static NotificationPrivacyInterceptor interceptor(
+            java.util.function.BiFunction<Integer, Integer, List<AiAssistantWorkspacePrivacy>> authority) {
+        return new NotificationPrivacyInterceptor(authority, () -> "2030-01-01 00:00:00");
     }
 
     private static Notification briefPointer() {

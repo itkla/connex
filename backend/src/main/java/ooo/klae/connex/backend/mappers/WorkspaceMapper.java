@@ -16,6 +16,20 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
  * Mapper for workspace and membership persistence.
  */
 public interface WorkspaceMapper {
+    /** Returns the immutable successful control cutover deadline as UTC, or null if unavailable. */
+    String findPendingInvitationCutoverDeadline();
+
+    /** A bounded primary-key window includes active rows without locking them. */
+    record PendingDeadlineRow(int userId, long membershipId, boolean needsBackfill) { }
+
+    /** Reads at most limit memberships within one workspace, regardless of status or freshness. */
+    List<PendingDeadlineRow> findPendingDeadlineWindow(@Param("workspaceId") int workspaceId,
+        @Param("afterUserId") int afterUserId, @Param("limit") int limit);
+
+    /** Persists the immutable cutover deadline only for the exact still-pending generation. */
+    int backfillPendingDeadline(@Param("workspaceId") int workspaceId, @Param("userId") int userId,
+        @Param("membershipId") long membershipId);
+
     List<Workspace> getWorkspacesForUser(int userId);
     List<WorkspaceMembershipDto> getMembershipsForUser(int userId);
     /** Discovers every membership scope without status or lifecycle filtering for final erasure. */

@@ -500,17 +500,44 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 
+  <!-- installed_on is TIMESTAMP: convert to UTC independently of the connection time zone.
+       Missing successful cutover history produces NULL, so invitation authorization fails closed. -->
+  <sql id="pendingInvitationCutoverDeadline">
+    (SELECT CAST(installed_on AT TIME ZONE '+00:00' AS DATETIME) + INTERVAL 30 DAY
+     FROM flyway_schema_history WHERE version = '247' AND success = 1 AND type = 'SQL')
+  </sql>
+
+  <select id="findPendingInvitationCutoverDeadline" resultType="String">
+    SELECT <include refid="pendingInvitationCutoverDeadline"/>
+  </select>
+
+  <select id="findPendingDeadlineWindow" resultType="ooo.klae.connex.backend.mappers.WorkspaceMapper$PendingDeadlineRow">
+    SELECT user_id, membership_id, (status = 'pending' AND expires_at IS NULL) AS needs_backfill
+    FROM workspace_member FORCE INDEX (PRIMARY)
+    WHERE workspace_id = #{workspaceId} AND user_id &gt; #{afterUserId}
+    ORDER BY user_id LIMIT #{limit}
+  </select>
+
+  <update id="backfillPendingDeadline">
+    UPDATE workspace_member FORCE INDEX (PRIMARY)
+    SET expires_at = <include refid="pendingInvitationCutoverDeadline"/>
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND membership_id = #{membershipId}
+      AND status = 'pending' AND expires_at IS NULL
+      AND <include refid="pendingInvitationCutoverDeadline"/> IS NOT NULL
+  </update>
+
   <insert id="addPendingMember">
     INSERT INTO workspace_member (
-      workspace_id, user_id, role, status, grant_authorization_version
+      workspace_id, user_id, role, status, grant_authorization_version, expires_at
     )
-    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1)
+    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1, UTC_TIMESTAMP() + INTERVAL 14 DAY)
   </insert>
 
   <update id="activateMember">
     UPDATE workspace_member SET status = 'active'
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
       AND grant_authorization_version &gt;= 1
+      AND COALESCE(expires_at, <include refid="pendingInvitationCutoverDeadline"/>) &gt; UTC_TIMESTAMP()
   </update>
 
   <select id="getPendingMemberships" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
@@ -523,6 +550,7 @@
     JOIN organization o ON o.id = w.org_id
     LEFT JOIN org_member om ON om.org_id = w.org_id AND om.user_id = wm.user_id
     WHERE wm.user_id = #{userId} AND wm.status = 'pending'
+      AND COALESCE(wm.expires_at, <include refid="pendingInvitationCutoverDeadline"/>) &gt; UTC_TIMESTAMP()
       AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
     ORDER BY w.name, w.id
   </select>
