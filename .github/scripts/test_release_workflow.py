@@ -1064,7 +1064,15 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ]
 
         self.assertEqual(3, len(checks))
-        self.assertTrue(all("BuildKit version: v0.31.1" in check for check in checks))
+        pattern = "grep -E '^BuildKit version:[[:space:]]+v0\\.31\\.1$'"
+        self.assertTrue(all(pattern in check for check in checks))
+        # buildx aligns node fields with a tabwriter, so a docker-container builder with daemon flags
+        # pads the value: "BuildKit version:      v0.31.1". A single-space literal never matches it.
+        padded = "Name:                  builder0\nBuildKit daemon flags: --allow-insecure-entitlement network.host\nBuildKit version:      v0.31.1\n"
+        regex = re.compile(r"^BuildKit version:[\s]+v0\.31\.1$", re.M)
+        self.assertIsNotNone(regex.search(padded))
+        self.assertIsNone(regex.search(padded.replace("v0.31.1", "v0.31.10")))
+        self.assertNotIn("BuildKit version: v0.31.1", padded)
 
     def test_transaction_and_candidates_are_attempt_scoped(self) -> None:
         upload = self.named_step("release-set-smoke", "Upload committed release transaction")
