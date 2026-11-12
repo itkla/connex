@@ -32,6 +32,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
@@ -243,6 +244,11 @@ public class NotificationReconciliationService {
                     notification.getId(),
                     triggeredAt
                 );
+                log.debug("Notification state decision branch=missing_reminder workspace={} recipient={} "
+                        + "notificationId={} rows={} transactionActive={} synchronizationActive={}",
+                    workspaceId, notification.getRecipientId(), notification.getId(), rows,
+                    TransactionSynchronizationManager.isActualTransactionActive(),
+                    TransactionSynchronizationManager.isSynchronizationActive());
                 if (rows > 0) {
                     changedCount += rows;
                     stateVersionService.markChanged(notification.getRecipientId());
@@ -260,6 +266,10 @@ public class NotificationReconciliationService {
         }
         int rows = notificationMapper.resolveInaccessibleNotifications(
             workspaceId, utcTimestamp(clock.instant()));
+        log.debug("Notification state decision branch=inaccessible_sources workspace={} recipients={} "
+                + "rows={} transactionActive={} synchronizationActive={}",
+            workspaceId, recipientIds, rows, TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isSynchronizationActive());
         if (rows > 0) {
             recipientIds.forEach(stateVersionService::markChanged);
         }
@@ -1021,6 +1031,10 @@ public class NotificationReconciliationService {
         String cutoff = utcTimestamp(clock.instant().minusSeconds(retentionDays * 86_400L));
         List<Integer> recipientIds = notificationMapper.findPurgeRecipientIds(workspaceId, cutoff);
         int rows = notificationMapper.purgeWorkspaceReminderHistory(workspaceId, cutoff);
+        log.debug("Notification state decision branch=purged_history workspace={} recipients={} "
+                + "rows={} transactionActive={} synchronizationActive={}",
+            workspaceId, recipientIds, rows, TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isSynchronizationActive());
         if (rows > 0) {
             recipientIds.forEach(stateVersionService::markChanged);
         }
