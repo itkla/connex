@@ -16,6 +16,7 @@ from benchmark.run_benchmark import (
     benchmark_opener,
     canonical_manifest,
     candidate,
+    equal,
     inspect_runtime_container,
     provenance,
     require_host_avx,
@@ -66,8 +67,8 @@ class BenchmarkManifestTest(unittest.TestCase):
             "baseUrl": self.BASE_URL,
             "requestsPerMinute": self.REQUESTS_PER_MINUTE,
             "manifestSha256": "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e960adc07fd84d87",
-            "fixturesSha256": "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5",
-            "fixtureMetadataSha256": "6aa9f38d733d8f510824b6872638b20387864d239386a6eb4a26de532ac74e29",
+            "fixturesSha256": "effb8a94a19695298e14c8651f515a6eb1fee0f50f4e472a2456a56316130fc2",
+            "fixtureMetadataSha256": "4f602ccfa83d3ebd235da26e1ab41df5f68b0e8c18819a26c967a599f7a31a7a",
             "fixtureGeneratorSha256": hashlib.sha256(
                 (benchmark / "generate_cards.py").read_bytes()
             ).hexdigest(),
@@ -157,6 +158,18 @@ class BenchmarkManifestTest(unittest.TestCase):
             self.assertTrue(fields["name"])
             self.assertTrue(fields["email"].endswith("@example.test"))
             self.assertRegex(fields["phone"], r"^\+\d{11}$")
+
+    def test_scoring_ignores_only_typographic_spaces_beside_japanese_script(self) -> None:
+        self.assertTrue(equal("name", "佐藤 花子", "佐藤花子"))
+        self.assertTrue(equal("name", "佐藤\u3000花子", "佐藤 花子"))
+        self.assertTrue(equal("title", "Sales 部長", "Sales部長"))
+        self.assertTrue(equal("company", "株式会社 Horizon Labs", "株式会社Horizon Labs"))
+        self.assertTrue(equal("title", "プロダクト Director", "ﾌﾟﾛﾀﾞｸﾄ Director"))
+        self.assertFalse(equal("name", "Ada Lovelace", "AdaLovelace"))
+        self.assertFalse(equal("company", "つながる Network Labs", "つながるNetworkLabs"))
+        self.assertFalse(equal("name", "佐藤 花子", "佐藤 花"))
+        self.assertFalse(equal("company", "株式会社北星パートナーズ", "株式会社北星パート"))
+        self.assertFalse(equal("name", "佐藤 花子", None))
 
     def test_scoring_includes_title_and_company_candidates(self) -> None:
         payload = {

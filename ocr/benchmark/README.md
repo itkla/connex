@@ -3,8 +3,11 @@
 This deterministic synthetic suite covers exactly 40 English, Japanese, and mixed-language cards
 across clean, glare, rotation, perspective, and low-light conditions. All names and contact details
 are synthetic fixtures using reserved `example.test` addresses. The runner accepts only the reviewed
-canonical manifest and matching generated fixture metadata. The exact 40-image set is pinned as
-`bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5` using the case-id/byte
+canonical manifest and matching generated fixture metadata. Every line is drawn inside a safe card
+region that survives the rotation and perspective conditions; the generator shrinks a long line to
+fit and refuses to render one that cannot fit, so no expected value is ever clipped off the card.
+The exact 40-image set is pinned as
+`effb8a94a19695298e14c8651f515a6eb1fee0f50f4e472a2456a56316130fc2` using the case-id/byte
 aggregate defined by the runner.
 
 Use the pinned Noto CJK font from revision
@@ -70,6 +73,13 @@ cannot self-assert its qualification inputs.
 
 Requests are spaced at three per minute by default to respect production throttles. Increase the
 rate only for a disposable stack whose per-principal and global scan limits were raised to match.
+Phone numbers compare by digits. Other fields compare after NFKC normalization, case folding, and
+whitespace collapsing; a space directly beside Japanese script is typographic (`佐藤 花子` and
+`佐藤花子` name the same person) and is ignored, while spaces between Latin words stay significant.
+The backend replays OCR lines recorded from these fixtures through the extractor in
+`BusinessCardExtractorTest`, so extractor regressions fail CI before a release attempt. Re-record
+`backend/src/test/resources/fixtures/business-card-benchmark-ocr-lines.json` whenever the fixtures
+or the OCR models change.
 The command fails unless all 40 responses succeed, email and phone accuracy are at least 95%, name
 accuracy is at least 85%, title and company accuracy are each at least 80%, and end-to-end P95
 latency is at most eight seconds. Generated images and reports are transient and must not be
