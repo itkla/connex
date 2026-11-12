@@ -79,7 +79,8 @@ class AiAgentMaintenanceRoutingTest {
         var service = new AiAgentPrivacyService(privacy, mock(AiAgentRunMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class),
                 mock(AiRestrictionEpoch.class), mock(AiRunLeaseService.class), mock(PlatformTransactionManager.class),
                 workspaces, lifecycle, mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC(),
-                mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
+                mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+                mock(ooo.klae.connex.backend.notifications.NotificationStateVersionService.class));
         CompletableFuture<Boolean> placementBeforeTransaction = new CompletableFuture<>();
         when(catalogs.resolveCatalog(ORG)).thenAnswer(call -> {
             placementBeforeTransaction.complete(!TransactionSynchronizationManager.isActualTransactionActive());

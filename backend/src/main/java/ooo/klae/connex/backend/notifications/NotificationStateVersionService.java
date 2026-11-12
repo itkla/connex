@@ -87,6 +87,22 @@ public class NotificationStateVersionService {
         TransactionSynchronizationManager.bindResource(RESOURCE_KEY, versions);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
+            public void suspend() {
+                if (TransactionSynchronizationManager.getResource(RESOURCE_KEY) == versions) {
+                    TransactionSynchronizationManager.unbindResource(RESOURCE_KEY);
+                }
+            }
+
+            @Override
+            public void resume() {
+                if (!TransactionSynchronizationManager.hasResource(RESOURCE_KEY)) {
+                    TransactionSynchronizationManager.bindResource(RESOURCE_KEY, versions);
+                } else if (TransactionSynchronizationManager.getResource(RESOURCE_KEY) != versions) {
+                    throw new IllegalStateException("Notification state belongs to another transaction");
+                }
+            }
+
+            @Override
             public void beforeCommit(boolean readOnly) {
                 List<Integer> recipientIds = versions.snapshot().stream()
                     .filter(id -> !ownershipNoticeVersions.hasQueuedChange(id)).toList();

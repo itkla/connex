@@ -39,7 +39,9 @@ import ooo.klae.connex.backend.mappers.AiAgentActionMapper;
 import ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -70,6 +72,7 @@ public class AiAgentPrivacyService {
     private final ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper privacyObjectMapper;
     private final ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper deletionQueueMapper;
     private final ooo.klae.connex.backend.storage.ManagedObjectService managedObjectService;
+    private final NotificationStateVersionService notificationStateVersions;
     private final ConcurrentMap<Integer, Integer> ownerCursors = new ConcurrentHashMap<>();
 
     /** Initializes an empty workspace and returns the number of admitted initialization/recovery work units. */
@@ -652,7 +655,7 @@ public class AiAgentPrivacyService {
                 }
                 privacyMapper.resetAffectedTitle(workspaceId, sessionId, cutoff, "Ask Connex", barrier.getGeneration());
                 privacyMapper.updateSessionPreview(workspaceId, sessionId);
-                if (privacyMapper.deleteSessionNotifications(workspaceId, sessionId, BATCH_SIZE) == BATCH_SIZE) {
+                if (deleteSessionNotifications(workspaceId, sessionId) == BATCH_SIZE) {
                     save(work);
                     return;
                 }
@@ -892,7 +895,7 @@ public class AiAgentPrivacyService {
                     }
                 }
                 case "title" -> {
-                    if (privacyMapper.deleteSessionNotifications(workspaceId, sessionId, BATCH_SIZE) == BATCH_SIZE) {
+                    if (deleteSessionNotifications(workspaceId, sessionId) == BATCH_SIZE) {
                         save(work);
                         return;
                     }
@@ -1020,6 +1023,23 @@ public class AiAgentPrivacyService {
                 + operation.getOperationKey() + "|" + operation.getContentScope() + "|" + operation.getReason() + "|"
                 + operation.getDsrRequestId() + "|" + operation.getControlAcceptanceAuditId() + "|"
                 + operation.getCutoffGeneration() + "|" + operation.getInvalidatedGeneration());
+    }
+
+    private int deleteSessionNotifications(int workspaceId, int sessionId) {
+        var candidates = privacyMapper.lockSessionNotifications(workspaceId, sessionId, BATCH_SIZE);
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+        int deleted = privacyMapper.deleteSessionNotifications(workspaceId, sessionId,
+                candidates.stream().map(NotificationMapper.DeletionCandidate::id).toList());
+        if (deleted != candidates.size()) {
+            throw unavailable();
+        }
+        List<Integer> recipients = candidates.stream()
+                .map(NotificationMapper.DeletionCandidate::recipientId)
+                .distinct().sorted().toList();
+        userMapper.findExistingIds(recipients).forEach(notificationStateVersions::markChanged);
+        return deleted;
     }
 
     private TransactionTemplate transaction() {

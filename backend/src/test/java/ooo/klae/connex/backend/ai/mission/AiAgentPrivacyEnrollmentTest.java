@@ -82,7 +82,8 @@ class AiAgentPrivacyEnrollmentTest {
                 mock(WorkspaceMapper.class), lifecycle, mock(UserMapper.class), mock(TenantWorkScope.class),
                 catalogs, context, Clock.fixed(Instant.parse("2026-10-20T00:00:00Z"), ZoneOffset.UTC),
                 authority, control, mock(AttachmentMapper.class), mock(AiAgentPrivacyObjectMapper.class),
-                mock(ObjectDeletionQueueMapper.class), mock(ManagedObjectService.class));
+                mock(ObjectDeletionQueueMapper.class), mock(ManagedObjectService.class),
+                mock(ooo.klae.connex.backend.notifications.NotificationStateVersionService.class));
         fence.setOrganizationId(11);
         fence.setGeneration(1);
         fence.setBootstrapOperationId(key);

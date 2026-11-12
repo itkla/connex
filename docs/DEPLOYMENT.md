@@ -1048,8 +1048,8 @@ resubmit rather than retry inside the transaction.
 Drain incompatible serving JVMs, scheduled workers and in-flight chat writers before control V236
 and tenant V237, followed by tenant V238. Only binaries compatible with organization privacy and
 runtime-3 proposal holdings may start afterward, with one serving JVM until #941. V238 remains the singleton-proposal compatibility minimum; the release-wide rollback floor
-is control V248 even with AI/missions disabled, as described in
-[the invitation-expiry cutover](UPGRADING.md#historical-pending-invitation-expiry-control-v247), followed by [the export-permission cutover](UPGRADING.md#export-data-permission-control-v248). Proposal-set emission remains
+is control V250 even with AI/missions disabled, as described in
+[the notification trigger-retirement cutover](UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250). Proposal-set emission remains
 disabled; runtime-3 mission singleton proposals use their separate source-linked storage. Bootstrap,
 DSR all-chat cleanup and object cleanup include that storage independently of feature flags. Unreachable
 placements or unreceipted object deletions keep erasure pending. Before serving a restore, reconcile
@@ -1066,9 +1066,9 @@ ignore export revocations. See [the V248 upgrade procedure](UPGRADING.md#export-
 
 ### Legacy notification trigger retirement (V249/V250)
 
-Apply tenant V249 and control V250 with older teardown writers drained. They remove external
+Apply tenant V249 and control V250 with older teardown and privacy-cleanup writers drained. They remove external
 notification invalidation triggers without rewriting notification, membership or version rows.
 The release-wide staging rollback floor is control V250: the compatible binary supplies atomic
-notification teardown deletion and recipient-version bumps. Older generic teardown writers relied
+notification teardown/privacy deletion and recipient-version bumps. Older cleanup writers relied
 on the legacy DELETE trigger on long-lived catalogs. Recover forward with a compatible binary;
 see [the V249/V250 upgrade note](UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250).

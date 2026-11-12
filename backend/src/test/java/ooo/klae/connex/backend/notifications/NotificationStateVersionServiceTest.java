@@ -1,10 +1,12 @@
 package ooo.klae.connex.backend.notifications;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -112,6 +114,49 @@ class NotificationStateVersionServiceTest {
             TransactionSynchronizationManager.clearSynchronization();
         }
         TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+
+    @Test
+    void committedInnerChangeIsIndependentOfOuterRollback() {
+        service.markChanged(9);
+        TransactionSynchronization outer = onlySynchronization();
+        outer.suspend();
+        TransactionSynchronizationManager.clearSynchronization();
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.markChanged(2);
+        TransactionSynchronization inner = onlySynchronization();
+        assertNotSame(outer, inner);
+        inner.beforeCommit(false);
+        inner.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+
+        outer.resume();
+        outer.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+        verify(notificationMapper).bumpStateVersions(List.of(2));
+        verify(notificationMapper, never()).bumpStateVersions(List.of(9));
+        verify(pushPublisher).invalidated(2);
+        verify(pushPublisher, never()).invalidated(9);
+    }
+
+    @Test
+    void afterCommitInnerChangeGetsANewQueueForTheSameRecipient() {
+        service.markChanged(9);
+        TransactionSynchronization outer = onlySynchronization();
+        outer.beforeCommit(false);
+        outer.suspend();
+        TransactionSynchronizationManager.clearSynchronization();
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.markChanged(9);
+        TransactionSynchronization inner = onlySynchronization();
+        assertNotSame(outer, inner);
+        inner.beforeCommit(false);
+        inner.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+
+        outer.resume();
+        outer.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+        verify(notificationMapper, times(2)).bumpStateVersions(List.of(9));
+        verify(pushPublisher, times(2)).invalidated(9);
     }
 
     @Test

@@ -1455,10 +1455,10 @@ database trigger. Each drop is safe to replay after an interrupted migration.
 
 The release-wide rollback floor is control V250, including with AI and missions disabled.
 Earlier binaries cover ordinary notification and membership changes, but their registry-driven
-workspace teardown deletes notification rows without a Java version bump. On long-lived catalogs
-the legacy DELETE trigger supplied that bump. This release locks bounded notification batches,
+workspace teardown and privacy cleanup delete notification rows without a Java version bump. On
+long-lived catalogs the legacy DELETE trigger supplied that bump. This release locks bounded notification batches,
 deletes their exact keys and advances each affected recipient once in the same transaction;
-failed version writes roll back deletion. Drain older teardown writers before retiring the triggers
+failed version writes roll back deletion. Drain older teardown and privacy-cleanup writers before retiring the triggers
 and recover forward with a V250-compatible binary.
 
 Invitation and snooze deadline filtering retains its existing behavior; passive clock transitions

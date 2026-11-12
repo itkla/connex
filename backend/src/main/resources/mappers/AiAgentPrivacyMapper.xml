@@ -279,9 +279,18 @@
     WHERE workspace_id = #{workspaceId} AND content_scope = 'organization_mission_holdings_v1' AND phase &lt;&gt; 'complete'
   </select>
 
+  <select id="lockSessionNotifications" resultType="ooo.klae.connex.backend.mappers.NotificationMapper$DeletionCandidate"
+      useCache="false" flushCache="true">
+    SELECT id, recipient_id FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND source_type = 'ai_chat_session' AND source_id = #{sessionId}
+    ORDER BY id LIMIT #{limit} FOR UPDATE
+  </select>
   <delete id="deleteSessionNotifications">
     DELETE FROM notification WHERE workspace_id = #{workspaceId}
-      AND source_type = 'ai_chat_session' AND source_id = #{sessionId} LIMIT #{limit}
+      AND source_type = 'ai_chat_session' AND source_id = #{sessionId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
   </delete>
   <update id="updateSessionPreview">
     UPDATE ai_chat_session SET last_message_at = COALESCE((SELECT MAX(m.created_at)
