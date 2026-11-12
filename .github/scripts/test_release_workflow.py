@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shlex
@@ -976,6 +977,45 @@ class ReleaseWorkflowTest(unittest.TestCase):
         sbom = self.named_step("candidate-images-dry-run", "Generate dry-run SBOM")
         self.assertNotIn("if", sbom)
         self.assertEqual("spdx-json", sbom["with"]["format"])
+
+    def run_prepare_release_set(self, digests: dict[str, str]) -> tuple[subprocess.CompletedProcess[str], Path]:
+        script = self.named_step("release-set-smoke", "Prepare exact-digest Compose release set")["run"]
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(root)], check=False)
+        deploy = root / "deploy"
+        deploy.mkdir()
+        (deploy / "eval.env.example").write_text(
+            (Path(__file__).parents[2] / "deploy" / "eval.env.example").read_text(encoding="utf-8"), encoding="utf-8")
+        for component, digest in digests.items():
+            sbom = root / f"sbom-{component}.spdx.json"
+            sbom.write_text("{}", encoding="utf-8")
+            (root / f"release-{component}.json").write_text(json.dumps({
+                "component": component, "version": "9.9.9-tc.1", "sourceSha": "a" * 40, "runId": "77",
+                "runAttempt": 1, "image": f"ghcr.io/itkla/connex-{component}", "digest": digest,
+                "sbom": {"file": sbom.name, "sha256": subprocess.run(
+                    ["sha256sum", str(sbom)], capture_output=True, text=True, check=True).stdout.split()[0]},
+            }), encoding="utf-8")
+        script = script.replace("/tmp/benchmark-password", str(root / "benchmark-password"))
+        env = dict(os.environ, VERSION="9.9.9-tc.1", GITHUB_SHA="a" * 40, GITHUB_RUN_ID="77",
+                   GITHUB_RUN_ATTEMPT="1", GITHUB_REPOSITORY_OWNER="itkla")
+        result = subprocess.run(["bash", "-e", "-c", script], cwd=deploy, env=env, capture_output=True, text=True)
+        return result, deploy / ".env"
+
+    def test_release_set_environment_carries_every_candidate_digest(self) -> None:
+        digests = {c: "sha256:" + format(i, "x") * 64 for i, c in enumerate(("backend", "frontend", "ocr", "clamav"), 1)}
+        result, env_file = self.run_prepare_release_set(digests)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        values = dict(line.split("=", 1) for line in env_file.read_text(encoding="utf-8").splitlines()
+                      if line.startswith("CONNEX_") and "=" in line)
+        for component, digest in digests.items():
+            self.assertEqual(digest.removeprefix("sha256:"), values[f"CONNEX_{component.upper()}_DIGEST"])
+
+    def test_release_set_environment_refuses_an_unusable_digest(self) -> None:
+        digests = {c: "sha256:" + "b" * 64 for c in ("backend", "frontend", "ocr", "clamav")}
+        digests["frontend"] = "sha256:not-a-digest"
+        result, _ = self.run_prepare_release_set(digests)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("invalid frontend digest", result.stdout + result.stderr)
 
     def test_release_scan_exceptions_stay_narrow(self) -> None:
         config = yaml.safe_load(SCAN_EXCEPTIONS_PATH.read_text())
