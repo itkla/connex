@@ -4,6 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.LocalDate;
@@ -18,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.assistant.AiBriefScheduler;
@@ -28,6 +38,7 @@ import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationScheduler;
+import ooo.klae.connex.backend.notifications.NotificationPushPublisher;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
@@ -62,6 +73,7 @@ class IdleReconciliationIntegrationTest extends AbstractAiAgentPrivacyIntegratio
     @Autowired private LeadResponseSlaScheduler leadSla;
     @Autowired private ApprovalReconciliationScheduler approvals;
     @Autowired private RelationshipSignalReconciliationService signalReconciliation;
+    @MockitoBean private NotificationPushPublisher notificationPushPublisher;
 
     @BeforeEach
     void finishBootstrapBeforeMeasuringIdleWork() {
@@ -194,6 +206,87 @@ class IdleReconciliationIntegrationTest extends AbstractAiAgentPrivacyIntegratio
         assertEquals(changed, signalSnapshot(first.getDedupeKey()));
         assertEquals(1, signals.replaceFamily(id, same.getFamily(), "absent", List.of(), at.plusMinutes(15), at));
         assertTrue(signalMapper.findActiveForActor(id, currentUser.getId()).isEmpty());
+    }
+
+    @Test
+    void populatedReminderSchedulerDoesNotInvalidateUnchangedRecipients() {
+        int id = workspace.getId();
+        var company = newCompany();
+        var pipeline = newPipeline();
+        var stage = newStage(pipeline, 1);
+        var deal = newDeal(pipeline, stage, company);
+        jdbc.update("UPDATE deal SET expected_close_date=?,created_at='2001-01-01 00:00:00' WHERE id=?",
+            LocalDate.now(clock).minusDays(1).toString(), deal.getId());
+        var firstTask = newTask(currentUser, null, deal);
+        var secondTask = newTask(currentUser, null, deal);
+        jdbc.update("UPDATE task SET due_date=? WHERE workspace_id=?",
+            LocalDate.now(clock).toString(), id);
+        WorkspaceMapper enumeration = mock(WorkspaceMapper.class);
+        when(enumeration.findWorkspaceIds()).thenReturn(List.of(id));
+        NotificationScheduler scheduler = new NotificationScheduler(
+            enumeration, tenantWorkScope, notifications, recorder);
+        long initialVersion = notificationMapper.getStateVersion(currentUser.getId());
+        clearInvocations(notificationPushPublisher);
+        try {
+            scheduler.reconcileAndPurge();
+            List<Map<String, Object>> seeded = reminderSnapshots();
+            assertEquals(4, seeded.size());
+            assertEquals(3, seeded.stream().map(row -> row.get("type")).distinct().count());
+            assertEquals(initialVersion + 1, notificationMapper.getStateVersion(currentUser.getId()));
+            verify(notificationPushPublisher, times(4)).created(eq(currentUser.getId()), any(), any());
+            verifyNoMoreInteractions(notificationPushPublisher);
+            for (var notification : notificationMapper.findWorkspaceReminderNotifications(id)) {
+                notification.setActorId(0);
+                assertTrue(notificationMapper.upsert(notification) <= 1);
+            }
+            jdbc.update("UPDATE notification SET updated_at='2001-01-01 00:00:00' WHERE workspace_id=?", id);
+            List<Map<String, Object>> before = reminderSnapshots();
+            Map<String, Object> version = recipientVersion();
+            clearInvocations(notificationPushPublisher);
+
+            scheduler.reconcileAndPurge();
+            scheduler.reconcileAndPurge();
+
+            assertEquals(before, reminderSnapshots());
+            assertEquals(version, recipientVersion());
+            verifyNoInteractions(notificationPushPublisher);
+
+            firstTask.setDescription("Changed task reminder");
+            firstTask.setDueDate(LocalDate.now(clock).toString());
+            taskMapper.update(firstTask);
+            scheduler.reconcileAndPurge();
+            assertEquals(initialVersion + 2, notificationMapper.getStateVersion(currentUser.getId()));
+            verify(notificationPushPublisher).updated(eq(currentUser.getId()), any(), eq("task.due:" + firstTask.getId()));
+            verifyNoMoreInteractions(notificationPushPublisher);
+            clearInvocations(notificationPushPublisher);
+            scheduler.reconcileAndPurge();
+            assertEquals(initialVersion + 2, notificationMapper.getStateVersion(currentUser.getId()));
+            verifyNoInteractions(notificationPushPublisher);
+
+            jdbc.update("UPDATE task SET completed=TRUE,status='done' WHERE workspace_id=?", id);
+            scheduler.reconcileAndPurge();
+            assertEquals(initialVersion + 3, notificationMapper.getStateVersion(currentUser.getId()));
+            verify(notificationPushPublisher).invalidated(currentUser.getId());
+            verifyNoMoreInteractions(notificationPushPublisher);
+            assertEquals(2, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM notification WHERE workspace_id=? AND type='task.due' AND resolved_at IS NOT NULL",
+                Integer.class, id));
+            clearInvocations(notificationPushPublisher);
+            scheduler.reconcileAndPurge();
+            assertEquals(initialVersion + 3, notificationMapper.getStateVersion(currentUser.getId()));
+            verifyNoInteractions(notificationPushPublisher);
+        } finally {
+            jdbc.update("DELETE FROM notification WHERE workspace_id=?", id);
+            jdbc.update("DELETE FROM task WHERE id IN (?,?)", firstTask.getId(), secondTask.getId());
+            jdbc.update("DELETE FROM deal WHERE id=?", deal.getId());
+            jdbc.update("DELETE FROM stage WHERE pipeline_id=?", pipeline.getId());
+            jdbc.update("DELETE FROM pipeline WHERE id=?", pipeline.getId());
+            jdbc.update("DELETE FROM company WHERE id=?", company.getId());
+        }
+    }
+
+    private List<Map<String, Object>> reminderSnapshots() {
+        return jdbc.queryForList("SELECT * FROM notification WHERE workspace_id=? ORDER BY id", workspace.getId());
     }
 
     @Test

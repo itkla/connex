@@ -805,8 +805,12 @@ share one transaction, so departure either wins before that check or follows del
 Notification delivery queues a recipient-state bump and realtime frame only when its in-app
 write reports a change. For an existing dedupe row, MySQL reports two affected rows for an update;
 zero or one is a no-op, including input normalized by SQL. Raw input comparisons must not override
-that result. Delivery clears the input id before the upsert and recognizes a generated replacement
-id if retention purged the discovered row before insertion; that insert still bumps and pushes.
+that result. Delivery clears the input id before the upsert and confirms any candidate insert key
+against the stored workspace, recipient, id and null-safe dedupe key. InnoDB can burn an
+auto-increment value on a duplicate-key no-op, so a generated key alone does not prove insertion.
+The exact identity read includes inbox-hidden rows and sees the transaction's own inserts without
+adding a locking read. It also recognizes a replacement if retention purged the discovered row
+before insertion; that insert still bumps and pushes.
 The existing notification-row → deduplicated before-commit recipient-state order is
 preserved, and a resolved reminder deliberately reopens once before redelivery becomes a no-op.
 

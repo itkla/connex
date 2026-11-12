@@ -581,6 +581,8 @@ class NotificationReconciliationServiceTest {
         PreferenceMapper preferenceMapper
     ) {
         Mockito.lenient().when(dispatcher.channel()).thenReturn("in_app");
+        Mockito.lenient().when(notificationMapper.existsDelivery(anyInt(), anyInt(), anyInt(), any()))
+            .thenReturn(true);
         Mockito.lenient().when(dispatcher.dispatch(any())).thenAnswer(invocation -> {
             invocation.<Notification>getArgument(0).setId(77);
             return 1;

@@ -826,6 +826,16 @@
       severity = incoming.severity
   </insert>
 
+  <select id="existsDelivery" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM notification
+      WHERE workspace_id = #{workspaceId}
+        AND recipient_id = #{recipientId}
+        AND id = #{id}
+        AND dedupe_key &lt;=&gt; #{dedupeKey}
+    )
+  </select>
+
   <update id="claimEmailDelivery">
     UPDATE notification
     SET email_delivery_claimed_at = CURRENT_TIMESTAMP
