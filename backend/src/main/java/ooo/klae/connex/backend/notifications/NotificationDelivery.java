@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.notifications;
 
 import java.time.Clock;
 import java.util.List;
-import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,8 +16,6 @@ import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * The single fan-out point for a generated notification. The {@code in_app}
@@ -35,13 +32,14 @@ import tools.jackson.databind.ObjectMapper;
  * <p>During quiet hours the durable in-app write and unread-state version still advance,
  * while detailed realtime frames and first-occurrence email delivery are suppressed.
  *
- * <p>A single dedupe pre-read serves two purposes. It gates email to the first
- * occurrence, and it classifies the in-app write as <em>created</em> (no prior
- * row), <em>updated</em> (a prior row whose severity shifts or is revived from
- * resolved — the exact condition under which the upsert clears read/dismiss
- * state) or an idempotent no-op. A realtime frame is published only for the
- * first two, so the every-cycle re-dispatch of an unchanged reminder never
- * re-notifies a live client.
+ * <p>A single dedupe pre-read gates email to the first occurrence and distinguishes
+ * created from updated realtime frames. The in-app affected-row count determines
+ * whether persistence changed: an existing row reports two for an update and
+ * zero or one for a no-op, depending on JDBC found-row configuration. Java input
+ * comparisons cannot substitute for that result because persistence can normalize
+ * input, such as a missing actor account, without changing the durable row.
+ * A generated key distinguishes an insert after a concurrent purge from an
+ * unchanged existing row that reports one found row.
  *
  * <p>The in-app affected-row count closes a stale-pre-read race for existing rows:
  * if another transaction changes a notification between the pre-read and upsert,
@@ -65,7 +63,6 @@ public class NotificationDelivery {
     private final NotificationQuietHoursControlAccess quietHoursControlAccess;
     private final NotificationQuietHoursBypassPolicy bypassPolicy;
     private final Clock clock;
-    private final ObjectMapper objectMapper;
 
     /**
      * Delivers a notification across every eligible channel.
@@ -76,7 +73,7 @@ public class NotificationDelivery {
     public boolean deliver(Notification notification) {
         Notification existing = findExisting(notification);
         boolean firstOccurrence = existing == null;
-        boolean changed = firstOccurrence || isVisibleChange(existing, notification);
+        notification.setId(0);
 
         int inAppRows = 0;
         for (NotificationDispatcher dispatcher : dispatchers) {
@@ -85,7 +82,9 @@ public class NotificationDelivery {
             }
         }
 
-        boolean persistedChange = changed || (!firstOccurrence && inAppRows > 1);
+        boolean inserted = inAppRows == 1 && notification.getId() > 0
+            && (existing == null || notification.getId() != existing.getId());
+        boolean persistedChange = inserted || inAppRows > 1;
         boolean quietHoursActive = persistedChange && quietHoursActive(notification);
         boolean recipientCanAccess = true;
         if (persistedChange) {
@@ -93,7 +92,7 @@ public class NotificationDelivery {
                 notification, existing, persistedChange, quietHoursActive);
         }
 
-        if (!firstOccurrence || quietHoursActive || !recipientCanAccess) {
+        if (!persistedChange || !firstOccurrence || quietHoursActive || !recipientCanAccess) {
             return persistedChange;
         }
         for (NotificationDispatcher dispatcher : dispatchers) {
@@ -135,7 +134,7 @@ public class NotificationDelivery {
         if (!created && !updated) {
             return true;
         }
-        int id = created ? notification.getId() : existing.getId();
+        int id = created || notification.getId() > 0 ? notification.getId() : existing.getId();
         Notification persisted = notificationMapper.findById(notification.getRecipientId(), id);
         if (persisted == null) {
             stateVersionService.markChanged(notification.getRecipientId());
@@ -153,41 +152,6 @@ public class NotificationDelivery {
             pushPublisher.updated(notification.getRecipientId(), dto, notification.getDedupeKey());
         }
         return true;
-    }
-
-    /**
-     * A re-delivered reminder is materially changed when its severity shifts or a
-     * previously resolved row is revived — the same condition under which the in-app
-     * upsert clears read/dismiss/snooze state, so a live client should refresh.
-     */
-    private boolean isVisibleChange(Notification existing, Notification incoming) {
-        return !Objects.equals(existing.getSeverity(), incoming.getSeverity())
-                || existing.getResolvedAt() != null
-                || !Objects.equals(existing.getType(), incoming.getType())
-                || !Objects.equals(existing.getCategory(), incoming.getCategory())
-                || existing.getTemplateVersion() != incoming.getTemplateVersion()
-                || !Objects.equals(existing.getTitle(), incoming.getTitle())
-                || !Objects.equals(existing.getBody(), incoming.getBody())
-                || !Objects.equals(existing.getActorId(), incoming.getActorId())
-                || !Objects.equals(existing.getActorLabel(), incoming.getActorLabel())
-                || !Objects.equals(existing.getSourceType(), incoming.getSourceType())
-                || !Objects.equals(existing.getSourceId(), incoming.getSourceId())
-                || !Objects.equals(existing.getSourceLabel(), incoming.getSourceLabel())
-                || !Objects.equals(existing.getContextType(), incoming.getContextType())
-                || !Objects.equals(existing.getContextId(), incoming.getContextId())
-                || !Objects.equals(existing.getContextLabel(), incoming.getContextLabel())
-                || !Objects.equals(existing.getActionUrl(), incoming.getActionUrl())
-                || !sameData(existing.getData(), incoming.getData());
-    }
-
-    private boolean sameData(String existing, String incoming) {
-        if (Objects.equals(existing, incoming)) return true;
-        if (existing == null || incoming == null) return false;
-        try {
-            return Objects.equals(objectMapper.readTree(existing), objectMapper.readTree(incoming));
-        } catch (JacksonException exception) {
-            return false;
-        }
     }
 
     private void safeDispatch(NotificationDispatcher dispatcher, Notification notification) {

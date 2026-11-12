@@ -16,6 +16,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -71,8 +73,7 @@ class NotificationDeliveryTest {
         delivery = new NotificationDelivery(
                 List.of(inApp, email), notificationMapper, preferenceMapper, pushPublisher,
                 stateVersionService, quietHoursControlAccess, bypassPolicy,
-                Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC),
-                new tools.jackson.databind.ObjectMapper());
+                Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC));
     }
 
     private Notification notification() {
@@ -234,6 +235,7 @@ class NotificationDeliveryTest {
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey()))
                 .thenReturn(existingRow(77, "info", null));
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "warning", null));
+        when(inApp.dispatch(n)).thenReturn(2);
 
         delivery.deliver(n);
 
@@ -247,6 +249,7 @@ class NotificationDeliveryTest {
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey()))
                 .thenReturn(existingRow(77, "info", "2026-07-01T00:00:00"));
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(n)).thenReturn(2);
 
         delivery.deliver(n);
 
@@ -262,6 +265,7 @@ class NotificationDeliveryTest {
         existing.setTitle("Old title");
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(existing);
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(n)).thenReturn(2);
 
         delivery.deliver(n);
 
@@ -283,6 +287,44 @@ class NotificationDeliveryTest {
         verify(notificationMapper, never()).findById(anyInt(), anyInt());
         verify(stateVersionService, never()).markChangedWithDetailedPush(anyInt());
         verify(stateVersionService, never()).markChanged(anyInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    void persistenceNoOpOverridesAnApparentInputChange(int affectedRows) {
+        Notification incoming = notification();
+        incoming.setActorId(0);
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey()))
+            .thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(incoming)).thenReturn(affectedRows);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher, quietHoursControlAccess);
+    }
+
+    @Test
+    void missingPreReadWithoutAPersistedWriteDoesNotBumpPushOrEmail() {
+        Notification incoming = notification();
+        when(inApp.dispatch(incoming)).thenReturn(0);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher, preferenceMapper);
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void staleInputIdCannotMakeAFoundRowLookLikeAnInsert() {
+        Notification incoming = notification();
+        incoming.setId(88);
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey()))
+            .thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(incoming)).thenReturn(1);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher);
     }
 
     @Test

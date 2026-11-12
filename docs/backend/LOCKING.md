@@ -801,6 +801,15 @@ roots; re-entering that prefix adds no new blocking root. No target account root
 a workflow/run root. The new recipient membership never waits behind departure or membership-first
 writes: contention propagates as a refusal. The exact active membership check and notification upsert
 share one transaction, so departure either wins before that check or follows delivery's commit.
+
+Notification delivery queues a recipient-state bump and realtime frame only when its in-app
+write reports a change. For an existing dedupe row, MySQL reports two affected rows for an update;
+zero or one is a no-op, including input normalized by SQL. Raw input comparisons must not override
+that result. Delivery clears the input id before the upsert and recognizes a generated replacement
+id if retention purged the discovered row before insertion; that insert still bumps and pushes.
+The existing notification-row → deduplicated before-commit recipient-state order is
+preserved, and a resolved reminder deliberately reopens once before redelivery becomes a no-op.
+
 Workflow task effects join the existing `READ_COMMITTED` effect transaction, or open one for
 non-durable dispatch, through `WorkflowTaskCreationService`. Before delegating to `TaskService`,
 they resolve/bind the existing record-visibility scope, then retain the exact active assignee with
