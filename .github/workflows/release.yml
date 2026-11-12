@@ -560,11 +560,16 @@ jobs:
           sed -i 's/^CONNEX_HTTP_PORT=.*/CONNEX_HTTP_PORT=18088/' .env
           sed -i 's/^CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=120/' .env
           sed -i 's/^CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=120/' .env
-          sed -i "s/^CONNEX_BACKEND_DIGEST=.*/CONNEX_BACKEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-backend.json)/" .env
-          sed -i "s/^CONNEX_FRONTEND_DIGEST=.*/CONNEX_FRONTEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-frontend.json)/" .env
-          sed -i "s/^CONNEX_OCR_DIGEST=.*/CONNEX_OCR_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-ocr.json)/" .env
+          # Each digest is read into a variable first, so a jq failure stops the step instead of
+          # silently writing an empty value that only surfaces later as a Compose interpolation error.
+          for component in backend frontend ocr clamav; do
+            digest="$(jq -er '.digest | sub("^sha256:"; "")' "../release-${component}.json")"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::invalid ${component} digest"; exit 1; }
+            key="CONNEX_${component^^}_DIGEST"
+            grep -q "^${key}=" .env || { echo "::error::${key} is missing from eval.env.example"; exit 1; }
+            sed -i "s/^${key}=.*/${key}=${digest}/" .env
+          done
           sed -i "s/^CONNEX_OCR_SERVICE_TOKEN=.*/CONNEX_OCR_SERVICE_TOKEN=${TOKEN}/" .env
-          sed -i "s/^CONNEX_CLAMAV_DIGEST=.*/CONNEX_CLAMAV_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-clamav.json)/" .env
           # eval.env.example ships with malware scanning OFF because it declares no edition.
           # This step declares CONNEX_DEPLOYMENT_PROFILE=silo below, and a declared edition
           # REFUSES TO BOOT with scanning disabled -- so the sidecar and its token must be turned
