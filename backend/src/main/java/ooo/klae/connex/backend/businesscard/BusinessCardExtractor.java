@@ -42,10 +42,16 @@ public class BusinessCardExtractor {
             "(?iu)^[\\p{L}][\\p{L}'’\\-]+(?:\\s+[\\p{L}][\\p{L}'’\\-]+){1,4}$");
     private static final Pattern JAPANESE_NAME = Pattern.compile(
             "^[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}々・ー]{1,12}(?:\\s+[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}々・ー]{1,12}){1,2}$");
+    private static final Pattern UNSPACED_JAPANESE_NAME = Pattern.compile(
+            "^[\\p{IsHan}々]{1,4}[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}々ー]{1,4}$");
+    private static final Pattern EMAIL_LABEL = Pattern.compile(
+            "(?iu)^(?:e-?mail(?:\\s*address)?|mail|メール(?:アドレス)?)\\s*(?:[:：]\\s*|\\s+)");
+    private static final Pattern GLUED_EMAIL_LABEL = Pattern.compile("^(?:EMAIL|E-MAIL)(?=[a-z0-9])");
     private static final Pattern WEB = Pattern.compile("(?iu)(?:https?://|www\\.|\\.(?:com|net|org|jp)\\b)");
     private static final Pattern CONTACT_LABEL = Pattern.compile(
             "(?iu)^(?:e-?mail|mail|tel|telephone|phone|mobile|mob|fax|〒|address|web|url)\\s*[:：]");
     private static final double LOW_CONFIDENCE = 0.70;
+    private static final double UNSPACED_NAME_PENALTY = 0.10;
 
     /**
      * Extracts editable candidates and warnings without mutating or persisting OCR output.
@@ -105,7 +111,7 @@ public class BusinessCardExtractor {
     private static Candidate email(List<Line> lines) {
         Candidate best = null;
         for (Line line : lines) {
-            String compact = line.text().replace(" ", "");
+            String compact = withoutEmailLabel(line.text()).replace(" ", "");
             Matcher matcher = EMAIL.matcher(compact);
             while (matcher.find()) {
                 String value = matcher.group();
@@ -116,6 +122,11 @@ public class BusinessCardExtractor {
             }
         }
         return best;
+    }
+
+    private static String withoutEmailLabel(String text) {
+        String unlabeled = EMAIL_LABEL.matcher(text).replaceFirst("");
+        return GLUED_EMAIL_LABEL.matcher(unlabeled).replaceFirst("");
     }
 
     private static Candidate phone(List<Line> lines) {
@@ -223,12 +234,18 @@ public class BusinessCardExtractor {
                     || WEB.matcher(line.text()).find()) {
                 continue;
             }
-            if (!personShape(line.text())) {
+            boolean spacedPerson = personShape(line.text());
+            boolean unspacedJapanese = !spacedPerson
+                    && UNSPACED_JAPANESE_NAME.matcher(line.text()).matches();
+            if (!spacedPerson && !unspacedJapanese) {
                 continue;
             }
             double evidence = 0.72 + Math.min(0.18, line.heightRatio() * 0.18);
             if (uppercaseWordmark(line.text())) {
                 evidence -= 0.18;
+            }
+            if (unspacedJapanese) {
+                evidence -= UNSPACED_NAME_PENALTY;
             }
             best = better(best, candidate(line.text(), line, evidence));
         }

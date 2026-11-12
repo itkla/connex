@@ -1,0 +1,407 @@
+{
+  "schemaVersion": 1,
+  "ocrImage": "ghcr.io/itkla/connex-ocr@sha256:2f826392d91c2f0b4ce9836170575ade3a5ee28557b312c2b1ff67d0b694b723",
+  "fixturesSha256": "effb8a94a19695298e14c8651f515a6eb1fee0f50f4e472a2456a56316130fc2",
+  "cases": [
+    {
+      "id": "en-classic-clean-01",
+      "lines": [
+        {"text": "Analytical Labs", "confidence": 0.9998, "box": [88, 88, 429, 143]},
+        {"text": "Ada Lovelace", "confidence": 0.9995, "box": [86, 215, 538, 286]},
+        {"text": "Principal Engineer", "confidence": 0.9996, "box": [93, 312, 507, 369]},
+        {"text": "EMAIL ada.lovelace01@example.test", "confidence": 0.9917, "box": [94, 476, 748, 522]},
+        {"text": "TEL +12025550101", "confidence": 0.9866, "box": [96, 542, 421, 579]}
+      ]
+    },
+    {
+      "id": "en-centered-glare-02",
+      "lines": [
+        {"text": "Compiler Systems", "confidence": 0.9981, "box": [397, 88, 806, 142]},
+        {"text": "Grace Hopper", "confidence": 0.9994, "box": [360, 233, 839, 321]},
+        {"text": "Rear Admiral", "confidence": 0.9926, "box": [451, 352, 747, 403]},
+        {"text": "grace.hopper02@example.test", "confidence": 0.9999, "box": [324, 509, 877, 556]},
+        {"text": "TEL +12025550102", "confidence": 0.9914, "box": [436, 569, 765, 606]}
+      ]
+    },
+    {
+      "id": "en-split-rotation-03",
+      "lines": [
+        {"text": "Katherine Johnson", "confidence": 0.9993, "box": [560, 94, 1063, 197]},
+        {"text": "Orbital Labs", "confidence": 0.9977, "box": [76, 153, 358, 231]},
+        {"text": "Research Mathematician", "confidence": 0.9999, "box": [579, 220, 1070, 311]},
+        {"text": "EMAIL katherine.johnson03@example.test", "confidence": 0.9988, "box": [596, 401, 1077, 475]},
+        {"text": "TEL +12025550103", "confidence": 0.9755, "box": [603, 482, 936, 553]}
+      ]
+    },
+    {
+      "id": "en-minimal-perspective-04",
+      "lines": [
+        {"text": "Margaret Hamilton", "confidence": 0.9999, "box": [86, 89, 780, 210]},
+        {"text": "Software Director", "confidence": 0.9997, "box": [91, 222, 519, 287]},
+        {"text": "Guidance Technology", "confidence": 0.9997, "box": [77, 407, 609, 474]},
+        {"text": "EMAIL margaret.hamilton04@example.test", "confidence": 0.9916, "box": [66, 565, 917, 624]},
+        {"text": "TEL +12025550104", "confidence": 0.9888, "box": [65, 640, 421, 687]}
+      ]
+    },
+    {
+      "id": "en-classic-low-light-05",
+      "lines": [
+        {"text": "Data Systems", "confidence": 0.9985, "box": [91, 91, 398, 143]},
+        {"text": "Barbara Liskov", "confidence": 0.995, "box": [91, 214, 598, 285]},
+        {"text": "Institute Professor", "confidence": 0.9999, "box": [94, 312, 511, 363]},
+        {"text": "EMAIL barbara.liskov05@example.test", "confidence": 0.9934, "box": [92, 471, 779, 523]},
+        {"text": "TEL+12025550105", "confidence": 1.0, "box": [95, 541, 423, 578]}
+      ]
+    },
+    {
+      "id": "en-centered-clean-06",
+      "lines": [
+        {"text": "Bridge Labs", "confidence": 0.9993, "box": [465, 85, 735, 143]},
+        {"text": "Radia Perlman", "confidence": 0.9993, "box": [349, 235, 849, 309]},
+        {"text": "Network Architect", "confidence": 0.9998, "box": [396, 352, 806, 403]},
+        {"text": "radia.perlman06@example.test", "confidence": 0.9999, "box": [317, 509, 883, 556]},
+        {"text": "TEL +12025550106", "confidence": 0.9897, "box": [437, 570, 764, 608]}
+      ]
+    },
+    {
+      "id": "en-split-glare-07",
+      "lines": [
+        {"text": "Flight Research", "confidence": 0.9999, "box": [95, 132, 443, 187]},
+        {"text": "Mary Jackson", "confidence": 0.9886, "box": [576, 137, 1048, 229]},
+        {"text": "Aerospace Engineer", "confidence": 0.9994, "box": [584, 270, 1036, 324]},
+        {"text": "EMAIL mary.jackson07@example.test", "confidence": 0.9992, "box": [588, 448, 1043, 479]},
+        {"text": "TEL+12025550107", "confidence": 1.0, "box": [587, 514, 917, 553]}
+      ]
+    },
+    {
+      "id": "en-minimal-rotation-08",
+      "lines": [
+        {"text": "Evelyn Boyd", "confidence": 0.9999, "box": [94, 47, 526, 183]},
+        {"text": "Research Director", "confidence": 0.9963, "box": [97, 165, 503, 256]},
+        {"text": "Signal Institute", "confidence": 0.9969, "box": [78, 335, 428, 425]},
+        {"text": "EMAIL evelyn.boyd08@example.test", "confidence": 0.9935, "box": [67, 479, 719, 590]},
+        {"text": "TEL+12025550108", "confidence": 1.0, "box": [62, 543, 396, 616]}
+      ]
+    },
+    {
+      "id": "en-classic-perspective-09",
+      "lines": [
+        {"text": "Energy Systems", "confidence": 0.9993, "box": [104, 95, 479, 159]},
+        {"text": "Annie Easley", "confidence": 0.9997, "box": [83, 222, 551, 314]},
+        {"text": "Computer Scientist", "confidence": 0.9917, "box": [90, 328, 560, 397]},
+        {"text": "EMAIL annie.easley09@example.test", "confidence": 0.9998, "box": [78, 506, 793, 562]},
+        {"text": "TEL +12025550109", "confidence": 0.9818, "box": [77, 580, 430, 627]}
+      ]
+    },
+    {
+      "id": "en-centered-low-light-10",
+      "lines": [
+        {"text": "Parallel Technologies", "confidence": 0.9996, "box": [354, 79, 844, 143]},
+        {"text": "Frances Allen", "confidence": 0.9995, "box": [373, 236, 826, 307]},
+        {"text": "Chief Scientist", "confidence": 0.9961, "box": [437, 350, 764, 403]},
+        {"text": "frances.allen10@example.test", "confidence": 0.9995, "box": [328, 506, 872, 556]},
+        {"text": "TEL+12025550110", "confidence": 1.0, "box": [437, 569, 765, 607]}
+      ]
+    },
+    {
+      "id": "en-split-clean-11",
+      "lines": [
+        {"text": "Language Systems", "confidence": 0.9999, "box": [93, 132, 485, 185]},
+        {"text": "Karen Sparck", "confidence": 0.9974, "box": [575, 140, 1042, 229]},
+        {"text": "Research Fellow", "confidence": 0.9996, "box": [589, 269, 957, 317]},
+        {"text": "EMAIL karen.sparck11@example.test", "confidence": 0.9993, "box": [589, 449, 1075, 480]},
+        {"text": "TEL +12025550111", "confidence": 0.9884, "box": [589, 516, 917, 553]}
+      ]
+    },
+    {
+      "id": "en-minimal-glare-12",
+      "lines": [
+        {"text": "Jean Sammet", "confidence": 0.9989, "box": [81, 106, 553, 174]},
+        {"text": "Programming Director", "confidence": 0.9939, "box": [85, 213, 593, 273]},
+        {"text": "Symbolic Labs", "confidence": 0.9985, "box": [85, 384, 418, 442]},
+        {"text": "EMAIL jean.sammet12@example.test", "confidence": 0.9929, "box": [89, 534, 748, 575]},
+        {"text": "TEL +12025550112", "confidence": 0.9855, "box": [89, 596, 416, 633]}
+      ]
+    },
+    {
+      "id": "en-classic-rotation-13",
+      "lines": [
+        {"text": "Pixel Studio", "confidence": 0.9991, "box": [66, 111, 340, 188]},
+        {"text": "Carol Shaw", "confidence": 0.997, "box": [75, 221, 471, 340]},
+        {"text": "Software Designer", "confidence": 0.9999, "box": [89, 322, 513, 415]},
+        {"text": "EMAIL carol.shaw13@example.test", "confidence": 0.9909, "box": [106, 465, 732, 568]},
+        {"text": "TEL+12025550113", "confidence": 1.0, "box": [114, 555, 447, 628]}
+      ]
+    },
+    {
+      "id": "en-centered-perspective-14",
+      "lines": [
+        {"text": "Object Systems", "confidence": 0.9911, "box": [455, 80, 837, 146]},
+        {"text": "Adele Goldberg", "confidence": 0.9999, "box": [344, 234, 935, 333]},
+        {"text": "Research Scientist", "confidence": 0.9999, "box": [406, 366, 867, 429]},
+        {"text": "adele.goldberg14@example.test", "confidence": 1.0, "box": [307, 541, 961, 599]},
+        {"text": "TEL +12025550114", "confidence": 0.9913, "box": [442, 609, 815, 658]}
+      ]
+    },
+    {
+      "id": "en-split-low-light-15",
+      "lines": [
+        {"text": "Directory Labs", "confidence": 0.9763, "box": [96, 133, 423, 188]},
+        {"text": "Elizabeth Feinler", "confidence": 0.9994, "box": [581, 137, 1070, 204]},
+        {"text": "Network Director", "confidence": 0.9702, "box": [588, 270, 980, 317]},
+        {"text": "EMAIL elizabeth.feinler15@example.test", "confidence": 0.9977, "box": [588, 445, 1074, 480]},
+        {"text": "TEL+12025550115", "confidence": 1.0, "box": [588, 514, 918, 554]}
+      ]
+    },
+    {
+      "id": "en-minimal-clean-16",
+      "lines": [
+        {"text": "Sister Keller", "confidence": 0.9994, "box": [81, 101, 490, 174]},
+        {"text": "Computer Science Chair", "confidence": 0.9996, "box": [88, 213, 634, 270]},
+        {"text": "Education Systems", "confidence": 0.9756, "box": [86, 385, 519, 443]},
+        {"text": "EMAIL sister.keller16@example.test", "confidence": 0.988, "box": [87, 530, 725, 576]},
+        {"text": "TEL +12025550116", "confidence": 0.9799, "box": [90, 596, 416, 632]}
+      ]
+    },
+    {
+      "id": "ja-classic-clean-17",
+      "lines": [
+        {"text": "株式会社みらい研究所", "confidence": 1.0, "box": [90, 88, 572, 138]},
+        {"text": "佐藤花子", "confidence": 0.9997, "box": [85, 207, 399, 293]},
+        {"text": "代表取締役", "confidence": 0.9999, "box": [94, 310, 338, 365]},
+        {"text": "EMAIL hanako.sato17@example.test", "confidence": 0.9996, "box": [94, 472, 743, 523]},
+        {"text": "TEL +81355550117", "confidence": 0.986, "box": [96, 542, 423, 579]}
+      ]
+    },
+    {
+      "id": "ja-centered-glare-18",
+      "lines": [
+        {"text": "青空テクノロジー株式会社", "confidence": 0.9938, "box": [311, 85, 890, 138]},
+        {"text": "鈴木太郎", "confidence": 0.9998, "box": [442, 231, 755, 311]},
+        {"text": "営業部長", "confidence": 0.9978, "box": [501, 349, 699, 406]},
+        {"text": "taro.suzuki18@example.test", "confidence": 0.9819, "box": [342, 505, 857, 555]},
+        {"text": "TEL+81355550118", "confidence": 1.0, "box": [435, 568, 765, 607]}
+      ]
+    },
+    {
+      "id": "ja-split-rotation-19",
+      "lines": [
+        {"text": "高橋美咲", "confidence": 0.9978, "box": [558, 110, 881, 225]},
+        {"text": "合同会社つながりラボ", "confidence": 0.9999, "box": [77, 140, 463, 221]},
+        {"text": "プロダクトマネージャー", "confidence": 0.9987, "box": [583, 222, 1065, 314]},
+        {"text": "EMAIL misaki.takahashi19@example.test", "confidence": 0.9978, "box": [596, 402, 1062, 475]},
+        {"text": "TEL +81355550119", "confidence": 0.9713, "box": [603, 483, 936, 553]}
+      ]
+    },
+    {
+      "id": "ja-minimal-perspective-20",
+      "lines": [
+        {"text": "田中健一", "confidence": 0.9985, "box": [92, 102, 418, 195]},
+        {"text": "主任エンジニア", "confidence": 0.9993, "box": [93, 224, 450, 286]},
+        {"text": "株式会社東雲システムズ", "confidence": 0.9999, "box": [79, 403, 652, 471]},
+        {"text": "EMAIL kenichi.tanaka20@example.test", "confidence": 0.9877, "box": [68, 568, 828, 617]},
+        {"text": "TEL +81355550120", "confidence": 0.9863, "box": [65, 642, 420, 685]}
+      ]
+    },
+    {
+      "id": "ja-classic-low-light-21",
+      "lines": [
+        {"text": "有限会社白波デザイン", "confidence": 0.9996, "box": [91, 87, 570, 140]},
+        {"text": "伊藤結衣", "confidence": 0.9994, "box": [86, 209, 400, 292]},
+        {"text": "デザイン部長", "confidence": 0.998, "box": [96, 310, 387, 365]},
+        {"text": "EMAIL yui.ito21@example.test", "confidence": 0.9998, "box": [94, 477, 637, 524]},
+        {"text": "TEL +81355550121", "confidence": 0.9766, "box": [96, 542, 422, 579]}
+      ]
+    },
+    {
+      "id": "ja-centered-clean-22",
+      "lines": [
+        {"text": "日本未来研究所", "confidence": 0.9997, "box": [434, 83, 767, 138]},
+        {"text": "渡辺翔", "confidence": 0.9999, "box": [477, 229, 720, 315]},
+        {"text": "研究開発部長", "confidence": 0.9992, "box": [455, 352, 745, 404]},
+        {"text": "sho.watanabe22@example.test", "confidence": 1.0, "box": [317, 504, 882, 557]},
+        {"text": "TEL +81355550122", "confidence": 0.9938, "box": [437, 571, 764, 608]}
+      ]
+    },
+    {
+      "id": "ja-split-glare-23",
+      "lines": [
+        {"text": "株式会社北星パートナーズ", "confidence": 0.9993, "box": [97, 128, 481, 162]},
+        {"text": "山本葵", "confidence": 0.9998, "box": [580, 137, 823, 224]},
+        {"text": "マーケティング課長", "confidence": 0.9976, "box": [588, 267, 1022, 320]},
+        {"text": "EMAIL aoi.yamamoto23@example.test", "confidence": 0.997, "box": [588, 449, 1060, 479]},
+        {"text": "TEL+81355550123", "confidence": 1.0, "box": [589, 517, 917, 551]}
+      ]
+    },
+    {
+      "id": "ja-minimal-rotation-24",
+      "lines": [
+        {"text": "中村陽一", "confidence": 0.9979, "box": [97, 45, 417, 161]},
+        {"text": "取締役", "confidence": 0.9997, "box": [92, 158, 254, 235]},
+        {"text": "光彩堂株式会社", "confidence": 0.9999, "box": [80, 335, 425, 420]},
+        {"text": "EMAIL yoichi.nakamura24@example.test", "confidence": 0.9995, "box": [68, 481, 796, 595]},
+        {"text": "TEL +81355550124", "confidence": 0.9799, "box": [63, 544, 396, 614]}
+      ]
+    },
+    {
+      "id": "ja-classic-perspective-25",
+      "lines": [
+        {"text": "合同会社円環", "confidence": 0.9997, "box": [105, 92, 408, 156]},
+        {"text": "小林七海", "confidence": 0.9999, "box": [89, 220, 424, 314]},
+        {"text": "人事マネージャー", "confidence": 0.9979, "box": [90, 330, 501, 391]},
+        {"text": "EMAIL nanami.kobayashi25@example.test", "confidence": 0.997, "box": [78, 505, 911, 566]},
+        {"text": "TEL +81355550125", "confidence": 0.9864, "box": [78, 580, 429, 627]}
+      ]
+    },
+    {
+      "id": "ja-centered-low-light-26",
+      "lines": [
+        {"text": "株式会社羅針盤", "confidence": 0.9982, "box": [431, 86, 769, 137]},
+        {"text": "加藤直樹", "confidence": 0.9999, "box": [441, 229, 757, 313]},
+        {"text": "シニアコンサルタント", "confidence": 0.9993, "box": [361, 354, 834, 402]},
+        {"text": "naoki.kato26@example.test", "confidence": 1.0, "box": [347, 507, 853, 556]},
+        {"text": "TEL +81355550126", "confidence": 0.9767, "box": [437, 570, 765, 607]}
+      ]
+    },
+    {
+      "id": "ja-split-clean-27",
+      "lines": [
+        {"text": "海風ソリューションズ株式会社", "confidence": 0.9998, "box": [96, 126, 490, 156]},
+        {"text": "吉田彩", "confidence": 0.9997, "box": [578, 134, 824, 226]},
+        {"text": "営業課長", "confidence": 0.9993, "box": [587, 264, 785, 320]},
+        {"text": "EMAIL aya.yoshida27@example.test", "confidence": 0.9868, "box": [589, 450, 1064, 481]},
+        {"text": "TEL +81355550127", "confidence": 0.9891, "box": [587, 514, 917, 553]}
+      ]
+    },
+    {
+      "id": "ja-minimal-glare-28",
+      "lines": [
+        {"text": "山田蓮", "confidence": 0.9997, "box": [80, 94, 322, 180]},
+        {"text": "技術顧問", "confidence": 0.9997, "box": [85, 212, 284, 267]},
+        {"text": "株式会社森羅システム", "confidence": 1.0, "box": [88, 386, 567, 437]},
+        {"text": "EMAIL ren.yamada28@example.test", "confidence": 0.9997, "box": [87, 533, 731, 577]},
+        {"text": "TEL +81355550128", "confidence": 0.9852, "box": [90, 595, 416, 631]}
+      ]
+    },
+    {
+      "id": "mixed-classic-clean-29",
+      "lines": [
+        {"text": "株式会社 Horizon Labs", "confidence": 0.9898, "box": [88, 83, 589, 140]},
+        {"text": "Rei Nakamura", "confidence": 0.9753, "box": [88, 210, 570, 288]},
+        {"text": "Engineering Manager", "confidence": 0.9872, "box": [94, 313, 571, 370]},
+        {"text": "EMAIL rei.nakamura29@example.test", "confidence": 0.9998, "box": [93, 473, 762, 524]},
+        {"text": "TEL +81355550129", "confidence": 0.9886, "box": [97, 542, 422, 579]}
+      ]
+    },
+    {
+      "id": "mixed-centered-glare-30",
+      "lines": [
+        {"text": "Sakura Technologies 株式会社", "confidence": 0.9917, "box": [260, 84, 938, 140]},
+        {"text": "Mika Tanaka", "confidence": 0.989, "box": [386, 235, 812, 306]},
+        {"text": "プロダクトDirector", "confidence": 0.993, "box": [385, 349, 820, 403]},
+        {"text": "mika.tanaka30@example.test", "confidence": 0.9999, "box": [334, 509, 866, 552]},
+        {"text": "TEL +81355550130", "confidence": 0.9777, "box": [436, 570, 764, 607]}
+      ]
+    },
+    {
+      "id": "mixed-split-rotation-31",
+      "lines": [
+        {"text": "Ken Ito", "confidence": 0.9427, "box": [558, 123, 812, 220]},
+        {"text": "未来 Cloud Systems", "confidence": 0.9872, "box": [74, 143, 468, 226]},
+        {"text": "Seniorエンジニア", "confidence": 0.9989, "box": [578, 230, 982, 321]},
+        {"text": "EMAIL ken.ito31@example.test", "confidence": 0.9988, "box": [596, 406, 1067, 486]},
+        {"text": "TEL +81355550131", "confidence": 0.9747, "box": [603, 483, 935, 553]}
+      ]
+    },
+    {
+      "id": "mixed-minimal-perspective-32",
+      "lines": [
+        {"text": "Aya Mori", "confidence": 0.998, "box": [85, 106, 405, 206]},
+        {"text": "Designマネージャー", "confidence": 0.9945, "box": [91, 219, 574, 294]},
+        {"text": "North Star株式会社", "confidence": 0.983, "box": [77, 404, 554, 471]},
+        {"text": "EMAIL aya.mori32@example.test", "confidence": 0.9998, "box": [67, 567, 713, 625]},
+        {"text": "TEL +81355550132", "confidence": 0.9921, "box": [66, 641, 420, 685]}
+      ]
+    },
+    {
+      "id": "mixed-classic-low-light-33",
+      "lines": [
+        {"text": "Connex研究所", "confidence": 1.0, "box": [90, 88, 416, 139]},
+        {"text": "Sora Kato", "confidence": 0.9973, "box": [88, 217, 424, 285]},
+        {"text": "Sales部長", "confidence": 0.9991, "box": [92, 309, 325, 365]},
+        {"text": "EMAIL sora.kato33@example.test", "confidence": 0.9953, "box": [92, 471, 693, 524]},
+        {"text": "TEL+81355550133", "confidence": 1.0, "box": [94, 539, 423, 579]}
+      ]
+    },
+    {
+      "id": "mixed-centered-clean-34",
+      "lines": [
+        {"text": "Quantum 未来 Labs", "confidence": 0.9709, "box": [380, 81, 819, 144]},
+        {"text": "Nao Suzuki", "confidence": 0.9981, "box": [406, 234, 789, 307]},
+        {"text": "Chief研究員", "confidence": 0.9954, "box": [463, 350, 737, 405]},
+        {"text": "nao.suzuki34@example.test", "confidence": 1.0, "box": [346, 507, 855, 556]},
+        {"text": "TEL +81355550134", "confidence": 0.994, "box": [436, 569, 765, 608]}
+      ]
+    },
+    {
+      "id": "mixed-split-glare-35",
+      "lines": [
+        {"text": "Blue Ocean 株式会社", "confidence": 0.9757, "box": [95, 129, 479, 173]},
+        {"text": "Rin Yoshida", "confidence": 0.9777, "box": [581, 143, 977, 216]},
+        {"text": "Marketing課長", "confidence": 0.953, "box": [586, 266, 926, 323]},
+        {"text": "EMAIL rin.yoshida35@example.test", "confidence": 0.9996, "box": [588, 449, 1054, 480]},
+        {"text": "TEL+81355550135", "confidence": 1.0, "box": [588, 515, 917, 551]}
+      ]
+    },
+    {
+      "id": "mixed-minimal-rotation-36",
+      "lines": [
+        {"text": "Yuki Sato", "confidence": 0.9963, "box": [98, 53, 423, 157]},
+        {"text": "Security エンジニア", "confidence": 0.9657, "box": [95, 163, 540, 264]},
+        {"text": "Trust Systems 合同会社", "confidence": 0.9705, "box": [79, 337, 607, 440]},
+        {"text": "EMAIL yuki.sato36@example.test", "confidence": 0.9997, "box": [68, 481, 661, 582]},
+        {"text": "TEL +81355550136", "confidence": 0.9797, "box": [63, 545, 395, 614]}
+      ]
+    },
+    {
+      "id": "mixed-classic-perspective-37",
+      "lines": [
+        {"text": "Pacific Link 株式会社", "confidence": 0.9532, "box": [103, 84, 590, 156]},
+        {"text": "Haru Watanabe", "confidence": 0.9998, "box": [89, 218, 656, 309]},
+        {"text": "Operations部長", "confidence": 0.9921, "box": [90, 324, 477, 398]},
+        {"text": "EMAIL haru.watanabe37@example.test", "confidence": 0.9999, "box": [77, 504, 847, 562]},
+        {"text": "TEL +81355550137", "confidence": 0.9765, "box": [77, 580, 429, 627]}
+      ]
+    },
+    {
+      "id": "mixed-centered-low-light-38",
+      "lines": [
+        {"text": "情報未来研究所", "confidence": 0.9999, "box": [431, 85, 768, 136]},
+        {"text": "Mei Kobayashi", "confidence": 0.9966, "box": [348, 232, 848, 320]},
+        {"text": "Data Scientist", "confidence": 0.9971, "box": [447, 356, 757, 401]},
+        {"text": "mei.kobayashi38@example.test", "confidence": 0.9933, "box": [315, 509, 887, 556]},
+        {"text": "TEL+81355550138", "confidence": 1.0, "box": [437, 569, 765, 606]}
+      ]
+    },
+    {
+      "id": "mixed-split-clean-39",
+      "lines": [
+        {"text": "つながるNetworkLabs", "confidence": 0.9996, "box": [99, 129, 482, 166]},
+        {"text": "Kai Yamamoto", "confidence": 0.98, "box": [579, 144, 1078, 216]},
+        {"text": "Solutions Architect", "confidence": 0.9879, "box": [588, 269, 1016, 317]},
+        {"text": "EMAIL kai.yamamoto39@example.test", "confidence": 0.9986, "box": [588, 448, 1057, 478]},
+        {"text": "TEL +81355550139", "confidence": 0.977, "box": [588, 516, 918, 553]}
+      ]
+    },
+    {
+      "id": "mixed-minimal-glare-40",
+      "lines": [
+        {"text": "Aoi Takahashi", "confidence": 0.9708, "box": [77, 98, 556, 174]},
+        {"text": "Customer Success部長", "confidence": 0.9836, "box": [88, 214, 604, 264]},
+        {"text": "Harmony株式会社", "confidence": 1.0, "box": [84, 381, 503, 443]},
+        {"text": "EMAIL aoi.takahashi40@example.test", "confidence": 0.9996, "box": [86, 528, 755, 576]},
+        {"text": "TEL+81355550140", "confidence": 1.0, "box": [89, 595, 415, 631]}
+      ]
+    }
+  ]
+}
