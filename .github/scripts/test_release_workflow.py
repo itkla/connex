@@ -1001,6 +1001,51 @@ class ReleaseWorkflowTest(unittest.TestCase):
         result = subprocess.run(["bash", "-e", "-c", script], cwd=deploy, env=env, capture_output=True, text=True)
         return result, deploy / ".env"
 
+    def inspection_program(self, container: str) -> str:
+        script = self.named_step("release-set-smoke", "Boot and verify exact release set")["run"]
+        start = script.index(f'docker inspect "${container}" | jq -e \'')
+        body = script[start:].split("'", 2)[1]
+        return body
+
+    def inspected(self, user: str, port: str, memory: int, tmpfs: str, network: str) -> dict[str, object]:
+        """docker inspect output as Docker Engine 29 reports these services: no devices is null."""
+        return {
+            "Config": {"User": user, "ExposedPorts": {f"{port}/tcp": {}}},
+            "HostConfig": {
+                "Memory": memory, "MemorySwap": memory, "NanoCpus": 2000000000, "PidsLimit": 128,
+                "ReadonlyRootfs": True, "Privileged": False, "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges:true"], "Devices": None, "DeviceRequests": None,
+                "Binds": None, "Mounts": None, "Tmpfs": {"/tmp": tmpfs}, "NetworkMode": f"connex_{network}",
+            },
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {f"connex_{network}": {}}, "Ports": {f"{port}/tcp": None}},
+        }
+
+    def test_release_set_container_inspections_accept_the_deployed_shape(self) -> None:
+        cases = {
+            "OCR_CONTAINER": self.inspected("10001", "8090", 2147483648,
+                                            "size=64m,mode=1777,noexec,nosuid,nodev", "ocr_internal"),
+            "CLAMAV_CONTAINER": self.inspected("10002", "8091", 3221225472,
+                                               "size=512m,mode=1777,noexec,nosuid,nodev", "clamav_internal"),
+        }
+        for container, inspected in cases.items():
+            program = self.inspection_program(container)
+            with self.subTest(container=container):
+                ok = subprocess.run(["jq", "-e", program], input=json.dumps([inspected]),
+                                    capture_output=True, text=True)
+                self.assertEqual(0, ok.returncode, ok.stdout + ok.stderr)
+                for name, mutate in {
+                    "privileged": lambda d: d["HostConfig"].update(Privileged=True),
+                    "device passed through": lambda d: d["HostConfig"].update(Devices=[{"PathOnHost": "/dev/kvm"}]),
+                    "read-only tmpfs": lambda d: d["HostConfig"].update(Tmpfs={"/tmp": d["HostConfig"]["Tmpfs"]["/tmp"] + ",ro"}),
+                    "published port": lambda d: d["NetworkSettings"].update(Ports={"9999/tcp": [{"HostPort": "9999"}]}),
+                }.items():
+                    bad = json.loads(json.dumps(inspected))
+                    mutate(bad)
+                    refused = subprocess.run(["jq", "-e", program], input=json.dumps([bad]),
+                                             capture_output=True, text=True)
+                    self.assertNotEqual(0, refused.returncode, name)
+
     def test_release_set_environment_carries_every_candidate_digest(self) -> None:
         digests = {c: "sha256:" + format(i, "x") * 64 for i, c in enumerate(("backend", "frontend", "ocr", "clamav"), 1)}
         result, env_file = self.run_prepare_release_set(digests)

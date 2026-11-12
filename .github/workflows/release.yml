@@ -653,13 +653,13 @@ jobs:
             and .HostConfig.Privileged == false
             and (.HostConfig.CapDrop | index("ALL") != null)
             and (.HostConfig.SecurityOpt | index("no-new-privileges:true") != null)
-            and .HostConfig.Devices == []
+            and (.HostConfig.Devices == null or .HostConfig.Devices == [])
             and (.HostConfig.DeviceRequests == null or .HostConfig.DeviceRequests == [])
             and (.HostConfig.Binds == null or .HostConfig.Binds == [])
             and (.HostConfig.Mounts == null or .HostConfig.Mounts == [])
             and .Mounts == []
             and (.HostConfig.Tmpfs | keys) == ["/tmp"]
-            and (.HostConfig.Tmpfs["/tmp"] | contains("rw"))
+            and (.HostConfig.Tmpfs["/tmp"] | split(",") | index("ro") == null)
             and (.HostConfig.Tmpfs["/tmp"] | contains("noexec"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nosuid"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nodev"))
@@ -686,11 +686,12 @@ jobs:
             and .HostConfig.Privileged == false
             and (.HostConfig.CapDrop | index("ALL") != null)
             and (.HostConfig.SecurityOpt | index("no-new-privileges:true") != null)
-            and .HostConfig.Devices == []
+            and (.HostConfig.Devices == null or .HostConfig.Devices == [])
             and (.HostConfig.Binds == null or .HostConfig.Binds == [])
             and (.HostConfig.Mounts == null or .HostConfig.Mounts == [])
             and .Mounts == []
             and (.HostConfig.Tmpfs | keys) == ["/tmp"]
+            and (.HostConfig.Tmpfs["/tmp"] | split(",") | index("ro") == null)
             and (.HostConfig.Tmpfs["/tmp"] | contains("noexec"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nosuid"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nodev"))
