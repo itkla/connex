@@ -6,7 +6,7 @@ ARG SOURCE_DATE_EPOCH
 # Same digest-pinned base as ocr/, deliberately: the supervisor and HTTP front are stdlib-only
 # Python, so this image needs no pip dependencies and therefore no requirements lock at all.
 # ClamAV itself comes from Debian's packages, matching ocr/'s unpinned-apt precedent.
-FROM python:3.12-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-clamav" \
@@ -24,7 +24,9 @@ WORKDIR /opt/connex-clamav/app
 # clamav-daemon supplies clamd, clamav-freshclam supplies the build-time updater.
 # The Debian postinst tries to start services that do not exist in a container; that is harmless
 # under a non-systemd PID 1, but the update it schedules is replaced by our own pinned config.
+# Upgrade first to pick up OS security fixes published after the base image (release scan gate).
 RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
     && apt-get install --no-install-recommends -y clamav clamav-daemon clamav-freshclam \
     && rm -rf /var/lib/apt/lists/* /etc/cron.d/clamav-freshclam \
     && rm -f /etc/clamav/clamd.conf /etc/clamav/freshclam.conf

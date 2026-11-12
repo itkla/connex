@@ -7,7 +7,7 @@ ARG SOURCE_DATE_EPOCH
 # (see AGENTS.md). Bumping this base past 3.12 makes the hash-pinned install unresolvable and
 # the sidecar image unbuildable. Move it only together with a paddlepaddle release that ships
 # wheels for the new interpreter, and regenerate requirements.lock on the same version.
-FROM python:3.12-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-ocr" \
@@ -22,7 +22,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/connex-ocr/app
 
+# Upgrade first to pick up OS security fixes published after the base image (release scan gate).
 RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
     && apt-get install --no-install-recommends -y libgl1 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
