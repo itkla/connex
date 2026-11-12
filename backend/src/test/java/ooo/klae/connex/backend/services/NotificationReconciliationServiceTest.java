@@ -581,6 +581,10 @@ class NotificationReconciliationServiceTest {
         PreferenceMapper preferenceMapper
     ) {
         Mockito.lenient().when(dispatcher.channel()).thenReturn("in_app");
+        Mockito.lenient().when(dispatcher.dispatch(any())).thenAnswer(invocation -> {
+            invocation.<Notification>getArgument(0).setId(77);
+            return 1;
+        });
         NotificationQuietHoursControlAccess quietHoursControlAccess =
             Mockito.mock(NotificationQuietHoursControlAccess.class);
         Mockito.lenient().when(quietHoursControlAccess.evaluateForUser(anyInt(), Mockito.any(Instant.class)))
@@ -590,7 +594,7 @@ class NotificationReconciliationServiceTest {
             Mockito.mock(NotificationPushPublisher.class), stateVersions(notificationMapper),
             quietHoursControlAccess,
             Mockito.mock(ooo.klae.connex.backend.notifications.NotificationQuietHoursBypassPolicy.class),
-            Clock.systemUTC(), new ObjectMapper());
+            Clock.systemUTC());
     }
 
     /** A deal-risk service that flags nothing, so the deal-risk pass is a no-op in unrelated tests. */
