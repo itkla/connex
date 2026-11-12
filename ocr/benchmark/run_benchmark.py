@@ -292,14 +292,15 @@ def inspect_runtime_container(component: str, container_id: str) -> dict[str, ob
             or "ALL" not in cap_drop
             or not isinstance(security_options, list)
             or "no-new-privileges:true" not in security_options
-            or devices != []
+            or devices not in (None, [])
             or device_requests not in (None, [])
             or host_config.get("Binds") not in (None, [])
             or host_config.get("Mounts") not in (None, [])
             or mounts != []
             or not isinstance(tmpfs, dict)
             or set(tmpfs) != {"/tmp"}
-            or not {"rw", "noexec", "nosuid", "nodev"}.issubset(tmp_option_set)
+            or "ro" in tmp_option_set
+            or not {"noexec", "nosuid", "nodev"}.issubset(tmp_option_set)
             or not ({"size=64m", "size=67108864"} & tmp_option_set)
             or not isinstance(network_mode, str)
             or not network_mode.endswith("_ocr_internal")

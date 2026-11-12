@@ -402,11 +402,11 @@ class BenchmarkManifestTest(unittest.TestCase):
                 "CapDrop": ["ALL"],
                 "Privileged": False,
                 "SecurityOpt": ["no-new-privileges:true"],
-                "Devices": [],
+                "Devices": None,
                 "DeviceRequests": None,
                 "Binds": None,
                 "Mounts": None,
-                "Tmpfs": {"/tmp": "rw,noexec,nosuid,nodev,size=67108864"},
+                "Tmpfs": {"/tmp": "size=64m,mode=1777,noexec,nosuid,nodev"},
                 "NetworkMode": "connex_ocr_internal",
             },
             "Mounts": [],
@@ -430,6 +430,22 @@ class BenchmarkManifestTest(unittest.TestCase):
         with patch("benchmark.run_benchmark.command_output", return_value=json.dumps(inspection)):
             with self.assertRaisesRegex(ValueError, "resource"):
                 inspect_runtime_container("ocr", "d" * 12)
+
+        inspection[0]["HostConfig"]["Privileged"] = False
+        inspection[0]["HostConfig"]["Devices"] = []
+        with patch("benchmark.run_benchmark.command_output", return_value=json.dumps(inspection)):
+            inspect_runtime_container("ocr", "d" * 12)
+        for name, host_config in {
+            "device passed through": {"Devices": [{"PathOnHost": "/dev/kvm"}]},
+            "read-only tmpfs": {"Tmpfs": {"/tmp": "size=64m,mode=1777,noexec,nosuid,nodev,ro"}},
+            "executable tmpfs": {"Tmpfs": {"/tmp": "size=64m,mode=1777,nosuid,nodev"}},
+        }.items():
+            with self.subTest(name=name):
+                mutated = json.loads(json.dumps(inspection))
+                mutated[0]["HostConfig"].update(host_config)
+                with patch("benchmark.run_benchmark.command_output", return_value=json.dumps(mutated)):
+                    with self.assertRaisesRegex(ValueError, "resource"):
+                        inspect_runtime_container("ocr", "d" * 12)
 
     def test_host_qualification_requires_avx_on_every_processor(self) -> None:
         with patch(
