@@ -283,6 +283,10 @@ jobs:
           image: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}@${{ steps.digest.outputs.digest }}
           fail-build: true
           severity-cutoff: high
+          # Fail on any High or Critical with an available fix; vendor-unfixed findings stay in the attested
+          # SBOM and are re-evaluated on every release (owner decision 2026-11-11).
+          only-fixed: true
+          config: .github/grype-release.yaml
           output-format: table
 
       - name: Install cosign
@@ -412,6 +416,10 @@ jobs:
           image: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
           fail-build: true
           severity-cutoff: high
+          # Fail on any High or Critical with an available fix; vendor-unfixed findings stay in the attested
+          # SBOM and are re-evaluated on every release (owner decision 2026-11-11).
+          only-fixed: true
+          config: .github/grype-release.yaml
           output-format: table
 
       - name: Generate dry-run SBOM

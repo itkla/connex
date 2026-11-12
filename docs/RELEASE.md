@@ -237,8 +237,17 @@ token is used only to fail closed on the immutable-release policy precondition.
 2. It builds each component with a reproducible commit timestamp and pushes only an attempt-scoped
    `candidate-<run>-<attempt>` tag. Every attempt builds from the checked-out release commit with
    pinned Buildx and BuildKit versions and emits BuildKit provenance; it never trusts content found
-   behind a pre-existing candidate tag. Each resulting digest is rejected on high-or-critical known
-   vulnerabilities, signed with cosign, and receives an SPDX SBOM attestation.
+   behind a pre-existing candidate tag. Each resulting digest is rejected on any high-or-critical
+   known vulnerability that has a fix available, signed with cosign, and receives an SPDX SBOM
+   attestation. Vulnerabilities the vendor has not fixed do not block a release, because no rebuild
+   can remove them; they stay in the attested SBOM, and each release re-scans, so one fails the
+   gate as soon as a fix ships. To keep fixable findings at zero, the runtime stages upgrade OS
+   packages at build time and the frontend runtime drops the unused npm toolchain. This was an owner
+   decision on 2026-11-11, after the Debian bases of the OCR and ClamAV images showed 85
+   vendor-unfixed high-or-critical findings that no Debian base could clear. Narrow,
+   owner-approved exceptions live in `.github/grype-release.yaml`; each names its tracking issue,
+   reachability analysis and removal condition. The only one so far is the ffmpeg bundled in
+   OCR's pinned OpenCV wheel (#2395).
 3. It boots the exact three candidate digests together through the deployment Compose bundle with
    OCR enabled. The gate verifies `/api/version`, scanning/import capabilities, running image
    identities, OCR and ClamAV health/isolation/resource limits, and the one-shot maintenance

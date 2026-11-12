@@ -12,6 +12,7 @@ import yaml
 
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "release.yml"
 PRECONDITIONS_PATH = Path(__file__).parent / "verify-release-preconditions.sh"
+SCAN_EXCEPTIONS_PATH = Path(__file__).parents[1] / "grype-release.yaml"
 DEPLOYMENT_PATH = Path(__file__).parents[2] / "docs" / "DEPLOYMENT.md"
 SEMVER_TAG_PATTERN = (
     r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -964,10 +965,26 @@ class ReleaseWorkflowTest(unittest.TestCase):
             "Scan dry-run candidate for high-severity vulnerabilities",
         )
         self.assertEqual("high", scan["with"]["severity-cutoff"])
+        self.assertIs(True, scan["with"]["only-fixed"])
+        published = self.named_step("candidate-images", "Scan exact candidate for high-severity vulnerabilities")
+        self.assertEqual("high", published["with"]["severity-cutoff"])
+        self.assertTrue(published["with"]["fail-build"])
+        self.assertIs(True, published["with"]["only-fixed"])
+        for step in (scan, published):
+            self.assertEqual(".github/grype-release.yaml", step["with"]["config"])
         self.assertTrue(scan["with"]["fail-build"])
         sbom = self.named_step("candidate-images-dry-run", "Generate dry-run SBOM")
         self.assertNotIn("if", sbom)
         self.assertEqual("spdx-json", sbom["with"]["format"])
+
+    def test_release_scan_exceptions_stay_narrow(self) -> None:
+        config = yaml.safe_load(SCAN_EXCEPTIONS_PATH.read_text())
+        self.assertEqual(["ignore"], list(config))
+        self.assertEqual(
+            [{"package": {"name": "ffmpeg", "version": "5.1.4", "type": "binary",
+                          "location": "/usr/local/lib/python3.12/site-packages/opencv_contrib_python.libs/**"}}],
+            config["ignore"],
+        )
 
     def test_publish_job_body_is_unchanged_from_the_prepublication_pipeline(self) -> None:
         publish = self.workflow["jobs"]["candidate-images"]
