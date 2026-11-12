@@ -43,6 +43,26 @@ class NotificationMapperTest extends AbstractMapperTest {
     @Autowired private TaskMapper taskMapper;
 
     @Test
+    void deliveryIdentityIncludesWorkspaceRecipientIdAndDedupeEvenForHiddenRows() {
+        User recipient = newUser();
+        User stranger = newUser();
+        Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
+        notification.setSourceType("task");
+        notification.setSourceId(0);
+        assertEquals(1, notificationMapper.upsert(notification));
+        int id = notification.getId();
+        String dedupe = notification.getDedupeKey();
+
+        assertNull(notificationMapper.findById(recipient.getId(), id));
+        assertTrue(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), id, dedupe));
+        assertFalse(notificationMapper.existsDelivery(0, recipient.getId(), id, dedupe));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), stranger.getId(), id, dedupe));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), 0, dedupe));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), id, "another-key"));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), id, null));
+    }
+
+    @Test
     void boundedInboxCursorAdvancesUnchangedRowsWithoutChangingOrdinaryPageOrder() {
         User recipient = newUser();
         Notification first = reminder(recipient, "info", "2026-01-03 00:00:00", 1);

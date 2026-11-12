@@ -65,6 +65,8 @@ class NotificationDeliveryTest {
         }).when(inApp).dispatch(any());
         lenient().when(notificationMapper.findById(eq(9), anyInt()))
             .thenAnswer(invocation -> existingRow(invocation.getArgument(1), "info", null));
+        lenient().when(notificationMapper.existsDelivery(eq(1), eq(9), anyInt(), any()))
+            .thenReturn(true);
         lenient().when(notificationMapper.claimEmailDelivery(eq(1), eq(9), any()))
             .thenReturn(1);
         lenient().when(quietHoursControlAccess.evaluateForUser(
@@ -312,6 +314,22 @@ class NotificationDeliveryTest {
 
         org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher, preferenceMapper);
         verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void burnedGeneratedKeyForAFoundRowDoesNotBumpOrPush() {
+        Notification incoming = notification();
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey()))
+            .thenReturn(existingRow(77, "info", null));
+        doAnswer(invocation -> {
+            invocation.<Notification>getArgument(0).setId(88);
+            return 1;
+        }).when(inApp).dispatch(incoming);
+        when(notificationMapper.existsDelivery(1, 9, 88, incoming.getDedupeKey())).thenReturn(false);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher, quietHoursControlAccess);
     }
 
     @Test

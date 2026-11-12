@@ -38,8 +38,9 @@ import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
  * zero or one for a no-op, depending on JDBC found-row configuration. Java input
  * comparisons cannot substitute for that result because persistence can normalize
  * input, such as a missing actor account, without changing the durable row.
- * A generated key distinguishes an insert after a concurrent purge from an
- * unchanged existing row that reports one found row.
+ * A generated key must identify a stored row with the same delivery identity:
+ * InnoDB can reserve an auto-increment value even for a duplicate-key no-op.
+ * This also recognizes an insert after a concurrent purge.
  *
  * <p>The in-app affected-row count closes a stale-pre-read race for existing rows:
  * if another transaction changes a notification between the pre-read and upsert,
@@ -83,7 +84,10 @@ public class NotificationDelivery {
         }
 
         boolean inserted = inAppRows == 1 && notification.getId() > 0
-            && (existing == null || notification.getId() != existing.getId());
+            && (existing == null || notification.getId() != existing.getId())
+            && notificationMapper.existsDelivery(
+                notification.getWorkspaceId(), notification.getRecipientId(),
+                notification.getId(), notification.getDedupeKey());
         boolean persistedChange = inserted || inAppRows > 1;
         boolean quietHoursActive = persistedChange && quietHoursActive(notification);
         boolean recipientCanAccess = true;

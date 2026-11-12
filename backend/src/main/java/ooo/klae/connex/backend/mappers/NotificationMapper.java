@@ -281,6 +281,14 @@ public interface NotificationMapper {
 
     int upsert(Notification notification);
 
+    /** Confirms a generated key belongs to this durable delivery, including rows hidden from the inbox. */
+    boolean existsDelivery(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("id") int id,
+        @Param("dedupeKey") String dedupeKey
+    );
+
     int claimEmailDelivery(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
