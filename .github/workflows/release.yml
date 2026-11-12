@@ -587,6 +587,15 @@ jobs:
             "CONNEX_BOOTSTRAP_PASSWORD=${PASSWORD}" \
             'CONNEX_BOOTSTRAP_DISPLAY_NAME=Release Benchmark' \
             >> .env
+          # The benchmark signs in as the bootstrap owner, a privileged account that cannot enroll a
+          # passkey in CI, so default privileged-MFA confinement refuses every scan with 403. This
+          # throwaway qualification stack measures OCR accuracy and latency, not MFA posture, so it
+          # uses the documented staged-rollout opt-out with a named change actor. The backend writes
+          # that choice to its audit log at startup. Shipped templates stay enforced.
+          printf '%s\n' \
+            'CONNEX_PRIVILEGED_MFA_ENFORCED=false' \
+            'CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR=release-benchmark-qualification' \
+            >> .env
           printf '%s' "$PASSWORD" > /tmp/benchmark-password
 
       - name: Boot and verify exact release set
