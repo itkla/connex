@@ -1022,6 +1022,6 @@ authority. V248 backfills existing custom roles and defaults all built-in flags 
 roles start without an export grant. The authority and endpoint inventory are in
 [SECURITY_BOUNDARIES.md](backend/SECURITY_BOUNDARIES.md#export-authority); drain and rollback rules
 are in [UPGRADING.md](UPGRADING.md#export-data-permission-control-v248).
-The current release-wide rollback floor is control V248. Retain the
+The current release-wide rollback floor is control V250. Retain the
 [invitation-expiry cutover](UPGRADING.md#historical-pending-invitation-expiry-control-v247), then apply the
 [export-permission cutover](UPGRADING.md#export-data-permission-control-v248).

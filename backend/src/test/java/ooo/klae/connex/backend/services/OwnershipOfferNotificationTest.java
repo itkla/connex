@@ -139,12 +139,14 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
         for (String action : List.of("accept", "revoke", "expiry", "invalidate")) {
             authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser);
             User target = newUser(); long id = create(target); var candidate = ledger.findById(id); Notification notice = delivered(id, target);
+            long before = notificationMapper.getStateVersion(target.getId());
             switch (action) {
                 case "accept" -> { OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, target); offers.accept(id, target.getId(), false); }
                 case "revoke" -> { authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser); offers.revoke("WORKSPACE", workspace.getId(), id, currentUser.getId()); }
                 case "expiry" -> { jdbc.update("UPDATE ownership_offer SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 8 DAY), expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY) WHERE id = ?", id); offers.expire(); }
                 default -> { authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser); workspaces.removeMember(workspace.getId(), currentUser.getId(), target.getId()); }
             }
+            assertEquals(before + 1, notificationMapper.getStateVersion(target.getId()), action);
             delivery.deliver(candidate); authenticateAs(target, workspace.getId());
             assertEquals(0, notificationMapper.getUnreadCounts(target.getId()).getUnread());
             if (!action.equals("invalidate")) { assertNotNull(notificationMapper.findById(target.getId(), notice.getId()).getResolvedAt()); }

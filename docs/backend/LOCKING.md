@@ -404,6 +404,18 @@ same domain-rows-then-notification-state order as the policy, approval and goal 
 inversion against them. A concurrent aggregate edit can deadlock with these final statements:
 propagate the failure and retry the operation in a fresh transaction, never retry in place.
 
+When departure also closes or erases a delivered ownership notice, its queued existing-row-only
+version writer owns the shared recipient's bump and invalidation. The ordinary queue skips that
+recipient regardless of callback registration order; it must not replace the ownership writer
+with an upsert that acquires a late recipient-account foreign-key lock. An immediate inbox response
+consumes the queued ownership bump through the same existing-row-only writer and missing-row guard.
+
+Notification teardown batches use an ascending primary-key locking read, delete those exact keys
+under their workspace predicate, and queue each affected recipient once in the same transaction.
+The existing control-catalog statement routing advances recipient versions at commit on that same
+database connection. A failed version write rolls back the notification deletions; an empty retry
+does not advance any version. Other registry tables retain their generic deletion path.
+
 The guard is exact for references committed before departure. A concurrently created request naming
 the departed member can survive departure and follows existing reconciliation in its existing order:
 its deadline rules apply first; expiration records `expired`, while escalation appends `any_approver`

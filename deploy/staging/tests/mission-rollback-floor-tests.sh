@@ -33,7 +33,7 @@ import zipfile
 root, releases = map(pathlib.Path, sys.argv[1:])
 floor = [line.strip() for line in (root / "deploy/staging/rollback-floor").read_text().splitlines()
          if line.strip() and not line.lstrip().startswith("#")]
-assert floor == ["control/V248__export_data_permission.sql"]
+assert floor == ["control/V250__drop_legacy_notification_membership_state_triggers.sql"]
 assert (root / "backend/src/main/resources/db/migration" / floor[0]).is_file()
 singleton_chain = ["tenant/V232__ai_agent_runs.sql", "tenant/V233__ai_assistant_proposal_set_storage.sql", "tenant/V234__deal_document_recency_index.sql", "tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql", "tenant/V237__ai_assistant_privacy_cutover.sql", "tenant/V238__ai_agent_singleton_proposals.sql"]
 workflow_chain = [*singleton_chain, "tenant/V239__rule_execution_workspace_history_index.sql"]
@@ -45,9 +45,11 @@ record_search_chain = [*deal_value_chain, "tenant/V244__record_search_keys.sql"]
 consent_chain = [*record_search_chain, "tenant/V245__contact_consent_version.sql"]
 currency_chain = [*consent_chain, "control/V246__workspace_default_currency.sql"]
 invitation_chain = [*currency_chain, "control/V247__pending_invitation_expiry.sql"]
+export_chain = [*invitation_chain, "control/V248__export_data_permission.sql"]
+notification_chain = [*export_chain, "tenant/V249__drop_legacy_notification_state_triggers.sql"]
 for name, migrations in (
-    ("compatible", [*invitation_chain, floor[0]]),
-    ("compatible-root", [*invitation_chain, floor[0]]),
+    ("compatible", [*notification_chain, floor[0]]),
+    ("compatible-root", [*notification_chain, floor[0]]),
     ("singleton-v238", singleton_chain),
     ("workflow-history-v239", workflow_chain),
     ("task-warmth-v240", task_chain),
@@ -58,6 +60,8 @@ for name, migrations in (
     ("consent-v245", consent_chain),
     ("workspace-currency-v246", currency_chain),
     ("invitation-expiry-v247", invitation_chain),
+    ("export-permission-v248", export_chain),
+    ("notification-v249-only", notification_chain),
     ("expiry-only", ["tenant/V231__ai_proposal_review_expiry_cutover.sql"]),
     ("privacy-control-v236", ["tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql"]),
     ("privacy-cutover-v237", ["tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql", "tenant/V237__ai_assistant_privacy_cutover.sql"]),
@@ -74,16 +78,18 @@ for name, migrations in (
             archive.writestr(prefix + "db/migration/" + migration, "SELECT 1;")
 PY
 
-for predecessor in expiry-only slice-one slice-one-v233 slice-one-v234 slice-two-v235 privacy-control-v236 privacy-cutover-v237 singleton-v238 workflow-history-v239 task-warmth-v240 deal-edit-v241 contact-edit-v242 deal-value-v243 record-search-v244 consent-v245 workspace-currency-v246 invitation-expiry-v247; do
+for predecessor in expiry-only slice-one slice-one-v233 slice-one-v234 slice-two-v235 privacy-control-v236 privacy-cutover-v237 singleton-v238 workflow-history-v239 task-warmth-v240 deal-edit-v241 contact-edit-v242 deal-value-v243 record-search-v244 consent-v245 workspace-currency-v246 invitation-expiry-v247 export-permission-v248 notification-v249-only; do
     if rollback_floor_allows_release "$predecessor"; then
-        printf '%s\n' "FAIL: $predecessor binary passed the V248 rollback floor" >&2
+        printf '%s\n' "FAIL: $predecessor binary passed the V250 rollback floor" >&2
         exit 1
     fi
 done
 rollback_floor_allows_release compatible
 rollback_floor_allows_release compatible-root
-if DEPLOY_TARGET=invitation-expiry-v247 rollback_floor_allows_release compatible; then
-    printf '%s\n' 'FAIL: target binary without V248 passed the rollback floor' >&2
-    exit 1
-fi
-printf '%s\n' 'PASS: exportPermissionRollbackFloorPreservesEarlierCutoversAndRejectsV247'
+for target in invitation-expiry-v247 export-permission-v248 notification-v249-only; do
+    if DEPLOY_TARGET="$target" rollback_floor_allows_release compatible; then
+        printf '%s\n' 'FAIL: target binary without V250 passed the rollback floor' >&2
+        exit 1
+    fi
+done
+printf '%s\n' 'PASS: notificationTriggerRollbackFloorPreservesEarlierCutoversAndRejectsV249'

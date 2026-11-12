@@ -978,8 +978,8 @@ turn/message association under the session mutex, insert parent and members in o
 and require complete membership before commit. Storage provenance guards and privacy cleanup are
 active at V237. Production set creation, effective-tier decisions and whole-call publication/decision
 routes remain disabled until their own slices. V233 itself retained its then-V232 floor; the current
-V237 privacy compatibility minimum applies independently of future producer activation; control V248 is
-the active release rollback floor (see [the invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247) and [the export-permission cutover](../UPGRADING.md#export-data-permission-control-v248)).
+V237 privacy compatibility minimum applies independently of future producer activation; control V250 is
+the active release rollback floor (see [legacy notification trigger retirement](../UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250) and [the export-permission cutover](../UPGRADING.md#export-data-permission-control-v248)).
 
 ### Adding an assistant write tool
 

@@ -12,6 +12,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.services.OwnershipOfferNotificationStateVersionService;
 
 /**
  * Advances recipient notification-state versions after all notification rows in a transaction
@@ -27,6 +28,7 @@ public class NotificationStateVersionService {
 
     private final NotificationMapper notificationMapper;
     private final NotificationPushPublisher pushPublisher;
+    private final OwnershipOfferNotificationStateVersionService ownershipNoticeVersions;
 
     /**
      * Records a recipient whose durable notification view changed in the current transaction.
@@ -68,7 +70,9 @@ public class NotificationStateVersionService {
         if (resource instanceof RecipientVersions versions) {
             versions.remove(recipientId);
         }
-        notificationMapper.bumpStateVersions(List.of(recipientId));
+        if (!ownershipNoticeVersions.bumpQueuedChangeNow(recipientId)) {
+            notificationMapper.bumpStateVersions(List.of(recipientId));
+        }
         long stateVersion = notificationMapper.getStateVersion(recipientId);
         pushPublisher.invalidated(recipientId);
         return stateVersion;
@@ -84,13 +88,16 @@ public class NotificationStateVersionService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void beforeCommit(boolean readOnly) {
-                List<Integer> recipientIds = versions.snapshot();
+                List<Integer> recipientIds = versions.snapshot().stream()
+                    .filter(id -> !ownershipNoticeVersions.hasQueuedChange(id)).toList();
                 if (!recipientIds.isEmpty()) {
                     log.debug("Notification state version write branch=before_commit recipients={} transactionName={}",
                         recipientIds, TransactionSynchronizationManager.getCurrentTransactionName());
                     notificationMapper.bumpStateVersions(recipientIds);
                 }
-                versions.invalidationSnapshot().forEach(pushPublisher::invalidated);
+                versions.invalidationSnapshot().stream()
+                    .filter(id -> !ownershipNoticeVersions.hasQueuedChange(id))
+                    .forEach(pushPublisher::invalidated);
             }
 
             @Override

@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
 import ooo.klae.connex.backend.services.NotificationQuietHoursEvaluator;
+import ooo.klae.connex.backend.support.LegacyNotificationTriggerFixtures;
 
 /** Verifies notification delivery changes against the real MySQL mapper and transaction boundary. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -69,6 +70,39 @@ class NotificationDeliveryConcurrencyIntegrationTest {
 
     private Workspace workspace;
     private User recipient;
+
+    @Test
+    void legacyTriggersInvalidateUnchangedRedeliveryUntilTheForwardMigrationsRun() {
+        Notification incoming = notification("task.due:legacy:" + UUID.randomUUID());
+        assertTrue(delivery.deliver(incoming));
+        long before = notificationMapper.getStateVersion(recipient.getId());
+        Notification persisted = notificationMapper.findByDedupe(
+            workspace.getId(), recipient.getId(), incoming.getDedupeKey());
+        clearInvocations(pushPublisher);
+        try {
+            LegacyNotificationTriggerFixtures.install(jdbcTemplate);
+
+            assertFalse(delivery.deliver(incoming));
+            assertEquals(before + 1, notificationMapper.getStateVersion(recipient.getId()));
+            verifyNoInteractions(pushPublisher);
+
+            LegacyNotificationTriggerFixtures.apply(jdbcTemplate);
+
+            assertFalse(delivery.deliver(incoming));
+            assertFalse(delivery.deliver(incoming));
+            assertEquals(before + 1, notificationMapper.getStateVersion(recipient.getId()));
+            assertEquals(persisted.getUpdatedAt(), notificationMapper.findByDedupe(
+                workspace.getId(), recipient.getId(), incoming.getDedupeKey()).getUpdatedAt());
+            verifyNoInteractions(pushPublisher);
+
+            incoming.setTitle("Changed reminder");
+            assertTrue(delivery.deliver(incoming));
+            assertEquals(before + 2, notificationMapper.getStateVersion(recipient.getId()));
+            verify(pushPublisher).updated(eq(recipient.getId()), any(), eq(incoming.getDedupeKey()));
+        } finally {
+            LegacyNotificationTriggerFixtures.remove(jdbcTemplate);
+        }
+    }
 
     @BeforeEach
     void setUp() {
