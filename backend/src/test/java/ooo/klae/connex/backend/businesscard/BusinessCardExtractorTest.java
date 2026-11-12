@@ -205,6 +205,7 @@ class BusinessCardExtractorTest {
         assertEquals("ada.lovelace@example.test", emailFrom("ada. lovelace @ example.test"));
         assertEquals("mail.desk@example.test", emailFrom("mail.desk@example.test"));
         assertEquals("emailteam@example.test", emailFrom("emailteam@example.test"));
+        assertEquals("EMAILdesk@example.test", emailFrom("Email: EMAILdesk@example.test"));
     }
 
     @Test
@@ -227,6 +228,17 @@ class BusinessCardExtractorTest {
                 line("佐藤 花子", 0.99, 80)));
 
         assertEquals("佐藤 花子", response.fields().name().value());
+    }
+
+    @Test
+    void keepsAnUppercaseLatinNameOverAnUnspacedJapaneseFallback() {
+        BusinessCardScanResponse response = extractor.extract(List.of(
+                line("ADA LOVELACE", 0.99, 20),
+                line("総務部", 0.99, 80),
+                line("Principal Engineer", 0.99, 140),
+                line("ada.lovelace@example.test", 0.99, 200)));
+
+        assertEquals("ADA LOVELACE", response.fields().name().value());
     }
 
     private String emailFrom(String text) {

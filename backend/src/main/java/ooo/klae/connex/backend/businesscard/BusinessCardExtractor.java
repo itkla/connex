@@ -125,8 +125,11 @@ public class BusinessCardExtractor {
     }
 
     private static String withoutEmailLabel(String text) {
-        String unlabeled = EMAIL_LABEL.matcher(text).replaceFirst("");
-        return GLUED_EMAIL_LABEL.matcher(unlabeled).replaceFirst("");
+        Matcher explicitLabel = EMAIL_LABEL.matcher(text);
+        if (explicitLabel.lookingAt()) {
+            return text.substring(explicitLabel.end());
+        }
+        return GLUED_EMAIL_LABEL.matcher(text).replaceFirst("");
     }
 
     private static Candidate phone(List<Line> lines) {
@@ -218,6 +221,7 @@ public class BusinessCardExtractor {
 
     private static Candidate name(List<Line> lines, Candidate title, Candidate company) {
         Candidate best = null;
+        Candidate unspacedJapaneseFallback = null;
         for (Line line : lines) {
             Matcher label = NAME_LABEL.matcher(line.text());
             if (label.matches()) {
@@ -234,22 +238,18 @@ public class BusinessCardExtractor {
                     || WEB.matcher(line.text()).find()) {
                 continue;
             }
-            boolean spacedPerson = personShape(line.text());
-            boolean unspacedJapanese = !spacedPerson
-                    && UNSPACED_JAPANESE_NAME.matcher(line.text()).matches();
-            if (!spacedPerson && !unspacedJapanese) {
-                continue;
-            }
             double evidence = 0.72 + Math.min(0.18, line.heightRatio() * 0.18);
-            if (uppercaseWordmark(line.text())) {
-                evidence -= 0.18;
+            if (personShape(line.text())) {
+                if (uppercaseWordmark(line.text())) {
+                    evidence -= 0.18;
+                }
+                best = better(best, candidate(line.text(), line, evidence));
+            } else if (UNSPACED_JAPANESE_NAME.matcher(line.text()).matches()) {
+                unspacedJapaneseFallback = better(unspacedJapaneseFallback,
+                        candidate(line.text(), line, evidence - UNSPACED_NAME_PENALTY));
             }
-            if (unspacedJapanese) {
-                evidence -= UNSPACED_NAME_PENALTY;
-            }
-            best = better(best, candidate(line.text(), line, evidence));
         }
-        return best;
+        return best == null ? unspacedJapaneseFallback : best;
     }
 
     private static boolean personShape(String text) {
