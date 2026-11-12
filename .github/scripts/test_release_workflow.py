@@ -1054,6 +1054,10 @@ class ReleaseWorkflowTest(unittest.TestCase):
                       if line.startswith("CONNEX_") and "=" in line)
         for component, digest in digests.items():
             self.assertEqual(digest.removeprefix("sha256:"), values[f"CONNEX_{component.upper()}_DIGEST"])
+        self.assertEqual("false", values["CONNEX_PRIVILEGED_MFA_ENFORCED"])
+        self.assertNotIn(values["CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR"], ("", "configuration-default"))
+        shipped = (Path(__file__).parents[2] / "deploy").glob("*.env.example")
+        self.assertFalse([p.name for p in shipped if "CONNEX_PRIVILEGED_MFA_ENFORCED=false" in p.read_text(encoding="utf-8")])
 
     def test_release_set_environment_refuses_an_unusable_digest(self) -> None:
         digests = {c: "sha256:" + "b" * 64 for c in ("backend", "frontend", "ocr", "clamav")}

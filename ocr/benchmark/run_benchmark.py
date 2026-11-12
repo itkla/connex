@@ -365,6 +365,8 @@ def run_case(case: dict[str, object], images: Path, configuration: dict[str, str
     except urllib.error.HTTPError as exception:
         payload = {"error": exception.read().decode("utf-8", errors="replace")[:512]}
         status = exception.code
+        print(f"BENCHMARK_HTTP_ERROR case={case['id']} status={status} code={error_code(payload['error'])}",
+              file=sys.stderr)
     latency = time.perf_counter() - started
     expected = case["fields"]
     assert isinstance(expected, dict)
@@ -383,6 +385,16 @@ def run_case(case: dict[str, object], images: Path, configuration: dict[str, str
         "actual": actual,
         "correct": scores,
     }
+
+
+def error_code(body: str) -> str:
+    """Return only the API error code from a failed response, never its free text."""
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return "unparseable"
+    code = parsed.get("code") if isinstance(parsed, dict) else None
+    return code if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", code) else "absent"
 
 
 def multipart(boundary: str, image: bytes, file_name: str) -> bytes:

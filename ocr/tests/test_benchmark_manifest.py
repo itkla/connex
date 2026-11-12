@@ -447,6 +447,15 @@ class BenchmarkManifestTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "resource"):
                         inspect_runtime_container("ocr", "d" * 12)
 
+    def test_error_code_reports_only_the_api_code(self) -> None:
+        from benchmark.run_benchmark import error_code
+        self.assertEqual("privileged_mfa_enrollment_required",
+                         error_code(json.dumps({"code": "privileged_mfa_enrollment_required",
+                                                "message": "Sensitive free text"})))
+        self.assertEqual("absent", error_code(json.dumps({"message": "Sensitive free text"})))
+        self.assertEqual("absent", error_code(json.dumps({"code": "has spaces and <markup>"})))
+        self.assertEqual("unparseable", error_code("<html>Forbidden</html>"))
+
     def test_host_qualification_requires_avx_on_every_processor(self) -> None:
         with patch(
             "benchmark.run_benchmark.Path.read_text",
