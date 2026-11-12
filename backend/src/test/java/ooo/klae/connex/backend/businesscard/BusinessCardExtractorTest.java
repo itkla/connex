@@ -206,6 +206,9 @@ class BusinessCardExtractorTest {
         assertEquals("mail.desk@example.test", emailFrom("mail.desk@example.test"));
         assertEquals("emailteam@example.test", emailFrom("emailteam@example.test"));
         assertEquals("EMAILdesk@example.test", emailFrom("Email: EMAILdesk@example.test"));
+        assertEquals("mail@example.test", emailFrom("mail @ example.test"));
+        assertEquals("email@example.test", emailFrom("email @ example.test"));
+        assertEquals("john@example.test", emailFrom("mail john @ example.test"));
     }
 
     @Test

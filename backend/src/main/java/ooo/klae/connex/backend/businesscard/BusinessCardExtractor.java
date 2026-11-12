@@ -127,9 +127,18 @@ public class BusinessCardExtractor {
     private static String withoutEmailLabel(String text) {
         Matcher explicitLabel = EMAIL_LABEL.matcher(text);
         if (explicitLabel.lookingAt()) {
-            return text.substring(explicitLabel.end());
+            return addressRemainder(text, explicitLabel.end());
         }
-        return GLUED_EMAIL_LABEL.matcher(text).replaceFirst("");
+        Matcher gluedLabel = GLUED_EMAIL_LABEL.matcher(text);
+        if (gluedLabel.lookingAt()) {
+            return addressRemainder(text, gluedLabel.end());
+        }
+        return text;
+    }
+
+    private static String addressRemainder(String text, int labelEnd) {
+        String remainder = text.substring(labelEnd);
+        return EMAIL.matcher(remainder.replace(" ", "")).find() ? remainder : text;
     }
 
     private static Candidate phone(List<Line> lines) {
