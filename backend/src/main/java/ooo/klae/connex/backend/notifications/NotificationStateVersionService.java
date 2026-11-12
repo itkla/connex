@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -20,6 +22,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 @Component
 @RequiredArgsConstructor
 public class NotificationStateVersionService {
+    private static final Logger log = LoggerFactory.getLogger(NotificationStateVersionService.class);
     private static final Object RESOURCE_KEY = NotificationStateVersionService.class;
 
     private final NotificationMapper notificationMapper;
@@ -30,6 +33,7 @@ public class NotificationStateVersionService {
      * @param recipientId the affected recipient
      */
     public void markChanged(int recipientId) {
+        logDecision("generic", recipientId);
         if (!TransactionSynchronizationManager.isSynchronizationActive()
                 || !TransactionSynchronizationManager.isActualTransactionActive()) {
             notificationMapper.bumpStateVersions(List.of(recipientId));
@@ -44,6 +48,7 @@ public class NotificationStateVersionService {
      * @param recipientId the affected recipient
      */
     public void markChangedWithDetailedPush(int recipientId) {
+        logDecision("detailed_push", recipientId);
         if (!TransactionSynchronizationManager.isSynchronizationActive()
                 || !TransactionSynchronizationManager.isActualTransactionActive()) {
             notificationMapper.bumpStateVersions(List.of(recipientId));
@@ -58,6 +63,7 @@ public class NotificationStateVersionService {
      * @return the advanced state version
      */
     public long bumpNow(int recipientId) {
+        logDecision("immediate", recipientId);
         Object resource = TransactionSynchronizationManager.getResource(RESOURCE_KEY);
         if (resource instanceof RecipientVersions versions) {
             versions.remove(recipientId);
@@ -80,6 +86,8 @@ public class NotificationStateVersionService {
             public void beforeCommit(boolean readOnly) {
                 List<Integer> recipientIds = versions.snapshot();
                 if (!recipientIds.isEmpty()) {
+                    log.debug("Notification state version write branch=before_commit recipients={} transactionName={}",
+                        recipientIds, TransactionSynchronizationManager.getCurrentTransactionName());
                     notificationMapper.bumpStateVersions(recipientIds);
                 }
                 versions.invalidationSnapshot().forEach(pushPublisher::invalidated);
@@ -93,6 +101,14 @@ public class NotificationStateVersionService {
             }
         });
         return versions;
+    }
+
+    private void logDecision(String branch, int recipientId) {
+        log.debug("Notification state version decision branch={} recipient={} transactionActive={} "
+                + "synchronizationActive={} transactionName={}",
+            branch, recipientId, TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isSynchronizationActive(),
+            TransactionSynchronizationManager.getCurrentTransactionName());
     }
 
     private static final class RecipientVersions {

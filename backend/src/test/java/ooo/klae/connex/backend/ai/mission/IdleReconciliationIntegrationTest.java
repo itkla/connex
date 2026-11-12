@@ -25,6 +25,8 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -33,6 +35,8 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.assistant.AiBriefScheduler;
 import ooo.klae.connex.backend.ai.assistant.AiWatchScheduler;
 import ooo.klae.connex.backend.beans.RelationshipSignal;
+import ooo.klae.connex.backend.beans.HistoricalNotificationBaseline;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
@@ -45,6 +49,7 @@ import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.services.ApprovalReconciliationScheduler;
 import ooo.klae.connex.backend.services.LeadResponseSlaScheduler;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
+import ooo.klae.connex.backend.services.NotificationQuietHoursControlAccess;
 import ooo.klae.connex.backend.services.RelationshipSignalScheduler;
 import ooo.klae.connex.backend.services.RelationshipSignalWriteService;
 import ooo.klae.connex.backend.services.RelationshipSignalDetectorService;
@@ -73,6 +78,7 @@ class IdleReconciliationIntegrationTest extends AbstractAiAgentPrivacyIntegratio
     @Autowired private LeadResponseSlaScheduler leadSla;
     @Autowired private ApprovalReconciliationScheduler approvals;
     @Autowired private RelationshipSignalReconciliationService signalReconciliation;
+    @Autowired private NotificationQuietHoursControlAccess quietHoursControlAccess;
     @MockitoBean private NotificationPushPublisher notificationPushPublisher;
 
     @BeforeEach
@@ -90,6 +96,8 @@ class IdleReconciliationIntegrationTest extends AbstractAiAgentPrivacyIntegratio
         if (workspace == null) return;
         int id = workspace.getId();
         jdbc.update("DELETE FROM notification WHERE workspace_id=?", id);
+        jdbc.update("DELETE FROM historical_notification_baseline WHERE workspace_id=?", id);
+        jdbc.update("DELETE FROM notification_quiet_hours WHERE user_id=?", currentUser.getId());
         jdbc.update("DELETE FROM relationship_signal_state WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM relationship_signal WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM relationship_signal_family_state WHERE workspace_id=?", id);
@@ -235,11 +243,7 @@ class IdleReconciliationIntegrationTest extends AbstractAiAgentPrivacyIntegratio
             assertEquals(initialVersion + 1, notificationMapper.getStateVersion(currentUser.getId()));
             verify(notificationPushPublisher, times(4)).created(eq(currentUser.getId()), any(), any());
             verifyNoMoreInteractions(notificationPushPublisher);
-            for (var notification : notificationMapper.findWorkspaceReminderNotifications(id)) {
-                notification.setActorId(0);
-                assertTrue(notificationMapper.upsert(notification) <= 1);
-            }
-            jdbc.update("UPDATE notification SET updated_at='2001-01-01 00:00:00' WHERE workspace_id=?", id);
+            replaceWithLegacyReminderRows(notificationMapper.findWorkspaceReminderNotifications(id));
             List<Map<String, Object>> before = reminderSnapshots();
             Map<String, Object> version = recipientVersion();
             clearInvocations(notificationPushPublisher);
@@ -287,6 +291,120 @@ class IdleReconciliationIntegrationTest extends AbstractAiAgentPrivacyIntegratio
 
     private List<Map<String, Object>> reminderSnapshots() {
         return jdbc.queryForList("SELECT * FROM notification WHERE workspace_id=? ORDER BY id", workspace.getId());
+    }
+
+    private void replaceWithLegacyReminderRows(List<Notification> reminders) {
+        jdbc.update("DELETE FROM notification WHERE workspace_id=?", workspace.getId());
+        for (Notification reminder : reminders) {
+            jdbc.update("""
+                INSERT INTO notification (
+                    workspace_id, recipient_id, type, category, severity, template_version,
+                    title, body, actor_id, actor_label, source_type, source_id, source_label,
+                    context_type, context_id, context_label, action_url, data, dedupe_key,
+                    triggered_at, read_at, dismissed_at, resolved_at, snoozed_until,
+                    snooze_timezone, created_at, updated_at, email_delivery_claimed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    '2001-01-01 00:00:00', NULL, NULL, NULL, NULL, NULL,
+                    '2001-01-01 00:00:00', '2001-01-01 00:00:00', NULL)
+                """, reminder.getWorkspaceId(), reminder.getRecipientId(), reminder.getType(), reminder.getCategory(),
+                reminder.getSeverity(), reminder.getTemplateVersion(), reminder.getTitle(), reminder.getBody(),
+                reminder.getSourceType(), reminder.getSourceId(), reminder.getSourceLabel(), reminder.getContextType(),
+                reminder.getContextId(), reminder.getContextLabel(), reminder.getActionUrl(), reminder.getData(),
+                reminder.getDedupeKey());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"visible", "quiet", "pending"})
+    void legacyReminderRowsAndHistoricalBaselinesDoNotInvalidateOnRedelivery(String mode) {
+        int id = workspace.getId();
+        String due = LocalDate.now(clock).toString();
+        var tasks = List.of(newTask(currentUser, null, null), newTask(currentUser, null, null),
+            newTask(currentUser, null, null));
+        for (int index = 0; index < tasks.size(); index++) {
+            var task = tasks.get(index);
+            task.setDueDate(due);
+            taskMapper.update(task);
+            jdbc.update("""
+                INSERT INTO notification (
+                    workspace_id, recipient_id, type, category, severity, template_version,
+                    title, body, actor_id, actor_label, source_type, source_id, source_label,
+                    context_type, context_id, context_label, action_url, data, dedupe_key,
+                    triggered_at, read_at, dismissed_at, resolved_at, snoozed_until,
+                    snooze_timezone, created_at, updated_at, email_delivery_claimed_at
+                ) VALUES (?, ?, 'task.due', 'task', 'warning', 1,
+                    'Task due soon', ?, NULL, NULL, 'task', ?, ?, NULL, NULL, NULL, ?, ?, ?,
+                    '2001-01-01 00:00:00', ?, ?, NULL, ?, ?,
+                    '2001-01-01 00:00:00', '2001-01-01 00:00:00', '2001-01-01 00:00:00')
+                """, id, currentUser.getId(), task.getDescription() + " — Due " + due,
+                task.getId(), task.getDescription(), "/activity/tasks?task=" + task.getId(),
+                json.writeValueAsString(Map.of("taskId", task.getId(), "task", task.getDescription(), "dueDate", due)),
+                "task.due:" + task.getId(), index == 0 ? "2001-01-01 00:00:00" : null,
+                index == 1 ? "2001-01-01 00:00:00" : null,
+                index == 2 ? "2099-01-01 00:00:00" : null, index == 2 ? "UTC" : null);
+        }
+        HistoricalNotificationBaseline baseline = new HistoricalNotificationBaseline();
+        baseline.setWorkspaceId(id);
+        baseline.setRecipientId(currentUser.getId());
+        baseline.setDedupeKey("task.due:" + tasks.getFirst().getId());
+        baseline.setNotificationType("task.due");
+        baseline.setBaselineSeverity("warning");
+        baseline.setSourceStateHash("a".repeat(64));
+        baseline.setImportRunId("b".repeat(64));
+        List<Map<String, Object>> before = reminderSnapshots();
+        assertEquals(1, notificationMapper.insertHistoricalNotificationBaselines(id, List.of(baseline)));
+        assertEquals(before, reminderSnapshots());
+        jdbc.update("INSERT INTO notification_recipient_state (recipient_id,state_version) VALUES (?,17) "
+            + "ON DUPLICATE KEY UPDATE state_version=17",
+            currentUser.getId());
+        if ("quiet".equals(mode)) {
+            jdbc.update("""
+                INSERT INTO notification_quiet_hours (user_id,enabled,timezone,start_local,end_local,days_mask)
+                VALUES (?,TRUE,'UTC',?,?,127)
+                """, currentUser.getId(), LocalDateTime.now(clock).minusHours(1).toLocalTime().withNano(0).toString(),
+                LocalDateTime.now(clock).plusHours(1).toLocalTime().withNano(0).toString());
+            assertTrue(quietHoursControlAccess.evaluateForUser(currentUser.getId(), clock.instant()).active());
+        }
+        if ("pending".equals(mode)) {
+            jdbc.update("UPDATE workspace_member SET status='pending' WHERE workspace_id=? AND user_id=?",
+                id, currentUser.getId());
+        }
+        for (var task : tasks) {
+            var stored = notificationMapper.findByDedupe(id, currentUser.getId(), "task.due:" + task.getId());
+            org.junit.jupiter.api.Assertions.assertNotNull(stored);
+            assertEquals("pending".equals(mode), notificationMapper.findById(currentUser.getId(), stored.getId()) == null);
+        }
+        Map<String, Object> version = recipientVersion();
+        clearInvocations(notificationPushPublisher);
+
+        tenantWorkScope.inWorkspace(id, () -> notifications.reconcileWorkspace(id, true));
+        int unchanged = tenantWorkScope.inWorkspace(id, () -> notifications.reconcileWorkspace(id, true));
+        assertEquals(0, unchanged);
+
+        assertEquals(before, reminderSnapshots());
+        assertEquals(version, recipientVersion());
+        assertTrue(notificationMapper.findHistoricalNotificationBaselines(id).isEmpty());
+        verifyNoInteractions(notificationPushPublisher);
+
+        for (var task : tasks) {
+            task.setDescription(task.getDescription() + " changed");
+            taskMapper.update(task);
+        }
+        tenantWorkScope.inWorkspace(id, () -> notifications.reconcileWorkspace(id, true));
+        assertEquals(18L, notificationMapper.getStateVersion(currentUser.getId()));
+        if ("visible".equals(mode)) {
+            verify(notificationPushPublisher, times(3)).updated(eq(currentUser.getId()), any(), any());
+        } else {
+            verify(notificationPushPublisher).invalidated(currentUser.getId());
+        }
+        verifyNoMoreInteractions(notificationPushPublisher);
+        List<Map<String, Object>> changed = reminderSnapshots();
+        clearInvocations(notificationPushPublisher);
+        unchanged = tenantWorkScope.inWorkspace(id, () -> notifications.reconcileWorkspace(id, true));
+        assertEquals(0, unchanged);
+        assertEquals(changed, reminderSnapshots());
+        assertEquals(18L, notificationMapper.getStateVersion(currentUser.getId()));
+        verifyNoInteractions(notificationPushPublisher);
     }
 
     @Test

@@ -89,6 +89,12 @@ public class NotificationDelivery {
                 notification.getWorkspaceId(), notification.getRecipientId(),
                 notification.getId(), notification.getDedupeKey());
         boolean persistedChange = inserted || inAppRows > 1;
+        log.debug("Notification delivery decision workspace={} recipient={} existingId={} generatedId={} "
+                + "inAppRows={} inserted={} persistedChange={} transactionActive={} synchronizationActive={}",
+            notification.getWorkspaceId(), notification.getRecipientId(), existing == null ? null : existing.getId(),
+            notification.getId(), inAppRows, inserted, persistedChange,
+            TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isSynchronizationActive());
         boolean quietHoursActive = persistedChange && quietHoursActive(notification);
         boolean recipientCanAccess = true;
         if (persistedChange) {
@@ -141,13 +147,16 @@ public class NotificationDelivery {
         int id = created || notification.getId() > 0 ? notification.getId() : existing.getId();
         Notification persisted = notificationMapper.findById(notification.getRecipientId(), id);
         if (persisted == null) {
+            logStateChange("persisted_missing", notification, existing, id, quietHoursActive);
             stateVersionService.markChanged(notification.getRecipientId());
             return false;
         }
         if (quietHoursActive) {
+            logStateChange("quiet_hours", notification, existing, id, true);
             stateVersionService.markChanged(notification.getRecipientId());
             return true;
         }
+        logStateChange(created ? "created" : "updated", notification, existing, id, false);
         stateVersionService.markChangedWithDetailedPush(notification.getRecipientId());
         NotificationDto dto = NotificationDto.from(persisted);
         if (created) {
@@ -156,6 +165,16 @@ public class NotificationDelivery {
             pushPublisher.updated(notification.getRecipientId(), dto, notification.getDedupeKey());
         }
         return true;
+    }
+
+    private void logStateChange(
+            String branch, Notification notification, Notification existing, int lookupId, boolean quietHoursActive) {
+        log.debug("Notification state change branch={} workspace={} recipient={} existingId={} generatedId={} "
+                + "lookupId={} quietHoursActive={} transactionActive={} synchronizationActive={}",
+            branch, notification.getWorkspaceId(), notification.getRecipientId(),
+            existing == null ? null : existing.getId(), notification.getId(), lookupId, quietHoursActive,
+            TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isSynchronizationActive());
     }
 
     private void safeDispatch(NotificationDispatcher dispatcher, Notification notification) {
