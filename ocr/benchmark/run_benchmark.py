@@ -29,8 +29,10 @@ def benchmark_opener() -> urllib.request.OpenerDirector:
 BENCHMARK_OPENER = benchmark_opener()
 CANONICAL_MANIFEST_SHA256 = "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e960adc07fd84d87"
 CANONICAL_FONT_SHA256 = "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
-CANONICAL_FIXTURES_SHA256 = "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5"
-CANONICAL_FIXTURE_METADATA_SHA256 = "6aa9f38d733d8f510824b6872638b20387864d239386a6eb4a26de532ac74e29"
+CANONICAL_FIXTURES_SHA256 = "effb8a94a19695298e14c8651f515a6eb1fee0f50f4e472a2456a56316130fc2"
+CANONICAL_FIXTURE_METADATA_SHA256 = "4f602ccfa83d3ebd235da26e1ab41df5f68b0e8c18819a26c967a599f7a31a7a"
+JAPANESE_SCRIPT = "\u3005-\u3007\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+JAPANESE_ADJACENT_SPACE = re.compile(f" (?=[{JAPANESE_SCRIPT}])|(?<=[{JAPANESE_SCRIPT}]) ")
 # Every container the release transaction signs must appear here. The transaction requires
 # .provenance.runtime.containers.<component>.imageReference for each of these components, so a
 # component that ships in the deployment bundle but is missing from this map makes the release
@@ -428,7 +430,8 @@ def equal(field: str, expected: object, actual: object) -> bool:
 
 
 def normalize(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+    collapsed = " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+    return JAPANESE_ADJACENT_SPACE.sub("", collapsed)
 
 
 def provenance(
