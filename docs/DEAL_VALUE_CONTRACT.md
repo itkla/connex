@@ -111,7 +111,7 @@ parent's version through that trigger without making the confirmation request st
 Only current booking value changes; the existing realized-value resolver and win-time freeze remain
 unchanged. Old clients can read the additive response fields but cannot take over a nonzero manual
 value without the new flag. Earlier serving binaries bypass that guard and restoration, so V243 is
-the deal-value component minimum; control V248 is the current release-wide rollback floor.
+the deal-value component minimum; control V250 is the current release-wide rollback floor.
 See the [invitation-expiry cutover](UPGRADING.md#historical-pending-invitation-expiry-control-v247),
 then the [export-permission cutover](UPGRADING.md#export-data-permission-control-v248).
 Leave the nullable column in place and roll forward with a compatible

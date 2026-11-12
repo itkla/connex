@@ -91,7 +91,7 @@ scopes and adds object obligations. Separate explicit INSTANT column operations 
 operations must fail if unsupported; no retained-content UPDATE backfill, COPY fallback or disabled
 FK validation is authorized. Scope triggers precede replacement of affected legacy work checks.
 The historical privacy component floor is tenant V237; the current release-wide floor is
-control V248, as documented in [UPGRADING.md](../UPGRADING.md#export-data-permission-control-v248).
+control V250, as documented in [UPGRADING.md](../UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250).
 
 Recent serving compatibility minima, in migration order:
 
@@ -103,6 +103,10 @@ Recent serving compatibility minima, in migration order:
   [the invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).
 - Control V248 introduces revocable export access while preserving existing role access. Older
   binaries ignore revocations and cannot serve safely; see [the export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
+- Tenant V249 and control V250 retire external notification invalidation triggers. The release
+  requires Java-owned notification teardown invalidation; older generic teardown writers relied on
+  the notification DELETE trigger on long-lived catalogs. The release floor is control V250; see
+  [trigger retirement](../UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250).
 
 ## Historical invitation deadline backfill
 

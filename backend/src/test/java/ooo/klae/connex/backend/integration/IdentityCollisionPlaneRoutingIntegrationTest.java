@@ -62,7 +62,9 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.IdentityBackfillRunner;
 import ooo.klae.connex.backend.services.IdentityBackfillTransaction;
 import ooo.klae.connex.backend.services.LegacyWorkflowBackfillRunner;
+import ooo.klae.connex.backend.services.TenantTeardownTenantTransaction;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -90,6 +92,7 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DataSource dataSource;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private TenantTeardownTenantTransaction teardownTransaction;
 
     @MockitoBean private IdentityBackfillRunner identityBackfillRunner;
     @MockitoBean private LegacyWorkflowBackfillRunner legacyWorkflowBackfillRunner;
@@ -334,6 +337,45 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
 
         assertFalse(tableExists(scratchCatalog, "notification_recipient_state"));
         assertFalse(tableExists(scratchCatalog, "workspace_member"));
+        assertEquals(defaultCatalog(), currentCatalog());
+    }
+
+    @Test
+    void notificationTeardownDeletesTenantRowsAndCommitsOneControlVersion() throws SQLException {
+        ControlFixture fixture = newControlFixture("notification-teardown");
+        String scratchCatalog = "cnx_notification_teardown_" + compactUuid();
+        scratchCatalogs.add(scratchCatalog);
+        createScratchCatalog(scratchCatalog);
+        jdbcTemplate.execute("CREATE TABLE `" + identifier(scratchCatalog) + "`.notification LIKE `"
+            + identifier(defaultCatalog()) + "`.notification");
+        insertPlacement(fixture.organization().getId(), "dedicated_database", scratchCatalog);
+
+        tenantWorkScope.withWorkspacePlacement(fixture.workspace().getId(), (orgId, catalog) -> {
+            TenantContext.State previous = tenantContext.snapshot();
+            tenantContext.set(fixture.workspace().getId(), orgId, fixture.user().getId(), "org_admin", catalog);
+            try {
+                for (int i = 0; i < 2; i++) {
+                    jdbcTemplate.update("""
+                        INSERT INTO notification (workspace_id, recipient_id, type, category, severity,
+                            template_version, title, triggered_at, dedupe_key)
+                        VALUES (?, ?, 'task.due', 'task', 'warning', 1, 'Teardown reminder', UTC_TIMESTAMP(), UUID())
+                        """, fixture.workspace().getId(), fixture.user().getId());
+                }
+                assertEquals(2, teardownTransaction.deleteBatch(
+                    fixture.workspace().getId(), TenantLifecycleRegistry.require("notification"), 10));
+                assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM notification", Integer.class));
+                assertEquals(1, notificationMapper.getStateVersion(fixture.user().getId()));
+                assertEquals(0, teardownTransaction.deleteBatch(
+                    fixture.workspace().getId(), TenantLifecycleRegistry.require("notification"), 10));
+                assertEquals(1, notificationMapper.getStateVersion(fixture.user().getId()));
+                assertEquals(scratchCatalog, jdbcTemplate.queryForObject("SELECT DATABASE()", String.class));
+            } finally {
+                tenantContext.restore(previous);
+            }
+            return null;
+        });
+
+        assertFalse(tableExists(scratchCatalog, "notification_recipient_state"));
         assertEquals(defaultCatalog(), currentCatalog());
     }
 

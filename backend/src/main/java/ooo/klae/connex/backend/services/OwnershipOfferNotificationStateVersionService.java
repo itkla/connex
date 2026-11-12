@@ -16,6 +16,26 @@ public class OwnershipOfferNotificationStateVersionService {
     private final OwnershipOfferMapper mapper;
     private final NotificationPushPublisher pushPublisher;
 
+    /** Returns whether this transaction will advance the existing delivered-notice state row. */
+    public boolean hasQueuedChange(int recipientId) {
+        Object resource = TransactionSynchronizationManager.getResource(RESOURCE_KEY);
+        return resource instanceof RecipientVersions versions && versions.recipients().contains(recipientId);
+    }
+
+    /**
+     * Consumes a queued closure bump for an immediate inbox response while retaining the
+     * existing-row-only write and its missing-row guard. The caller publishes invalidation.
+     */
+    public boolean bumpQueuedChangeNow(int recipientId) {
+        Object resource = TransactionSynchronizationManager.getResource(RESOURCE_KEY);
+        if (!(resource instanceof RecipientVersions versions) || !versions.recipients().contains(recipientId)) {
+            return false;
+        }
+        bumpExisting(recipientId);
+        versions.recipients().remove(recipientId);
+        return true;
+    }
+
     /**
      * Queues sorted, deduplicated updates while the caller retains offer X. Delivery commits its
      * marker, notice and recipient-state row together, so closure updates only existing rows and
@@ -49,9 +69,7 @@ public class OwnershipOfferNotificationStateVersionService {
             }
             @Override public void beforeCommit(boolean readOnly) {
                 for (int id : versions.recipients()) {
-                    if (mapper.bumpExistingNoticeStateVersion(id) != 1) {
-                        throw new IllegalStateException("Delivered ownership notice has no recipient state");
-                    }
+                    bumpExisting(id);
                 }
                 versions.recipients().forEach(pushPublisher::invalidated);
             }
@@ -61,6 +79,12 @@ public class OwnershipOfferNotificationStateVersionService {
                 }
             }
         });
+    }
+
+    private void bumpExisting(int recipientId) {
+        if (mapper.bumpExistingNoticeStateVersion(recipientId) != 1) {
+            throw new IllegalStateException("Delivered ownership notice has no recipient state");
+        }
     }
 
     private record RecipientVersions(TreeSet<Integer> recipients) {}

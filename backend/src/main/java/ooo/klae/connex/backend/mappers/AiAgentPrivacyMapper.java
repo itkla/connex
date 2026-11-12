@@ -175,9 +175,13 @@ public interface AiAgentPrivacyMapper {
     int clearSessionProjections(
             @Param("workspaceId") int workspaceId,
             @Param("sessionId") int sessionId);
-    /** Removes at most one batch of derived notification sources for an enrolled session. */
-    int deleteSessionNotifications(@Param("workspaceId") int workspaceId,
+    /** Locks one bounded batch of derived notification keys and their recipients for an enrolled session. */
+    List<NotificationMapper.DeletionCandidate> lockSessionNotifications(@Param("workspaceId") int workspaceId,
             @Param("sessionId") int sessionId, @Param("limit") int limit);
+
+    /** Removes only the locked notification keys belonging to the enrolled workspace and session. */
+    int deleteSessionNotifications(@Param("workspaceId") int workspaceId,
+            @Param("sessionId") int sessionId, @Param("ids") List<Integer> ids);
 
     /** Recomputes safe transcript preview timing without changing its sequence authority. */
     int updateSessionPreview(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);

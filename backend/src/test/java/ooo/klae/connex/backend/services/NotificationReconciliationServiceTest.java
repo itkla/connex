@@ -623,7 +623,8 @@ class NotificationReconciliationServiceTest {
 
     private static NotificationStateVersionService stateVersions(NotificationMapper notificationMapper) {
         return new NotificationStateVersionService(
-            notificationMapper, Mockito.mock(NotificationPushPublisher.class));
+            notificationMapper, Mockito.mock(NotificationPushPublisher.class),
+            Mockito.mock(OwnershipOfferNotificationStateVersionService.class));
     }
 
     private static OpenDealRecipient recipient(int dealId, String dealLabel, int recipientId) {

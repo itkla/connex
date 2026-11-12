@@ -282,6 +282,12 @@ pre-taint input while resetting generated titles and preview timing. V2 also dra
 durable object disposition, then deletes affected sessions and participants. Deletion batches
 contain at most 100 rows; a settlement transaction handles one leased subject.
 
+Session notification pruning locks bounded exact keys and captures their recipients before deletion.
+Both v1 and v2 queue each surviving recipient once through the notification-state service in that
+same transaction, including already-read brief notifications. Deleted accounts are omitted from
+invalidation without retaining their notification pointers. A failed version write rolls back
+pruning and the work cursor; retries of an empty batch do not advance recipient versions.
+
 Mutation order follows [the global locking rule](LOCKING.md#global-privacy-restriction-and-audit-order):
 session/run/proposal-parent/tool/turn/segment roots, domain/storage roots, local restriction and
 publication fences, organization authority, ascending workspace barriers, operation/placement/work
@@ -417,7 +423,7 @@ JVM, initialized workspace and organization authority, completed active-attempt 
 and the full compatible reader/writer rollout. Drain incompatible serving binaries, scheduled
 workers and in-flight writers before control V236 → tenant V237 → tenant V238. Upgrades crossing V232 must also retain that
 version's stopped-writer sequence-backfill procedure.
-V238 remains the mission component minimum; control V248 is the current release-wide rollback floor,
+V238 remains the mission component minimum; control V250 is the current release-wide rollback floor,
 including with AI and missions disabled; see the
 [invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247), then the
 [export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).

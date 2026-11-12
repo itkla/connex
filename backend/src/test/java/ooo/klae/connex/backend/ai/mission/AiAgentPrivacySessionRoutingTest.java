@@ -189,7 +189,8 @@ class AiAgentPrivacySessionRoutingTest {
                 mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class), mock(AiRestrictionEpoch.class),
                 mock(AiRunLeaseService.class), transactions, sessions.getMapper(WorkspaceMapper.class), lifecycle,
                 mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC(),
-                mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
+                mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+                mock(ooo.klae.connex.backend.notifications.NotificationStateVersionService.class));
         var persistence = mock(AiAgentRunPersistenceService.class);
         when(persistence.settleOrphan(any(), any(), org.mockito.ArgumentMatchers.anyLong())).thenAnswer(call -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),

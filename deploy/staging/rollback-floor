@@ -1,1 +1,1 @@
-control/V248__export_data_permission.sql
+control/V250__drop_legacy_notification_membership_state_triggers.sql

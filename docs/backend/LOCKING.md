@@ -404,6 +404,23 @@ same domain-rows-then-notification-state order as the policy, approval and goal 
 inversion against them. A concurrent aggregate edit can deadlock with these final statements:
 propagate the failure and retry the operation in a fresh transaction, never retry in place.
 
+Recipient queues are owned by their actual transaction: suspension unbinds the outer queue and
+resume restores it after the inner queue completes. `REQUIRES_NEW` privacy pruning commits its own
+version even if the caller rolls back, and after-commit work that opens a new transaction receives
+a fresh queue. Inner completion cannot clear the suspended caller's recipients.
+
+When departure also closes or erases a delivered ownership notice, its queued existing-row-only
+version writer owns the shared recipient's bump and invalidation. The ordinary queue skips that
+recipient regardless of callback registration order; it must not replace the ownership writer
+with an upsert that acquires a late recipient-account foreign-key lock. An immediate inbox response
+consumes the queued ownership bump through the same existing-row-only writer and missing-row guard.
+
+Notification teardown batches use an ascending primary-key locking read, delete those exact keys
+under their workspace predicate, and queue each affected recipient once in the same transaction.
+The existing control-catalog statement routing advances recipient versions at commit on that same
+database connection. A failed version write rolls back the notification deletions; an empty retry
+does not advance any version. Other registry tables retain their generic deletion path.
+
 The guard is exact for references committed before departure. A concurrently created request naming
 the departed member can survive departure and follows existing reconciliation in its existing order:
 its deadline rules apply first; expiration records `expired`, while escalation appends `any_approver`
@@ -2515,6 +2532,13 @@ opening its ordered transaction. Read projection retains current authority throu
 Mutation admission retains it only after delegate roots, then rechecks deadlines. Approval waiting
 past its 72-hour deadline must refuse even if generation did not change. Cancellation, expiry and
 erasure retain terminal/lease settlement atomicity and conservative provider accounting.
+
+Session-notification pruning retains its existing deletion-phase row-lock position: lock a bounded
+notification-key batch, delete those exact workspace/session keys, and queue distinct surviving
+recipients for the commit-time notification-state tail. The bounded account-existence read takes no
+account locks, so already-erased recipients cannot prevent pruning. The ordinary version upsert
+retains the legacy trigger's recipient-account FK lock footprint; a concurrent erasure conflict
+rolls back pruning and cursor advancement together and follows the existing privacy retry path.
 
 Control locks remain on the transaction-bound connection through control-catalog routing.
 Organization invalidation retains the local publication write fence through commit or rollback.

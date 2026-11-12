@@ -65,7 +65,7 @@ organization root lock before grant/lease writes. Locked workspace authorization
 policy with `FOR SHARE`; nonlocking snapshot authorization retains its consistent-read semantics.
 Ordinary attachments/document artifacts and statutory data-subject disclosure retain their own
 access/privacy contracts; they are not bulk-export endpoints. Existing export completion audit
-semantics and passkey step-up are unchanged. The current release-wide rollback floor is control V248;
+semantics and passkey step-up are unchanged. The current release-wide rollback floor is control V250;
 retain the [V247 invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247),
 then follow the [V248 export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
 

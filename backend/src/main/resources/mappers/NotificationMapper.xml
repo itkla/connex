@@ -501,6 +501,24 @@
     ), 0)
   </select>
 
+  <select id="lockTeardownBatch" resultType="ooo.klae.connex.backend.mappers.NotificationMapper$DeletionCandidate">
+    SELECT id, recipient_id
+    FROM notification
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY id
+    LIMIT #{limit}
+    FOR UPDATE
+  </select>
+
+  <delete id="deleteTeardownBatch">
+    DELETE FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+  </delete>
+
   <insert id="bumpStateVersions">
     INSERT INTO notification_recipient_state (recipient_id, state_version)
     VALUES

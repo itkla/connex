@@ -17,6 +17,15 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
  * Mapper for notification inbox lifecycle and reminder reconciliation.
  */
 public interface NotificationMapper {
+    /** Locked notification keys and recipients for one bounded teardown transaction. */
+    record DeletionCandidate(int id, int recipientId) { }
+
+    /** Locks the next workspace-owned notification keys in primary-key order. */
+    List<DeletionCandidate> lockTeardownBatch(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+
+    /** Deletes only the exact notification keys retained by the workspace's teardown transaction. */
+    int deleteTeardownBatch(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+
     default List<Notification> findPage(
         int recipientId,
         String status,
