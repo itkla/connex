@@ -1,0 +1,17 @@
+[Unit]
+Description=Connex Staging ClamAV Signature Refresh
+Documentation=https://github.com/itkla/connex/blob/main/deploy/staging/connex-staging-clamav-refresh.sh
+# Yield via the deploy lock; Conflicts= would stop an active deploy.
+After=connex-staging-deploy.service docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/connex-staging-clamav-refresh
+User=root
+Group=root
+UMask=0077
+TimeoutStartSec=30min
+TimeoutStopSec=2min
+# Allow the shell to restore the previous scanner when systemd sends SIGTERM.
+KillMode=mixed

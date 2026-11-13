@@ -308,6 +308,72 @@ already running an older script is outside that guarantee, so complete the rollo
 on it. More than four entries or more than 1 GiB produces a warning `ALERT`; inspect reclamation
 at or before either threshold. New builds require the footprint-inclusive reserve described above.
 
+### Refreshing ClamAV signatures
+
+`connex-staging-clamav-refresh.timer` runs weekly on Sunday at 04:00 host-local time, with up to
+30 minutes of randomized delay and catch-up after downtime. Its root-run oneshot builds a fresh
+`connex-clamav:staging-candidate` image from `git archive <deployed-sha> clamav`, using the committed
+`.staging/deployed-sha` rather than checkout HEAD. `--pull --no-cache` forces the image's signature
+prefetch to run again. The scanner still has no runtime updater or added network egress.
+
+Install or update the script and both units explicitly; merging does not replace the installed
+copy. The host needs Docker, Git, Bash, jq, curl, tar and flock. Run from the staging checkout:
+
+```bash
+sudo install -m 0755 deploy/staging/connex-staging-clamav-refresh.sh /usr/local/bin/connex-staging-clamav-refresh
+sudo install -m 0644 deploy/staging/systemd/connex-staging-clamav-refresh.service \
+    deploy/staging/systemd/connex-staging-clamav-refresh.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now connex-staging-clamav-refresh.timer
+systemctl cat connex-staging-clamav-refresh.service | grep ExecStart
+systemctl list-timers connex-staging-clamav-refresh.timer
+
+# Run once through the same root unit, then inspect its fixed-label result.
+sudo systemctl start connex-staging-clamav-refresh.service
+sudo journalctl -u connex-staging-clamav-refresh.service -n 30 --no-pager
+```
+
+The job takes `/tmp/connex-staging-deploy.lock` non-blocking and logs `result=skipped reason=lock_busy`
+if a deployment or another maintenance job holds it. It requires the existing lock created by the
+deploy wrapper, leaving ownership and permissions intact. A failed build leaves the live container
+untouched. Before swapping, it inspects `connex-staging-clamav` and preserves port bindings, memory
+and swap limits, read-only root, tmpfs mounts, shared-memory size, restart policy, network and aliases,
+log driver and options, container user, and capability/security options. Only `CONNEX_CLAMAV_*`
+environment entries are copied, using a root-only temporary file removed on exit; raw command
+diagnostics and environment values never enter the job's journal output. It refuses bind/volume
+mounts, tmpfs supplied through `--mount` rather than `--tmpfs`, multiple networks,
+privileged/auto-remove containers, malformed settings, or an existing
+`connex-staging-clamav-previous` backup instead of guessing how to recreate them.
+Configuration validation and Docker arguments share one field registry. PID limits, memory
+swappiness (including zero), CPU shares/quotas expressed as `NanoCpus`, ulimits, init, runtime,
+and IPC/cgroup namespace settings are reproduced when present. Every other `HostConfig` field
+must match an explicitly listed Docker Linux default; unknown fields or unsupported overrides
+refuse the refresh before the build or swap. The default path-mask lists follow Docker 28.5.2;
+additional host-specific masks also refuse the refresh pending an explicit policy update.
+
+The old scanner is stopped and renamed to `connex-staging-clamav-previous` while the replacement
+starts with the original name. Uploads may briefly fail closed during this interval. The job waits
+up to 420 seconds for Docker health `healthy` **and** HTTP `/health` reporting `ready: true`, covering
+the image's 180-second healthcheck start period plus database loading. Before those checks and
+tagging succeed, any failure or handled termination removes the candidate container and renames and
+starts the old one again, exiting nonzero. Restoring an already expired scanner does not repair its
+signatures; check the failure and retry the refresh. Rollback re-inspects actual names and running
+state after CLI errors, with up to three restore attempts. If a stopped candidate cannot be removed,
+it is renamed to `connex-staging-clamav-failed` to free the live name; a fixed-label retention event
+requires operator cleanup of that candidate. A retained candidate already using that name can
+prevent this fallback. Rollback succeeds only after confirming the original has the live name
+and is running. If Docker prevents restoration, the original is retained, starting it is still
+attempted, and `result=failed stage=rollback reason=...` identifies the unrecoverable state.
+
+After readiness, the candidate is tagged `connex-clamav:staging`, the stopped old container is
+removed, and its superseded image is removed without force. An image still referenced elsewhere
+is retained with `result=retained stage=image_cleanup`. A container-cleanup failure after the commit
+leaves the healthy replacement running and the backup retained. The service allows 30 minutes for
+the full build and replacement; its termination handler attempts rollback before systemd's final
+kill timeout. A hard kill or host crash cannot run cleanup: inspect any retained backup and private
+temporary directory before retrying. Signature-age monitoring remains necessary; see
+[MALWARE_SCANNING.md](MALWARE_SCANNING.md#signature-freshness).
+
 ### Operator note: headroom refusals and failed target builds
 
 A pre-build refusal logs one complete requirement, for example:

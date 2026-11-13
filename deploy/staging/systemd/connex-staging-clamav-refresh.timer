@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Connex staging ClamAV signatures weekly
+
+[Timer]
+# Low-traffic host-local time. Catch missed runs after downtime.
+OnCalendar=Sun *-*-* 04:00:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
