@@ -344,6 +344,12 @@ diagnostics and environment values never enter the job's journal output. It refu
 mounts, tmpfs supplied through `--mount` rather than `--tmpfs`, multiple networks,
 privileged/auto-remove containers, malformed settings, or an existing
 `connex-staging-clamav-previous` backup instead of guessing how to recreate them.
+Configuration validation and Docker arguments share one field registry. PID limits, memory
+swappiness (including zero), CPU shares/quotas expressed as `NanoCpus`, ulimits, init, runtime,
+and IPC/cgroup namespace settings are reproduced when present. Every other `HostConfig` field
+must match an explicitly listed Docker Linux default; unknown fields or unsupported overrides
+refuse the refresh before the build or swap. The default path-mask lists follow Docker 28.5.2;
+additional host-specific masks also refuse the refresh pending an explicit policy update.
 
 The old scanner is stopped and renamed to `connex-staging-clamav-previous` while the replacement
 starts with the original name. Uploads may briefly fail closed during this interval. The job waits
@@ -351,8 +357,13 @@ up to 420 seconds for Docker health `healthy` **and** HTTP `/health` reporting `
 the image's 180-second healthcheck start period plus database loading. Before those checks and
 tagging succeed, any failure or handled termination removes the candidate container and renames and
 starts the old one again, exiting nonzero. Restoring an already expired scanner does not repair its
-signatures; check the failure and retry the refresh. If Docker itself prevents rollback, the original
-container is retained and `result=failed stage=rollback` requires operator attention.
+signatures; check the failure and retry the refresh. Rollback re-inspects actual names and running
+state after CLI errors, with up to three restore attempts. If a stopped candidate cannot be removed,
+it is renamed to `connex-staging-clamav-failed` to free the live name; a fixed-label retention event
+requires operator cleanup of that candidate. A retained candidate already using that name can
+prevent this fallback. Rollback succeeds only after confirming the original has the live name
+and is running. If Docker prevents restoration, the original is retained, starting it is still
+attempted, and `result=failed stage=rollback reason=...` identifies the unrecoverable state.
 
 After readiness, the candidate is tagged `connex-clamav:staging`, the stopped old container is
 removed, and its superseded image is removed without force. An image still referenced elsewhere

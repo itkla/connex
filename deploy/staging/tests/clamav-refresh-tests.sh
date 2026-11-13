@@ -11,6 +11,7 @@ OLD_IMAGE=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 NEW_IMAGE=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 LIVE=connex-staging-clamav
 PREVIOUS=connex-staging-clamav-previous
+FAILED=connex-staging-clamav-failed
 FAILURES=0
 ASSERTIONS=0
 
@@ -39,11 +40,14 @@ stub_docker() {
                 '') jq -s '.' "$file" ;;
                 '{{.Id}}') jq -r '.Id' "$file" ;;
                 '{{.Name}}') jq -r '.Name' "$file" ;;
+                '{{.State.Running}}') jq -r '.State.Running' "$file" ;;
+                '{{.Name}} {{.State.Running}}') jq -r '.Name + " " + (.State.Running | tostring)' "$file" ;;
                 *)
                     [ "$SCENARIO" != health_inspect_failure ] || return 1
                     if [ "$SCENARIO" = healthy ] || [ "$SCENARIO" = create_failure ] \
                         || [ "$SCENARIO" = start_failure ] || [ "$SCENARIO" = tag_failure ] \
                         || [ "$SCENARIO" = old_container_cleanup_failure ] || [ "$SCENARIO" = old_image_in_use ] \
+                        || [[ "$SCENARIO" = field_* ]] \
                         || { [ "$SCENARIO" = starting_then_healthy ] && [ -e "$CASE/slept" ]; }; then
                         echo healthy
                     elif [ "$SCENARIO" = starting_then_healthy ] || [ "$SCENARIO" = timeout ]; then
@@ -66,14 +70,25 @@ stub_docker() {
             shift 2
             file="$(container_file "$1")" || return 1
             [ "$SCENARIO" != stop_failure ] || return 1
+            if [ "$1" = "$NEW_ID" ] && [ "$SCENARIO" = new_stop_transient ] && [ ! -e "$CASE/stop-failed" ]; then
+                touch "$CASE/stop-failed"; return 1
+            fi
             jq '.State.Running = false' "$file" > "$CASE/update.json"
             mv "$CASE/update.json" "$file" ;;
         rename)
             file="$(container_file "$1")" || return 1
+            [ ! -e "$CASE/containers/$2.json" ] || return 1
             if [ "$SCENARIO" = rename_failure ] && [ "$2" = "$PREVIOUS" ]; then return 1; fi
+            if [ "$1" = "$OLD_ID" ] && [ "$2" = "$LIVE" ]; then
+                if [ "$SCENARIO" = restore_rename_failure ]; then return 1; fi
+                if [ "$SCENARIO" = restore_rename_transient ] && [ ! -e "$CASE/rename-failed" ]; then
+                    touch "$CASE/rename-failed"; return 1
+                fi
+            fi
             jq --arg name "/$2" '.Name = $name' "$file" > "$CASE/update.json"
             rm "$file"
-            mv "$CASE/update.json" "$CASE/containers/$2.json" ;;
+            mv "$CASE/update.json" "$CASE/containers/$2.json"
+            if [ "$SCENARIO" = restore_rename_error_completed ] && [ "$2" = "$LIVE" ]; then return 1; fi ;;
         create)
             [ ! -e "$CASE/containers/$LIVE.json" ]
             [ -e "$CASE/containers/$PREVIOUS.json" ]
@@ -88,6 +103,9 @@ stub_docker() {
                     [ "$(stat -c %a "$(dirname "$1")")" = 700 ]
                     cp "$1" "$CASE/copied.env"
                     echo "$1" >> "$CASE/env.paths"
+                    if [ -e "$(dirname "$1")/runtime-arguments.json" ]; then
+                        cp "$(dirname "$1")/runtime-arguments.json" "$CASE/runtime-arguments.json"
+                    fi
                 fi
                 shift
             done
@@ -99,16 +117,29 @@ stub_docker() {
         start)
             file="$(container_file "$1")" || return 1
             name="$(jq -r '.Id' "$file")"
+            if [ "$name" = "$OLD_ID" ]; then echo attempt >> "$CASE/old-start-attempts"; fi
             if [ "$name" = "$NEW_ID" ] && [ "$SCENARIO" = start_failure ]; then return 1; fi
             if [ "$name" = "$OLD_ID" ] && [ "$SCENARIO" = rollback_start_failure ]; then return 1; fi
+            if [ "$name" = "$OLD_ID" ] && [ "$SCENARIO" = restore_start_transient ] && [ ! -e "$CASE/start-failed" ]; then
+                touch "$CASE/start-failed"; return 1
+            fi
+            local other
+            for other in "$CASE/containers/"*.json; do
+                [ "$other" = "$file" ] && continue
+                if jq -e '.State.Running == true' "$other" >/dev/null; then return 1; fi
+            done
             jq '.State.Running = true' "$file" > "$CASE/update.json"
             mv "$CASE/update.json" "$file"
+            if [ "$name" = "$OLD_ID" ] && [ "$SCENARIO" = restore_start_error_completed ]; then return 1; fi
             if [ "$name" = "$NEW_ID" ] && [ "$SCENARIO" = interrupted ]; then kill -TERM "$PPID"; fi
             echo "$name" ;;
         rm)
             file="$(container_file "$1")" || return 1
             if [ "$1" = "$OLD_ID" ] && [ "$SCENARIO" = old_container_cleanup_failure ]; then return 1; fi
-            rm "$file" ;;
+            if [ "$1" = "$NEW_ID" ] && [ "$SCENARIO" = removal_error_present ]; then return 1; fi
+            jq -e '.State.Running == false' "$file" >/dev/null || return 1
+            rm "$file"
+            if [ "$1" = "$NEW_ID" ] && [ "$SCENARIO" = removal_error_gone ]; then return 1; fi ;;
         tag)
             [ "$SCENARIO" != tag_failure ] || return 1
             [ "$1" = connex-clamav:staging-candidate ] && [ "$2" = connex-clamav:staging ]
@@ -346,12 +377,43 @@ main() {
         assert_private_cleanup
     done
 
+    for scenario in removal_error_gone removal_error_present restore_rename_error_completed restore_rename_transient restore_start_error_completed restore_start_transient new_stop_transient; do
+        setup "$scenario"
+        run_refresh
+        assert failed test "$STATUS" -ne 0
+        assert_original_running
+        assert rollback_confirmed grep -q 'result=restored' "$CASE/run.log"
+        if [ "$scenario" = removal_error_present ]; then
+            assert failed_candidate_retained test -e "$CASE/containers/$FAILED.json"
+            assert failed_candidate_stopped jq -e '.State.Running == false' "$CASE/containers/$FAILED.json"
+            assert failed_candidate_reported grep -q 'result=retained reason=candidate_removal' "$CASE/run.log"
+        else
+            assert failed_candidate_absent test ! -e "$CASE/containers/$FAILED.json"
+        fi
+        if [ "$scenario" = new_stop_transient ]; then
+            assert running_candidate_stop_retried test "$(wc -l < "$CASE/old-start-attempts")" = 2
+        fi
+        assert_private_cleanup
+    done
+
+    setup restore_rename_failure
+    run_refresh
+    assert failed test "$STATUS" -ne 0
+    assert original_started_even_if_rename_failed jq -e '.State.Running == true' "$CASE/containers/$PREVIOUS.json"
+    assert unrecoverable_name_reported grep -q 'result=failed stage=rollback reason=restore_name' "$CASE/run.log"
+    assert bounded_attempts test "$(wc -l < "$CASE/old-start-attempts")" = 3
+    assert_private_cleanup
+
     setup rollback_start_failure
     run_refresh
     assert failed test "$STATUS" -ne 0
     assert original_retained test "$(jq -r '.Id' "$CASE/containers/$LIVE.json")" = "$OLD_ID"
     assert rollback_failure_reported grep -q 'result=failed stage=rollback' "$CASE/run.log"
+    assert unrecoverable_start_reported grep -q 'result=failed stage=rollback reason=original_not_running' "$CASE/run.log"
+    assert bounded_attempts test "$(wc -l < "$CASE/old-start-attempts")" = 3
     assert_private_cleanup
+
+    security_field_cases
 
     setup old_container_cleanup_failure
     run_refresh
@@ -370,6 +432,107 @@ main() {
 
     echo "$ASSERTIONS assertions; $FAILURES failures"
     [ "$FAILURES" -eq 0 ]
+}
+
+security_field_cases() {
+    cat > "$SANDBOX/field-cases.json" <<'JSON'
+[
+  ["Memory", 3221225472, "--memory", "3221225472"],
+  ["MemorySwap", 4294967296, "--memory-swap", "4294967296"],
+  ["ReadonlyRootfs", true, "--read-only=true", null],
+  ["ShmSize", 134217728, "--shm-size", "134217728"],
+  ["RestartPolicy", {"Name":"on-failure","MaximumRetryCount":3}, "--restart", "on-failure:3"],
+  ["NetworkMode", "staging-scanner", "--network", "staging-scanner"],
+  ["LogConfig", {"Type":"json-file","Config":{"max-size":"32m"}}, "--log-opt", "max-size=32m"],
+  ["Tmpfs", {"/run":"rw,nosuid,size=1g"}, "--tmpfs", "/run:rw,nosuid,size=1g"],
+  ["PortBindings", {"8091/tcp":[{"HostIp":"127.0.0.1","HostPort":"8094"}]}, "--publish", "127.0.0.1:8094:8091/tcp"],
+  ["PidsLimit", 128, "--pids-limit", "128"],
+  ["MemorySwappiness", 0, "--memory-swappiness", "0"],
+  ["CpuShares", 512, "--cpu-shares", "512"],
+  ["NanoCpus", 1500000000, "--cpus", "1.5"],
+  ["CapDrop", ["ALL"], "--cap-drop", "ALL"],
+  ["CapAdd", ["NET_BIND_SERVICE"], "--cap-add", "NET_BIND_SERVICE"],
+  ["SecurityOpt", ["no-new-privileges"], "--security-opt", "no-new-privileges"],
+  ["Ulimits", [{"Name":"nofile","Soft":1024,"Hard":2048}], "--ulimit", "nofile=1024:2048"],
+  ["Init", true, "--init=true", null],
+  ["CgroupnsMode", "private", "--cgroupns", "private"],
+  ["IpcMode", "private", "--ipc", "private"],
+  ["Runtime", "runc", "--runtime", "runc"]
+]
+JSON
+    local row field flag argument
+    : > "$SANDBOX/accepted-fields"
+    : > "$SANDBOX/reproduced-fields"
+    jq -c '.[]' "$SANDBOX/field-cases.json" > "$SANDBOX/field-cases.jsonl"
+    while IFS= read -r row; do
+        field="$(jq -r '.[0]' <<< "$row")"
+        flag="$(jq -r '.[2]' <<< "$row")"
+        argument="$(jq -r '.[3] // empty' <<< "$row")"
+        setup "field_$field"
+        jq --argjson row "$row" '.HostConfig[$row[0]] = $row[1]' "$CASE/original.json" > "$CASE/containers/$LIVE.json"
+        run_refresh
+        assert field_accepted test "$STATUS" = 0
+        if [ "$STATUS" = 0 ]; then echo "$field" >> "$SANDBOX/accepted-fields"; fi
+        if [ -n "$argument" ]; then
+            assert field_reproduced has_pair "$flag" "$argument"
+            if has_pair "$flag" "$argument"; then echo "$field" >> "$SANDBOX/reproduced-fields"; fi
+        else
+            assert field_reproduced grep -qx -- "$flag" "$CASE/create.args"
+            if grep -qx -- "$flag" "$CASE/create.args"; then echo "$field" >> "$SANDBOX/reproduced-fields"; fi
+        fi
+        assert_private_cleanup
+    done < "$SANDBOX/field-cases.jsonl"
+    assert validation_and_reproduction_lists_match cmp -s "$SANDBOX/accepted-fields" "$SANDBOX/reproduced-fields"
+    jq -r '.host | keys[]' "$CASE/runtime-arguments.json" > "$SANDBOX/registry-fields" 2>/dev/null || : > "$SANDBOX/registry-fields"
+    sort "$SANDBOX/accepted-fields" > "$SANDBOX/sorted-fields"
+    assert registry_fields_have_boundary_coverage cmp -s "$SANDBOX/registry-fields" "$SANDBOX/sorted-fields"
+
+    setup field_User
+    jq '.Config.User = "10003:10003"' "$CASE/original.json" > "$CASE/containers/$LIVE.json"
+    run_refresh
+    assert user_accepted test "$STATUS" = 0
+    assert user_reproduced has_pair --user 10003:10003
+    assert_private_cleanup
+
+    setup field_defaults
+    jq '.HostConfig += {
+        ContainerIDFile:"", Binds:null, Mounts:[], VolumesFrom:null, VolumeDriver:"", ConsoleSize:[0,0],
+        Annotations:{}, CgroupnsMode:"private", IpcMode:"private", Runtime:"runc", Isolation:"",
+        Dns:[], DnsOptions:[], DnsSearch:[], ExtraHosts:null, GroupAdd:null, Links:null,
+        Cgroup:"", CgroupParent:"", PidMode:"", UTSMode:"", UsernsMode:"", OomScoreAdj:0,
+        PublishAllPorts:false, OomKillDisable:false, StorageOpt:{}, Sysctls:{},
+        MemoryReservation:0, MemorySwappiness:null, PidsLimit:null, CpuShares:0, NanoCpus:0,
+        CapAdd:null, Ulimits:null, Init:false, KernelMemory:0, KernelMemoryTCP:0,
+        BlkioWeight:0, BlkioWeightDevice:[], BlkioDeviceReadBps:[], BlkioDeviceWriteBps:[],
+        BlkioDeviceReadIOps:[], BlkioDeviceWriteIOps:[], CpuPeriod:0, CpuQuota:0,
+        CpuRealtimePeriod:0, CpuRealtimeRuntime:0, CpusetCpus:"", CpusetMems:"",
+        Devices:[], DeviceCgroupRules:null, DeviceRequests:null, CpuCount:0, CpuPercent:0,
+        IOMaximumIOps:0, IOMaximumBandwidth:0,
+        MaskedPaths:["/proc/asound","/proc/acpi","/proc/interrupts","/proc/kcore","/proc/keys",
+            "/proc/latency_stats","/proc/timer_list","/proc/timer_stats","/proc/sched_debug",
+            "/proc/scsi","/sys/firmware","/sys/devices/virtual/powercap"],
+        ReadonlyPaths:["/proc/bus","/proc/fs","/proc/irq","/proc/sys","/proc/sysrq-trigger"]
+    }' "$CASE/original.json" > "$CASE/containers/$LIVE.json"
+    run_refresh
+    assert full_default_host_config_accepted test "$STATUS" = 0
+    assert explicit_false_init_preserved grep -qx -- --init=false "$CASE/create.args"
+    assert_private_cleanup
+
+    for row in '{"MemoryReservation":1048576}' '{"PidMode":"host"}' '{"GroupAdd":["1"]}' \
+        '{"FutureSecurityLimit":128}' '{"FutureDefault":false}' '{"MemorySwappiness":101}' \
+        '{"Ulimits":[{"Name":"nofile","Soft":1024}]}' '{"MaskedPaths":["/custom"]}' '{"ReadonlyPaths":[]}' \
+        '{"User":"10003"}' '{"CapAdd":false}' '{"SecurityOpt":false}' '{"Ulimits":false}' \
+        '{"Runtime":false}' '{"Tmpfs":false}' '{"RestartPolicy":{"Name":"always","MaximumRetryCount":3}}' \
+        '{"PortBindings":{"8091/tcp":[{"HostIp":"127.0.0.1","HostPort":"8094","ExtraSecurity":false}]}}'; do
+        field="$(jq -r 'keys[0]' <<< "$row")"
+        setup "refused_$field"
+        jq --argjson extra "$row" '.HostConfig += $extra' "$CASE/original.json" > "$CASE/containers/$LIVE.json"
+        run_refresh
+        assert unsupported_field_refused test "$STATUS" -ne 0
+        assert no_container_mutation test "$(grep -cE '^(stop|rename|create|start|rm|tag)$' "$CASE/actions" || true)" = 0
+        assert_original_running
+        assert_private_cleanup
+    done
 }
 
 main "$@"

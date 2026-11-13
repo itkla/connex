@@ -9,6 +9,7 @@ LOCK_FILE="${CONNEX_DEPLOY_LOCK_FILE:-/tmp/connex-staging-deploy.lock}"
 WAIT_SECONDS="${CONNEX_CLAMAV_REFRESH_WAIT_SECONDS:-420}"
 CONTAINER=connex-staging-clamav
 PREVIOUS=connex-staging-clamav-previous
+FAILED=connex-staging-clamav-failed
 CANDIDATE=connex-clamav:staging-candidate
 IMAGE=connex-clamav:staging
 SCRATCH=""
@@ -22,18 +23,42 @@ STAGE=preflight
 log() { echo "[connex-staging-clamav-refresh] $*"; }
 
 rollback() {
-    local current name
-    current="$(docker container inspect --format '{{.Id}}' "$CONTAINER" 2>/dev/null)" || current=""
-    if [ -n "$current" ] && [ "$current" != "$OLD_ID" ]; then
-        docker stop --time 30 "$current" >/dev/null 2>&1 || return 1
-        docker rm "$current" >/dev/null 2>&1 || return 1
-    fi
-    name="$(docker container inspect --format '{{.Name}}' "$OLD_ID" 2>/dev/null)" || return 1
-    if [ "$name" != "/$CONTAINER" ]; then
-        docker rename "$OLD_ID" "$CONTAINER" >/dev/null 2>&1 || return 1
-    fi
-    docker start "$OLD_ID" >/dev/null 2>&1 || return 1
-    log 'result=restored'
+    local attempt current name state="" retained running
+    # A failed CLI response does not prove the daemon rejected the operation. Retry from observed
+    # state, and always attempt to start the original even when restoring its name fails.
+    for ((attempt=0; attempt<3; attempt++)); do
+        current="$(docker container inspect --format '{{.Id}}' "$CONTAINER" 2>/dev/null)" || current=""
+        if [ -n "$current" ] && [ "$current" != "$OLD_ID" ]; then
+            docker stop --time 30 "$current" >/dev/null 2>&1 || true
+            docker rm "$current" >/dev/null 2>&1 || true
+            current="$(docker container inspect --format '{{.Id}}' "$CONTAINER" 2>/dev/null)" || current=""
+            name="$(docker container inspect --format '{{.Name}}' "$OLD_ID" 2>/dev/null)" || name=""
+            running="$(docker container inspect --format '{{.State.Running}}' "$current" 2>/dev/null)" || running=""
+            if [ -n "$current" ] && [ "$current" != "$OLD_ID" ] && [ -n "$name" ] && [ "$running" = false ]; then
+                # A stopped candidate that cannot be removed must not reserve the scanner's name.
+                docker rename "$current" "$FAILED" >/dev/null 2>&1 || true
+                retained="$(docker container inspect --format '{{.Id}}' "$FAILED" 2>/dev/null)" || retained=""
+                if [ "$retained" = "$current" ]; then log 'result=retained reason=candidate_removal'; fi
+            fi
+        fi
+        name="$(docker container inspect --format '{{.Name}}' "$OLD_ID" 2>/dev/null)" || name=""
+        if [ "$name" != "/$CONTAINER" ]; then
+            docker rename "$OLD_ID" "$CONTAINER" >/dev/null 2>&1 || true
+        fi
+        docker start "$OLD_ID" >/dev/null 2>&1 || true
+        state="$(docker container inspect --format '{{.Name}} {{.State.Running}}' "$OLD_ID" 2>/dev/null)" || state=""
+        current="$(docker container inspect --format '{{.Id}}' "$CONTAINER" 2>/dev/null)" || current=""
+        if [ "$state" = "/$CONTAINER true" ] && [ "$current" = "$OLD_ID" ]; then
+            log 'result=restored'
+            return 0
+        fi
+    done
+    case "$state" in
+        '') log 'result=failed stage=rollback reason=original_unavailable' ;;
+        *' false') log 'result=failed stage=rollback reason=original_not_running' ;;
+        *) log 'result=failed stage=rollback reason=restore_name' ;;
+    esac
+    return 1
 }
 
 cleanup() {
@@ -60,6 +85,91 @@ cleanup() {
     exit "$status"
 }
 
+prepare_arguments() {
+    # This field-to-arguments registry is also the non-default HostConfig allow-list. Adding a
+    # field to validation therefore requires specifying how it is reproduced.
+    jq -e '
+        def integer: type == "number" and floor == .;
+        def option($flag): if . == null then [] else [$flag, tostring] end;
+        .[0] | .HostConfig as $h |
+        if (([$h.CapAdd, $h.CapDrop, $h.SecurityOpt, $h.Ulimits] | all(. == null or type == "array")) and
+            ([$h.Runtime, $h.IpcMode, $h.CgroupnsMode] | all(. == null or type == "string")) and
+            ($h.Tmpfs == null or ($h.Tmpfs | type == "object")) and
+            ($h.LogConfig.Config == null or ($h.LogConfig.Config | type == "object")) and
+            ($h.LogConfig | keys - ["Type", "Config"] | length == 0) and
+            ($h.RestartPolicy | keys - ["Name", "MaximumRetryCount"] | length == 0) and
+            ($h.PidsLimit == null or ($h.PidsLimit | integer and . >= -1)) and
+            ($h.MemorySwappiness == null or ($h.MemorySwappiness | integer and . >= 0 and . <= 100)) and
+            ($h.CpuShares == null or ($h.CpuShares | integer and . >= 0)) and
+            ($h.NanoCpus == null or ($h.NanoCpus | integer and . >= 0 and . <= 9007199254740991)) and
+            ($h.Init == null or ($h.Init | type == "boolean")) and
+            ([$h.Ulimits[]? | (keys == ["Hard", "Name", "Soft"]) and
+                (.Name | type == "string" and test("^[a-z0-9]+$")) and
+                (.Soft | integer and . >= -1) and (.Hard | integer and . >= -1)] | all))
+        then {
+            host: {
+                Memory: ["--memory", ($h.Memory | tostring)],
+                MemorySwap: ["--memory-swap", ($h.MemorySwap | tostring)],
+                ReadonlyRootfs: ["--read-only=" + ($h.ReadonlyRootfs | tostring)],
+                ShmSize: ["--shm-size", ($h.ShmSize | tostring)],
+                RestartPolicy: ["--restart", ($h.RestartPolicy | .Name +
+                    if .Name == "on-failure" and .MaximumRetryCount > 0
+                    then ":" + (.MaximumRetryCount | tostring) else "" end)],
+                NetworkMode: ["--network", $h.NetworkMode],
+                LogConfig: ["--log-driver", $h.LogConfig.Type,
+                    ($h.LogConfig.Config // {} | to_entries[] | "--log-opt", (.key + "=" + .value))],
+                Tmpfs: [($h.Tmpfs // {} | to_entries[] | "--tmpfs", (.key + ":" + .value))],
+                PortBindings: [($h.PortBindings // {} | to_entries[] | .key as $port | .value[] |
+                    "--publish", ((if .HostIp == "" then "" elif (.HostIp | contains(":"))
+                    then "[" + .HostIp + "]:" else .HostIp + ":" end) + .HostPort + ":" + $port))],
+                PidsLimit: ($h.PidsLimit | option("--pids-limit")),
+                MemorySwappiness: ($h.MemorySwappiness | option("--memory-swappiness")),
+                CpuShares: ($h.CpuShares | option("--cpu-shares")),
+                NanoCpus: (if $h.NanoCpus == null then [] else ["--cpus", ($h.NanoCpus / 1000000000 | tostring)] end),
+                CapDrop: [$h.CapDrop[]? | "--cap-drop", .],
+                CapAdd: [$h.CapAdd[]? | "--cap-add", .],
+                SecurityOpt: [$h.SecurityOpt[]? | "--security-opt", .],
+                Ulimits: [$h.Ulimits[]? | "--ulimit", (.Name + "=" + (.Soft | tostring) + ":" + (.Hard | tostring))],
+                Init: (if $h.Init == null then [] else ["--init=" + ($h.Init | tostring)] end),
+                CgroupnsMode: (if ($h.CgroupnsMode // "") == "" then [] else ["--cgroupns", $h.CgroupnsMode] end),
+                IpcMode: (if ($h.IpcMode // "") == "" then [] else ["--ipc", $h.IpcMode] end),
+                Runtime: (if ($h.Runtime // "") == "" then [] else ["--runtime", $h.Runtime] end)
+            },
+            config: {User: [if .Config.User != "" then "--user", .Config.User else empty end]},
+            network: {Aliases: [.NetworkSettings.Networks[].Aliases[]? | "--network-alias", .]}
+        } else error("unsupported resource settings") end
+    ' "$SCRATCH/inspect.json" > "$SCRATCH/runtime-arguments.json"
+    # Known Linux Docker defaults may be omitted. Unknown fields, including future API fields,
+    # are refused rather than silently inheriting daemon defaults. Masked/readonly path defaults:
+    # https://github.com/moby/moby/blob/v28.5.2/oci/defaults.go
+    jq -e --slurpfile arguments "$SCRATCH/runtime-arguments.json" '
+        {
+            AutoRemove: [false], Privileged: [false], PublishAllPorts: [false],
+            Binds: [null, []], Mounts: [null, []], VolumesFrom: [null, []], VolumeDriver: [""],
+            ContainerIDFile: [""], ConsoleSize: [[0, 0]], Annotations: [null, {}],
+            Dns: [null, []], DnsOptions: [null, []], DnsSearch: [null, []],
+            ExtraHosts: [null, []], GroupAdd: [null, []], Links: [null, []],
+            Cgroup: [""], CgroupParent: [""], PidMode: [""], UTSMode: [""], UsernsMode: [""],
+            OomScoreAdj: [0], OomKillDisable: [null, false], StorageOpt: [null, {}], Sysctls: [null, {}],
+            Isolation: ["", "default"], MemoryReservation: [0], KernelMemory: [0], KernelMemoryTCP: [0],
+            BlkioWeight: [0], BlkioWeightDevice: [null, []], BlkioDeviceReadBps: [null, []],
+            BlkioDeviceWriteBps: [null, []], BlkioDeviceReadIOps: [null, []], BlkioDeviceWriteIOps: [null, []],
+            CpuPeriod: [0], CpuQuota: [0], CpuRealtimePeriod: [0], CpuRealtimeRuntime: [0],
+            CpusetCpus: [""], CpusetMems: [""], Devices: [null, []], DeviceCgroupRules: [null, []],
+            DeviceRequests: [null, []], CpuCount: [0], CpuPercent: [0], IOMaximumIOps: [0], IOMaximumBandwidth: [0],
+            MaskedPaths: [null, ["/proc/asound", "/proc/acpi", "/proc/interrupts", "/proc/kcore", "/proc/keys",
+                "/proc/latency_stats", "/proc/timer_list", "/proc/timer_stats", "/proc/sched_debug",
+                "/proc/scsi", "/sys/firmware", "/sys/devices/virtual/powercap"]],
+            ReadonlyPaths: [null, ["/proc/bus", "/proc/fs", "/proc/irq", "/proc/sys", "/proc/sysrq-trigger"]]
+        } as $defaults |
+        all(.[0].HostConfig | to_entries[]; . as $field |
+            ($arguments[0].host | has($field.key)) or
+            (($defaults | has($field.key)) and any($defaults[$field.key][]; . == $field.value)))
+    ' "$SCRATCH/inspect.json" >/dev/null
+    # One argument per line avoids eval and shell interpretation of inspected values.
+    jq -r '.host[], .config[], .network[] | .[]' "$SCRATCH/runtime-arguments.json" > "$SCRATCH/args"
+}
+
 prepare_settings() {
     docker container inspect "$CONTAINER" > "$SCRATCH/inspect.json"
     # Refuse configurations this narrowly scoped staging job cannot reproduce safely. In
@@ -80,13 +190,14 @@ prepare_settings() {
             (.HostConfig.Memory | integer) and (.HostConfig.MemorySwap | integer) and
             (.HostConfig.ShmSize | integer) and (.HostConfig.ReadonlyRootfs | type == "boolean") and
             (.HostConfig.RestartPolicy.Name | IN("no", "always", "unless-stopped", "on-failure")) and
-            (.HostConfig.RestartPolicy.MaximumRetryCount | integer) and
+            (.HostConfig.RestartPolicy.MaximumRetryCount | integer and . >= 0) and
+            (.HostConfig.RestartPolicy | .Name == "on-failure" or .MaximumRetryCount == 0) and
             (.HostConfig.LogConfig.Type | line and length > 0) and
             ([.Config.Env[]? | select(startswith("CONNEX_CLAMAV_")) |
                 line and test("^CONNEX_CLAMAV_[A-Z0-9_]+=")] | all) and
             (.HostConfig.PortBindings["8091/tcp"] | length > 0) and
             ([.HostConfig.PortBindings[]?[]? |
-                (.HostIp | test("^[0-9a-fA-F:.]*$")) and
+                (keys == ["HostIp", "HostPort"]) and (.HostIp | test("^[0-9a-fA-F:.]*$")) and
                 (.HostPort | test("^[0-9]{1,5}$") and (tonumber > 0 and tonumber <= 65535))] | all)
         )
     ' "$SCRATCH/inspect.json" >/dev/null
@@ -95,30 +206,13 @@ prepare_settings() {
     jq -r '.[0].Config.Env[]? | select(startswith("CONNEX_CLAMAV_"))' \
         "$SCRATCH/inspect.json" > "$SCRATCH/env"
     chmod 0600 "$SCRATCH/env"
-    # One argument per line avoids eval and shell interpretation of inspected values.
-    jq -r '
-        .[0] | .HostConfig as $h |
-        "--memory", ($h.Memory | tostring), "--memory-swap", ($h.MemorySwap | tostring),
-        ("--read-only=" + ($h.ReadonlyRootfs | tostring)), "--shm-size", ($h.ShmSize | tostring),
-        "--restart", ($h.RestartPolicy | .Name +
-            if .Name == "on-failure" and .MaximumRetryCount > 0
-            then ":" + (.MaximumRetryCount | tostring) else "" end),
-        "--network", $h.NetworkMode, "--log-driver", $h.LogConfig.Type,
-        ($h.LogConfig.Config // {} | to_entries[] | "--log-opt", (.key + "=" + .value)),
-        ($h.Tmpfs // {} | to_entries[] | "--tmpfs", (.key + ":" + .value)),
-        ($h.PortBindings // {} | to_entries[] | .key as $port | .value[] |
-            "--publish", ((if .HostIp == "" then "" elif (.HostIp | contains(":"))
-                then "[" + .HostIp + "]:" else .HostIp + ":" end) + .HostPort + ":" + $port)),
-        ($h.CapDrop[]? | "--cap-drop", .), ($h.CapAdd[]? | "--cap-add", .),
-        ($h.SecurityOpt[]? | "--security-opt", .),
-        (.NetworkSettings.Networks[].Aliases[]? | "--network-alias", .),
-        (if .Config.User != "" then "--user", .Config.User else empty end)
-    ' "$SCRATCH/inspect.json" > "$SCRATCH/args"
+    prepare_arguments
     # Reject embedded line breaks before converting the generated stream to shell arguments.
     jq -e '[.[0] | .HostConfig as $h |
         ($h.LogConfig.Config // {} | to_entries[] | .key, .value),
         ($h.Tmpfs // {} | to_entries[] | .key, .value),
-        $h.CapDrop[]?, $h.CapAdd[]?, $h.SecurityOpt[]?,
+        $h.CapDrop[]?, $h.CapAdd[]?, $h.SecurityOpt[]?, $h.NetworkMode,
+        ($h.CgroupnsMode // ""), ($h.IpcMode // ""), ($h.Runtime // ""),
         .NetworkSettings.Networks[].Aliases[]?, .Config.User |
         type == "string" and (test("[\\r\\n]") | not)] | all' \
         "$SCRATCH/inspect.json" >/dev/null
