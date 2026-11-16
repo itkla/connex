@@ -134,19 +134,26 @@ describe.each([
     { locale: 'ja', messages: { ...commonJa, ...recordsJa } },
 ])('narrow contact identity in $locale', ({ locale, messages }) => {
     it.each([true, false])('A11Y-26 reserves the name row while keeping warmth on the secondary line (secondary: %s)', (hasSecondary) => {
+        const fullName = locale === 'ja' ? '長谷川アレクサンダー' : contact.name;
         render(
             <NextIntlClientProvider locale={locale} messages={messages} timeZone="UTC">
                 <TooltipProvider>
                     <NowProvider value={Date.parse('2026-01-01T00:00:00Z')}>
-                        <ContactListRow contact={{ ...contact, title: hasSecondary ? contact.title : '', email: '' }} temperature={noHistory} />
+                        <ContactListRow contact={{ ...contact, name: fullName, title: hasSecondary ? contact.title : '', email: '' }} temperature={noHistory} />
                     </NowProvider>
                 </TooltipProvider>
             </NextIntlClientProvider>,
         );
-        const name = screen.getByTitle(contact.name);
+        const name = screen.getByTitle(fullName);
         expect(name.classList.contains('col-span-2')).toBe(true);
-        expect(name.classList.contains('min-w-[8ch]')).toBe(true);
+        expect(name.classList.contains('line-clamp-2')).toBe(true);
+        expect(name.classList.contains('wrap-break-word')).toBe(true);
+        expect(name.classList.contains('whitespace-normal')).toBe(true);
+        expect(name.classList.contains('truncate')).toBe(false);
+        expect(name.classList.contains('break-all')).toBe(false);
         expect(name.classList.contains('min-[400px]:col-span-1')).toBe(true);
+        expect(name.classList.contains('min-[400px]:line-clamp-none')).toBe(true);
+        expect(name.classList.contains('min-[400px]:truncate')).toBe(true);
         const warmth = screen.getByText(messages.Temperature.noHistory).parentElement;
         expect(warmth?.classList.contains('row-start-2')).toBe(true);
         expect(warmth?.classList.contains('min-[400px]:row-start-1')).toBe(true);

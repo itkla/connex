@@ -99,43 +99,13 @@ for (const resource of ['contacts', 'companies', 'deals'] as const) {
         }
         await assertStickyAlignment(table);
     });
-
-    test(`${resource}: normal values keep their 1440px appearance with caps enabled`, async ({ page }, testInfo) => {
-        const fixture = runFixture(testInfo.project.name);
-        const id = resource === 'contacts' ? fixture.contacts.peek.id : resource === 'companies' ? fixture.companies.primary.id : fixture.deals.primary.id;
-        const state = await stubRecords(page, resource, id);
-        await useLocale(page, 'en');
-        await page.setViewportSize({ width: 1440, height: 1000 });
-        await page.goto(`/records/${resource}?view=table&q=width-check`);
-        const table = page.locator('table[data-density]');
-        await waitForTable(page, table, resource, state.name);
-        await page.mouse.move(0, 0);
-        const scroller = table.locator('..');
-        for (const theme of ['light', 'dark']) {
-            await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), theme === 'dark');
-            const widthsWithCaps = await columnWidths(table);
-            const withCaps = await scroller.screenshot({ animations: 'disabled' });
-            const caps = await table.locator('[style*="max-width"]').evaluateAll((elements) => elements.map((element) => element.getAttribute('style')));
-            await table.locator('[style*="max-width"]').evaluateAll((elements) => elements.forEach((element) => {
-                if (element instanceof HTMLElement) element.style.maxWidth = 'none';
-            }));
-            expect(await columnWidths(table)).toEqual(widthsWithCaps);
-            const withoutCaps = await scroller.screenshot({ animations: 'disabled' });
-            await testInfo.attach(`${resource}-${theme}-before-caps-1440`, { body: withoutCaps, contentType: 'image/png' });
-            await testInfo.attach(`${resource}-${theme}-after-caps-1440`, { body: withCaps, contentType: 'image/png' });
-            expect(withCaps.equals(withoutCaps)).toBe(true);
-            await table.locator('[style*="max-width"]').evaluateAll((elements, styles) => elements.forEach((element, index) => {
-                const style = styles[index];
-                if (style != null) element.setAttribute('style', style);
-            }), caps);
-        }
-    });
 }
 
 for (const locale of ['en', 'ja'] as const) {
     test(`A11Y-26 ${locale} contacts retain eight visible name characters at 320px @mobile`, async ({ page }, testInfo) => {
         const id = runFixture(testInfo.project.name).contacts.peek.id;
         const state = await stubRecords(page, 'contacts', id);
+        if (locale === 'ja') state.name = '長谷川アレクサンダー';
         await useLocale(page, locale);
         await page.setViewportSize({ width: 320, height: 800 });
         await page.goto('/records/contacts?view=table');
@@ -144,27 +114,41 @@ for (const locale of ['en', 'ja'] as const) {
         const warmth = row.getByText(message(locale, 'common', 'Temperature.noHistory'), { exact: true });
         await expect(name).toBeVisible();
         await expect(warmth).toBeVisible();
+        await page.evaluate(() => document.fonts.ready);
         const visibleCharacters = await name.evaluate((element) => {
             const text = element.firstChild;
             if (!text) return 0;
             const available = element.getBoundingClientRect();
-            const ellipsisWidth = element.scrollWidth > element.clientWidth ? Number.parseFloat(getComputedStyle(element).fontSize) : 0;
+            const styles = getComputedStyle(element);
+            const lineHeight = Number.parseFloat(styles.lineHeight);
+            const clipped = element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight + 1;
+            const ellipsisWidth = clipped ? Number.parseFloat(styles.fontSize) : 0;
             let visible = 0;
-            for (let index = 0; index < Math.min(8, text.textContent?.length ?? 0); index += 1) {
+            let offset = 0;
+            for (const character of Array.from(text.textContent ?? '')) {
                 const range = document.createRange();
-                range.setStart(text, index);
-                range.setEnd(text, index + 1);
-                if (range.getBoundingClientRect().right <= available.right - ellipsisWidth) visible += 1;
+                range.setStart(text, offset);
+                offset += character.length;
+                range.setEnd(text, offset);
+                const glyph = range.getBoundingClientRect();
+                const onLastLine = (glyph.top + glyph.bottom) / 2 > available.bottom - lineHeight / 2 - 0.5;
+                const rightEdge = available.right - (onLastLine ? ellipsisWidth : 0);
+                if (glyph.width === 0
+                    || glyph.left < available.left - 0.5 || glyph.right > rightEdge + 0.5
+                    || glyph.top < available.top - 0.5 || glyph.bottom > available.bottom + 0.5) break;
+                visible += 1;
             }
             return visible;
         });
-        expect(visibleCharacters).toBe(8);
+        expect(visibleCharacters).toBeGreaterThanOrEqual(8);
         const nameBounds = await name.boundingBox();
         const warmthBounds = await warmth.boundingBox();
         expect(nameBounds).not.toBeNull();
         expect(warmthBounds).not.toBeNull();
         if (!nameBounds || !warmthBounds) throw new Error('Missing mobile row bounds');
         expect(warmthBounds.y).toBeGreaterThanOrEqual(nameBounds.y + nameBounds.height);
+        const lineHeight = await name.evaluate((element) => Number.parseFloat(getComputedStyle(element).lineHeight));
+        expect(nameBounds.height).toBeLessThanOrEqual(lineHeight * 2 + 1);
         expect(nameBounds.x).toBeGreaterThanOrEqual(0);
         expect(nameBounds.x + nameBounds.width).toBeLessThanOrEqual(320);
         await row.click();

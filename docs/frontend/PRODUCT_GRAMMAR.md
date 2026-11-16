@@ -61,7 +61,7 @@ Record-table column definitions may cap intrinsic text width through `ColumnDef.
 
 Mobile keeps the same capability semantics but uses task-adaptive lists and focused sheets rather than horizontally scrolled desktop tables or indiscriminate desktop-card stacks. Prefer one focused task at a time and generous touch targets.
 
-Below 400px, contact-list names span the available text width with an 8ch minimum, and warmth shares the secondary line. Wider mobile lists retain the trailing warmth cue.
+Below 400px, contact-list names span the available text width and may wrap to two lines so Japanese names remain identifiable; Latin words wrap at normal word boundaries, with emergency wrapping for an oversized word. Warmth shares the secondary line. Wider mobile lists retain single-line name truncation and the trailing warmth cue. Keep the full name in a title.
 
 ## Operation → surface mapping
 
