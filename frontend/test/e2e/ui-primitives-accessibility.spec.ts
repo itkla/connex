@@ -85,7 +85,7 @@ async function expectForcedFocus(control: Locator) {
     await expect(control).not.toHaveCSS("outline-color", "rgba(0, 0, 0, 0)");
 }
 
-test("state-opened pipeline and company dialogs restore keyboard focus @mobile", async ({ page, isMobile }) => {
+test("state-opened pipeline and company dialogs restore keyboard focus @mobile", async ({ page }) => {
     for (const item of [
         { path: "/records/pipelines", opener: "Add pipeline", title: "New pipeline" },
         { path: "/records/companies", opener: "Add company", title: "New company" },
@@ -96,7 +96,6 @@ test("state-opened pipeline and company dialogs restore keyboard focus @mobile",
         await opener.press("Enter");
         const dialog = page.getByRole("dialog", { name: item.title, exact: true });
         await expect(dialog).toBeVisible();
-        if (isMobile) await expectHitArea(dialog.getByRole("button", { name: "Close", exact: true }), 32);
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(dialog).not.toBeVisible();
         await expect(opener).toBeFocused();
@@ -180,10 +179,13 @@ test("forced colors preserve all primitive outlines and normal styles in both th
         await expectForcedFocus(tab);
         await page.goto(`/records/contacts?view=table&q=${encodeURIComponent(fixture.contacts.peek.name)}`);
         const checkbox = page.getByRole("checkbox").first();
+        const search = page.getByRole("textbox", { name: "Search", exact: true });
         await page.emulateMedia({ forcedColors: "none" });
         await expectNormalStylesUnchanged(checkbox);
+        await expectNormalStylesUnchanged(search);
         await page.emulateMedia({ forcedColors: "active" });
         await expectForcedFocus(checkbox);
+        await expectForcedFocus(search);
         await page.setViewportSize({ width: 1024, height: 900 });
         await page.goto(`/records/deals?view=grid&q=${encodeURIComponent(fixture.deals.primary.name)}`);
         const card = page.getByRole("link").filter({ hasText: fixture.deals.primary.name }).first();
@@ -230,12 +232,36 @@ test("a near miss inside the task checkbox cell completes the task @mobile-only"
     }
 });
 
-test("inline tag actions keep their visual size and a 44px hit area @mobile-only", async ({ page }, testInfo) => {
+test("My Work Next and Close own taps at their visible edges @mobile-only", async ({ page }, testInfo) => {
     const fixture = runFixture(testInfo.project.name);
-    const name = `Touch tag ${randomUUID()}`;
-    await seeder(page.request, fixture.workspaceId, await csrfBootstrap(page.request)).post("/api/tags", { name, color: "#abcdef" });
-    await page.goto(`/library/tags?q=${encodeURIComponent(name)}`);
-    await expectHitArea(page.getByRole("button", { name: `Actions for tag ${name}` }), 24);
+    const description = `Drawer edge ${randomUUID()}`;
+    const taskIds: number[] = [];
+    try {
+        for (const suffix of ["A", "B"]) {
+            taskIds.push(await createTask(page, fixture.workspaceId, fixture.contacts.activity.id, `${description} ${suffix}`));
+        }
+        await page.goto("/me");
+        await page.getByRole("main").getByRole("button").filter({ hasText: description }).first().click();
+        const drawer = page.locator('[data-slot="drawer-content"]');
+        const next = drawer.getByRole("button", { name: "Next", exact: true });
+        const close = drawer.getByRole("button", { name: "Close", exact: true });
+        await expect(next).toBeEnabled();
+        await expectVisibleEdgesBelongTo(next);
+        await expectVisibleEdgesBelongTo(close);
+        const title = drawer.locator('[data-slot="drawer-title"]');
+        const before = await title.innerText();
+        const point = await next.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            return { x: box.right - 3, y: box.top + box.height / 2 };
+        });
+        await page.touchscreen.tap(point.x, point.y);
+        await expect(drawer).toBeVisible();
+        await expect(title).not.toHaveText(before);
+        await close.click();
+        await expect(drawer).toBeHidden();
+    } finally {
+        for (const taskId of taskIds) await deleteTask(page, fixture.workspaceId, taskId);
+    }
 });
 
 test("dense stage and peek controls own taps at their visible edges @mobile-only", async ({ page }, testInfo) => {

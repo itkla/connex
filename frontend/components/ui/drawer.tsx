@@ -187,7 +187,6 @@ function DrawerContent({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  expandHitArea
                   className="absolute top-4 right-4 z-10"
                 />
               }

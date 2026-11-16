@@ -27,10 +27,12 @@ describe("forced-colors focus contracts", () => {
             <Tabs defaultValue="one"><TabsList><TabsTrigger value="one">One</TabsTrigger></TabsList></Tabs>
             <SegmentedControl value="one" onChange={() => {}} ariaLabel="View" options={[{ value: "one", label: "List" }]} />
             <Checkbox aria-label="Complete" /><Switch aria-label="Enabled" />
+            <SearchField value="query" onChange={() => {}} onClear={() => {}} placeholder="Search" searchAria="Search" clearAria="Clear search" />
         </>);
         for (const control of [
-            screen.getByRole("button", { name: "Save" }), screen.getByRole("textbox"), screen.getByRole("combobox"),
+            screen.getByRole("button", { name: "Save" }), screen.getByRole("textbox", { name: "Name" }), screen.getByRole("combobox"),
             screen.getByRole("tab"), screen.getByRole("button", { name: "List" }), screen.getByRole("checkbox"), screen.getByRole("switch"),
+            screen.getByRole("textbox", { name: "Search" }), screen.getByRole("button", { name: "Clear search" }),
         ]) {
             expect(control.classList.contains("outline-hidden")).toBe(true);
             expect(control.classList.contains("forced-colors:focus-visible:outline-2")).toBe(true);

@@ -643,10 +643,14 @@ describe("My Work queue interactions", () => {
         expect(viewport?.className).toContain("justify-center");
         expect(drawer.className).toContain("pb-[max(1rem,env(safe-area-inset-bottom))]");
         expect(drawer.querySelector("[data-slot='drawer-swipe-handle']")).not.toBeNull();
+        const close = drawer.querySelector<HTMLElement>("[data-slot='drawer-close-button']");
+        if (close == null) throw new Error("drawer close button not found");
+        expect(close.classList.contains("touch-target")).toBe(false);
         for (const label of ["queueStepPrevious", "queueStepNext"]) {
             const button = findDocumentButton(label, drawer);
             expect(button.className).toContain("min-h-11");
             expect(button.className).toContain("min-w-11");
+            expect(button.parentElement?.classList.contains("pr-16")).toBe(true);
         }
 
         await act(async () => { root.unmount(); });
