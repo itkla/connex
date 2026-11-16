@@ -73,6 +73,25 @@ The full matrix runs with `pnpm exec playwright test --config=playwright.matrix.
 the production frontend, seeded backend, and fault proxy described by `test/e2e/matrix/matrix.setup.ts`.
 Set `PLAYWRIGHT_BROWSERS_PATH` when Chromium is installed outside Playwright's default cache.
 
+`test/unit/chartPolish.test.tsx` covers chart axis sizing, year-boundary ticks, revenue labels,
+legends and Deals chart summaries; `pickerInputSafety.test.tsx` covers localized chevron names.
+Numeric axes share `app/lib/chartAxes.ts`, which uses Recharts' measured `width="auto"` behavior.
+`test/e2e/chart-polish.spec.ts` measures actual tick boxes on Dashboard, Analytics and both Reports
+chart types with billion-scale USD/JPY data, and checks Deals chart focus and axe accessible-name
+rules. It runs in EN/light and JA/dark on desktop and phone in the normal browser suite.
+
+`appShellHydration.test.tsx` hydrates the real shell and sidebar with delayed sidebar hydration,
+persisted navigation preferences and recent records. Each `useSidebarMode` consumer must reuse
+the expanded server snapshot until its own hydration completes: a provider's mount effect can
+restore rail mode before a suspended sidebar hydrates. The test requires the server DOM to survive,
+then checks that the saved mode applies and the toggle still works. Data hooks, the assistant and
+the MFA route gate are stubbed, so this does not replace route-level browser coverage.
+`app-shell-hydration.spec.ts` covers full document loads of Dashboard, Deals and deal detail,
+Pipelines, Contacts and Companies lists and details, and CRM settings in EN/JA on desktop and phone.
+It fails on hydration console errors and uncaught hydration errors, waits for page content, and
+opens the workspace menu to verify the sidebar is interactive. Unrelated console errors are not
+part of that assertion.
+
 ## How auth bootstrap works
 
 The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` and `setup-mobile` projects (`frontend/test/e2e/global.setup.ts`) each provision an isolated tenant:

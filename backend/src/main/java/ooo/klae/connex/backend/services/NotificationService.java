@@ -410,30 +410,57 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
+    /**
+     * Marks ownership notices in separate locked transactions and advances the inbox once.
+     * Committed notice reads still invalidate the inbox if a later step fails.
+     */
     public NotificationCountsDto markAllRead() {
         int recipientId = currentRecipientId();
         String asOf = notificationMapper.getDatabaseUtcTimestamp();
         long cutoffId = notificationMapper.getInboxCutoffId(recipientId);
         long afterId = 0;
-        List<Notification> offerNotices;
-        do {
-            offerNotices = notificationMapper.findPage(recipientId, "unread",
-                List.of(OwnershipOfferWriter.NOTICE_TYPE), null, null, null, null, null,
-                asOf, 100, 0, afterId, cutoffId);
-            for (Notification notice : offerNotices) {
-                long offerId = ownershipOfferId(notice);
-                try {
-                    ownershipOfferTransaction.mutateNotice(offerId, recipientId,
-                        () -> markRead(notice.getId()));
-                } catch (ResourceNotFoundException missing) {
-                    if (!ownershipNoticeDeleted(offerId, recipientId, notice)) {
-                        throw missing;
+        boolean ownershipNoticesChanged = false;
+        try {
+            List<Notification> offerNotices;
+            do {
+                offerNotices = notificationMapper.findPage(recipientId, "unread",
+                    List.of(OwnershipOfferWriter.NOTICE_TYPE), null, null, null, null, null,
+                    asOf, 100, 0, afterId, cutoffId);
+                for (Notification notice : offerNotices) {
+                    long offerId = ownershipOfferId(notice);
+                    try {
+                        ownershipNoticesChanged |= ownershipOfferTransaction.mutateNotice(offerId, recipientId,
+                            () -> markOwnershipNoticeRead(recipientId, notice.getId()));
+                    } catch (ResourceNotFoundException missing) {
+                        if (!ownershipNoticeDeleted(offerId, recipientId, notice)) {
+                            throw missing;
+                        }
                     }
+                    afterId = notice.getId();
                 }
-                afterId = notice.getId();
+            } while (offerNotices.size() == 100 && afterId < cutoffId);
+            boolean includeOwnershipChanges = ownershipNoticesChanged;
+            return approvalMutationRetryService.execute(
+                () -> markOrdinaryNotificationsRead(recipientId, includeOwnershipChanges));
+        } catch (RuntimeException failure) {
+            if (ownershipNoticesChanged) {
+                try {
+                    approvalMutationRetryService.execute(() -> stateVersionService.bumpNow(recipientId));
+                } catch (RuntimeException invalidationFailure) {
+                    failure.addSuppressed(invalidationFailure);
+                }
             }
-        } while (offerNotices.size() == 100 && afterId < cutoffId);
-        return approvalMutationRetryService.execute(this::markOrdinaryNotificationsRead);
+            throw failure;
+        }
+    }
+
+    private boolean markOwnershipNoticeRead(int recipientId, int id) {
+        Notification current = requireNotification(recipientId, id);
+        if (current.getReadAt() != null) {
+            return false;
+        }
+        requireMutation(notificationMapper.markRead(recipientId, id), id);
+        return true;
     }
 
     private boolean ownershipNoticeDeleted(long offerId, int recipientId, Notification notice) {
@@ -447,13 +474,12 @@ public class NotificationService {
         });
     }
 
-    private NotificationCountsDto markOrdinaryNotificationsRead() {
-        int recipientId = currentRecipientId();
+    private NotificationCountsDto markOrdinaryNotificationsRead(int recipientId, boolean ownershipNoticesChanged) {
         notificationMapper.lockRecipientMemberships(recipientId);
         String readAt = notificationMapper.getDatabaseUtcTimestamp();
         long cutoffId = notificationMapper.getInboxCutoffId(recipientId);
         int rows = notificationMapper.markAllRead(recipientId, cutoffId, readAt);
-        if (rows > 0) {
+        if (rows > 0 || ownershipNoticesChanged) {
             stateVersionService.bumpNow(recipientId);
         }
         NotificationCountsDto counts = countsAt(recipientId, readAt);

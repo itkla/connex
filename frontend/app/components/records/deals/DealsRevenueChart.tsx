@@ -1,5 +1,6 @@
 'use client';
 
+import { autoYAxisWidth, monthAxisTicks } from '@/app/lib/chartAxes';
 import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import * as React from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
@@ -25,7 +26,7 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ti
     const startIndex = currentIndex - MONTHS_BACK;
 
     const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
-    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: 'numeric', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
 
@@ -35,7 +36,7 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ti
         const year = Math.floor(monthIndex / 12);
         const month = ((monthIndex % 12) + 12) % 12;
         const d = new Date(Date.UTC(year, month, 1));
-        const key = `${year}-${month}`;
+        const key = `${year}-${String(month + 1).padStart(2, '0')}`;
         keyToIndex.set(key, buckets.length);
 
         const label = month === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
@@ -43,19 +44,18 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ti
         buckets.push({ key, label, closed: 0, projected: 0 });
     }
 
-    const todayKey = `${current.year}-${current.month - 1}`;
-    const todayLabel = buckets[keyToIndex.get(todayKey) ?? -1]?.label ?? null;
+    const todayKey = `${current.year}-${String(current.month).padStart(2, '0')}`;
 
     for (const point of series.closed) {
-        const idx = keyToIndex.get(`${point.year}-${point.month - 1}`);
+        const idx = keyToIndex.get(`${point.year}-${String(point.month).padStart(2, '0')}`);
         if (idx !== undefined) buckets[idx].closed += point.total;
     }
     for (const point of series.projected) {
-        const idx = keyToIndex.get(`${point.year}-${point.month - 1}`);
+        const idx = keyToIndex.get(`${point.year}-${String(point.month).padStart(2, '0')}`);
         if (idx !== undefined) buckets[idx].projected += point.total;
     }
 
-    return { data: buckets, todayLabel };
+    return { data: buckets, todayKey: keyToIndex.has(todayKey) ? todayKey : null };
 }
 
 export default function DealsRevenueChart({
@@ -70,7 +70,7 @@ export default function DealsRevenueChart({
     const t = useTranslations('DealsRevenueChart');
     const locale = useLocale();
     const [now] = React.useState(() => Date.now());
-    const { data, todayLabel } = React.useMemo(
+    const { data, todayKey } = React.useMemo(
         () => buildBuckets(series, now, locale, timezone),
         [series, now, locale, timezone],
     );
@@ -84,11 +84,20 @@ export default function DealsRevenueChart({
     );
 
     return (
-        <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
-            <LineChart data={data} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
+        <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full" role="img"
+            aria-label={t('chartSummary', {
+                actual: formatCompactCurrency(data.reduce((sum, bucket) => sum + bucket.closed, 0), currency, locale),
+                projected: formatCompactCurrency(data.reduce((sum, bucket) => sum + bucket.projected, 0), currency, locale),
+                currency,
+            })}>
+            <LineChart accessibilityLayer={false} data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
                 <XAxis
-                    dataKey="label"
+                    dataKey="key"
+                    padding={{ left: 12, right: 32 }}
+                    tickFormatter={(value: string) => data.find((bucket) => bucket.key === value)?.label ?? value}
+                    ticks={monthAxisTicks(data.map((bucket) => bucket.key))}
+                    interval={0}
                     tickLine={false}
                     axisLine={false}
                     tickMargin={8}
@@ -97,10 +106,8 @@ export default function DealsRevenueChart({
                 <YAxis
                     tickLine={false}
                     axisLine={false}
-                    tickMargin={4}
-                    width={56}
+                    {...autoYAxisWidth((value) => formatCompactCurrency(value, currency, locale))}
                     tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
-                    tickFormatter={(v: number) => formatCompactCurrency(v, currency, locale)}
                 />
                 <RechartsTooltip
                     cursor={{ stroke: 'var(--color-brand)', strokeOpacity: 0.3, strokeWidth: 1 }}
@@ -112,9 +119,9 @@ export default function DealsRevenueChart({
                         />
                     }
                 />
-                {todayLabel != null && (
+                {todayKey != null && (
                     <ReferenceLine
-                        x={todayLabel}
+                        x={todayKey}
                         stroke="var(--chart-grid)"
                         strokeDasharray="4 4"
                         label={{ value: t('today'), position: 'top', fontSize: 10, fill: 'var(--chart-axis)' }}

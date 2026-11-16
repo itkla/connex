@@ -115,6 +115,7 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
 import {
     type Company,
@@ -1067,8 +1068,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             label: t('columnName'),
             getSortValue: (d) => d.name ?? null,
             widthClass: 'min-w-48',
+            maxWidth: '20rem',
+            getTextValue: (d) => d.name,
             render: (d) => (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
                     <span className="truncate">{d.name}</span>
                     <CommentIndicatorChip count={commentCounts.get(d.id)} />
                 </span>
@@ -1477,7 +1480,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             <SummaryTile
                                 label={t('openDeals')}
                                 tooltip={t('openDealsTooltip')}
-                                value={String(summary.openCount)}
+                                value={getNumberFormatter(locale).format(summary.openCount)}
                             />
                             <SummaryTile
                                 label={`${t('closedForecast')} · ${displayCurrency}`}

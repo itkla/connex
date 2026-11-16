@@ -1,5 +1,6 @@
 'use client';
 
+import { autoYAxisWidth, monthAxisTicks } from '@/app/lib/chartAxes';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
@@ -25,7 +26,7 @@ import {
     type RollingRangeKey,
 } from './metrics';
 
-type Row = { label: string; tooltipLabel: string } & Record<ActivityType, number>;
+type Row = { key: string; label: string; tooltipLabel: string } & Record<ActivityType, number>;
 
 /**
  * Stacked activity-volume chart. Consumes server-aggregated {@link ActivityVolumeBucket}s
@@ -54,11 +55,12 @@ export default function ActivityVolume({
         if (granularity) {
             rows = [...buckets]
                 .sort((a, b) => a.bucketIndex - b.bucketIndex)
-                .map((bucket) => {
+                .map((bucket, index) => {
                     const periodStart = bucket.periodStart ?? '';
                     const date = formatPeriodTooltipDate(periodStart, granularity, locale);
                     return {
-                        label: formatPeriodTick(periodStart, granularity, locale),
+                        key: periodStart,
+                        label: formatPeriodTick(periodStart, granularity, locale, index === 0 || periodStart.slice(5, 7) === '01'),
                         tooltipLabel: granularity === 'week' ? tPage('weekOf', { date }) : date,
                         Call: bucket.call,
                         Email: bucket.email,
@@ -72,8 +74,10 @@ export default function ActivityVolume({
             const byIndex = new Map(buckets.map((bucket) => [bucket.bucketIndex, bucket]));
             rows = labels.map((slot, index) => {
                 const bucket = byIndex.get(index);
+                const key = new Date(slot.start).toISOString().slice(0, 10);
                 return {
-                    label: slot.label,
+                    key,
+                    label: range === '12m' ? formatPeriodTick(key, 'month', locale, index === 0 || key.slice(5, 7) === '01') : slot.label,
                     tooltipLabel: slot.label,
                     Call: bucket?.call ?? 0,
                     Email: bucket?.email ?? 0,
@@ -88,7 +92,7 @@ export default function ActivityVolume({
             activeTypes: ACTIVITY_TYPES.filter(
                 (type) => rows.reduce((sum, row) => sum + row[type], 0) > 0,
             ),
-            tooltipLabels: new Map(rows.map((row) => [row.label, row.tooltipLabel])),
+            tooltipLabels: new Map(rows.map((row) => [row.key, row.tooltipLabel])),
         };
     }, [buckets, granularity, range, now, locale, tPage, timeZone]);
 
@@ -104,6 +108,7 @@ export default function ActivityVolume({
         }
         return cfg;
     }, [t]);
+    const monthly = granularity === 'month' || (!granularity && range === '12m');
 
     if (total === 0) {
         return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;
@@ -111,18 +116,21 @@ export default function ActivityVolume({
 
     return (
         <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
-            <BarChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
+            <BarChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
                 <XAxis
-                    dataKey="label"
+                    dataKey="key"
+                    padding={{ left: 12, right: 32 }}
+                    tickFormatter={(value: string) => data.find((row) => row.key === value)?.label ?? value}
+                    ticks={monthly ? monthAxisTicks(data.map((row) => row.key)) : undefined}
                     tickLine={false}
                     axisLine={false}
                     tickMargin={10}
                     minTickGap={16}
-                    interval="preserveStartEnd"
+                    interval={monthly ? 0 : 'preserveStartEnd'}
                     tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                 />
-                <YAxis tickLine={false} axisLine={false} tickMargin={4} width={36} allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--chart-axis)' }} />
+                <YAxis tickLine={false} axisLine={false} {...autoYAxisWidth()} allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--chart-axis)' }} />
                 <ChartTooltip
                     cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
                     content={

@@ -11,14 +11,14 @@ import { toTiles } from "@/app/components/overview/analytics/currencyScope";
 import en from "@/messages/en/me.json";
 import ja from "@/messages/ja/me.json";
 
-const fixture = vi.hoisted<{ currency: string | null }>(() => ({ currency: null }));
+const fixture = vi.hoisted<{ currency: string | null; reducedMotion: boolean }>(() => ({ currency: null, reducedMotion: true }));
 const replace = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
     useSearchParams: () => new URLSearchParams(fixture.currency ? { currency: fixture.currency, task: "42" } : { task: "42" }),
     useRouter: () => ({ replace }),
     usePathname: () => "/me",
 }));
-vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
+vi.mock("motion/react", () => ({ useReducedMotion: () => fixture.reducedMotion }));
 vi.mock("@/app/components/overview/analytics/CurrencyControl", () => ({
     default: ({ counts, onChange }: { counts: ReadonlyMap<string, number>; onChange: (currency: string) => void }) => (
         <div>{[...counts.keys()].map((currency) => <button key={currency} onClick={() => onChange(currency)}>{currency}</button>)}</div>
@@ -65,6 +65,7 @@ function mount(locale: "en" | "ja" = "en", data: DealMetrics = metrics, personal
 beforeEach(() => {
     vi.clearAllMocks();
     fixture.currency = null;
+    fixture.reducedMotion = true;
     vi.spyOn(Date, "now").mockReturnValue(NOW);
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -154,6 +155,29 @@ describe("personal currency aggregation", () => {
 });
 
 describe("personal deal signal tiles", () => {
+    it("never substitutes animated zeroes for loaded totals when currency data changes", () => {
+        fixture.reducedMotion = false;
+        const content = (currency: string, personalDeals = deals) => (
+            <NextIntlClientProvider locale="en" messages={en}>
+                <PersonalDealSignals data={{ currency, metrics, kpis: personalDealKpis(personalDeals, currency, WINDOW, "Asia/Tokyo") }} />
+            </NextIntlClientProvider>
+        );
+        const { rerender } = render(content("USD"));
+        expect(screen.getByText("$735K")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "JPY" }));
+        expect(screen.getByText("$735K")).toBeTruthy();
+        expect(screen.queryByText("¥0")).toBeNull();
+
+        rerender(content("JPY"));
+        expect(screen.getByText("¥45.5M")).toBeTruthy();
+        expect(screen.getByText("¥1.2M")).toBeTruthy();
+        expect(screen.queryByText("¥0")).toBeNull();
+        expect(screen.getByText("100")).toBeTruthy();
+
+        rerender(content("JPY", []));
+        expect(screen.getAllByText("¥0")).toHaveLength(2);
+    });
+
     it("shows only the selected currency, with a visible scope on both money tiles", () => {
         mount();
         expect(screen.getByText("$735K")).toBeTruthy();

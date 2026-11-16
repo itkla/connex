@@ -263,6 +263,8 @@
     "skipRow": "この行をスキップ",
     "includeRow": "この行を含める",
     "errorColumn": "修正が必要な内容",
+    "companyWillCreate": "この行のインポート時に、会社「{name}」を新規作成します。",
+    "companySelected": "関連付ける会社：{name}",
     "companyChoice": "「{name}」の会社を選択",
     "companyChoiceHint": "名前が一致するだけでは会社を選択しません。候補から選び、再確認してください。適切な会社がなければ、この行をスキップできます。",
     "bulkCompanyReview": "同じ会社名の{count}行に「{name}」を指定しますか？この会社が候補に表示される行だけが対象です。適用後に再確認してください。",
