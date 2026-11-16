@@ -21,6 +21,7 @@
     "searchPlaceholder": "ファイル名・担当者・種類で検索",
     "countAndSize": "{count}件のファイル・合計 {size}",
     "entityLabel": "ファイル",
+    "entityLabelPlural": "ファイル",
     "columnName": "名前",
     "typeLabel": "種類",
     "typeAll": "すべての種類",

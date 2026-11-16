@@ -1246,6 +1246,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                             removeIntent={showArchived ? 'restore' : 'archive'}
                             gridClassName="grid grid-cols-1 gap-3"
                             entityLabel={t('entityLabel')}
+                            entityLabelPlural={t('entityLabelPlural')}
                             selectionActions={selectionActions}
                             emptyState={
                                 <EmptyState

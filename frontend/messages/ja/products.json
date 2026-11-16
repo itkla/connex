@@ -31,6 +31,7 @@
         "deleted": "商品を削除しました",
         "deleteFailed": "商品を削除できませんでした",
         "entityLabel": "商品",
+        "entityLabelPlural": "商品",
         "displayModeAria": "表示モード",
         "gridViewAria": "グリッド表示",
         "tableViewAria": "テーブル表示",

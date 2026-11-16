@@ -19,6 +19,7 @@
     "emptyBody": "A pipeline is the set of stages your deals move through. Create one that matches how your team actually sells.",
     "emptyCta": "New pipeline",
     "entityLabel": "pipeline",
+    "entityLabelPlural": "pipelines",
     "noChangesToSave": "No changes to save",
     "nameRequiredFor": "Name is required for \"{name}\"",
     "stageNamesEmptyIn": "Stage names cannot be empty in \"{name}\"",
@@ -75,7 +76,7 @@
   "PipelinesQuickEditSheet": {
     "titleSingle": "Quick edit pipeline",
     "titleMultiple": "Quick edit {count} pipelines",
-    "description": "Update fields below. Only changed pipelines will be saved. Use the arrows to order stages.",
+    "description": "Update fields below. Only changed fields will be saved. Use the arrows to order stages.",
     "name": "Name",
     "stages": "Stages",
     "stageNamePlaceholder": "Stage name",

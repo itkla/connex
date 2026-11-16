@@ -307,7 +307,7 @@ describe("first-run and filtered-empty stay distinct", () => {
                 displayMode="table"
                 selectedIds={new Set()}
                 onSelectedIdsChange={() => {}}
-                entityLabel="contact"
+                entityLabel="contact" entityLabelPlural="contacts"
                 emptyState={journeyEmptyState}
                 filtersActive={filtersActive}
                 onClearFilters={() => {}}

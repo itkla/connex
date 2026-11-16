@@ -16,7 +16,8 @@
     "emptyTitle": "メンバーはまだいません",
     "emptyBody": "このワークスペースを利用できる人がここに並びます。ワークスペース設定から、一緒に働くメンバーを招待してください。",
     "emptyCta": "メンバーを招待",
-    "entityLabel": "ユーザー"
+    "entityLabel": "ユーザー",
+    "entityLabelPlural": "ユーザー"
   },
   "UsersPage": {
     "allUsers": "すべてのユーザー",

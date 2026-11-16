@@ -152,13 +152,13 @@ describe("invitation disclosure in the member-management panel", () => {
         const copy = (language === "en" ? english : japanese).WorkspaceMembers;
         await render(language);
         const memberSection = host.querySelector("section");
-        expect(memberSection?.textContent).toContain(copy.count.replace("{count}", "1"));
+        expect(memberSection?.textContent).toContain(language === "en" ? "1 member" : "1 人のメンバー");
 
         await submitInvitation();
 
         expect(createWorkspaceInvite).toHaveBeenCalledWith(9, pending.email, "member");
         expect(toastSuccess).toHaveBeenCalledWith(copy.invitationCreated);
-        expect(memberSection?.textContent).toContain(copy.count.replace("{count}", "1"));
+        expect(memberSection?.textContent).toContain(language === "en" ? "1 member" : "1 人のメンバー");
         expect(memberSection?.textContent).not.toContain(pending.email);
         const row = [...host.querySelectorAll("li")].find((item) => item.textContent?.includes(pending.email));
         expect(row?.textContent).toContain(pending.email);
@@ -187,7 +187,7 @@ describe("invitation disclosure in the member-management panel", () => {
         expect(rows[0]?.textContent).not.toContain(copy.inviteNoExpiry);
         const pendingHeading = [...host.querySelectorAll("h3")].find((heading) => heading.textContent === copy.pendingTitle);
         expect(pendingHeading?.parentElement?.querySelector("span")?.textContent).toBe("1");
-        expect(host.querySelector("section")?.textContent).toContain(copy.count.replace("{count}", "1"));
+        expect(host.querySelector("section")?.textContent).toContain(language === "en" ? "1 member" : "1 人のメンバー");
         expect(getWorkspaceMembers).toHaveBeenCalledTimes(1);
         expect(getWorkspaceInvites).toHaveBeenCalledTimes(1);
     });

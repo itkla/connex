@@ -336,7 +336,7 @@
     "saveFailed": "変更を保存できませんでした"
   },
   "RecordsRenderView": {
-    "selectAllAria": "すべての {entityLabel} を選択",
+    "selectAllAria": "すべての {entityLabelPlural} を選択",
     "selectItemAria": "{name} を選択",
     "copiedToast": "{label} をコピーしました",
     "copyFailedToast": "{label} をコピーできませんでした",

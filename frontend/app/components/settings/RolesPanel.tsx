@@ -318,7 +318,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                     action={
                         !loading && roles.length > 0 ? (
                             <Badge variant="secondary" className="tabular-nums">
-                                {t("permissionCount", { count: roles.length })}
+                                {t("roleCount", { count: roles.length })}
                             </Badge>
                         ) : undefined
                     }

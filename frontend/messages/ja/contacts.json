@@ -218,7 +218,7 @@
     "ContactsQuickEditSheet": {
         "titleSingle": "連絡先のクイック編集",
         "titleMultiple": "{count} 件の連絡先をクイック編集",
-        "description": "下のフィールドを更新します。変更があった連絡先のみ保存されます。",
+        "description": "以下の項目を更新してください。変更した項目のみ保存されます。",
         "name": "名前",
         "email": "メール",
         "phone": "電話",

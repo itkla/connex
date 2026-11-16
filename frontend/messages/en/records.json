@@ -336,7 +336,7 @@
     "saveFailed": "Couldn't save your change"
   },
   "RecordsRenderView": {
-    "selectAllAria": "Select all {entityLabel}s",
+    "selectAllAria": "Select all {entityLabelPlural}",
     "selectItemAria": "Select {name}",
     "copiedToast": "{label} copied",
     "copyFailedToast": "Couldn't copy the {label}",

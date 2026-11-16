@@ -333,7 +333,7 @@
         "nameRequired": "ロール名を入力してください",
         "noAccess": "現在のロールではワークスペースのロールを管理できません。アクセス権が必要な場合は、ワークスペースのオーナーに依頼してください。",
         "empty": "カスタムロールはまだありません。",
-        "permissionCount": "{count} 件の権限",
+        "roleCount": "{count} 件のロール",
         "defaultRolesLabel": "標準ロール",
         "customRolesLabel": "カスタムロール",
         "builtInBadge": "標準",

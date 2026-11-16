@@ -42,7 +42,7 @@ function renderTable(columns: ColumnDef<Contact>[], readOnly = false) {
             <TooltipProvider>
                 <RecordsRenderView
                     data={[contact]} columns={columns} displayMode="table" renderCard={() => null}
-                    renderAvatar={() => <span>Avatar</span>} emptyState={null} entityLabel="contact"
+                    renderAvatar={() => <span>Avatar</span>} emptyState={null} entityLabel="contact" entityLabelPlural="contacts"
                     selectedIds={new Set()} onSelectedIdsChange={vi.fn()} readOnly={readOnly}
                 />
             </TooltipProvider>
@@ -59,6 +59,24 @@ function bodyCell() {
 }
 
 describe('bounded record columns', () => {
+    it('ACT-32 names the company select-all checkbox with the irregular plural', () => {
+        const onSelectionChange = vi.fn();
+        render(
+            <NextIntlClientProvider locale="en" messages={{ ...commonEn, ...recordsEn }} timeZone="UTC">
+                <TooltipProvider>
+                    <RecordsRenderView
+                        data={[{ id: 1, name: 'Grammar company' }]} columns={[]} displayMode="table"
+                        renderCard={() => null} emptyState={null} entityLabel="company" entityLabelPlural="companies"
+                        selectedIds={new Set()} onSelectedIdsChange={onSelectionChange}
+                    />
+                </TooltipProvider>
+            </NextIntlClientProvider>,
+        );
+        const selectAll = screen.getByRole('checkbox', { name: 'Select all companies' });
+        fireEvent.click(selectAll);
+        expect(onSelectionChange).toHaveBeenCalledWith(new Set([1]));
+    });
+
     it.each(['email', 'title'] as const)('A11Y-25 caps editable %s and preserves its full value and editor', (key) => {
         const save = vi.fn().mockResolvedValue(undefined);
         renderTable([{

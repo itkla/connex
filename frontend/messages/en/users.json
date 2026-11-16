@@ -16,7 +16,8 @@
     "emptyTitle": "No one here yet",
     "emptyBody": "Everyone with access to this workspace appears here. Invite the people you work with from workspace settings.",
     "emptyCta": "Invite a member",
-    "entityLabel": "user"
+    "entityLabel": "user",
+    "entityLabelPlural": "users"
   },
   "UsersPage": {
     "allUsers": "All Users",

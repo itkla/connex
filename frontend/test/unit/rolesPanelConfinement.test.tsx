@@ -175,6 +175,20 @@ describe("editing a custom role that would confine its assignees", () => {
 });
 
 describe.each(["en", "ja"] as const)("localized role explanations in %s", (locale) => {
+    it.each([1, 3])("ADM-62 labels %i custom roles instead of permissions", async (count) => {
+        vi.mocked(getWorkspaceRoles).mockResolvedValueOnce(Array.from({ length: count }, (_, index) => ({
+            id: index + 1, name: `Role ${index + 1}`, permissions: ["MEMBER_MANAGE"],
+        })));
+        await act(async () => root.render(
+            <NextIntlClientProvider locale={locale} messages={{ ...(locale === "en" ? enWorkspace : jaWorkspace), ...enSettings }}>
+                <RolesPanel />
+            </NextIntlClientProvider>,
+        ));
+        await flush();
+        const badges = [...container.querySelectorAll('[data-slot="badge"]')].map((badge) => badge.textContent);
+        expect(badges).toContain(locale === "en" ? `${count} ${count === 1 ? 'role' : 'roles'}` : `${count} 件のロール`);
+    });
+
     it("names built-in roles, shows denied actions, and labels editable permissions", async () => {
         const messages = locale === "en" ? enWorkspace : jaWorkspace;
         const copy = messages.WorkspaceRoles;

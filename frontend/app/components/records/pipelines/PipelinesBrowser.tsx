@@ -624,6 +624,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         onDelete={deleteOne}
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
+                        entityLabelPlural={t('entityLabelPlural')}
                         selectionActions={selectionActions}
                         emptyState={
                             <EmptyState

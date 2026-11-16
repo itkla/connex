@@ -371,6 +371,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                         sortState={sortState}
                         gridClassName="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
                         entityLabel={t('entityLabel')}
+                        entityLabelPlural={t('entityLabelPlural')}
                         selectionActions={selectionActions}
                         emptyState={
                             <EmptyState

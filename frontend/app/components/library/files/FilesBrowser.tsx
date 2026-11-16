@@ -598,6 +598,7 @@ export default function FilesBrowser() {
                             selectedIds={selectedIds}
                             onSelectedIdsChange={(ids) => setSelectedIds(ids as Set<number>)}
                             entityLabel={t('entityLabel')}
+                            entityLabelPlural={t('entityLabelPlural')}
                             selectionActions={selectionActions}
                             loading={loading}
                             emptyState={libraryEmptyState}
