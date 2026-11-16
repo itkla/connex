@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 
 import java.time.Clock;
@@ -358,6 +359,87 @@ class NotificationServiceTest {
         verify(stateVersionService).bumpNow(42);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 2})
+    void markAllReadCombinesOwnershipAndOrdinaryChangesIntoOneVersionBump(int ordinaryCount) {
+        NotificationCountsDto counts = ordinaryReadResult();
+        List<Notification> notices = List.of(ownershipNotice(11), ownershipNotice(12), ownershipNotice(13));
+        discoveredOwnershipNotices(notices);
+        executeOwnershipNoticeMutations();
+        for (Notification notice : notices) {
+            when(notificationMapper.findById(42, notice.getId())).thenReturn(notice);
+            when(notificationMapper.markRead(42, notice.getId())).thenReturn(1);
+        }
+        when(notificationMapper.markAllRead(42, 81L, "2026-06-25 00:00:00")).thenReturn(ordinaryCount);
+
+        assertSame(counts, service.markAllRead());
+
+        InOrder mutationOrder = inOrder(notificationMapper, stateVersionService);
+        for (Notification notice : notices) {
+            mutationOrder.verify(notificationMapper).markRead(42, notice.getId());
+        }
+        mutationOrder.verify(notificationMapper).markAllRead(42, 81L, "2026-06-25 00:00:00");
+        mutationOrder.verify(stateVersionService).bumpNow(42);
+        verify(stateVersionService).bumpNow(42);
+    }
+
+    @Test
+    void markAllReadDoesNotBumpWhenDiscoveredOwnershipNoticesAreAlreadyRead() {
+        NotificationCountsDto counts = new NotificationCountsDto();
+        Notification notice = ownershipNotice(11);
+        notice.setReadAt("2026-06-25 00:00:00");
+        discoveredOwnershipNotice(notice);
+        executeOwnershipNoticeMutations();
+        when(notificationMapper.findById(42, 11)).thenReturn(notice);
+        when(notificationMapper.getUnreadCounts(42, "2026-06-25 00:00:00")).thenReturn(counts);
+
+        assertSame(counts, service.markAllRead());
+
+        verify(notificationMapper, never()).markRead(42, 11);
+        verify(stateVersionService, never()).bumpNow(42);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void markAllReadInvalidatesCommittedOwnershipChangesWhenLaterWorkFails(boolean offerFailure) {
+        Notification notice = ownershipNotice(11);
+        discoveredOwnershipNotices(offerFailure ? List.of(notice, ownershipNotice(12)) : List.of(notice));
+        executeOwnershipNoticeMutations();
+        when(notificationMapper.findById(42, 11)).thenReturn(notice);
+        when(notificationMapper.markRead(42, 11)).thenReturn(1);
+        ConflictException failure = new ConflictException("Notification mutation failed");
+        if (offerFailure) {
+            when(ownershipOfferTransaction.mutateNotice(eq(12L), eq(42), any())).thenThrow(failure);
+        } else {
+            when(notificationMapper.markAllRead(42, 81L, "2026-06-25 00:00:00")).thenThrow(failure);
+        }
+
+        assertSame(failure, assertThrows(ConflictException.class, service::markAllRead));
+
+        verify(notificationMapper).markRead(42, 11);
+        verify(stateVersionService).bumpNow(42);
+        if (offerFailure) {
+            verify(notificationMapper, never()).markAllRead(42, 81L, "2026-06-25 00:00:00");
+        }
+    }
+
+    @Test
+    void markAllReadPreservesTheMutationFailureWhenInvalidationAlsoFails() {
+        Notification notice = ownershipNotice(11);
+        discoveredOwnershipNotice(notice);
+        executeOwnershipNoticeMutations();
+        when(notificationMapper.findById(42, 11)).thenReturn(notice);
+        when(notificationMapper.markRead(42, 11)).thenReturn(1);
+        ConflictException failure = new ConflictException("Notification mutation failed");
+        IllegalStateException invalidationFailure = new IllegalStateException("Notification state unavailable");
+        when(notificationMapper.markAllRead(42, 81L, "2026-06-25 00:00:00")).thenThrow(failure);
+        when(stateVersionService.bumpNow(42)).thenThrow(invalidationFailure);
+
+        assertSame(failure, assertThrows(ConflictException.class, service::markAllRead));
+
+        assertEquals(List.of(invalidationFailure), List.of(failure.getSuppressed()));
+    }
+
     @Test
     void markAllReadContinuesWhenTheDiscoveredOfferWasDeleted() {
         NotificationCountsDto counts = ordinaryReadResult();
@@ -383,6 +465,23 @@ class NotificationServiceTest {
         assertSame(counts, service.markAllRead());
 
         verify(notificationMapper).findByDedupe(7, 42, "ownership.offer:11");
+        verify(notificationMapper).markAllRead(42, 81L, "2026-06-25 00:00:00");
+    }
+
+    @Test
+    void markAllReadDoesNotMarkAReplacementOwnershipNoticeRead() {
+        NotificationCountsDto counts = ordinaryReadResult();
+        discoveredOwnershipNotice(ownershipNotice(11));
+        executeOwnershipNoticeMutations();
+        when(ownershipOfferMapper.findById(11L)).thenReturn(new OwnershipOffer());
+        Notification replacement = ownershipNotice(90);
+        replacement.setDedupeKey("ownership.offer:11");
+        when(notificationMapper.findByDedupe(7, 42, "ownership.offer:11")).thenReturn(replacement);
+
+        assertSame(counts, service.markAllRead());
+
+        verify(notificationMapper, never()).markRead(42, 11);
+        verify(notificationMapper, never()).markRead(42, 90);
         verify(notificationMapper).markAllRead(42, 81L, "2026-06-25 00:00:00");
     }
 
@@ -426,6 +525,7 @@ class NotificationServiceTest {
                 assertEquals(1, firstPageReads.incrementAndGet(), "An unchanged page must not be rediscovered");
                 return unchanged;
             });
+        when(ownershipOfferTransaction.mutateNotice(anyLong(), eq(42), any())).thenReturn(false);
 
         assertSame(counts, service.markAllRead());
 
@@ -435,11 +535,20 @@ class NotificationServiceTest {
     }
 
     private void discoveredOwnershipNotice(Notification notice) {
+        discoveredOwnershipNotices(List.of(notice));
+    }
+
+    private void discoveredOwnershipNotices(List<Notification> notices) {
         when(notificationMapper.getInboxCutoffId(42)).thenReturn(81L);
         when(notificationMapper.getDatabaseUtcTimestamp()).thenReturn("2026-06-25 00:00:00");
         when(notificationMapper.findPage(42, "unread", List.of(OwnershipOfferWriter.NOTICE_TYPE),
             null, null, null, null, null, "2026-06-25 00:00:00", 100, 0, 0L, 81L))
-            .thenReturn(List.of(notice));
+            .thenReturn(notices);
+    }
+
+    private void executeOwnershipNoticeMutations() {
+        when(ownershipOfferTransaction.mutateNotice(anyLong(), eq(42), any()))
+            .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(2)).get());
     }
 
     private NotificationCountsDto ordinaryReadResult() {
