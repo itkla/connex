@@ -114,6 +114,7 @@ function byId(elements: readonly InteractiveElement[], id: string): InteractiveE
 
 async function render(ui: ReactNode) {
     const interactive = installInteractiveDocument();
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 0; });
     const { createRoot } = await import("react-dom/client");
     const root = createRoot(interactive.container);
     await act(async () => {
@@ -249,6 +250,11 @@ for (const locale of ["en", "ja"] as const) {
             try {
                 const password = `Aa12345${symbol}`;
                 expect(rendered.container.textContent).toContain(authMessages.PasswordPolicy.specialCharacter);
+                if (mode === "register") {
+                    await rendered.fill("register-username", "form_probe");
+                    await rendered.fill("register-email", "form@example.test");
+                    await rendered.fill("register-displayName", "Form probe");
+                }
                 await rendered.fill(inputId, password);
                 if (mode === "reset") await rendered.fill("reset-confirm", password);
                 await rendered.submit();
@@ -268,6 +274,11 @@ for (const locale of ["en", "ja"] as const) {
         ])("refuses %j locally and names the missing requirement", async (password, key) => {
             const rendered = await form();
             try {
+                if (mode === "register") {
+                    await rendered.fill("register-username", "form_probe");
+                    await rendered.fill("register-email", "form@example.test");
+                    await rendered.fill("register-displayName", "Form probe");
+                }
                 await rendered.fill(inputId, password);
                 if (mode === "reset") await rendered.fill("reset-confirm", password);
                 await rendered.submit();

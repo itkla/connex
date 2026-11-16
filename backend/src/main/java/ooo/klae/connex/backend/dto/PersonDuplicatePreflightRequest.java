@@ -14,9 +14,9 @@ import jakarta.validation.constraints.Pattern;
  * @param reviewToken previously acknowledged bounded-person proof, or null
  */
 public record PersonDuplicatePreflightRequest(
-        @Size(max = 255) String name,
-        @Size(max = 8) List<@Size(max = 2048) String> emails,
-        @Size(max = 8) List<@Size(max = 2048) String> phones,
+        @Size(max = 255, message = "{validation.string.max}") String name,
+        @Size(max = 8) List<@Size(max = 2048, message = "{validation.string.max}") String> emails,
+        @Size(max = 8) List<@Size(max = 2048, message = "{validation.string.max}") String> phones,
         @Pattern(regexp = "^[0-9a-f]{64}$") String reviewToken) {
 
     /** Creates a probe without an existing acknowledgement. */

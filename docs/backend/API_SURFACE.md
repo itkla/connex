@@ -313,3 +313,22 @@ Authentication, CSRF and the pinned workspace remain mandatory. Each item commit
 HTTP 200 batch stop results preserve prior outcomes, including explicit indeterminate status
 when fresh authorized reconciliation cannot establish a failing item's outcome. Safe metadata
 and cancellation remain accessible when content is withheld or schemas are unsupported.
+
+## Field validation responses
+
+Body binding failures return HTTP 400 with `code: VALIDATION_FAILED`, `message`, and
+`fieldErrors` (one message per field). Constraint selection is ordered: `NotBlank`/`NotNull`,
+then `Size`, then `Pattern`, then other constraints; code and message break remaining ties.
+An additive `fieldErrorCodes` map carries the selected Bean Validation constraint names when
+available. Clients use these codes to select localized product copy, with a localized fallback
+for unknown or missing codes. Existing custom binding errors without codes retain their messages.
+English and Japanese `ValidationMessages` catalogs supply the constraint messages.
+
+The global `Size` message is type-neutral because the constraint also validates collections,
+maps and arrays. It omits the zero lower bound for max-only limits. The auth, activity, follow-up
+task, contact/company, business-card and duplicate-preflight request strings use explicit
+character-limit keys. `ValidationConfig` retains Hibernate Validator's standard interpolator;
+the global Size template uses only conditional expressions over numeric constraint attributes,
+with no bean access or submitted values. Hibernate Validator 9.1.3 defaults ordinary constraint
+messages to `BEAN_PROPERTIES`, which supports these expressions; no EL feature level is raised.
+See the [installed-version feature-level contract](https://docs.hibernate.org/validator/9.1/api/org/hibernate/validator/messageinterpolation/ExpressionLanguageFeatureLevel.html).

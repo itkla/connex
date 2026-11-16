@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.exceptions;
 
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -16,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
+import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -210,15 +212,35 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BindException.class)
     public ResponseEntity<Map<String, Object>> validation(BindException ex) {
         Map<String, String> fieldErrors = new LinkedHashMap<>();
-        ex.getBindingResult().getFieldErrors().forEach(err ->
-            fieldErrors.put(err.getField(), Objects.requireNonNullElse(
-                err.getDefaultMessage(), "Invalid value"))
-        );
+        Map<String, String> fieldErrorCodes = new LinkedHashMap<>();
+        ex.getBindingResult().getFieldErrors().stream()
+            .sorted(Comparator.comparing(FieldError::getField)
+                .thenComparingInt(GlobalExceptionHandler::constraintPriority)
+                .thenComparing(error -> Objects.requireNonNullElse(error.getCode(), ""))
+                .thenComparing(error -> Objects.requireNonNullElse(error.getDefaultMessage(), "")))
+            .forEach(error -> {
+                if (fieldErrors.containsKey(error.getField())) return;
+                fieldErrors.put(error.getField(), Objects.requireNonNullElse(
+                    error.getDefaultMessage(), "Invalid value"));
+                if (error.getCode() != null) {
+                    fieldErrorCodes.put(error.getField(), error.getCode());
+                }
+            });
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("code", "VALIDATION_FAILED");
         body.put("message", "Please fix the highlighted fields");
         body.put("fieldErrors", fieldErrors);
+        if (!fieldErrorCodes.isEmpty()) body.put("fieldErrorCodes", fieldErrorCodes);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    private static int constraintPriority(FieldError error) {
+        return switch (Objects.requireNonNullElse(error.getCode(), "")) {
+            case "NotBlank", "NotNull" -> 0;
+            case "Size" -> 1;
+            case "Pattern" -> 2;
+            default -> 3;
+        };
     }
 
     /**

@@ -39,6 +39,9 @@
     "toastFailedDelete": "アクティビティを削除できませんでした"
   },
   "ActivityCreateDialog": {
+    "subjectTooLong": "件名は255文字以内で入力してください",
+    "subjectInvalid": "件名を確認して、もう一度お試しください",
+    "subjectCount": "{count}/{max}文字",
     "titleCreate": "アクティビティを記録",
     "description": "電話・メール・ミーティングなどの接点を記録します。連絡先や案件と関連付けるとタイムラインに表示されます。",
     "typeLabel": "種類",
@@ -295,6 +298,9 @@
     "noCompanyForPeople": "この案件にはまだ会社が設定されていないため、関連付けられる連絡先がありません。"
   },
   "ActivityEditActivitySheet": {
+    "subjectTooLong": "件名は255文字以内で入力してください",
+    "subjectInvalid": "件名を確認して、もう一度お試しください",
+    "subjectCount": "{count}/{max}文字",
     "title": "アクティビティを編集",
     "description": "下のフィールドを更新して保存してください。",
     "typeLabel": "種類",

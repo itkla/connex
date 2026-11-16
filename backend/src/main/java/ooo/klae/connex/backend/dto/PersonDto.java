@@ -39,14 +39,14 @@ public class PersonDto {
     private Integer ownerId;
 
     @NotBlank
-    @Size(max = 255)
+    @Size(max = 255, message = "{validation.string.max}")
     private String name;
 
     @Email
-    @Size(max = 255)
+    @Size(max = 255, message = "{validation.string.max}")
     private String email;
 
-    @Size(max = 64)
+    @Size(max = 64, message = "{validation.string.max}")
     private String phone;
 
     // @JsonIdentityReference(alwaysAsId = true) // this was casting Company to an int, causing it to crash
@@ -54,7 +54,7 @@ public class PersonDto {
 
     private Integer companyId;
 
-    @Size(max = 128)
+    @Size(max = 128, message = "{validation.string.max}")
     private String title;
 
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
@@ -111,7 +111,7 @@ public class PersonDto {
 
     private PersonLeadSource leadSource;
 
-    @Size(max = 255)
+    @Size(max = 255, message = "{validation.string.max}")
     private String leadSourceDetail;
 
     private Integer referrerPersonId;

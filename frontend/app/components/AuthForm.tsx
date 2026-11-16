@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { authReturnPath, authSwitchHref, returnsToInvitation } from "@/app/lib/authReturnPath";
 import { withSectionFragment } from "@/app/lib/sessionExpiry";
 import { toastError, toastSuccess } from "@/app/lib/toast";
@@ -62,20 +62,6 @@ const FIELD_META: Record<FieldKey, { type: string; autoComplete: string }> = {
     password: { type: "password", autoComplete: "current-password" },
 };
 
-function pickFieldErrors(errors?: Record<string, string>): FieldErrors {
-    if (!errors) {
-        return {};
-    }
-
-    return FIELD_KEYS.reduce<FieldErrors>((picked, key) => {
-        if (errors[key]) {
-            picked[key] = errors[key];
-        }
-
-        return picked;
-    }, {});
-}
-
 function isSsoEnforcedError(err: ApiError): boolean {
     return err.status === 403 && err.code === SSO_ENFORCED_CODE;
 }
@@ -123,6 +109,7 @@ export function AuthForm({
     );
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const [submitting, setSubmitting] = useState(false);
+    const submittingRef = useRef(false);
     const [showPassword, setShowPassword] = useState(false);
     const [passkeySubmitting, setPasskeySubmitting] = useState(false);
     const [ssoSubmitting, setSsoSubmitting] = useState(false);
@@ -249,17 +236,68 @@ export function AuthForm({
         return tForm("genericError");
     }
 
+    function showFieldErrors(errors: FieldErrors) {
+        setFieldErrors(errors);
+        const firstField = fields.find((key) => errors[key]);
+        if (firstField) {
+            requestAnimationFrame(() => document.getElementById(`${mode}-${firstField}`)?.focus());
+        }
+    }
+
+    function registerFieldErrors(): FieldErrors {
+        const errors: FieldErrors = {};
+        for (const key of FIELD_KEYS) {
+            if (!values[key].trim()) errors[key] = tForm("fieldRequired", { field: fieldLabels[key] });
+        }
+        if (!errors.username) {
+            if (values.username.length < 3 || values.username.length > 64) {
+                errors.username = tForm("usernameLength");
+            } else if (!/^[a-zA-Z0-9._-]+$/.test(values.username)) {
+                errors.username = tForm("usernameFormat");
+            }
+        }
+        if (!errors.email) {
+            if (values.email.length > 255) errors.email = tForm("emailLength");
+            else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) errors.email = tForm("emailFormat");
+        }
+        if (!errors.displayName && values.displayName.length > 128) errors.displayName = tForm("nameLength");
+        if (!errors.password) {
+            const missing = missingPasswordRequirements(values.password)[0];
+            if (missing) errors.password = tPassword(missing);
+        }
+        return errors;
+    }
+
+    function pickFieldErrors(err: ApiError): FieldErrors {
+        const errors: FieldErrors = {};
+        for (const key of fields) {
+            if (!err.fieldErrors?.[key]) continue;
+            const code = err.fieldErrorCodes?.[key];
+            errors[key] = code === "NotBlank" || code === "NotNull"
+                ? tForm("fieldRequired", { field: fieldLabels[key] })
+                : code === "Size"
+                    ? tForm(key === "username" ? "usernameLength" : key === "email" ? "emailLength"
+                        : key === "displayName" ? "nameLength" : "passwordTooLong")
+                    : code === "Pattern" && key === "username" ? tForm("usernameFormat")
+                        : code === "Email" ? tForm("emailFormat")
+                            : tForm("fieldInvalid", { field: fieldLabels[key] });
+        }
+        return errors;
+    }
+
     async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
+        if (submittingRef.current) return;
         setError(null);
         setFieldErrors({});
         if (mode === "register") {
-            const missing = missingPasswordRequirements(values.password)[0];
-            if (missing) {
-                setFieldErrors({ password: tPassword(missing) });
+            const errors = registerFieldErrors();
+            if (Object.keys(errors).length > 0) {
+                showFieldErrors(errors);
                 return;
             }
         }
+        submittingRef.current = true;
         setSubmitting(true);
 
         try {
@@ -292,7 +330,7 @@ export function AuthForm({
                     : err instanceof ApiError && err.code === PASSWORD_TOO_LONG_CODE
                         ? { password: tForm("passwordTooLong") }
                         : err instanceof ApiError
-                            ? pickFieldErrors(err.fieldErrors)
+                            ? pickFieldErrors(err)
                             : {};
             const hasFieldErrors = Object.keys(nextFieldErrors).length > 0;
             const message =
@@ -301,11 +339,12 @@ export function AuthForm({
                     : tForm("genericError");
 
             setError(message);
-            setFieldErrors(nextFieldErrors);
+            showFieldErrors(nextFieldErrors);
             if (!hasFieldErrors) {
                 toastError(message);
             }
         } finally {
+            submittingRef.current = false;
             setSubmitting(false);
         }
     }
@@ -366,7 +405,8 @@ export function AuthForm({
                                                 onChange={(e) => setField(key, e.target.value)}
                                                 placeholder=" "
                                                 autoComplete={autoComplete}
-                                                maxLength={isNewPassword ? MAX_NEW_PASSWORD_LENGTH : undefined}
+                                                maxLength={mode === "register" ? key === "username" ? 64 : key === "email" ? 255
+                                                    : key === "displayName" ? 128 : MAX_NEW_PASSWORD_LENGTH : undefined}
                                                 required
                                                 aria-invalid={Boolean(fieldError)}
                                                 aria-describedby={[fieldError ? errorId : undefined, hintId].filter(Boolean).join(" ") || undefined}
@@ -410,7 +450,7 @@ export function AuthForm({
                                             )}
                                         </div>
                                         {fieldError && (
-                                            <p id={errorId} role="alert" className="mt-1.5 px-1 text-sm text-destructive">
+                                            <p id={errorId} className="mt-1.5 px-1 text-sm text-destructive">
                                                 {fieldError}
                                             </p>
                                         )}
@@ -444,23 +484,22 @@ export function AuthForm({
                                 </p>
                             )}
 
+                            <p aria-live="polite" aria-atomic="true" className="sr-only">
+                                {hasFieldErrors ? tForm("formHasErrors") : ""}
+                            </p>
+
                             <button
                                 type="submit"
-                                disabled={submitting || (mode === "login" && hasFieldErrors)}
+                                aria-disabled={submitting}
+                                aria-busy={submitting}
                                 style={{ animationDelay: `${120 + fields.length * 60}ms` }}
-                                className={`connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold transition-[transform,background-color,opacity] duration-150 ease-out active:scale-[0.98] disabled:cursor-not-allowed ${
-                                    mode === "login" && hasFieldErrors
-                                        ? "bg-muted text-muted-foreground"
-                                        : "bg-brand text-brand-foreground hover:bg-brand-hover disabled:opacity-70"
-                                }`}
+                                className="connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color,opacity] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98] aria-disabled:cursor-not-allowed aria-disabled:opacity-70"
                             >
                                 {submitting ? (
                                     <>
                                         <LoaderCircle className="size-4 animate-spin" />
                                         {tMode("submittingLabel")}
                                     </>
-                                ) : mode === "login" && hasFieldErrors ? (
-                                    tForm("resolveErrors")
                                 ) : (
                                     <>
                                         {tMode("submitLabel")}

@@ -296,7 +296,7 @@ export function ActivityDialogForm({
     const activityCreatedRef = useRef(false);
     const ownsDraftRef = useRef(ownsInitialDraft);
     const hasChangedRef = useRef(false);
-    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const enableFollowUp = () => {
         setFollowUpEnabled(true);
@@ -356,6 +356,11 @@ export function ActivityDialogForm({
         e.preventDefault();
         const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         resetFieldErrors();
+        if (!subject.trim() || subject.length > 255) {
+            setFieldErrors({ subject: t(!subject.trim() ? 'toastSubjectRequired' : 'subjectTooLong') });
+            requestAnimationFrame(() => document.getElementById('activity-subject')?.focus());
+            return;
+        }
         if (requireRelationshipTarget && selectedPerson === null && selectedDeal === null) {
             setRelationshipTargetMissing(true);
             return;
@@ -412,6 +417,13 @@ export function ActivityDialogForm({
             if (requestInit?.signal?.aborted) return;
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
+                    if (err.fieldErrors.subject) {
+                        const code = err.fieldErrorCodes?.subject;
+                        setFieldErrors({ ...err.fieldErrors, subject: t(
+                            code === 'NotBlank' || code === 'NotNull' ? 'toastSubjectRequired'
+                                : code === 'Size' ? 'subjectTooLong' : 'subjectInvalid',
+                        ) });
+                    }
                     const firstKey = Object.keys(err.fieldErrors)[0];
                     if (firstKey) {
                         requestAnimationFrame(() => document.getElementById(`activity-${firstKey}`)?.focus());
@@ -449,6 +461,7 @@ export function ActivityDialogForm({
                 </div>
 
                 <form
+                    noValidate
                     onSubmit={handleSubmit}
                     onKeyDown={(e) => {
                         if (isSubmitShortcut(e) && !submitting && !succeeded) {
@@ -469,12 +482,14 @@ export function ActivityDialogForm({
                     </div>
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
-                        <Label htmlFor="activity-subject">{t('subjectLabel')}</Label>
+                        <Label htmlFor="activity-subject"><span id="activity-subject-label">{t('subjectLabel')}</span> <span aria-hidden="true" className="text-muted-foreground">*</span></Label>
                         <div className="group relative">
                             <PencilSquareIcon className={fieldLeadIconClass} />
                             <input
                                 id="activity-subject"
+                                aria-labelledby="activity-subject-label"
                                 type="text"
+                                maxLength={255}
                                 value={subject}
                                 onChange={(e) => {
                                     setSubject(e.target.value);
@@ -483,12 +498,13 @@ export function ActivityDialogForm({
                                 placeholder={t('subjectPlaceholder')}
                                 className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.subject && fieldErrorClass)}
                                 aria-invalid={Boolean(fieldErrors.subject)}
-                                aria-describedby={fieldErrors.subject ? 'activity-subject-error' : undefined}
+                                aria-describedby={[fieldErrors.subject && 'activity-subject-error', subject.length >= 230 && 'activity-subject-count'].filter(Boolean).join(' ') || undefined}
                                 disabled={followUpFailed}
                                 autoFocus
                                 required
                             />
                         </div>
+                        {subject.length >= 230 && <p id="activity-subject-count" className="text-right text-xs text-muted-foreground">{t('subjectCount', { count: subject.length, max: 255 })}</p>}
                         {fieldErrors.subject && <p id="activity-subject-error" className="text-sm text-destructive">{fieldErrors.subject}</p>}
                     </div>
 

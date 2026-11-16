@@ -33,21 +33,21 @@ public class CompanyDto {
     private Integer ownerId;
 
     @NotBlank
-    @Size(max = 255)
+    @Size(max = 255, message = "{validation.string.max}")
     private String name;
 
     @URL(regexp = "^https?://[\\w-]+(\\.[\\w-]+)+.*$",
          message = "Please enter a valid URL including http:// or https://")
-    @Size(max = 255)
+    @Size(max = 255, message = "{validation.string.max}")
     private String website;
 
-    @Size(max = 128)
+    @Size(max = 128, message = "{validation.string.max}")
     private String industry;
 
-    @Size(max = 64)
+    @Size(max = 64, message = "{validation.string.max}")
     private String phone;
 
-    @Size(max = 512)
+    @Size(max = 512, message = "{validation.string.max}")
     private String address;
 
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
