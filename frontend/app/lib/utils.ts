@@ -545,18 +545,47 @@ export function normalizeWebsiteForCompare(website: string | null | undefined): 
         .replace(/\/+$/, '');
 }
 
+let graphemeSegmenter: Intl.Segmenter | undefined;
+
+function graphemes(value: string): string[] {
+    if (typeof Intl.Segmenter !== 'function') return Array.from(value);
+    graphemeSegmenter ??= new Intl.Segmenter('und', { granularity: 'grapheme' });
+    return Array.from(graphemeSegmenter.segment(value), ({ segment }) => segment);
+}
+
 /**
- * converts a name to initials
- * @param name - the name to convert to initials
- * @returns the initials of the name
+ * Returns the first family-name grapheme for Han, kana and Hangul names, otherwise the
+ * first and last name initials. Ignores tokens without letters and falls back to '?'.
+ * Uses grapheme segmentation when available and Unicode code points otherwise.
  */
-export function initials(name: string) {
-    return name
-        .split(" ")
-        .map((part) => part[0])
-        .slice(0, 2)
-        .join("")
-        .toUpperCase();
+export function initials(name: string): string {
+    const parts = name.trim().split(/\s+/).filter((part) => /\p{L}/u.test(part));
+    const first = parts[0];
+    if (!first) return '?';
+    const firstInitial = graphemes(first).find((part) => /\p{L}/u.test(part)) ?? '?';
+    if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(firstInitial)) {
+        return firstInitial;
+    }
+    const last = parts.length > 1 ? parts[parts.length - 1] : '';
+    const lastInitial = graphemes(last).find((part) => /\p{L}/u.test(part)) ?? '';
+    return (firstInitial + lastInitial).toUpperCase();
+}
+
+const COMPANY_LEGAL_PREFIX = /^(?:株式会社|有限会社|合同会社|\(株\)|\(有\)|\(同\))\s*/u;
+const COMPANY_LEGAL_SUFFIX = /\s*(?:株式会社|有限会社|合同会社|\(株\)|\(有\)|\(同\))$|(?:^|[\s,]+)(?:inc\.?|incorporated|co\.?\s*,?\s*ltd\.?|ltd\.?|limited|k\.?\s*k\.?|gmbh|l\.?l\.?c\.?)$/iu;
+
+/**
+ * Returns a company preview's first grapheme after removing boundary legal forms supported by
+ * CompanyReviewNameNormalizer. This is display-only and never changes the authored company name.
+ */
+export function companyInitial(name: string): string {
+    let current = name.normalize('NFKC').trim();
+    while (current) {
+        const stripped = current.replace(COMPANY_LEGAL_PREFIX, '').replace(COMPANY_LEGAL_SUFFIX, '').trim();
+        if (stripped === current) break;
+        current = stripped;
+    }
+    return (graphemes(current)[0] ?? '').toUpperCase();
 }
 
 const WARMTH_DOT: Record<TemperatureBand, string> = {
