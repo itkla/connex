@@ -8,8 +8,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,10 +29,14 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.notifications.NotificationRealtimePublisher;
+import ooo.klae.connex.backend.notifications.NotificationPushPublisher;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import tools.jackson.databind.ObjectMapper;
 
 /** Verifies ordinary shared-catalog inbox visibility, after-commit realtime and serialized closure. */
@@ -46,14 +52,31 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
     @Autowired private ObjectMapper json;
     @MockitoBean private NotificationRealtimePublisher realtime;
     @MockitoSpyBean private NotificationMapper inboxMapper;
+    @MockitoSpyBean private NotificationPushPublisher pushes;
     private final List<Integer> accounts = new ArrayList<>();
+    private final List<Workspace> createdWorkspaces = new ArrayList<>();
+    private final List<Integer> createdOrganizations = new ArrayList<>();
 
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
     @BeforeEach void freshOwner() {
         OwnershipOfferTestFixtures.restartExpiryTraversal(offers);
         OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser); clearInvocations(realtime);
     }
-    @AfterEach void clean() { reset(inboxMapper); accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id)); accounts.clear(); }
+    @AfterEach void clean() {
+        reset(inboxMapper);
+        for (Workspace created : createdWorkspaces) {
+            TestEntityFixtures.deleteChatPrivacy(jdbc, created.getId());
+            jdbc.update("DELETE FROM workspace WHERE id = ?", created.getId());
+        }
+        createdWorkspaces.clear();
+        for (int orgId : createdOrganizations) {
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbc, orgId);
+            jdbc.update("DELETE FROM organization WHERE id = ?", orgId);
+        }
+        createdOrganizations.clear();
+        accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id));
+        accounts.clear();
+    }
 
     private long create(User target) { return Long.parseLong(workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id()); }
     private Notification delivered(long id, User target) {
@@ -62,8 +85,91 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
         return notificationMapper.findByDedupe(workspace.getId(), target.getId(), "ownership.offer:" + id);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 2})
+    void markAllReadBumpsOnceAndPushesOnceForSeveralOwnershipNotices(int ordinaryCount) {
+        User target = newUser();
+        List<Notification> notices = new ArrayList<>();
+        notices.add(delivered(create(target), target));
+        for (int i = 0; i < 2; i++) {
+            authenticateAs(currentUser, workspace.getId());
+            OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser);
+            int workspaceId = workspaces.createWorkspace("Read-all workspace " + unique(), currentUser.getId()).getId();
+            Workspace created = workspaceMapper.getActiveById(workspaceId);
+            assertNotNull(created);
+            createdWorkspaces.add(created);
+            if (created.getOrgId() != workspace.getOrgId() && !createdOrganizations.contains(created.getOrgId())) {
+                createdOrganizations.add(created.getOrgId());
+            }
+            workspaces.ensureActiveMember(workspaceId, target.getId(), "member");
+            long offerId = Long.parseLong(workspaces.changeMemberRole(
+                workspaceId, currentUser.getId(), target.getId(), "owner").offer().id());
+            delivery.deliver(ledger.findById(offerId));
+            notices.add(notificationMapper.findByDedupe(workspaceId, target.getId(), "ownership.offer:" + offerId));
+        }
+        for (int i = 0; i < ordinaryCount; i++) {
+            notices.add(newNotification(workspace.getId(), target.getId()));
+        }
+        authenticateAs(target, workspace.getId());
+        assertEquals(3 + ordinaryCount, inbox.getUnreadCounts().getUnread());
+        long before = notificationMapper.getStateVersion(target.getId());
+        clearInvocations(pushes);
+
+        var result = inbox.markAllRead();
+
+        assertEquals(before + 1, notificationMapper.getStateVersion(target.getId()));
+        assertEquals(before + 1, result.getStateVersion());
+        assertEquals(0, result.getUnread());
+        for (Notification notice : notices) {
+            assertNotNull(notificationMapper.findById(target.getId(), notice.getId()).getReadAt());
+        }
+        verify(pushes).invalidated(target.getId());
+        verifyNoMoreInteractions(pushes);
+
+        clearInvocations(pushes);
+        assertEquals(before + 1, inbox.markAllRead().getStateVersion());
+        verifyNoMoreInteractions(pushes);
+    }
+
     @Test
-    void deletedOfferAndNoticeAfterDiscoveryDoNotAbortOrdinaryMarkAllRead() {
+    void singleOwnershipNoticeReadStillBumpsAndPushesOnce() {
+        User target = newUser();
+        Notification notice = delivered(create(target), target);
+        long before = notificationMapper.getStateVersion(target.getId());
+        clearInvocations(pushes);
+
+        assertEquals(before + 1, inbox.markRead(notice.getId()).getStateVersion());
+
+        assertEquals(before + 1, notificationMapper.getStateVersion(target.getId()));
+        verify(pushes).invalidated(target.getId());
+        verifyNoMoreInteractions(pushes);
+        clearInvocations(pushes);
+        assertEquals(before + 1, inbox.markRead(notice.getId()).getStateVersion());
+        verifyNoMoreInteractions(pushes);
+    }
+
+    @Test
+    void failedOrdinaryBatchStillInvalidatesPreviouslyCommittedOwnershipReadsOnce() {
+        User target = newUser();
+        Notification notice = delivered(create(target), target);
+        Notification ordinary = newNotification(workspace.getId(), target.getId());
+        long before = notificationMapper.getStateVersion(target.getId());
+        ConflictException failure = new ConflictException("Notification mutation failed");
+        doThrow(failure).when(inboxMapper).markAllRead(eq(target.getId()), anyLong(), anyString());
+        clearInvocations(pushes);
+
+        assertSame(failure, assertThrows(ConflictException.class, inbox::markAllRead));
+
+        assertNotNull(inboxMapper.findById(target.getId(), notice.getId()).getReadAt());
+        assertNull(inboxMapper.findById(target.getId(), ordinary.getId()).getReadAt());
+        assertEquals(before + 1, notificationMapper.getStateVersion(target.getId()));
+        verify(pushes).invalidated(target.getId());
+        verifyNoMoreInteractions(pushes);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"offer", "notice", "replacement"})
+    void deletedOrReplacedNoticesAfterDiscoveryDoNotAbortOrdinaryMarkAllRead(String removed) {
         OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser);
         User target = newUser();
         long offerId = Long.parseLong(workspaces.changeMemberRole(
@@ -73,6 +179,7 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
         Notification offerNotice = inboxMapper.findByDedupe(
             workspace.getId(), target.getId(), "ownership.offer:" + offerId);
         assertNotNull(offerNotice);
+        int discoveredNoticeId = offerNotice.getId();
 
         Notification ordinary = new Notification();
         ordinary.setWorkspaceId(workspace.getId());
@@ -94,18 +201,31 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
                 null, null, null, null, null, invocation.getArgument(8), 100, 0, 0L,
                 invocation.getArgument(12));
             assertEquals(1, candidates.size());
-            assertEquals(offerNotice.getId(), candidates.getFirst().getId());
-            assertEquals(1, jdbc.update("DELETE FROM notification WHERE id = ?", offerNotice.getId()));
-            assertEquals(1, jdbc.update("DELETE FROM ownership_offer WHERE id = ?", offerId));
+            assertEquals(discoveredNoticeId, candidates.getFirst().getId());
+            assertEquals(1, jdbc.update("DELETE FROM notification WHERE id = ?", discoveredNoticeId));
+            if ("offer".equals(removed)) {
+                assertEquals(1, jdbc.update("DELETE FROM ownership_offer WHERE id = ?", offerId));
+            } else if ("replacement".equals(removed)) {
+                offerNotice.setId(0);
+                realInbox.upsert(offerNotice);
+            }
             return candidates;
         }).when(inboxMapper).findPage(eq(target.getId()), eq("unread"),
             eq(List.of(OwnershipOfferWriter.NOTICE_TYPE)), isNull(), isNull(), isNull(),
             isNull(), isNull(), anyString(), eq(100), eq(0), eq(0L), anyLong());
 
-        assertEquals(0, inbox.markAllRead().getUnread());
+        assertEquals("replacement".equals(removed) ? 1 : 0, inbox.markAllRead().getUnread());
 
-        assertNull(ledger.findById(offerId));
-        assertNull(inboxMapper.findById(target.getId(), offerNotice.getId()));
+        if ("offer".equals(removed)) {
+            assertNull(ledger.findById(offerId));
+        } else {
+            assertNotNull(ledger.findById(offerId));
+        }
+        assertNull(inboxMapper.findById(target.getId(), discoveredNoticeId));
+        if ("replacement".equals(removed)) {
+            assertNotEquals(discoveredNoticeId, offerNotice.getId());
+            assertNull(inboxMapper.findById(target.getId(), offerNotice.getId()).getReadAt());
+        }
         assertNotNull(inboxMapper.findById(target.getId(), ordinary.getId()).getReadAt());
     }
 
