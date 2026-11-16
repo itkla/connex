@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 export default function SummaryTile({ label, value, tooltip, className }: { label: string; value: string | React.ReactNode; tooltip?: React.ReactNode; className?: string }) {
 
-    const valueElement = typeof value === 'string' ? <p className="mt-1 text-2xl font-semibold text-foreground">{value}</p> : value;
+    const valueElement = typeof value === 'string' ? <p className="mt-1 text-2xl font-semibold whitespace-nowrap text-foreground">{value}</p> : value;
 
     return (
         <div className={`rounded-2xl border border-border bg-card p-4${className ? ` ${className}` : ''}`}>

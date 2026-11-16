@@ -458,18 +458,35 @@ describe("breadcrumb collapse", () => {
         { pathname: "/workflows/recipes/example/run", label: "Run", current: true },
     ];
 
-    it("keeps the root, overflow, parent, and current page on desktop", () => {
+    it("keeps the root, overflow, and current page on desktop", () => {
         const nodes = buildBreadcrumbNodes(crumbs, "desktop");
         expect(nodes.map((node) => node.kind === "crumb" ? node.crumb.label : "overflow")).toEqual([
             "Northstar",
             "overflow",
-            "Example",
             "Run",
         ]);
         expect(nodes[1]).toMatchObject({
             kind: "ellipsis",
-            hidden: [{ label: "Workflows" }, { label: "Recipes" }],
+            hidden: [{ label: "Workflows" }, { label: "Recipes" }, { label: "Example" }],
         });
+    });
+
+    it("INS-21 folds both snapshot ancestors into the desktop overflow menu", () => {
+        const route = resolveBreadcrumbRoute("/insights/reports/42/snapshots/7", context({
+            dynamicLabels: new Map([["/insights/reports/42", "Monthly pipeline review"]]),
+        }));
+        expect(route.crumbs).toHaveLength(4);
+        expect(buildBreadcrumbNodes(route.crumbs, "desktop")).toEqual([
+            { kind: "crumb", crumb: route.crumbs[0] },
+            { kind: "ellipsis", hidden: route.crumbs.slice(1, -1) },
+            { kind: "crumb", crumb: route.crumbs[3] },
+        ]);
+    });
+
+    it("leaves three desktop crumbs visible", () => {
+        expect(buildBreadcrumbNodes(crumbs.slice(0, 3), "desktop")).toEqual(
+            crumbs.slice(0, 3).map((crumb) => ({ kind: "crumb", crumb })),
+        );
     });
 
     it("keeps only overflow, parent, and current page on mobile", () => {

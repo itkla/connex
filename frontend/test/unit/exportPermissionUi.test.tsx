@@ -7,6 +7,7 @@ import RecordsActions from "@/app/components/import/RecordsActions";
 import ReportDocumentBoard from "@/app/components/reports/ReportDocumentBoard";
 import type { AppAction } from "@/app/lib/actions/types";
 import type { ReportDefinition, ReportSnapshot } from "@/app/lib/types";
+import { formatDateTime } from "@/app/lib/utils";
 import englishImports from "@/messages/en/importExport.json";
 import japaneseImports from "@/messages/ja/importExport.json";
 import englishReports from "@/messages/en/reports.json";
@@ -88,6 +89,16 @@ beforeEach(() => { state.permission = "granted"; });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe.each(["en", "ja"] as const)("export permission controls in %s", (locale) => {
+    it("JA-24 keeps the snapshot and generated dates together", () => {
+        viewReport(locale);
+        const dates = screen.getAllByText(formatDateTime(snapshot.generatedAt, locale, "UTC"));
+        expect(dates).toHaveLength(2);
+        for (const date of dates) expect(date.classList.contains("whitespace-nowrap")).toBe(true);
+        const facts = screen.getByRole("article").querySelectorAll("dl dd");
+        expect(facts).toHaveLength(2);
+        for (const fact of facts) expect(fact.classList.contains("whitespace-nowrap")).toBe(true);
+    });
+
     it.each(["persons", "companies", "deals", "products"] as const)("disables %s export and omits its command-palette action when denied", (entity) => {
         state.permission = "denied";
         viewRecords(locale, entity);

@@ -179,7 +179,7 @@ export default function ContentShell({
                         <>
                             <div
                                 data-app-toolbar
-                                className="relative flex w-full shrink-0 items-center gap-3 p-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,36rem)_minmax(0,1fr)] md:gap-0"
+                                className="relative flex w-full shrink-0 items-center gap-3 p-6 md:grid md:grid-cols-[minmax(0,1.25fr)_minmax(0,1.5fr)_minmax(0,1fr)] md:gap-x-4 md:gap-y-0"
                             >
                                 <Button
                                     ref={mobileTriggerRef}

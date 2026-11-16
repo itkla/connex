@@ -359,6 +359,11 @@ The authenticated shell puts a localized skip link first. After route changes, i
 without scrolling only when focus is on the body or a removed element; destination autofocus wins.
 Its closed mobile sidebar is inert; opening it moves focus into the drawer and makes the page inert,
 and dismissing it restores the opener (or the toolbar trigger when the bottom-bar opener unmounts).
+Desktop breadcrumbs show at most three positions, folding middle ancestors into the existing
+overflow menu. The current label keeps at least 7rem; bounded ancestors truncate first, with the
+workspace taking the most shrink. The header search shares available width rather than reserving
+36rem. Japanese body text uses `keep-all` and strict line breaking with an anywhere fallback for
+unbroken content; compact money values and formatted record/report dates remain on one line.
 Settings and organization row menus share `rowActionTrigger` from `SettingsListPrimitives`: hover
 reveals actions on mouse devices, while `(hover: none)` or `(any-pointer: coarse)` shows them
 without interaction on touch, including hybrid devices that also support hover.
