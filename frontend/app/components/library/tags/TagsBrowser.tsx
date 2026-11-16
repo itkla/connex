@@ -328,8 +328,9 @@ function TagTile({ tag, reduce, onOpen, onEdit, onCopy, onDelete, t }: TileProps
                             <IconButton
                                 variant="ghost"
                                 size="icon-inline"
+                                expandHitArea
                                 label={t('actionsAria', { name: tag.name })}
-                                className="text-muted-foreground"
+                                className="text-muted-foreground pointer-coarse:mx-2.5 pointer-coarse:my-2.5"
                             >
                                 <EllipsisHorizontalIcon className="size-4" />
                             </IconButton>

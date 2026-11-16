@@ -362,8 +362,10 @@ and dismissing it restores the opener (or the toolbar trigger when the bottom-ba
 Shared dialogs and responsive bottom sheets capture the focused opener before autofocus and restore
 it on close. A removed, hidden, disabled, or unfocusable opener falls back to `#app-main`; caller
 autofocus cancellation takes precedence. Menu triggers leave keyboard activation to the menu
-primitive and apply press transforms only to their inner content. Shared checkboxes and toolbar/inline
-icon buttons retain their visual size while expanding to at least 44px on coarse pointers. Dialog
+primitive and apply press transforms only to their inner content. Checkboxes and buttons can opt
+into a 44px coarse-pointer hit area with `expandHitArea`. Callers
+reserve space around expanded controls; dense groups keep targets within each control’s visible
+bounds. Task completion checkboxes reserve 44px cells while retaining their visual size. Dialog
 field styles, `SearchField`, and `MentionEditor` default to 16px text below `md` and 14px from `md`.
 Focus outlines remain visible in forced-colors mode alongside the normal ring treatment.
 Settings and organization row menus share `rowActionTrigger` from `SettingsListPrimitives`: hover

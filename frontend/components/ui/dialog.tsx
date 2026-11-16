@@ -152,6 +152,7 @@ function DialogContent({
               variant="ghost"
               className="absolute top-4 right-4"
               size="icon-sm"
+              expandHitArea
             >
               <XIcon
               />

@@ -644,7 +644,7 @@ export default function OrgAiProviderPanel({
                                     <Textarea
                                         id="ai-sa-json"
                                         rows={4}
-                                        className="font-mono text-xs"
+                                        className="font-mono text-base md:text-xs"
                                         value={form.serviceAccountJson}
                                         placeholder={credentialStored ? t("credentialConfigured") : "{ … }"}
                                         onChange={(e) => set("serviceAccountJson", e.target.value)}

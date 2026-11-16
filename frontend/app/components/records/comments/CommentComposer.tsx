@@ -201,7 +201,7 @@ export default function CommentComposer({
                 ariaLabel={submitLabel}
                 autoFocus={autoFocus}
                 onSubmit={submitReady ? onSubmit : undefined}
-                className="min-h-9 px-3.5 py-2 text-sm outline-none"
+                className="min-h-9 px-3.5 py-2 text-base md:text-sm outline-none"
                 handleRef={editorHandle}
             />
             <div

@@ -34,7 +34,7 @@ import { type Activity, type ContactPickerOption, type Deal, type UpdateActivity
 import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass =
-    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
+    'w-full rounded-lg bg-muted px-3 py-2 text-base md:text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 const NONE_VALUE = 'none';
 

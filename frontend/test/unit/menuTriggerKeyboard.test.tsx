@@ -45,7 +45,7 @@ for (const component of ["WorkspaceSwitcher", "NotificationBell", "TagsBrowser"]
                 : component === "NotificationBell" ? <NotificationBell />
                 : <TagsBrowser tags={[{ id: 1, name: "Priority", color: "#abcdef", createdAt: "", updatedAt: "" }]} />;
             render(<NextIntlClientProvider locale="en" timeZone="UTC" messages={{ ...workspace, ...notifications, ...activity, ...common, ...records }}>
-                <TooltipProvider>{view}</TooltipProvider>
+                <TooltipProvider><aside aria-label="Primary sidebar">{view}</aside></TooltipProvider>
             </NextIntlClientProvider>);
             const name = component === "WorkspaceSwitcher" ? workspace.WorkspaceSwitcher.switchAria
                 : component === "NotificationBell" ? notifications.Notifications.bellLabel
@@ -56,6 +56,7 @@ for (const component of ["WorkspaceSwitcher", "NotificationBell", "TagsBrowser"]
             fireEvent.keyUp(trigger, { key });
             await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("true"));
             expect(screen.getByRole("menu")).toBeTruthy();
+            expect(trigger.closest('[aria-hidden="true"]')).not.toBeNull();
         });
     });
 }

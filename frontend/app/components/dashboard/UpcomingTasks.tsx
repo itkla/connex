@@ -73,12 +73,15 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
                 const isOverdue = Boolean(task.dueDate && task.dueDate < today);
                 return (
                     <li key={task.id} className="flex items-center gap-3 py-3">
-                        <Checkbox
-                            checked={false}
-                            onCheckedChange={() => complete(task)}
-                            aria-label={t('completeAria', { description: noteContentToPlainText(task.description) })}
-                            className="size-4 shrink-0 cursor-pointer"
-                        />
+                        <span className="flex shrink-0 items-center justify-center pointer-coarse:size-11">
+                            <Checkbox
+                                expandHitArea
+                                checked={false}
+                                onCheckedChange={() => complete(task)}
+                                aria-label={t('completeAria', { description: noteContentToPlainText(task.description) })}
+                                className="size-4 shrink-0 cursor-pointer"
+                            />
+                        </span>
                         <span className="line-clamp-1 flex-1 text-sm text-foreground">
                             <NoteContent content={task.description} references={task.references} />
                         </span>

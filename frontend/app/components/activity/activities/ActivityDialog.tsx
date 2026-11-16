@@ -677,7 +677,7 @@ export function ActivityDialogForm({
                                                 value={followUpDueDate}
                                                 onChange={(e) => setFollowUpDueDate(e.target.value)}
                                                 aria-label={t('followUpDueLabel')}
-                                                className={cn(fieldInputClass, 'h-8 w-40 pl-8 pr-2 text-xs')}
+                                                className={cn(fieldInputClass, 'h-8 w-40 pl-8 pr-2 text-base md:text-xs')}
                                             />
                                         </div>
                                     </div>

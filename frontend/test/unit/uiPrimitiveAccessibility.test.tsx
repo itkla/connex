@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { StageOrderControls } from "@/app/components/records/pipelines/StageOrderControls";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { DialogStatusCover, fieldInputClass } from "@/components/ui/dialog-status-cover";
 import SearchField from "@/app/components/filters/SearchField";
@@ -40,9 +42,25 @@ describe("forced-colors focus contracts", () => {
 });
 
 describe("coarse-pointer hit areas", () => {
-    it("expands checkboxes and both icon sizes including existing aliases without resizing their boxes", () => {
-        render(<><Checkbox aria-label="Complete" className="size-[18px]" />
-            {(["icon-toolbar", "icon-inline", "icon-sm", "icon-xs"] as const).map((size) => <Button key={size} size={size}>{size}</Button>)}
+    it("leaves dense controls inside their own bounds by default", () => {
+        const move = vi.fn();
+        render(<TooltipProvider>
+            <StageOrderControls id="middle" index={1} count={3} disabled={false} onMove={move} />
+            <Checkbox aria-label="Select row" />
+            <Button size="icon-toolbar">Toolbar</Button>
+            <Button size="icon-inline">Inline</Button>
+        </TooltipProvider>);
+        for (const control of [...screen.getAllByRole("button"), screen.getByRole("checkbox")]) {
+            expect(control.classList.contains("touch-target")).toBe(false);
+        }
+        fireEvent.click(screen.getByRole("button", { name: "moveUp" }));
+        fireEvent.click(screen.getByRole("button", { name: "moveDown" }));
+        expect(move.mock.calls).toEqual([[0, "up"], [2, "down"]]);
+    });
+
+    it("expands opted-in controls without resizing their boxes", () => {
+        render(<><Checkbox expandHitArea aria-label="Complete" className="size-[18px]" />
+            {(["icon-toolbar", "icon-inline", "icon-sm", "icon-xs"] as const).map((size) => <Button key={size} size={size} expandHitArea>{size}</Button>)}
         </>);
         const checkbox = screen.getByRole("checkbox");
         expect(checkbox.classList.contains("size-[18px]")).toBe(true);

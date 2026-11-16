@@ -2343,7 +2343,7 @@ function ConversationSurface({
                             ariaLabel={labels.composerAria}
                             mentionTypes={ASK_CONNEX_MENTION_TYPES}
                             recordPickerRequest={recordPickerRequest}
-                            className="min-h-16 max-h-36 overflow-y-auto px-1 py-1 text-sm leading-5"
+                            className="min-h-16 max-h-36 overflow-y-auto px-1 py-1 text-base md:text-sm leading-5"
                         />
                         <div className="mt-2 flex items-end gap-2">
                             {open ? (

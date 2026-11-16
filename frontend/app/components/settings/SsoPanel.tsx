@@ -344,7 +344,7 @@ export default function SsoPanel({
                                     <Textarea
                                         id="sso-metadata"
                                         rows={4}
-                                        className="font-mono text-xs"
+                                        className="font-mono text-base md:text-xs"
                                         value={form.samlIdpMetadataXml}
                                         placeholder="<EntityDescriptor …>"
                                         onChange={(e) => set("samlIdpMetadataXml", e.target.value)}
@@ -356,7 +356,7 @@ export default function SsoPanel({
                                     <Textarea
                                         id="sso-x509"
                                         rows={4}
-                                        className="font-mono text-xs"
+                                        className="font-mono text-base md:text-xs"
                                         value={form.samlIdpX509}
                                         placeholder="-----BEGIN CERTIFICATE-----"
                                         onChange={(e) => set("samlIdpX509", e.target.value)}
@@ -369,7 +369,7 @@ export default function SsoPanel({
                                             id="sso-sp-cert"
                                             readOnly
                                             rows={4}
-                                            className="font-mono text-xs"
+                                            className="font-mono text-base md:text-xs"
                                             value={spCertificate}
                                         />
                                         <p className="text-xs text-muted-foreground">{t("samlSpCertHint")}</p>

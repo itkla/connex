@@ -1095,9 +1095,10 @@ function TaskRow({
                 <div
                     onClick={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
-                    className="relative z-10 shrink-0"
+                    className="relative z-10 flex shrink-0 items-center justify-center pointer-coarse:size-11"
                 >
                     <Checkbox
+                        expandHitArea
                         checked={checked}
                         onCheckedChange={(value) => onToggle(value === true)}
                         disabled={pending}

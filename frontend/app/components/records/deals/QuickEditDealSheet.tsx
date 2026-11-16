@@ -381,7 +381,7 @@ export default function QuickEditDealSheet({
                                                 value={draft.closedReason ?? ''}
                                                 onChange={(value) => updateDraft(d.id, { closedReason: value })}
                                                 commands={ENTITY_COMMANDS}
-                                                className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
+                                                className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-base md:text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                                             />
                                         </QuickEditField>
                                     </div>
