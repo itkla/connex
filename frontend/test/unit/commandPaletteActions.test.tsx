@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import WorkflowActionsBridge from "@/app/components/actions/WorkflowActionsBridge";
@@ -9,6 +10,7 @@ import {
     ActionProvider, useActionRecord, useActionSelection, useActions, useAvailableActions, useRegisterActions,
 } from "@/app/hooks/useActions";
 import type { ActiveRecordRef, ActiveSelection, AppAction, OverlayRequest } from "@/app/lib/actions/types";
+import { publishPaletteOpened } from "@/app/lib/actions/paletteEvents";
 import type { SearchResults, User, WorkflowListItem, Workspace } from "@/app/lib/types";
 import messages from "@/messages/en/actions.json";
 import common from "@/messages/en/common.json";
@@ -35,8 +37,20 @@ vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: (key: string) => k
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => mocks.error }));
 vi.mock("@/app/lib/api", () => ({ getWorkflows: mocks.getWorkflows }));
 vi.mock("@/app/components/actions/ActionOverlayHost", () => ({
-    default: ({ overlay }: { overlay: OverlayRequest | null }) => <output data-testid="overlay">{JSON.stringify(overlay)}</output>,
+    default: ({ overlay, overlayGeneration }: { overlay: OverlayRequest | null; overlayGeneration: number | null }) => <>
+        <output data-testid="overlay">{JSON.stringify(overlay)}</output>
+        {overlay?.kind === "create-company" || overlay?.kind === "create-note"
+            ? <DraftComposer key={overlayGeneration} /> : null}
+    </>,
 }));
+
+function DraftComposer() {
+    const [draft, setDraft] = useState("");
+    return <div role="dialog" aria-label="Composer">
+        <input aria-label="Draft" value={draft} onChange={(event) => setDraft(event.target.value)} />
+        <button type="button">Submit draft</button>
+    </div>;
+}
 
 const record: ActiveRecordRef = { type: "person", id: 42, label: "Contact" };
 const selection: ActiveSelection = {
@@ -173,9 +187,82 @@ describe("workflow palette context", () => {
         view.rerender(tree());
         expect(screen.queryByTestId("workspace.run-workflow")).toBeNull();
     });
+
+    it("shows the launcher on palette open after the first workflow is enabled", async () => {
+        mocks.getWorkflows.mockResolvedValueOnce([workflow({ enabled: false })]).mockResolvedValueOnce([workflow()]);
+        render(tree());
+        await act(async () => undefined);
+        expect(screen.queryByTestId("workspace.run-workflow")).toBeNull();
+        act(() => publishPaletteOpened());
+        expect(await screen.findByTestId("workspace.run-workflow")).toBeTruthy();
+        expect(mocks.getWorkflows).toHaveBeenCalledTimes(2);
+    });
+
+    it("hides the launcher on palette reopen after the last workflow is archived", async () => {
+        const held = deferred<WorkflowListItem[]>();
+        mocks.getWorkflows.mockResolvedValueOnce([workflow()]).mockReturnValueOnce(held.promise);
+        render(tree());
+        await screen.findByTestId("workspace.run-workflow");
+        act(() => publishPaletteOpened());
+        expect(screen.queryByTestId("workspace.run-workflow")).toBeNull();
+        await act(async () => held.resolve([]));
+        expect(screen.queryByTestId("workspace.run-workflow")).toBeNull();
+        expect(mocks.getWorkflows).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores an older catalogue response after a newer palette refresh", async () => {
+        const held = deferred<WorkflowListItem[]>();
+        mocks.getWorkflows.mockReturnValueOnce(held.promise).mockResolvedValueOnce([]);
+        render(tree());
+        act(() => publishPaletteOpened());
+        await act(async () => held.resolve([workflow()]));
+        expect(screen.queryByTestId("workspace.run-workflow")).toBeNull();
+    });
 });
 
 describe("registered shortcut dispatcher", () => {
+    it.each(["company", "note"])("preserves unsaved %s input when focus leaves its editable field", async (kind) => {
+        render(tree());
+        fireEvent.click(screen.getByRole("button", { name: `create.${kind}` }));
+        const draft = screen.getByLabelText("Draft");
+        fireEvent.change(draft, { target: { value: "Unsaved input" } });
+        const submit = screen.getByRole("button", { name: "Submit draft" });
+        submit.focus();
+        for (const key of ["t", "n", "a"]) {
+            fireEvent.keyDown(submit, { key, ctrlKey: true, altKey: true });
+        }
+        await act(async () => undefined);
+        expect(screen.getByTestId("overlay").textContent).toContain(`"kind":"create-${kind}"`);
+        expect(screen.getByLabelText("Draft")).toBe(draft);
+        expect(draft.getAttribute("value")).toBe("Unsaved input");
+    });
+
+    it("suppresses shortcuts while an action overlay is loading before its dialog mounts", async () => {
+        render(tree());
+        fireEvent.click(screen.getByRole("button", { name: "create.person" }));
+        expect(screen.queryByRole("dialog")).toBeNull();
+        fireEvent.keyDown(document.body, { key: "t", ctrlKey: true, altKey: true });
+        await act(async () => undefined);
+        expect(screen.getByTestId("overlay").textContent).toContain('"kind":"create-person"');
+    });
+
+    it.each(["dialog", "alertdialog", "native"])("suppresses shortcuts while a page-owned %s is open", async (role) => {
+        const view = render(tree());
+        const dialog = document.createElement(role === "native" ? "dialog" : "div");
+        if (role === "native") dialog.setAttribute("open", "");
+        else dialog.setAttribute("role", role);
+        const control = document.createElement("button");
+        dialog.appendChild(control);
+        view.container.appendChild(dialog);
+        control.focus();
+        fireEvent.keyDown(control, { key: "t", ctrlKey: true, altKey: true });
+        await act(async () => undefined);
+        expect(screen.getByTestId("overlay").textContent).toBe("null");
+        dialog.remove();
+        fireEvent.keyDown(document.body, { key: "t", ctrlKey: true, altKey: true });
+        await waitFor(() => expect(screen.getByTestId("overlay").textContent).toContain('"kind":"create-task"'));
+    });
+
     it.each([
         ["t", "create-task"], ["n", "create-note"], ["a", "create-activity"],
     ])("dispatches Ctrl+Alt+%s through the real seed action", async (key, kind) => {

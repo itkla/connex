@@ -42,6 +42,8 @@ for (const [locale, theme] of [["en", "light"], ["ja", "dark"]] as const) {
         });
         expect(selectedStyle.background).not.toBe("rgba(0, 0, 0, 0)");
         expect(selectedStyle.shadow).toContain("inset");
+        const unselected = palette.locator('[data-slot="command-item"][data-selected="false"]').first();
+        expect(await unselected.evaluate((element) => getComputedStyle(element).boxShadow)).toBe("none");
         await page.keyboard.press("Escape");
         await expect(palette).toBeHidden();
 
@@ -73,11 +75,19 @@ for (const [locale, theme] of [["en", "light"], ["ja", "dark"]] as const) {
 
     test(`context-free workflow launcher belongs to Workspace (${locale})`, async ({ page, context }) => {
         await useLocale(context, locale);
-        await page.route(/\/api\/workflows\?archived=false$/, (route) => route.fulfill({ json: [{
+        const published = {
             id: 1, name: "Follow up", enabled: true, runtimeOwner: "canonical", executionAvailable: true,
             recordType: "person", activeVersion: { id: 1, number: 1, publishedAt: "2026-11-01T00:00:00Z" },
-        }] }));
+        };
+        let workflows = [{ ...published, enabled: false }];
+        let reads = 0;
+        await page.route(/\/api\/workflows\?archived=false$/, (route) => {
+            reads += 1;
+            return route.fulfill({ json: workflows });
+        });
         await page.goto("/dashboard");
+        await expect.poll(() => reads).toBeGreaterThan(0);
+        workflows = [published];
         await page.keyboard.press("ControlOrMeta+k");
         const palette = page.getByRole("dialog", { name: message(locale, "actions", "Actions.palette.trigger") });
         const group = palette.locator("[cmdk-group]").filter({
@@ -86,7 +96,37 @@ for (const [locale, theme] of [["en", "light"], ["ja", "dark"]] as const) {
         const launcher = group.getByRole("option", { name: message(locale, "actions", "Actions.workspace.runWorkflow") });
         await expect(launcher).toBeVisible();
         await expect(palette.getByText(message(locale, "actions", "Actions.group.record"), { exact: true })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(palette).toBeHidden();
+        workflows = [];
+        const beforeArchiveRead = reads;
+        await page.keyboard.press("ControlOrMeta+k");
+        await expect.poll(() => reads).toBeGreaterThan(beforeArchiveRead);
+        await expect(launcher).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(palette).toBeHidden();
+        workflows = [published];
+        await page.keyboard.press("ControlOrMeta+k");
+        await expect(launcher).toBeVisible();
         await launcher.click();
         await expect(page.getByRole("dialog", { name: message(locale, "workflow-operations", "WorkflowOperations.manual.title") })).toBeVisible();
+    });
+
+    test(`create shortcuts preserve an unsaved company composer (${locale})`, async ({ page, context }) => {
+        await useLocale(context, locale);
+        await page.goto("/dashboard");
+        await page.keyboard.press("ControlOrMeta+k");
+        await page.getByRole("option", { name: message(locale, "actions", "Actions.create.company") }).click();
+        const composer = page.getByRole("dialog", { name: message(locale, "companies", "CompaniesNewDialog.title") });
+        const name = composer.locator("#company-name");
+        await name.fill("Unsaved company draft");
+        const cancel = composer.getByRole("button", { name: message(locale, "companies", "CompaniesNewDialog.cancel"), exact: true });
+        await cancel.focus();
+        await page.keyboard.press("ControlOrMeta+Alt+t");
+        await expect(composer).toBeVisible();
+        await expect(name).toHaveValue("Unsaved company draft");
+        await expect(page.getByRole("dialog")).toHaveCount(1);
+        await cancel.click();
+        await expect(page.getByRole("dialog", { name: message(locale, "common", "ConfirmDiscard.title") })).toBeVisible();
     });
 }

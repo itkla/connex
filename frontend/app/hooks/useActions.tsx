@@ -358,6 +358,8 @@ export function ActionProvider({ user, children }: { user: User | null; children
         const onKeyDown = (event: KeyboardEvent) => {
             if (event.defaultPrevented || event.repeat || composing || event.isComposing || event.keyCode === 229
                 || event.composedPath().some(isEditableShortcutTarget)) return;
+            if (liveOverlayRef.current !== null
+                || document.querySelector('[role="dialog"]:not([data-state="closed"]):not([aria-hidden="true"]), [role="alertdialog"]:not([data-state="closed"]):not([aria-hidden="true"]), dialog[open]') !== null) return;
             const platform = resolveShortcutPlatform(navigator.platform);
             for (const action of registryMapRef.current.values()) {
                 if (!action.shortcut || !matchesShortcut(event, action.shortcut, platform)

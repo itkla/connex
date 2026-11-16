@@ -31,10 +31,13 @@ The palette carries the header search query across and selects it on every open 
 Record actions require a focused record or list selection. The context-free workflow launcher belongs
 to Workspace and is offered only with effective `RULE_MANAGE` permission and an enabled, unpaused,
 published workflow whose execution and record type support manual runs. Catalogue failures keep it hidden.
+Eligibility is revalidated on every palette open; newer lookups supersede older responses.
 The action provider dispatches registered shortcuts through the same availability and execution path
 as menus. Editable controls, composition (including key code 229), repeated and already-handled keys
-retain their native behavior. Selected command rows use the accent text pair and a brand-text inset
-outline, with immediate feedback and no selection animation.
+retain their native behavior. Registered shortcuts are suppressed while an action overlay or another
+dialog is open so a new composer cannot replace an unsaved one. Selected command rows use the accent
+text pair and a brand-text inset outline only for `data-selected="true"`, with immediate feedback and
+no selection animation.
 
 ## Record details
 

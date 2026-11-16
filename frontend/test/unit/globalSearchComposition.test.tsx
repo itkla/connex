@@ -5,6 +5,7 @@ import type { PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GlobalSearch from '@/app/components/GlobalSearch';
+import { subscribeToPaletteOpened } from '@/app/lib/actions/paletteEvents';
 import type { SearchResults } from '@/app/lib/types';
 import enActions from '@/messages/en/actions.json';
 import enMessages from '@/messages/en/common.json';
@@ -66,6 +67,21 @@ describe.each([
     ['en', { ...enMessages, ...enActions }],
     ['ja', { ...jaMessages, ...jaActions }],
 ] as const)('global search composition in %s', (locale, messages) => {
+    it('notifies contributors on keyboard opens and shell launcher opens', async () => {
+        const opened = vi.fn();
+        const unsubscribe = subscribeToPaletteOpened(opened);
+        try {
+            render(<NextIntlClientProvider locale={locale} messages={messages}><GlobalSearch /></NextIntlClientProvider>);
+            fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+            expect(opened).toHaveBeenCalledTimes(1);
+            fireEvent.keyDown(document, { key: 'Escape' });
+            act(() => window.dispatchEvent(new Event('connex:open-search')));
+            expect(opened).toHaveBeenCalledTimes(2);
+        } finally {
+            unsubscribe();
+        }
+    });
+
     it('selects the carried query on reopen so new typing replaces it', async () => {
         render(<NextIntlClientProvider locale={locale} messages={messages}><GlobalSearch /></NextIntlClientProvider>);
         fireEvent.keyDown(document, { key: 'k', ctrlKey: true });

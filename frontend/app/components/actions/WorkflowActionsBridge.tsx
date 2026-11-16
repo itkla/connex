@@ -8,6 +8,7 @@ import { usePermission } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { getWorkflows } from "@/app/lib/api";
 import type { AppAction } from "@/app/lib/actions/types";
+import { subscribeToPaletteOpened } from "@/app/lib/actions/paletteEvents";
 import { supportsManualRun } from "@/app/components/settings/workflows/vocabulary";
 
 /** Registers the context-free workflow launcher only for a permitted, runnable workspace. */
@@ -22,26 +23,39 @@ export default function WorkflowActionsBridge(): null {
 
     useEffect(() => {
         if (!permitted || switching || workspaceId === null || userId === null) return;
-        const controller = new AbortController();
-        void getWorkflows(false, {
-            headers: { "X-Workspace-Id": String(workspaceId) },
-            signal: controller.signal,
-        }).then((workflows) => {
-            if (controller.signal.aborted) return;
-            setAvailability({
-                identity,
-                runnable: workflows.some((workflow) => workflow.activeVersion != null
-                    && workflow.runtimeOwner === "canonical"
-                    && workflow.executionAvailable
-                    && workflow.enabled
-                    && workflow.archivedAt == null
-                    && workflow.intakePausedAt == null
-                    && supportsManualRun(workflow.recordType)),
+        let pending: AbortController | null = null;
+        const refresh = () => {
+            pending?.abort();
+            const controller = new AbortController();
+            pending = controller;
+            void getWorkflows(false, {
+                headers: { "X-Workspace-Id": String(workspaceId) },
+                signal: controller.signal,
+            }).then((workflows) => {
+                if (controller.signal.aborted) return;
+                setAvailability({
+                    identity,
+                    runnable: workflows.some((workflow) => workflow.activeVersion != null
+                        && workflow.runtimeOwner === "canonical"
+                        && workflow.executionAvailable
+                        && workflow.enabled
+                        && workflow.archivedAt == null
+                        && workflow.intakePausedAt == null
+                        && supportsManualRun(workflow.recordType)),
+                });
+            }).catch(() => {
+                if (!controller.signal.aborted) setAvailability({ identity, runnable: false });
             });
-        }).catch(() => {
-            if (!controller.signal.aborted) setAvailability({ identity, runnable: false });
+        };
+        refresh();
+        const unsubscribe = subscribeToPaletteOpened(() => {
+            setAvailability(null);
+            refresh();
         });
-        return () => controller.abort();
+        return () => {
+            pending?.abort();
+            unsubscribe();
+        };
     }, [identity, permitted, switching, userId, workspaceId]);
 
     const runnable = permitted && !switching && availability?.identity === identity && availability.runnable;

@@ -102,9 +102,9 @@ for (const theme of ["light", "dark"] as const) {
 
 it("applies the contrast-checked selection tokens without delaying keyboard navigation", () => {
     const command = readFileSync("components/ui/command.tsx", "utf8");
-    expect(command).toContain("data-selected:bg-accent");
-    expect(command).toContain("data-selected:text-accent-foreground");
-    expect(command).toContain("data-selected:ring-1 data-selected:ring-inset data-selected:ring-brand-text");
+    expect(command).toContain("data-[selected=true]:bg-accent");
+    expect(command).toContain("data-[selected=true]:text-accent-foreground");
+    expect(command).toContain("data-[selected=true]:ring-1 data-[selected=true]:ring-inset data-[selected=true]:ring-brand-text");
     expect(command).not.toMatch(/transition|animate-/);
 });
 
