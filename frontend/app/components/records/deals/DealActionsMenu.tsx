@@ -37,6 +37,7 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import DealTeamDialog from '@/app/components/records/deals/DealTeamDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
 import { latestDealSnapshot } from './dealEditConflict';
+import { useDealDetail } from './DealDetailState';
 import {
     RecordActivityComposer,
     RecordTaskComposer,
@@ -100,7 +101,8 @@ export default function DealActionsMenu({
     const showApiError = useApiErrorToast('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
     const [lastSavedDeal, setLastSavedDeal] = useState<Deal | null>(null);
-    const editDeal = latestDealSnapshot(deal, lastSavedDeal);
+    const detail = useDealDetail();
+    const editDeal = latestDealSnapshot(detail?.deal ?? deal, lastSavedDeal);
     const [editOpen, setEditOpen] = useState(false);
     const [isPreparingEdit, setIsPreparingEdit] = useState(false);
     const [teamOpen, setTeamOpen] = useState(false);
@@ -140,7 +142,9 @@ export default function DealActionsMenu({
     const toggleDealStatus = async (won: boolean | null) => {
         setIsUpdatingStatus(true);
         try {
-            setLastSavedDeal(won === null ? await reopenDeal(deal.id) : await closeDeal(deal.id, { won }));
+            const saved = won === null ? await reopenDeal(deal.id) : await closeDeal(deal.id, { won });
+            setLastSavedDeal(saved);
+            detail?.publish(saved);
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {

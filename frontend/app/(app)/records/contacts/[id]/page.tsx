@@ -294,7 +294,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
 
                             <ContactMarketingPreferences contact={contact} status={marketingStatus} />
 
-                            <ContactEmploymentSection />
+                            <ContactEmploymentSection contact={contact} />
                         </RecordDetailSection>
 
                         {ownsContact && lifecycle ? (

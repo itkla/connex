@@ -33,6 +33,14 @@ Use `PageShell`, `RecordStickyContext`, domain action menus, and `frontend/app/c
 
 Do not turn record details into dense multi-panel consoles or promote aggregate engagement charts/evidence above the decision-oriented content without a product decision.
 
+Deal detail outcome mutations publish their acknowledged record into a workspace/record-scoped snapshot before refreshing the server page. Header, stage, lifecycle and performance displays use that snapshot, retain it across older server payloads, and adopt a newer server version.
+
+Contact Employment history offers the existing Change company dialog beside its heading, including an association action when no employer is linked. It uses the current workspace's update permission and the same conflict handling as the overflow action.
+
+Deal outcome mutations publish their acknowledged response to the page's shared, workspace-and-record-scoped snapshot before refreshing the server route. Header amounts, outcome, stage, performance and lifecycle consume that snapshot; older refresh payloads cannot roll it back, and a newer server version takes over. Server refresh still reloads dependent collections.
+
+Completing a task from a record's notification banner refreshes that record after the mutation succeeds, independently of unread-count loading. Contact warmth and its evidence panel then adopt the same refreshed evidence object.
+
 ## Loading, empty, error, and permission states
 
 Client collections using `useServerRecords` wrap their list content in `RecordListState`, keeping search and filter controls outside it so members can change or clear a failed filter. Failed loads show the shared alert and Retry, suppress empty and onboarding copy, and preserve the last successful rows only within the same workspace. A pending retry keeps its error visible with a disabled busy control; success clears the error. Expired sessions use the shared sign-in redirect and suppress collection content. Authentication and permission failures discard the cached page until a successful load; permission refusals use access guidance. API support references appear when available.
@@ -292,6 +300,8 @@ Legacy anchors `#product`, `#features`, `#deploy` (relationship intelligence), a
 Reuse the canonical task/activity composers (`TaskDialog`, `ActivityDialog`) through record adapters such as `RecordComposers`. Pass defaults and explicit create callbacks rather than introducing another composer for the same domain object.
 
 The same principle applies generally: extend an existing shared composer/control before creating a parallel implementation.
+
+Note headers and list cards show the same resolved contact, deal and company links without choosing one record over another. Explicit contact/deal associations come first; company links use the note's server-resolved references because notes have no direct company field. Headers link to records; cards keep their single note destination.
 
 ## Unsaved work and destructive actions
 

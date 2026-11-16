@@ -2,6 +2,7 @@
 
 import { BellAlertIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useLocale, useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { completeTask, dismissNotification, getContextNotifications } from "@/app/lib/api";
@@ -29,6 +30,7 @@ export default function EntityNotificationBanner({
 }) {
     const t = useTranslations("Notifications");
     const locale = useLocale();
+    const router = useRouter();
     const { recipientId, refreshUnread } = useNotifications();
     const [items, setItems] = useState(initialNotifications);
 
@@ -91,6 +93,7 @@ export default function EntityNotificationBanner({
         try {
             await completeTask(item.sourceId);
             setItems((current) => current.filter((entry) => entry.id !== item.id));
+            router.refresh();
             await refreshUnread();
         } catch {
             toastError(t("completeError"));

@@ -60,6 +60,7 @@ describe("full-page note links", () => {
     it("sends held links and reconciles an absent-link save response into the chip and next save", async () => {
         const view = render(editor(linked));
         expect(view.getByRole("link", { name: contact.name })).toBeTruthy();
+        expect(view.getByRole("link", { name: deal.name }).getAttribute("href")).toBe(`/records/deals/${deal.id}`);
         fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Edited" } });
         flush();
 
@@ -67,12 +68,33 @@ describe("full-page note links", () => {
             content: "Edited", person: 42, deal: 73,
         }), workspacePinnedRequest(7)));
         await waitFor(() => expect(view.queryByRole("link", { name: contact.name })).toBeNull());
+        expect(view.queryByRole("link", { name: deal.name })).toBeNull();
         fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Edited again" } });
         flush();
 
         await waitFor(() => expect(api.update).toHaveBeenLastCalledWith(71, expect.objectContaining({
             content: "Edited again", person: null, deal: null,
         }), workspacePinnedRequest(7)));
+    });
+
+    it("shows every resolved record reference once and adopts saved company references", async () => {
+        const company = { type: "company", id: 9, label: "Linked company" } as const;
+        const note: Note = { ...linked, references: [
+            { type: "person", id: contact.id, label: contact.name },
+            { type: "deal", id: deal.id, label: deal.name },
+            company,
+        ] };
+        api.update.mockResolvedValue({ ...linked, references: [{ ...company, id: 10, label: "Updated company" }] });
+        const view = render(editor(note));
+        expect(view.getAllByRole("link", { name: contact.name })).toHaveLength(1);
+        expect(view.getAllByRole("link", { name: deal.name })).toHaveLength(1);
+        expect(view.getByRole("link", { name: company.label }).getAttribute("href")).toBe("/records/companies/9");
+        fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Edited company reference" } });
+        flush();
+        await waitFor(() => expect(view.getByRole("link", { name: "Updated company" }).getAttribute("href")).toBe("/records/companies/10"));
+        expect(view.queryByRole("link", { name: company.label })).toBeNull();
+        view.rerender(editor(unlinked));
+        expect(view.queryByRole("link", { name: "Updated company" })).toBeNull();
     });
 
     it.each([

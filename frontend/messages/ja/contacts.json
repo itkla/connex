@@ -15,6 +15,7 @@
         "updated": "更新日",
         "companyPlaceholder": "—",
         "employmentHistory": "職歴",
+        "noEmploymentHistory": "職歴はまだありません",
         "current": "現職",
         "present": "現在",
         "unknownCompany": "会社不明",

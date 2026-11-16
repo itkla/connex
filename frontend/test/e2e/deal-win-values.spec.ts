@@ -60,13 +60,30 @@ test('Mark won and Edit Outcome keep the stage and record the default or entered
 
     const markedId = await createOpenDeal(`Mark won ${suffix}`);
     await page.goto(`/records/deals/${markedId}`);
-    await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    const closed = page.waitForResponse((response) =>
-        response.url().endsWith(`/api/deals/${markedId}/close`) && response.request().method() === 'POST');
-    await page.getByRole('menuitem', { name: 'Mark won', exact: true }).click();
-    const closeResponse = await closed;
-    expect(closeResponse.status()).toBe(200);
-    expect(await closeResponse.json()).toMatchObject({ won: true, actualValue: 25400, stage: openId });
+    let releaseRefresh: (() => void) | undefined;
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const detailRoute = `**/records/deals/${markedId}*`;
+    await page.route(detailRoute, async (route) => {
+        if (route.request().headers().rsc === '1') await refreshGate;
+        await route.continue();
+    });
+    try {
+        await page.getByRole('button', { name: 'More actions', exact: true }).click();
+        const closed = page.waitForResponse((response) =>
+            response.url().endsWith(`/api/deals/${markedId}/close`) && response.request().method() === 'POST');
+        await page.getByRole('menuitem', { name: 'Mark won', exact: true }).click();
+        const closeResponse = await closed;
+        expect(closeResponse.status()).toBe(200);
+        expect(await closeResponse.json()).toMatchObject({ won: true, actualValue: 25400, stage: openId });
+        const header = page.locator('#deal-record-identity');
+        await expect(header).toContainText('Won');
+        await expect(header).toContainText('Actual · USD');
+        await expect(header).toContainText('$25,400.00');
+        await expect(header).toContainText('Proposal');
+    } finally {
+        releaseRefresh?.();
+        await page.unroute(detailRoute);
+    }
     await expectOneHandoff(markedId);
 
     for (const explicitZero of [false, true]) {

@@ -79,13 +79,24 @@ for (const surface of ["dialog", "page"] as const) {
 test("full-page autosave preserves links and reconciles its chip with the response", async ({ page, request }, testInfo) => {
     const fixture = runFixture(testInfo.project.name);
     const csrf = await csrfBootstrap(request);
+    const title = `Linked note ${randomUUID()}`;
     const headers = { "X-Workspace-Id": String(fixture.workspaceId), [csrf.headerName]: csrf.token };
     const created = await request.post("/api/notes", { headers, data: {
-        content: "Original linked note", person: fixture.contacts.activity.id, deal: fixture.deals.primary.id,
+        title,
+        content: `Original linked note [${fixture.companyName}](company:${fixture.companies.primary.id})`,
+        person: fixture.contacts.activity.id, deal: fixture.deals.primary.id,
     } });
     const note: unknown = await created.json();
     if (typeof note !== "object" || note === null || !("id" in note) || typeof note.id !== "number") throw new Error("Missing note id");
+    await page.goto(`/activity/notes?q=${encodeURIComponent(title)}`);
+    const card = page.locator(`a[href="/activity/notes/${note.id}"]`);
+    for (const name of [fixture.contacts.activity.name, fixture.deals.primary.name, fixture.companyName]) {
+        await expect(card).toContainText(name);
+    }
     await page.goto(`/activity/notes/${note.id}`);
+    await expect(page.getByRole("link", { name: fixture.contacts.activity.name, exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: fixture.deals.primary.name, exact: true })).toBeVisible();
+    await expect(page.locator(`a[href="/records/companies/${fixture.companies.primary.id}"]`).first()).toBeVisible();
     const save = page.waitForResponse((response) => response.url().endsWith(`/api/notes/${note.id}`) && response.request().method() === "PUT");
     await page.locator('.tiptap[contenteditable="true"]').fill("Edited linked note");
     const response = await save;
@@ -93,6 +104,7 @@ test("full-page autosave preserves links and reconciles its chip with the respon
     expect(await response.json()).toMatchObject({ person: fixture.contacts.activity.id, deal: fixture.deals.primary.id });
     await page.reload();
     await expect(page.getByRole("link", { name: fixture.contacts.activity.name, exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: fixture.deals.primary.name, exact: true })).toBeVisible();
     const persisted = await request.get(`/api/notes/${note.id}`);
     expect(await persisted.json()).toMatchObject({ person: fixture.contacts.activity.id, deal: fixture.deals.primary.id });
 
@@ -106,6 +118,7 @@ test("full-page autosave preserves links and reconciles its chip with the respon
     });
     await page.locator('.tiptap[contenteditable="true"]').fill("Response reconciliation");
     await expect(page.getByRole("link", { name: fixture.contacts.activity.name, exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: fixture.deals.primary.name, exact: true })).toHaveCount(0);
 });
 
 test("HTTP updates distinguish omitted links from explicit null", async ({ request }, testInfo) => {
