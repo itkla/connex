@@ -717,8 +717,10 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             label: t('columnName'),
             getSortValue: (c) => c.name ?? null,
             widthClass: 'min-w-48',
+            maxWidth: '20rem',
+            getTextValue: (c) => c.name,
             render: (c) => (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
                     <span className="truncate">{c.name}</span>
                     <CommentIndicatorChip count={commentCounts.get(c.id)} />
                 </span>

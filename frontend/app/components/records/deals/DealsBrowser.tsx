@@ -1068,8 +1068,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             label: t('columnName'),
             getSortValue: (d) => d.name ?? null,
             widthClass: 'min-w-48',
+            maxWidth: '20rem',
+            getTextValue: (d) => d.name,
             render: (d) => (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
                     <span className="truncate">{d.name}</span>
                     <CommentIndicatorChip count={commentCounts.get(d.id)} />
                 </span>
