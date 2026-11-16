@@ -5,6 +5,7 @@ import * as React from "react"
 import { useIsMobile } from "@/app/hooks/useIsMobile"
 import { cn } from "@/lib/utils"
 import { createCloseCompletionGate } from "@/lib/overlay-lifecycle"
+import { DialogFocusCapture, useDialogFocusReturn } from "@/lib/dialog-focus-return"
 import {
   Dialog,
   DialogClose,
@@ -155,6 +156,8 @@ type ResponsiveDialogContentProps = {
   children?: React.ReactNode
   showCloseButton?: boolean
   scrollable?: boolean
+  onOpenAutoFocus?: (event: Event) => void
+  onCloseAutoFocus?: (event: Event) => void
 }
 
 /**
@@ -168,12 +171,32 @@ function ResponsiveDialogContent({
   children,
   showCloseButton,
   scrollable = true,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
 }: ResponsiveDialogContentProps) {
   const { isMobile, onCloseComplete } = useResponsiveDialogContext()
+  const popupRef = React.useRef<HTMLDivElement>(null)
+  const focusReturn = useDialogFocusReturn(onOpenAutoFocus, onCloseAutoFocus)
 
   if (isMobile) {
     return (
-      <DrawerContent className={className} showCloseButton={showCloseButton}>
+      <DrawerContent
+        ref={popupRef}
+        className={className}
+        showCloseButton={showCloseButton}
+        initialFocus={() => {
+          const event = new Event("openAutoFocus", { cancelable: true })
+          focusReturn.onOpenAutoFocus(event)
+          return event.defaultPrevented ? false : popupRef.current
+        }}
+        finalFocus={() => {
+          queueMicrotask(() => focusReturn.onCloseAutoFocus(
+            new Event("closeAutoFocus", { cancelable: true })
+          ))
+          return false
+        }}
+      >
+        <DialogFocusCapture capture={focusReturn.captureOpener} />
         {scrollable ? (
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
         ) : (
@@ -187,7 +210,11 @@ function ResponsiveDialogContent({
     <DialogContent
       className={className}
       showCloseButton={showCloseButton}
-      onCloseAutoFocus={onCloseComplete}
+      onOpenAutoFocus={onOpenAutoFocus}
+      onCloseAutoFocus={(event) => {
+        onCloseAutoFocus?.(event)
+        onCloseComplete?.()
+      }}
     >
       {children}
     </DialogContent>

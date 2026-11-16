@@ -61,7 +61,7 @@ export default function SearchField({
                     }
                 }}
                 placeholder={placeholder}
-                className="h-9 w-full rounded-full bg-muted pl-9 pr-9 text-sm text-foreground outline-none ring-1 ring-border transition placeholder:text-muted-foreground focus:ring-2 focus:ring-brand"
+                className="h-9 w-full rounded-full bg-muted pl-9 pr-9 text-base md:text-sm text-foreground outline-none ring-1 ring-border transition placeholder:text-muted-foreground focus:ring-2 focus:ring-brand"
             />
             {value ? (
                 <button

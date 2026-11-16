@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import PixelCard from '@/components/PixelCard';
 
@@ -46,13 +46,12 @@ export function DialogStatusCover({
     dangerous?: boolean;
     className?: string;
 }) {
-    // Idle keeps the previous palette so pixels fade out smoothly instead of snapping.
-    const lastColorsRef = useRef(PIXEL_GRAY);
-    let colors = lastColorsRef.current;
+    const [lastColors, setLastColors] = useState(PIXEL_GRAY);
+    let colors = lastColors;
     if (status === 'loading') colors = PIXEL_GRAY;
     else if (status === 'success') colors = dangerous ? PIXEL_RED : PIXEL_GREEN;
     else if (status === 'error') colors = PIXEL_RED;
-    lastColorsRef.current = colors;
+    if (colors !== lastColors) setLastColors(colors);
 
     return (
         <div aria-hidden className={cn('relative h-24 overflow-hidden', className)}>
@@ -72,7 +71,7 @@ export function DialogStatusCover({
 // Shared field styling for dialog inputs. `fieldInputClass` is padding-free so a leading-icon
 // variant composes cleanly via cn(): cn(fieldInputClass, 'pl-9 pr-3', err && fieldErrorClass).
 export const fieldInputClass =
-    'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
+    'w-full rounded-lg bg-muted py-2 text-base md:text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 export const fieldErrorClass = 'ring-2 ring-destructive focus:ring-destructive';
 export const fieldWarnClass = 'ring-2 ring-amber-500 focus:ring-amber-500';
 // Requires the input's wrapper to be `group relative`.
