@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTimeZone, useTranslations } from 'next-intl';
+import { formatDateTime } from '@/app/lib/utils';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -123,6 +124,8 @@ const IMPORT_CONTACTS_ACTION = 'utility.import-contacts';
 
 export default function ContactsBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
+    const locale = useLocale();
+    const timeZone = useTimeZone();
     const t = useTranslations('ContactsBrowser');
     const showApiError = useApiErrorToast('ContactsBrowser');
     const tf = useTranslations('Filters');
@@ -786,15 +789,15 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             key: 'createdAt',
             label: t('columnCreated'),
             getSortValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : null),
-            render: (c) => c.createdAt,
+            render: (c) => formatDateTime(c.createdAt, locale, timeZone),
         },
         {
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
-            render: (c) => c.updatedAt,
+            render: (c) => formatDateTime(c.updatedAt, locale, timeZone),
         },
-    ], [t, tempByContactId, memberById, inlineEdit, saveContact, showArchived, commentCounts, isSaving, isPreparingEdit]);
+    ], [locale, timeZone, t, tempByContactId, memberById, inlineEdit, saveContact, showArchived, commentCounts, isSaving, isPreparingEdit]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 

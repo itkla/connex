@@ -31,7 +31,7 @@ import {
     getRelationshipMapAvailability,
 } from "@/app/lib/api";
 import { type Company, type Tag } from "@/app/lib/types";
-import { formatDate, formatDateTime } from "@/app/lib/utils";
+import { formatDateTime } from "@/app/lib/utils";
 
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
@@ -230,7 +230,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
                                         : t("ownerUnassigned")}
                                 />
-                                <InfoRow label={t("added")} value={formatDate(company.createdAt, locale, timeZone)} />
+                                <InfoRow label={t("added")} value={formatDateTime(company.createdAt, locale, timeZone)} />
                                 <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale, timeZone)} />
                                 <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
                             </dl>
