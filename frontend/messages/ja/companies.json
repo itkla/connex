@@ -209,7 +209,7 @@
   "CompaniesQuickEditSheet": {
     "titleSingle": "会社をクイック編集",
     "titleMultiple": "{count} 件の会社をクイック編集",
-    "description": "以下のフィールドを更新します。変更があった会社のみ保存されます。",
+    "description": "以下の項目を更新してください。変更した項目のみ保存されます。",
     "labelName": "名前",
     "labelWebsite": "ウェブサイト",
     "labelIndustry": "業界",

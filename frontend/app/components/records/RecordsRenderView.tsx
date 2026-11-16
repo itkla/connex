@@ -105,6 +105,7 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     recordRef?: (item: T) => ActiveRecordRef | null;
     gridClassName?: string;
     entityLabel: string;
+    entityLabelPlural: string;
     selectionActions?: ReactNode; // pass along the react node for the selection actions
     pagination?: {
         page: number;
@@ -148,6 +149,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     recordRef,
     gridClassName = 'grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]',
     entityLabel,
+    entityLabelPlural,
     selectionActions,
     pagination,
     sortState,
@@ -690,7 +692,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                     <Checkbox
                                         checked={someSelected ? 'indeterminate' : allSelected}
                                         onCheckedChange={(checked) => toggleAll(checked === true)}
-                                        aria-label={t('selectAllAria', { entityLabel })}
+                                        aria-label={t('selectAllAria', { entityLabelPlural })}
                                         className={CHECKBOX_CLASS}
                                     />
                                 </th>

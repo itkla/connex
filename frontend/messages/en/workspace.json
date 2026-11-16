@@ -201,7 +201,7 @@
     "WorkspaceMembers": {
         "title": "Members",
         "subtitle": "People with access to {workspace}.",
-        "count": "{count} members",
+        "count": "{count, plural, one {# member} other {# members}}",
         "searchPlaceholder": "Search members",
         "searchNoMatches": "No members match “{query}”.",
         "inviteAccessTitle": "Invite & access",
@@ -333,7 +333,7 @@
         "nameRequired": "Enter a role name",
         "noAccess": "Your role doesn't include managing workspace roles. Ask a workspace owner to grant access.",
         "empty": "No custom roles yet.",
-        "permissionCount": "{count} permissions",
+        "roleCount": "{count, plural, one {# role} other {# roles}}",
         "defaultRolesLabel": "Built-in roles",
         "customRolesLabel": "Custom roles",
         "builtInBadge": "Built-in",

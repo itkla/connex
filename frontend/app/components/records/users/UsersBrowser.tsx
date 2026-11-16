@@ -191,6 +191,7 @@ export default function UsersBrowser({
                         selectedIds={selectedIds}
                         onSelectedIdsChange={setSelectedIds}
                         entityLabel={t("entityLabel")}
+                        entityLabelPlural={t('entityLabelPlural')}
                         selectionActions={selectionActions}
                         emptyState={
                             <EmptyState

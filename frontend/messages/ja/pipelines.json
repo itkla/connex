@@ -19,6 +19,7 @@
     "emptyBody": "パイプラインは、案件が進むステージの並びです。チームの売り方に合わせて最初の1つを作成してください。",
     "emptyCta": "新規パイプライン",
     "entityLabel": "パイプライン",
+    "entityLabelPlural": "パイプライン",
     "noChangesToSave": "保存する変更はありません",
     "nameRequiredFor": "「{name}」の名前を入力してください",
     "stageNamesEmptyIn": "「{name}」のステージ名は空にできません",
@@ -75,7 +76,7 @@
   "PipelinesQuickEditSheet": {
     "titleSingle": "パイプラインをクイック編集",
     "titleMultiple": "{count} 件のパイプラインをクイック編集",
-    "description": "下のフィールドを更新してください。変更したパイプラインのみ保存されます。矢印でステージを並べ替えられます。",
+    "description": "以下の項目を更新してください。変更した項目のみ保存されます。矢印でステージを並べ替えられます。",
     "name": "名前",
     "stages": "ステージ",
     "stageNamePlaceholder": "ステージ名",

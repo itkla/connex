@@ -1140,6 +1140,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                             readOnly={showArchived}
                             removeIntent={showArchived ? 'restore' : 'archive'}
                             entityLabel="contact"
+                            entityLabelPlural={t('entityLabelPlural')}
                             selectionActions={selectionActions}
                             loading={loading}
                             emptyState={

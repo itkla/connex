@@ -21,6 +21,7 @@
     "searchPlaceholder": "Search files, people, or types",
     "countAndSize": "{count, plural, =1 {# file} other {# files}} · {size} in total",
     "entityLabel": "file",
+    "entityLabelPlural": "files",
     "columnName": "Name",
     "typeLabel": "Type",
     "typeAll": "All types",
