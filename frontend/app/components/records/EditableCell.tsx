@@ -79,13 +79,15 @@ export default function EditableCell({
                 saving && 'opacity-60',
             )}
         >
-            {display !== undefined ? (
-                display
-            ) : current === '' ? (
-                <span className="text-muted-foreground/50">—</span>
-            ) : (
-                <span className="text-foreground">{current}</span>
-            )}
+            <span className="block truncate" title={current}>
+                {display !== undefined ? (
+                    display
+                ) : current === '' ? (
+                    <span className="text-muted-foreground/50">—</span>
+                ) : (
+                    <span className="text-foreground">{current}</span>
+                )}
+            </span>
         </button>
     );
 }

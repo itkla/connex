@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useAccountStorageGeneration } from "@/app/hooks/useAccountStorageGeneration";
 
 import { useActions } from '@/app/hooks/useActions';
@@ -18,6 +18,7 @@ type SidebarModeContextValue = {
 };
 
 const SidebarModeContext = createContext<SidebarModeContextValue | null>(null);
+const subscribeNoop = () => () => {};
 
 function modeStorageKey(userId: number | null, workspaceId: number | null): string {
     return `${MODE_PREFIX}${userId ?? 'anon'}:${workspaceId ?? 'none'}`;
@@ -74,8 +75,19 @@ export function SidebarModeProvider({ children }: { children: ReactNode }) {
     return <SidebarModeContext.Provider value={value}>{children}</SidebarModeContext.Provider>;
 }
 
-/** Reads the desktop sidebar mode; falls back to expanded when rendered outside the provider. */
+/**
+ * Reads the desktop sidebar mode with an expanded snapshot for each consumer's hydration.
+ * The provider can restore rail mode before a suspended sidebar hydrates. Context notifies
+ * consumers of mode changes; the server snapshot keeps their initial HTML deterministic.
+ * Falls back to expanded when rendered outside the provider.
+ */
 export function useSidebarMode(): SidebarModeContextValue {
     const ctx = useContext(SidebarModeContext);
+    const mode = useSyncExternalStore<SidebarMode>(
+        subscribeNoop,
+        () => ctx?.mode ?? 'expanded',
+        () => 'expanded',
+    );
+    if (ctx && mode !== ctx.mode) return { ...ctx, mode };
     return ctx ?? { mode: 'expanded', setMode: () => {}, toggle: () => {} };
 }
