@@ -26,13 +26,13 @@ const ICON_INLINE =
   "size-6 rounded-full in-data-[slot=button-group]:rounded-md [&_svg:not([class*='size-'])]:size-3"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-full border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,transform] duration-(--motion-micro) outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-full border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,transform] duration-(--motion-micro) outline-hidden forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-[Highlight] select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         brand:
-          "bg-brand text-brand-foreground hover:bg-brand-hover aria-expanded:bg-brand-hover aria-expanded:text-brand-foreground data-[state=open]:bg-brand-hover data-[state=open]:text-brand-foreground",
+          "bg-brand text-brand-foreground forced-colors:border-[ButtonText] hover:bg-brand-hover aria-expanded:bg-brand-hover aria-expanded:text-brand-foreground data-[state=open]:bg-brand-hover data-[state=open]:text-brand-foreground",
         outline:
           "border-border bg-background shadow-xs hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -96,6 +96,8 @@ export type ButtonProps = React.ComponentProps<"button"> &
     asChild?: boolean
     /** Appends the chevron that marks this button as a menu trigger. Ignored under `asChild`. */
     menu?: boolean
+    /** Expands the coarse-pointer target to 44px; the caller must reserve room around the control. */
+    expandHitArea?: boolean
   }
 
 function Button({
@@ -105,6 +107,7 @@ function Button({
   press = "dip",
   asChild = false,
   menu = false,
+  expandHitArea = false,
   children,
   ...props
 }: ButtonProps) {
@@ -115,7 +118,7 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, press, className }))}
+      className={cn(buttonVariants({ variant, size, press }), expandHitArea && "relative touch-target", className)}
       {...props}
     >
       {asChild ? (

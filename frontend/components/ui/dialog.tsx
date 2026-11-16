@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { DialogFocusCapture, useDialogFocusReturn } from "@/lib/dialog-focus-return"
 import { XIcon } from "lucide-react"
 
 function Dialog({
@@ -66,6 +67,8 @@ function DialogContent({
   onEscapeKeyDown,
   onCompositionStartCapture,
   onCompositionEndCapture,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ref,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
@@ -73,6 +76,7 @@ function DialogContent({
   size?: DialogSize
 }) {
   const t = useTranslations("UI")
+  const focusReturn = useDialogFocusReturn(onOpenAutoFocus, onCloseAutoFocus)
   const contentRef = React.useRef<HTMLDivElement>(null)
   const composing = React.useRef(false)
   const composedRef = React.useCallback(
@@ -89,6 +93,8 @@ function DialogContent({
       <DialogPrimitive.Content
         ref={composedRef}
         data-slot="dialog-content"
+        onOpenAutoFocus={focusReturn.onOpenAutoFocus}
+        onCloseAutoFocus={focusReturn.onCloseAutoFocus}
         onCompositionStartCapture={(event) => {
           composing.current = true
           onCompositionStartCapture?.(event)
@@ -138,6 +144,7 @@ function DialogContent({
         )}
         {...props}
       >
+        <DialogFocusCapture capture={focusReturn.captureOpener} />
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>

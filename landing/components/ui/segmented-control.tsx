@@ -31,7 +31,7 @@ const segmentedControlVariants = cva(
  * change reverses from wherever the thumb currently is.
  */
 const segmentVariants = cva(
-  "relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium outline-none transition-[color,transform] duration-(--motion-micro) hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40 disabled:pointer-events-none disabled:opacity-50 motion-safe:active:scale-[0.97] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+  "relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium outline-hidden forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-[Highlight] transition-[color,transform] duration-(--motion-micro) hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40 disabled:pointer-events-none disabled:opacity-50 motion-safe:active:scale-[0.97] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
   {
     variants: {
       size: {

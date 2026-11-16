@@ -316,6 +316,31 @@ describe("the Security page while a privileged account is confined", () => {
         expect(backend.getPasskeys).toHaveBeenCalledOnce();
     });
 
+    it("retains enrollment-button focus and rejects repeat activation during a ceremony", async () => {
+        backend.requirements = requirementsFor("ENROLLMENT_REQUIRED");
+        let finish: () => void = () => {};
+        const pending = new Promise<void>((resolve) => { finish = resolve; });
+        backend.startRegistration.mockImplementationOnce(async () => {
+            await pending;
+            return { id: "credential" };
+        });
+        await renderPanel();
+        const add = [...container.querySelectorAll("button")]
+            .find((candidate) => candidate.textContent === enAccount.AccountSecurity.add);
+        if (!add) throw new Error("no add button");
+        add.focus();
+        await act(async () => add.click());
+        expect(add.disabled).toBe(false);
+        expect(add.getAttribute("aria-disabled")).toBe("true");
+        expect(add.getAttribute("aria-busy")).toBe("true");
+        expect(document.activeElement).toBe(add);
+        await act(async () => add.click());
+        expect(backend.beginPasskeyRegistration).toHaveBeenCalledOnce();
+        await act(async () => { finish(); await pending; });
+        expect(document.activeElement).toBe(add);
+        expect(add.getAttribute("aria-busy")).toBe("false");
+    });
+
     it("re-reads the standing as a ceremony once a first passkey is enrolled", async () => {
         backend.requirements = requirementsFor("ENROLLMENT_REQUIRED");
         await renderPanel();

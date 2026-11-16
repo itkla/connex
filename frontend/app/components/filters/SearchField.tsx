@@ -61,14 +61,14 @@ export default function SearchField({
                     }
                 }}
                 placeholder={placeholder}
-                className="h-9 w-full rounded-full bg-muted pl-9 pr-9 text-sm text-foreground outline-none ring-1 ring-border transition placeholder:text-muted-foreground focus:ring-2 focus:ring-brand"
+                className="h-9 w-full rounded-full bg-muted pl-9 pr-9 text-base md:text-sm text-foreground outline-hidden forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-[Highlight] ring-1 ring-border transition placeholder:text-muted-foreground focus:ring-2 focus:ring-brand"
             />
             {value ? (
                 <button
                     type="button"
                     onClick={onClear}
                     aria-label={clearAria}
-                    className="absolute right-2.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-none transition hover:bg-background hover:text-foreground active:scale-90 focus-visible:ring-2 focus-visible:ring-brand/40"
+                    className="absolute right-2.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-hidden forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-[Highlight] transition hover:bg-background hover:text-foreground active:scale-90 focus-visible:ring-2 focus-visible:ring-brand/40"
                 >
                     <XMarkIcon className="size-3.5" />
                 </button>

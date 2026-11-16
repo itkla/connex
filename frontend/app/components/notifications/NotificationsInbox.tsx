@@ -95,6 +95,8 @@ function NotificationManagementMenu({
                     <Button
                         variant="ghost"
                         size="icon-sm"
+                        expandHitArea
+                        className="pointer-coarse:mx-1.5 pointer-coarse:my-1.5"
                         aria-label={t("moreActions", { title })}
                         disabled={disabled}
                     >

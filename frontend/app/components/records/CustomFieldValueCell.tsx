@@ -194,7 +194,7 @@ function CustomFieldInput({
                 onKeyDown={onKeyDown}
                 rows={3}
                 maxLength={2000}
-                className={cn(fieldInputClass, "px-2 py-1 text-sm")}
+                className={cn(fieldInputClass, "px-2 py-1 text-base md:text-sm")}
             />
         );
     }
@@ -211,7 +211,7 @@ function CustomFieldInput({
             onKeyDown={onKeyDown}
             placeholder={field.fieldType === "url" ? "https://" : undefined}
             maxLength={field.fieldType === "url" ? 2048 : 1000}
-            className={cn(fieldInputClass, "h-8 px-2 text-sm")}
+            className={cn(fieldInputClass, "h-8 px-2 text-base md:text-sm")}
         />
     );
 }

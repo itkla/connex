@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 
 import {
     ApiError,
@@ -32,14 +32,12 @@ import {
     emitNotificationStateChanged,
     onNotificationStateChanged,
 } from "@/app/components/notifications/notificationEvents";
-import { instant, springJiggle } from "@/app/lib/motion";
 
 export default function NotificationBell() {
     const timeZone = useTimeZone();
     const t = useTranslations("Notifications");
     const locale = useLocale();
     const now = useLiveNow();
-    const reduce = useReducedMotion() ?? false;
     const { recipientId, unread, refreshUnread } = useNotifications();
     const { executeInNotificationWorkspace, openNotification } = useNotificationWorkspaceActions();
     const [items, setItems] = useState<Notification[]>([]);
@@ -173,16 +171,16 @@ export default function NotificationBell() {
                 <motion.button
                     type="button"
                     aria-label={unread > 0 ? `${t("bellLabel")} — ${t("unreadCount", { count: unread })}` : t("bellLabel")}
-                    whileTap={reduce ? undefined : { scale: 0.95 }}
-                    transition={reduce ? instant : springJiggle}
-                    className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    className="group relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-brand"
                 >
-                    <BellIcon className="size-5" />
-                    {unread > 0 ? (
-                        <span aria-hidden="true" className="absolute -right-1 -top-1 min-w-5 rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-5 text-white">
-                            {unread > 99 ? "99+" : unread}
-                        </span>
-                    ) : null}
+                    <span className="pointer-events-none relative inline-flex size-full items-center justify-center transition-transform duration-(--motion-micro) ease-hand group-active:scale-95 motion-reduce:transition-none motion-reduce:group-active:scale-100">
+                        <BellIcon className="size-5" />
+                        {unread > 0 ? (
+                            <span aria-hidden="true" className="absolute -right-1 -top-1 min-w-5 rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-5 text-white">
+                                {unread > 99 ? "99+" : unread}
+                            </span>
+                        ) : null}
+                    </span>
                 </motion.button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>

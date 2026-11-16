@@ -311,7 +311,7 @@ export default function ApprovalChainEditor({
                                         aria-label={t('stepNameLabel')}
                                         onChange={(e) => updateStep(index, { name: e.target.value })}
                                         disabled={disabled}
-                                        className="h-8 text-sm"
+                                        className="h-8 text-base md:text-sm"
                                     />
 
                                     <div className="grid gap-3 sm:grid-cols-2">
@@ -338,7 +338,7 @@ export default function ApprovalChainEditor({
                                                 }}
                                                 disabled={disabled}
                                                 aria-invalid={!dueIntervalIsValid(step.dueIntervalHours) || undefined}
-                                                className="h-8 text-sm"
+                                                className="h-8 text-base md:text-sm"
                                             />
                                         </div>
                                         <div className="space-y-1.5">

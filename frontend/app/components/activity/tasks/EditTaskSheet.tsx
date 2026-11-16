@@ -35,7 +35,7 @@ import { getCompanyPeople, updateTask } from '@/app/lib/api';
 import type { Contact, Deal, Task, UpdateTaskPayload } from '@/app/lib/types';
 import { calendarDateInputValue } from '@/app/lib/utils';
 
-const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-base md:text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 type TaskDraft = {
     description: string;
@@ -168,7 +168,7 @@ export default function EditTaskSheet({
                                 autoFocus
                                 commands={ENTITY_COMMANDS}
                                 className={cn(
-                                    'min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand',
+                                    'min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-base md:text-sm ring-1 ring-border focus:ring-2 focus:ring-brand',
                                     fieldErrors.description && fieldErrorClass,
                                 )}
                             />

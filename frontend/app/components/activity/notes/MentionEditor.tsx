@@ -914,7 +914,7 @@ export default function MentionEditor({
                 onBlur={() => window.setTimeout(closeMenu, 120)}
                 data-placeholder={placeholder}
                 className={cn(
-                    'min-h-[8.5rem] whitespace-pre-wrap break-words outline-none',
+                    'min-h-[8.5rem] text-base md:text-sm whitespace-pre-wrap break-words outline-none',
                     'empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]',
                     className,
                 )}

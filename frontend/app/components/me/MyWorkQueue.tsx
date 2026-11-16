@@ -733,7 +733,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                 >
                     {detail != null && (
                         <>
-                            <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
+                            <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3 pr-16">
                                 <Button
                                     variant="outline"
                                     className="min-h-11 min-w-11 md:min-h-9"

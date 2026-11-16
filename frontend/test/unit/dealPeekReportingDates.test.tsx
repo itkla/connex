@@ -72,6 +72,9 @@ describe('deal peek reporting close dates', () => {
                     </NowProvider>
                 </NextIntlClientProvider>,
             ));
+            for (const name of ['Previous record', 'Next record']) {
+                expect(within(container).getByRole('button', { name }).classList.contains('touch-target')).toBe(false);
+            }
             const closeTerm = within(container).getByText('Closed at', { selector: 'dt', exact: true });
             expect(closeTerm.parentElement?.querySelector('dd')?.textContent).toBe('March 1, 2025');
             const activity = within(container).getByText('Historic activity').closest('li');

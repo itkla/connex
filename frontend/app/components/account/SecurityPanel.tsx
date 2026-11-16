@@ -273,9 +273,11 @@ export default function SecurityPanel() {
 
     const addButton = (
         <Button
-            onClick={() => void enrollment.addPasskey()}
+            onClick={() => {
+                if (!enrollment.adding && supported) void enrollment.addPasskey();
+            }}
             variant="brand"
-            disabled={enrollment.adding || !supported}
+            aria-disabled={enrollment.adding || !supported}
             aria-busy={enrollment.adding}
         >
             {enrollment.adding ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon className="size-4" />}

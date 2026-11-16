@@ -137,7 +137,7 @@ function CellInput({
                 }
             }}
             maxLength={inputType === 'url' ? 2048 : 500}
-            className={cn(fieldInputClass, 'h-8 px-2 text-sm')}
+            className={cn(fieldInputClass, 'h-8 px-2 text-base md:text-sm')}
         />
     );
 }
