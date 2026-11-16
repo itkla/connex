@@ -1,7 +1,9 @@
 {
   "UI": {
     "searching": "検索中…",
-    "close": "閉じる"
+    "close": "閉じる",
+    "pagination": "ページ切り替え",
+    "notificationsRegion": "通知"
   },
   "AppMetadata": {
     "title": "Connex",

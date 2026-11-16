@@ -86,7 +86,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   await connection();
-  const [locale, requestHeaders] = await Promise.all([getLocale(), headers()]);
+  const [locale, requestHeaders, t] = await Promise.all([getLocale(), headers(), getTranslations("UI")]);
   const nonce = requestHeaders.get("x-nonce") ?? undefined;
 
   return (
@@ -100,7 +100,7 @@ export default async function RootLayout({
           <NextIntlClientProvider>
             <TooltipProvider>{children}</TooltipProvider>
           </NextIntlClientProvider>
-          <Toaster position="top-center" />
+          <Toaster position="top-center" containerAriaLabel={t("notificationsRegion")} />
         </ThemeProvider>
       </body>
     </html>

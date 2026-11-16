@@ -1,7 +1,9 @@
 {
   "UI": {
     "searching": "Searching…",
-    "close": "Close"
+    "close": "Close",
+    "pagination": "Pagination",
+    "notificationsRegion": "Notifications"
   },
   "AppMetadata": {
     "title": "Connex",

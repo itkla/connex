@@ -25,7 +25,7 @@
   },
   "CompaniesBrowser": {
     "title": "Companies",
-    "addCompanyAriaLabel": "Add company",
+    "addCompanyAriaLabel": "New company",
     "new": "New",
     "displayModeAriaLabel": "Display mode",
     "gridViewAriaLabel": "Grid view",

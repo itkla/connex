@@ -53,7 +53,7 @@ export default function WorkspaceSwitcher({ compact = false }: { compact?: boole
                 <DropdownMenuTrigger asChild>
                     <motion.button
                         type="button"
-                        aria-label={t("switchAria")}
+                        aria-label={t("switchAria", { workspace: activeWorkspace?.name ?? t("label"), count })}
                         disabled={switching}
                         whileTap={reduce ? undefined : { scale: 0.95 }}
                         transition={reduce ? instant : springJiggle}

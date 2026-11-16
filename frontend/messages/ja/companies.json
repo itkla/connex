@@ -25,7 +25,7 @@
   },
   "CompaniesBrowser": {
     "title": "会社",
-    "addCompanyAriaLabel": "会社を追加",
+    "addCompanyAriaLabel": "新規会社",
     "new": "新規",
     "displayModeAriaLabel": "表示モード",
     "gridViewAriaLabel": "グリッド表示",

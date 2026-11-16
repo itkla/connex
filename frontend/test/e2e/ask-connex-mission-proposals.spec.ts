@@ -164,7 +164,7 @@ for (const locale of ['en', 'ja'] as const) {
                 await expect(page).toHaveURL(/\/dashboard$/);
                 await page.getByRole('button', { name: message(locale, 'common', 'CommonContentShell.showSidebar') }).click();
             }
-            await page.getByRole('button', { name: message(locale, 'workspace', 'WorkspaceSwitcher.switchAria') }).click();
+            await page.getByRole('button', { name: new RegExp(message(locale, 'workspace', 'WorkspaceSwitcher.switchAria').replace('{workspace}', '.+').replace('{count}', '.+')) }).click();
             await page.getByRole('menuitem').filter({ hasText: destinationName }).click();
             await expect(page).toHaveURL(/\/dashboard$/);
             await expect(page.getByText('Negotiation', { exact: true })).toHaveCount(0);

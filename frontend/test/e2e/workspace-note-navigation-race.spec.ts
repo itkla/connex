@@ -61,7 +61,7 @@ test("a first note save cannot replace a pending workspace navigation URL", asyn
         });
         await page.locator('.tiptap[contenteditable="true"]').fill("Origin note " + run);
         await noteStarted.promise;
-        await page.getByRole("button", { name: "Switch workspace" }).click();
+        await page.getByRole("button", { name: /, switch workspace$/ }).click();
         const selection = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/workspaces/" + next + "/switch" && response.request().method() === "POST");
         await page.getByRole("menuitem").filter({ hasText: nextName }).click();
         expect((await selection).status()).toBe(200);
@@ -71,7 +71,7 @@ test("a first note save cannot replace a pending workspace navigation URL", asyn
         await expect(page.locator("html")).not.toHaveAttribute("data-note-url-write", "true");
         releaseDashboard.resolve();
         await expect(page).toHaveURL(/\/dashboard$/);
-        await expect(page.getByRole("button", { name: "Switch workspace" })).toContainText(nextName);
+        await expect(page.getByRole("button", { name: /, switch workspace$/ })).toContainText(nextName);
     } finally {
         releaseNote.resolve();
         releaseDashboard.resolve();

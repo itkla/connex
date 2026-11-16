@@ -1,6 +1,5 @@
 import React from 'react';
-import { InformationCircleIcon } from '@heroicons/react/24/outline';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import InfoTip from '@/app/components/overview/analytics/InfoTip';
 
 export default function SummaryTile({ label, value, tooltip, className }: { label: string; value: string | React.ReactNode; tooltip?: React.ReactNode; className?: string }) {
 
@@ -11,17 +10,7 @@ export default function SummaryTile({ label, value, tooltip, className }: { labe
             <div className="flex items-center gap-1">
                 <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
                 {tooltip && (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <InformationCircleIcon className="size-3 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                            <div className="flex max-w-xs flex-col gap-2">
-                                <h2 className="text-sm font-medium">{label}</h2>
-                                <p className="text-xs text-muted-foreground">{tooltip}</p>
-                            </div>
-                        </TooltipContent>
-                    </Tooltip>
+                    <InfoTip title={label} label={label} body={tooltip} />
                 )}
             </div>
             {valueElement}

@@ -468,7 +468,6 @@ export default function CalendarShell({
                                 <button
                                     type="button"
                                     onClick={() => setGoToOpen(true)}
-                                    aria-label={t('goToDate')}
                                     className="mr-auto rounded text-sm text-muted-foreground tabular-nums outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
                                 >
                                     {periodLabel}
