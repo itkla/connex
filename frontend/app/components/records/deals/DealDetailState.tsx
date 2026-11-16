@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { Deal } from '@/app/lib/types';
 import { latestDealSnapshot } from './dealEditConflict';
 
@@ -15,14 +15,15 @@ export function DealDetailProvider({ initial, children }: { initial: Deal; child
     if (snapshot.source !== initial) {
         setSnapshot({ source: initial, retained: deal });
     }
-    const publish = (next: Deal) => {
+    const publish = useCallback((next: Deal) => {
         setSnapshot((current) => {
             const scope = current.source;
             if (next.id !== scope.id || (scope.workspaceId !== undefined && next.workspaceId !== scope.workspaceId)) return current;
             return { ...current, retained: latestDealSnapshot(current.retained, next) };
         });
-    };
-    return <DealDetailContext.Provider value={{ deal, publish }}>{children}</DealDetailContext.Provider>;
+    }, []);
+    const value = useMemo(() => ({ deal, publish }), [deal, publish]);
+    return <DealDetailContext.Provider value={value}>{children}</DealDetailContext.Provider>;
 }
 
 /** Reads the current detail snapshot; reusable menus outside a detail retain their local state. */

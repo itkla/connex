@@ -36,9 +36,12 @@ const deal: Deal = {
 };
 const unlinked: Note = {
     id: 71, content: "Original", title: "Original title", author: 1, visibility: "workspace",
-    createdAt: timestamp, updatedAt: timestamp,
+    createdAt: "2026-11-04 00:00:00", updatedAt: "2026-11-04 00:00:00",
 };
 const linked: Note = { ...unlinked, person: contact.id, deal: deal.id };
+const acknowledgedRemoval: Note = {
+    ...unlinked, content: "Removed all links", references: [], updatedAt: "2026-11-04 10:00:00",
+};
 
 function editor(note: Note) {
     return <NoteEditorView note={note} currentUserId={1} persons={[contact]} deals={[deal]}
@@ -65,12 +68,12 @@ describe("full-page note links", () => {
         ["equal ISO", "2026-11-04T10:00:00Z"],
         ["equal offset", "2026-11-04T12:00:00+02:00"],
     ])("keeps acknowledged removals when %s props arrive after the save", async (_label, updatedAt) => {
-        const saved: Note = { ...unlinked, references: [], updatedAt: "2026-11-04 10:00:00" };
-        api.update.mockResolvedValue(saved);
+        api.update.mockResolvedValue(acknowledgedRemoval);
         const view = render(editor(linkedWithCompany));
         fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Removed all links" } });
         flush();
         await waitFor(() => expect(view.queryByRole("link", { name: company.label })).toBeNull());
+        expect(api.update.mock.calls[0]?.[1]).not.toHaveProperty("updatedAt");
         view.rerender(editor({ ...linkedWithCompany, updatedAt }));
 
         for (const name of [contact.name, deal.name, company.label]) {
@@ -84,7 +87,7 @@ describe("full-page note links", () => {
     });
 
     it("adopts strictly newer props after an acknowledged save without replacing unsaved text", async () => {
-        api.update.mockResolvedValue({ ...unlinked, references: [], updatedAt: "2026-11-04 10:00:00" });
+        api.update.mockResolvedValue(acknowledgedRemoval);
         const view = render(editor(linkedWithCompany));
         fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Removed all links" } });
         flush();
@@ -101,12 +104,15 @@ describe("full-page note links", () => {
     it.each([
         ["missing prop", "2026-11-04 10:00:00", undefined],
         ["invalid prop", "2026-11-04 10:00:00", "invalid"],
-        ["missing save", undefined, "2026-11-04 09:00:00"],
-        ["invalid save", "invalid", "2026-11-04 09:00:00"],
+        ["missing save response", undefined, "2026-11-04 09:00:00"],
+        ["invalid save response", "invalid", "2026-11-04 09:00:00"],
     ])("adopts props with a %s timestamp using the existing fallback", async (_label, savedAt, propAt) => {
-        const saved: Note = { ...unlinked, references: [], updatedAt: savedAt ?? timestamp };
+        const saved: Note = { ...acknowledgedRemoval, updatedAt: savedAt ?? acknowledgedRemoval.updatedAt };
         const refreshed: Note = { ...linkedWithCompany, updatedAt: propAt ?? timestamp };
-        if (savedAt === undefined) Reflect.deleteProperty(saved, "updatedAt");
+        if (savedAt === undefined) {
+            Reflect.deleteProperty(saved, "updatedAt");
+            expect(saved).not.toHaveProperty("updatedAt");
+        }
         if (propAt === undefined) Reflect.deleteProperty(refreshed, "updatedAt");
         api.update.mockResolvedValue(saved);
         const view = render(editor(linkedWithCompany));

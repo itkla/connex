@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Note;
@@ -24,6 +27,7 @@ class NoteServiceTest extends AbstractServiceTest {
     @Autowired NoteService noteService;
     @Autowired NoteMapper noteMapper;
     @Autowired ObjectMapper objectMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private Note linkedNote() {
         var company = newCompany();
@@ -36,6 +40,57 @@ class NoteServiceTest extends AbstractServiceTest {
 
     private Note updateFromJson(Note original, String json) {
         return noteService.update(original.getId(), objectMapper.readValue(json, NoteDto.class).toBean());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void createResponseReturnsPersistedTimestamps(boolean clientSuppliesTimestamps) {
+        String timestamps = clientSuppliesTimestamps
+            ? ",\"createdAt\":\"1900-01-01 00:00:00\",\"updatedAt\":\"2100-01-01 00:00:00\""
+            : "";
+        Note request = objectMapper.readValue("{\"content\":\"Created note\"" + timestamps + "}", NoteDto.class).toBean();
+
+        Note created = noteService.create(request);
+
+        assertPersistedResponseTimestamps(created);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void updateResponseReturnsPersistedTimestamps(boolean clientSuppliesTimestamps) {
+        Note created = noteService.create(draft("Original note", null));
+        jdbcTemplate.update("UPDATE note SET updated_at = ? WHERE workspace_id = ? AND id = ?",
+            "2000-01-01 00:00:00", workspace.getId(), created.getId());
+        String timestamps = clientSuppliesTimestamps
+            ? ",\"createdAt\":\"1900-01-01 00:00:00\",\"updatedAt\":\"2100-01-01 00:00:00\""
+            : "";
+
+        Note saved = updateFromJson(created, "{\"content\":\"Edited note\"" + timestamps + "}");
+
+        assertPersistedResponseTimestamps(saved);
+        assertNotEquals("2000-01-01 00:00:00", saved.getUpdatedAt());
+    }
+
+    private void assertPersistedResponseTimestamps(Note saved) {
+        Note persisted = noteMapper.getNoteById(workspace.getId(), saved.getId());
+        assertNotNull(persisted);
+        assertNotNull(persisted.getCreatedAt());
+        assertNotNull(persisted.getUpdatedAt());
+        assertEquals(persisted.getCreatedAt(), saved.getCreatedAt());
+        assertEquals(persisted.getUpdatedAt(), saved.getUpdatedAt());
+        assertNotEquals("1900-01-01 00:00:00", saved.getCreatedAt());
+        assertNotEquals("2100-01-01 00:00:00", saved.getUpdatedAt());
+        var response = objectMapper.readTree(objectMapper.writeValueAsString(NoteDto.from(saved)));
+        assertEquals(persisted.getCreatedAt(), response.path("createdAt").asString());
+        assertEquals(persisted.getUpdatedAt(), response.path("updatedAt").asString());
+    }
+
+    @Test
+    void persistedTimestampsStayInTheirWorkspace() {
+        Note created = noteService.create(draft("Workspace note", null));
+
+        assertNotNull(noteMapper.getNoteTimestamps(workspace.getId(), created.getId()));
+        assertNull(noteMapper.getNoteTimestamps(workspace.getId() + 1, created.getId()));
     }
 
     @Test

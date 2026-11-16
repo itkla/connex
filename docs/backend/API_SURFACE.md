@@ -103,6 +103,11 @@ links and reconciles its header and save snapshot with save responses and refres
 props. A response from a save started before a refresh cannot restore the older links. The
 dialog removes a link when its selector is emptied and sends explicit `null`.
 
+Note create and update responses read `createdAt` and `updatedAt` from the persisted row
+inside the write transaction, overwriting submitted timestamps. After an acknowledged save,
+refreshed link metadata needs a strictly newer parsed `updatedAt`; ties retain the save.
+Missing or invalid timestamps preserve the editor's existing prop-adoption fallback.
+
 Standard note audit diffs retain content, title and visibility (visibility alone for private
 notes), not the person/deal relationship fields. Inline references in audited content do not
 establish which relationships were set, so those diffs cannot reliably reconstruct detached

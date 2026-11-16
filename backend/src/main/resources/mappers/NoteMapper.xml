@@ -217,6 +217,11 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getNoteTimestamps" resultMap="NoteResult">
+    SELECT id, created_at, updated_at FROM note
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
   <select id="getVisibleNotesPage" resultMap="NoteResult">
     SELECT <include refid="qualifiedNoteColumns"/> FROM note n
     WHERE n.workspace_id = #{workspaceId}

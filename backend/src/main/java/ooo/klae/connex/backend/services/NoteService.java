@@ -220,7 +220,7 @@ public class NoteService {
         if (!PRIVATE.equals(note.getVisibility())) {
             notifyMentions(workspaceId, note, mentioned, actor);
         }
-        return hydrateReferences(workspaceId, note);
+        return hydrateSavedNote(workspaceId, note);
     }
 
     @Transactional
@@ -256,7 +256,7 @@ public class NoteService {
         if (!PRIVATE.equals(note.getVisibility())) {
             notifyMentions(workspaceId, note, mentioned, actor);
         }
-        return hydrateReferences(workspaceId, note);
+        return hydrateSavedNote(workspaceId, note);
     }
 
     @Transactional
@@ -400,7 +400,11 @@ public class NoteService {
         }
     }
 
-    private Note hydrateReferences(int workspaceId, Note note) {
+    private Note hydrateSavedNote(int workspaceId, Note note) {
+        Note persisted = noteMapper.getNoteTimestamps(workspaceId, note.getId());
+        if (persisted == null) throw new ResourceNotFoundException("Note not found with id: " + note.getId());
+        note.setCreatedAt(persisted.getCreatedAt());
+        note.setUpdatedAt(persisted.getUpdatedAt());
         note.setReferences(referenceService.referencesForReader(workspaceId, ReferenceService.SOURCE_NOTE, note.getId()));
         return note;
     }
