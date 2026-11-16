@@ -155,7 +155,7 @@ export default function PipelineChart({
                                             </span>
                                             <span
                                                 className={cn(
-                                                    'text-xl leading-none font-semibold tabular-nums',
+                                                    'text-xl leading-none font-semibold whitespace-nowrap tabular-nums',
                                                     isActive ? 'text-brand-text' : 'text-foreground',
                                                 )}
                                             >
@@ -213,7 +213,7 @@ export default function PipelineChart({
                                             <span className="text-muted-foreground">
                                                 {chartConfig[active].label}
                                             </span>
-                                            <span className="ml-auto font-mono font-medium text-foreground tabular-nums">
+                                            <span className="ml-auto font-mono font-medium whitespace-nowrap text-foreground tabular-nums">
                                                 {formatCompactCurrency(Number(value), currency, locale)}
                                             </span>
                                         </div>

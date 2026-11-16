@@ -286,8 +286,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                         label={t("owner")}
                                         value={contact.ownerId != null ? owner?.displayName ?? '' : t("ownerUnassigned")}
                                     />
-                                    <InfoRow label={t("added")} value={formatDateTime(contact.createdAt, locale, timeZone)} />
-                                    <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale, timeZone)} />
+                                    <InfoRow label={t("added")} value={formatDateTime(contact.createdAt, locale, timeZone)} valueClassName="whitespace-nowrap" />
+                                    <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale, timeZone)} valueClassName="whitespace-nowrap" />
                                     <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                                 </dl>
                             </div>

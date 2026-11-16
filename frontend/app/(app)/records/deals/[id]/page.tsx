@@ -267,7 +267,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <StatusPill outcome={outcome} t={t} />
                                     )}
                                     {deal.expectedCloseDate ? (
-                                        <span className="inline-flex items-center gap-1">
+                                        <span className="inline-flex items-center gap-1 whitespace-nowrap">
                                             <CalendarIcon className="size-3.5" />
                                             {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale, timeZone) })}
                                         </span>
@@ -322,10 +322,10 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
                                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
                                         <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
-                                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale, timeZone)} />
-                                        <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : '—'} />
-                                        <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale, timeZone)} />
-                                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale, timeZone)} />
+                                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale, timeZone)} valueClassName="whitespace-nowrap" />
+                                        <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : '—'} valueClassName="whitespace-nowrap" />
+                                        <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale, timeZone)} valueClassName="whitespace-nowrap" />
+                                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale, timeZone)} valueClassName="whitespace-nowrap" />
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
                                     </dl>
                                 </div>

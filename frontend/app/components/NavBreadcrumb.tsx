@@ -45,7 +45,7 @@ function ResolvedCrumbLink({
     const href = crumb.returnCollection
         ? resolveRecordReturnPath(crumb.returnCollection, returnTarget)
         : crumb.pathname;
-    const className = dropdown ? undefined : "max-w-[12rem] truncate";
+    const className = dropdown ? undefined : "min-w-0 max-w-full truncate";
     const link = crumb.returnCollection && !dropdown ? (
         <RecordReturnLink href={href} className={className}>
             {crumb.label}
@@ -72,8 +72,14 @@ export default function NavBreadcrumb({ mode = "desktop" }: { mode?: BreadcrumbD
             <BreadcrumbList className="flex-nowrap overflow-hidden">
                 {nodes.map((node, index) => (
                     <Fragment key={node.kind === "crumb" ? node.crumb.pathname : "ellipsis"}>
-                        {index > 0 ? <BreadcrumbSeparator /> : null}
-                        <BreadcrumbItem className={index === nodes.length - 2 ? "min-w-0 shrink-0" : "min-w-0"}>
+                        {index > 0 ? <BreadcrumbSeparator className="shrink-0" /> : null}
+                        <BreadcrumbItem className={node.kind === "ellipsis"
+                            ? "shrink-0"
+                            : node.crumb.current
+                                ? "min-w-[7rem] max-w-[16rem]"
+                                : index === 0
+                                    ? "min-w-[3ch] max-w-[6rem] shrink-[1000]"
+                                    : "min-w-[3ch] max-w-[6rem] shrink-[100]"}>
                             {node.kind === "ellipsis" ? (
                                 <DropdownMenu>
                                     <DropdownMenuTrigger
@@ -89,7 +95,7 @@ export default function NavBreadcrumb({ mode = "desktop" }: { mode?: BreadcrumbD
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             ) : node.crumb.current ? (
-                                <BreadcrumbPage className="max-w-[16rem] truncate">
+                                <BreadcrumbPage className="w-full shrink-0 truncate">
                                     {node.crumb.label}
                                 </BreadcrumbPage>
                             ) : (

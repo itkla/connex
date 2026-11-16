@@ -693,12 +693,12 @@ function ReportPaper({
                     <dl className="grid shrink-0 gap-3 text-sm">
                         <div>
                             <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.period')}</dt>
-                            <dd className="mt-1 font-medium text-foreground">{formatRange(document.periodStart, document.periodEnd, locale)}</dd>
+                            <dd className="mt-1 font-medium whitespace-nowrap text-foreground">{formatRange(document.periodStart, document.periodEnd, locale)}</dd>
                         </div>
                         {hasComparison ? (
                             <div>
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.comparison')}</dt>
-                                <dd className="mt-1 text-foreground">{formatRange(document.priorPeriodStart, document.priorPeriodEnd, locale)}</dd>
+                                <dd className="mt-1 whitespace-nowrap text-foreground">{formatRange(document.priorPeriodStart, document.priorPeriodEnd, locale)}</dd>
                             </div>
                         ) : null}
                         {hasCurrentStateWidgets ? (
@@ -706,13 +706,13 @@ function ReportPaper({
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
                                     {t('document.currentStateAsOf')}
                                 </dt>
-                                <dd className="mt-1 text-foreground">{formatDateTime(document.generatedAt, locale, timeZone)}</dd>
+                                <dd className="mt-1 whitespace-nowrap text-foreground">{formatDateTime(document.generatedAt, locale, timeZone)}</dd>
                             </div>
                         ) : null}
                         {snapshot ? (
                             <div>
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.snapshot')}</dt>
-                                <dd className="mt-1 text-foreground">{formatDateTime(snapshot.generatedAt, locale, timeZone)}</dd>
+                                <dd className="mt-1 whitespace-nowrap text-foreground">{formatDateTime(snapshot.generatedAt, locale, timeZone)}</dd>
                             </div>
                         ) : null}
                     </dl>
@@ -919,7 +919,7 @@ function ReportPaper({
 
             <footer className="mt-10 flex flex-wrap justify-between gap-3 border-t border-border pt-5 text-xs text-muted-foreground">
                 <span>{t('document.generatedBy')}</span>
-                <span>{formatDateTime(document.generatedAt, locale, timeZone)}</span>
+                <span className="whitespace-nowrap">{formatDateTime(document.generatedAt, locale, timeZone)}</span>
             </footer>
         </article>
     );

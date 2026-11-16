@@ -533,7 +533,7 @@ export function buildBreadcrumbNodes(
     crumbs: BreadcrumbCrumb[],
     mode: BreadcrumbDisplayMode,
 ): BreadcrumbNode[] {
-    const visibleLimit = mode === "mobile" ? 2 : 4;
+    const visibleLimit = mode === "mobile" ? 2 : 3;
     if (crumbs.length <= visibleLimit) {
         return crumbs.map((crumb) => ({ kind: "crumb", crumb }));
     }
@@ -546,8 +546,7 @@ export function buildBreadcrumbNodes(
     }
     return [
         { kind: "crumb", crumb: crumbs[0] },
-        { kind: "ellipsis", hidden: crumbs.slice(1, -2) },
-        { kind: "crumb", crumb: crumbs[crumbs.length - 2] },
+        { kind: "ellipsis", hidden: crumbs.slice(1, -1) },
         { kind: "crumb", crumb: crumbs[crumbs.length - 1] },
     ];
 }

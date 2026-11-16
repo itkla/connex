@@ -230,8 +230,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
                                         : t("ownerUnassigned")}
                                 />
-                                <InfoRow label={t("added")} value={formatDateTime(company.createdAt, locale, timeZone)} />
-                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale, timeZone)} />
+                                <InfoRow label={t("added")} value={formatDateTime(company.createdAt, locale, timeZone)} valueClassName="whitespace-nowrap" />
+                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale, timeZone)} valueClassName="whitespace-nowrap" />
                                 <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
                             </dl>
                         </RecordDetailSection>
