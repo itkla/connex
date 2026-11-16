@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
-import { cleanup, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { NextIntlClientProvider, createTranslator } from 'next-intl';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -49,6 +50,50 @@ describe.each(['en', 'ja'] as const)('company import review in %s', (locale) => 
         expect(screen.queryByText(t('companyChoice', { name: '㈱テスト' }))).toBeNull();
         expect(screen.queryByText(t('companyWillCreate', { name: '㈱テスト' }))).toBeNull();
         expect(screen.queryByText(t('companyChoiceHint'))).toBeNull();
+    });
+
+    it('reopens a selected company disclosure and applies the choice to every matching row', () => {
+        const rows: ImportRowAnalysis[] = [0, 1].map((rowIndex) => ({
+            rowIndex, status: 'invalid', companyDependency: {
+                name: candidate.name, key: 'test', truncated: false, candidates: [candidate],
+            },
+        }));
+        const onChoice = vi.fn<(indices: number[], id: number | null) => void>();
+        function ReviewState() {
+            const [companyLinks, setCompanyLinks] = useState<Record<number, number>>({});
+            return <>{rows.map((row) => <section key={row.rowIndex} data-testid={`company-row-${row.rowIndex}`}>
+                <CompanyChoices row={row} allRows={rows} selectedId={companyLinks[row.rowIndex]}
+                    onChoice={(indices, id) => {
+                        onChoice(indices, id);
+                        setCompanyLinks((previous) => {
+                            const next = { ...previous };
+                            for (const index of indices) {
+                                if (id == null) delete next[index];
+                                else next[index] = id;
+                            }
+                            return next;
+                        });
+                    }} />
+            </section>)}</>;
+        }
+        render(<NextIntlClientProvider locale={locale} messages={messages}>
+            <ReviewState />
+        </NextIntlClientProvider>);
+        const firstRow = screen.getByTestId('company-row-0');
+        fireEvent.click(within(firstRow).getByRole('button', { name: t('candidateUse') }));
+        expect(onChoice).toHaveBeenLastCalledWith([0], candidate.recordId);
+        expect(within(firstRow).queryByText(t('companyChoice', { name: candidate.name }))).toBeNull();
+        expect(within(firstRow).queryByText(t('companyChoiceHint'))).toBeNull();
+        expect(firstRow.querySelector('details')?.open).toBe(false);
+        fireEvent.click(within(firstRow).getByText(t('companySelected', { name: candidate.name })));
+        expect(firstRow.querySelector('details')?.open).toBe(true);
+        fireEvent.click(within(firstRow).getByRole('button', { name: t('applyCompanyChoice', { count: 2 }) }));
+        expect(onChoice).toHaveBeenLastCalledWith([0, 1], candidate.recordId);
+        for (const row of rows) {
+            const reviewedRow = screen.getByTestId(`company-row-${row.rowIndex}`);
+            expect(within(reviewedRow).getByText(t('companySelected', { name: candidate.name }))).toBeTruthy();
+            expect(within(reviewedRow).queryByText(t('companyChoice', { name: candidate.name }))).toBeNull();
+        }
     });
 
     it('never promises creation when the company candidate set was truncated', () => {
