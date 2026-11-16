@@ -14,8 +14,8 @@ function secondaryLine(contact: Contact): string {
  * with warmth as the trailing decision cue because relationship temperature is what a phone user is
  * triaging by.
  *
- * Both text lines truncate on one line each, so a long Japanese company name shortens the line
- * rather than wrapping the row or widening the list.
+ * Below 400px the name spans the row and can use two lines so full-width Japanese glyphs remain
+ * readable. Wider lists keep a single-line name and trailing warmth cue. Long values stay bounded.
  */
 export default function ContactListRow({
     contact,
@@ -26,12 +26,12 @@ export default function ContactListRow({
 }) {
     const secondary = secondaryLine(contact);
     return (
-        <span className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-foreground">{contact.name}</span>
-                {secondary && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{secondary}</span>}
+        <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2">
+            <span className="col-span-2 min-w-0 line-clamp-2 wrap-break-word whitespace-normal text-sm font-medium text-foreground min-[400px]:col-span-1 min-[400px]:line-clamp-none min-[400px]:truncate" title={contact.name}>
+                {contact.name}
             </span>
-            <span className="shrink-0">
+            {secondary && <span className="col-start-1 row-start-2 mt-0.5 block min-w-0 truncate text-xs text-muted-foreground" title={secondary}>{secondary}</span>}
+            <span className="col-start-2 row-start-2 mt-0.5 min-[400px]:row-span-2 min-[400px]:row-start-1 min-[400px]:mt-0">
                 <WarmthPill temp={temperature} />
             </span>
         </span>

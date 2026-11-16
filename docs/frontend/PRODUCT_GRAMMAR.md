@@ -57,7 +57,11 @@ Cards represent genuine semantic units: an actionable insight, record preview, g
 
 Comfortable density is the default. Compactness is explicit, scoped, reversible, and persistent only for bounded work modes such as tables, bulk cleanup, imports, or pipeline review. Do not globally compact dashboards, forms, detail pages, or mobile.
 
+Record-table column definitions may cap intrinsic text width through `ColumnDef.maxWidth`, shared by the header, body cell, and truncating content. Contacts, Companies, and Deals cap names at 20rem; contact titles and email at 16rem. Truncated values retain their full text in a title, including rich names and inline-edit displays. These are default content bounds; user-controlled resizing and its persistence remain under #413.
+
 Mobile keeps the same capability semantics but uses task-adaptive lists and focused sheets rather than horizontally scrolled desktop tables or indiscriminate desktop-card stacks. Prefer one focused task at a time and generous touch targets.
+
+Below 400px, contact-list names span the available text width and may wrap to two lines so Japanese names remain identifiable; Latin words wrap at normal word boundaries, with emergency wrapping for an oversized word. Warmth shares the secondary line. Wider mobile lists retain single-line name truncation and the trailing warmth cue. Keep the full name in a title.
 
 ## Operation → surface mapping
 
