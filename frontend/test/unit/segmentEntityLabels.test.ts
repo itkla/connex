@@ -28,6 +28,13 @@ describe.each([
         expect(segmentConditionLabel(definition.conditions[0], t, String, undefined, 'person')).toContain(contact);
     });
 
+    it('explains linked-company comparisons and directs missing-company searches to Contacts', () => {
+        const hint = t('linkedCompanyHint');
+        expect(hint).toMatch(locale === 'en' ? /supports is \/ is not/ : /一致・不一致/);
+        expect(hint).toMatch(locale === 'en' ? /empty company name is unavailable/ : /会社名の空欄は判定できません/);
+        expect(hint).toMatch(locale === 'en' ? /Company filter in Contacts/ : /連絡先一覧の会社フィルター/);
+    });
+
     it('distinguishes the linked company, resolves references and preserves all/any groups', () => {
         const definition: SegmentDefinition = {
             match: 'all', conditions: [{ type: 'field', field: 'company', op: 'is', value: '42' }],

@@ -263,6 +263,8 @@
     "skipRow": "Skip row",
     "includeRow": "Include row",
     "errorColumn": "Problem",
+    "companyWillCreate": "Company {name} will be created when this row is imported.",
+    "companySelected": "Company selected: {name}",
     "companyChoice": "Choose company for {name}",
     "companyChoiceHint": "Names alone do not select a company. Choose a visible record, then refresh the review. Skip the row if none is suitable.",
     "bulkCompanyReview": "Use {name} for {count} rows with this company name? Only rows showing this company as a candidate are included. Refresh the review after applying.",
