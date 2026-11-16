@@ -28,6 +28,7 @@ import { renderedWorkspaceNavigationVersion, workspacePinnedRequest } from "@/ap
 import { toastDismiss, toastError, toastInfo } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { noteRecordLinks } from "@/app/lib/noteRecordLinks";
+import { parseMysqlDateTime } from "@/app/lib/utils";
 import NoteRecordLinks from "./NoteRecordLinks";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecordReturnLink from "@/app/components/records/RecordReturnLink";
@@ -42,6 +43,14 @@ type NoteEditorDraft = {
     title: string;
     content: string;
     visibility: NoteVisibility;
+};
+
+type NoteLinkState = {
+    source: Note | null;
+    revision: number;
+    links: { person: number | null; deal: number | null };
+    references: Note["references"];
+    acknowledgedUpdatedAt?: string;
 };
 
 const KEPT_DRAFT_LABEL_LENGTH = 48;
@@ -99,18 +108,24 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [originWorkspaceId] = useState(activeWorkspaceId);
     const [originNavigationVersion] = useState(renderedWorkspaceNavigationVersion);
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
-    const [linkState, setLinkState] = useState({
+    const [linkState, setLinkState] = useState<NoteLinkState>({
         source: note,
         revision: 0,
         links: { person: note?.person ?? null, deal: note?.deal ?? null },
         references: note?.references,
     });
     if (linkState.source !== note) {
+        const propUpdatedAt = parseMysqlDateTime(note?.updatedAt);
+        const acknowledgedAt = parseMysqlDateTime(linkState.acknowledgedUpdatedAt);
+        const adopt = !Number.isFinite(propUpdatedAt) || !Number.isFinite(acknowledgedAt) || propUpdatedAt > acknowledgedAt;
         setLinkState({
+            ...linkState,
             source: note,
-            revision: linkState.revision + 1,
-            links: { person: note?.person ?? null, deal: note?.deal ?? null },
-            references: note?.references,
+            ...(adopt ? {
+                revision: linkState.revision + 1,
+                links: { person: note?.person ?? null, deal: note?.deal ?? null },
+                references: note?.references,
+            } : {}),
         });
     }
     const { links, revision: linkRevision } = linkState;
@@ -243,10 +258,12 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
                 if (stateRef.current.linkRevision === snapshot.linkRevision) {
                     stateRef.current = { ...stateRef.current, ...savedLinks };
-                    setLinkState((current) => current.revision === snapshot.linkRevision
-                        ? { ...current, links: savedLinks, references: saved.references }
-                        : current);
                 }
+                setLinkState((current) => ({
+                    ...current,
+                    acknowledgedUpdatedAt: saved.updatedAt,
+                    ...(current.revision === snapshot.linkRevision ? { links: savedLinks, references: saved.references } : {}),
+                }));
                 if (snapshot.noteId == null && saved?.id) {
                     rekeyEditorDraft(`note:${saved.id}`);
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
@@ -306,10 +323,12 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
             if (stateRef.current.linkRevision === snapshot.linkRevision) {
                 stateRef.current = { ...stateRef.current, ...savedLinks };
-                setLinkState((current) => current.revision === snapshot.linkRevision
-                    ? { ...current, links: savedLinks, references: saved.references }
-                    : current);
             }
+            setLinkState((current) => ({
+                ...current,
+                acknowledgedUpdatedAt: saved.updatedAt,
+                ...(current.revision === snapshot.linkRevision ? { links: savedLinks, references: saved.references } : {}),
+            }));
             rekeyEditorDraft(`note:${saved.id}`);
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);

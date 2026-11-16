@@ -303,6 +303,8 @@ The same principle applies generally: extend an existing shared composer/control
 
 Note headers and list cards show the same resolved contact, deal and company links without choosing one record over another. Explicit contact/deal associations come first; company links use the note's server-resolved references because notes have no direct company field. Headers link to records; cards keep their single note destination.
 
+After a note save is acknowledged, refreshed link metadata must have a strictly newer parsed `updatedAt` to replace it; ties retain the save. Missing or invalid timestamps preserve prop adoption, and the existing revision guard still prevents a delayed save from overwriting already adopted props.
+
 ## Unsaved work and destructive actions
 
 Any dialog/drawer that accumulates meaningful input participates in the shared unsaved-changes/discard-confirm pattern. Quick-edit shells inherit this through their existing dirty-state contract. Keep the draft-guard inventory/gate current when adding an eligible surface; do not increase a baseline to hide a missing guard.

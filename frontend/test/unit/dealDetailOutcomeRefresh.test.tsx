@@ -105,6 +105,23 @@ describe('acknowledged deal outcome rendering', () => {
         expect(requests.error).toHaveBeenCalledOnce();
     });
 
+    it('retains reopened server v3 after acknowledging won v2 and receiving delayed v1 props', async () => {
+        requests.close.mockResolvedValueOnce(won);
+        const view = render(detail());
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: en.DealsActionsMenu.markWon })); });
+        const header = screen.getByRole('region', { name: 'Header' });
+        expect(within(header).getByText(en.DealsPage.statusWon)).toBeTruthy();
+
+        const reopened: Deal = { ...open, version: 3 };
+        view.rerender(detail(reopened));
+        expect(within(header).getByText(en.DealsPage.statusOpen)).toBeTruthy();
+        view.rerender(detail({ ...open }));
+
+        expect(within(header).getByText(en.DealsPage.statusOpen)).toBeTruthy();
+        expect(header.textContent).toContain('25,400');
+        expect(within(screen.getByRole('region', { name: 'Performance' })).getAllByText('—')).toHaveLength(3);
+    });
+
     it('publishes reopen responses and clears the actual amount without waiting for refresh', async () => {
         requests.reopen.mockResolvedValueOnce({ ...open, version: 3 });
         render(detail(won));

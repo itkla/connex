@@ -7,13 +7,20 @@ import { latestDealSnapshot } from './dealEditConflict';
 type DealDetailState = { deal: Deal; publish: (saved: Deal) => void };
 const DealDetailContext = createContext<DealDetailState | null>(null);
 
-/** Shares acknowledged outcomes until a server refresh reaches their version. Scope by workspace and deal. */
+/** Retains the newest server or acknowledged snapshot within one workspace and deal. */
 export function DealDetailProvider({ initial, children }: { initial: Deal; children: ReactNode }) {
-    const [saved, setSaved] = useState<Deal | null>(null);
-    const deal = latestDealSnapshot(initial, saved);
+    const [snapshot, setSnapshot] = useState({ source: initial, retained: initial });
+    const sameScope = initial.id === snapshot.source.id && initial.workspaceId === snapshot.source.workspaceId;
+    const deal = sameScope ? latestDealSnapshot(initial, snapshot.retained) : initial;
+    if (snapshot.source !== initial) {
+        setSnapshot({ source: initial, retained: deal });
+    }
     const publish = (next: Deal) => {
-        if (next.id !== initial.id || (initial.workspaceId !== undefined && next.workspaceId !== initial.workspaceId)) return;
-        setSaved((current) => latestDealSnapshot(latestDealSnapshot(initial, current), next));
+        setSnapshot((current) => {
+            const scope = current.source;
+            if (next.id !== scope.id || (scope.workspaceId !== undefined && next.workspaceId !== scope.workspaceId)) return current;
+            return { ...current, retained: latestDealSnapshot(current.retained, next) };
+        });
     };
     return <DealDetailContext.Provider value={{ deal, publish }}>{children}</DealDetailContext.Provider>;
 }
