@@ -98,7 +98,7 @@ for (const [locale, currency, theme] of [['en', 'USD', 'light'], ['ja', 'JPY', '
             return result.violations.map(({ id, nodes }) => ({ id, targets: nodes.map((node) => node.target) }));
         });
         expect(violations).toEqual([]);
-        await page.getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
+        await page.getByRole('main').locator('[data-slot="split-button"]').getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
         const dialog = page.getByRole('dialog', { name: message(locale, 'deals', 'DealsNewDialog.title'), exact: true });
         await expect(dialog.getByRole('button', { name: message(locale, 'common', 'UI.showOptions'), exact: true }).first()).toBeVisible();
         const dialogViolations = await page.evaluate(async () => {

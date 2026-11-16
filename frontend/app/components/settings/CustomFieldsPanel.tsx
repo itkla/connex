@@ -248,7 +248,7 @@ export default function CustomFieldsPanel({
                                         <DropdownMenuTrigger asChild>
                                             <button
                                                 type="button"
-                                                aria-label={t("fieldActions")}
+                                                aria-label={t("fieldActions", { field: field.label })}
                                                 className={rowActionTrigger}
                                             >
                                                 <EllipsisHorizontalIcon className="size-5" />

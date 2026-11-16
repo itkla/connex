@@ -55,7 +55,7 @@
     },
     "ContactsBrowser": {
         "heading": "Contacts",
-        "newAria": "Add contact",
+        "newAria": "New contact",
         "new": "New",
         "displayModeAria": "Display mode",
         "gridViewAria": "Grid view",

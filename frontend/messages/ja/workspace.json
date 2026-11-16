@@ -1,7 +1,7 @@
 {
     "WorkspaceSwitcher": {
         "label": "ワークスペース",
-        "switchAria": "ワークスペースを切り替え",
+        "switchAria": "{workspace}、{count}、ワークスペースを切り替え",
         "oneWorkspace": "1 件のワークスペース",
         "manyWorkspaces": "{count} 件のワークスペース",
         "createOrJoin": "ワークスペースを追加",
@@ -1132,7 +1132,7 @@
     },
     "WorkspaceCustomFields": {
         "newField": "フィールドを追加",
-        "fieldActions": "フィールドの操作",
+        "fieldActions": "{field}の操作",
         "edit": "編集",
         "delete": "削除",
         "created": "フィールドを作成しました",

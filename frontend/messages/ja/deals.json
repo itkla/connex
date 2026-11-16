@@ -217,7 +217,7 @@
     "DealsBrowser": {
         "columnClosedAt": "決着日",
         "title": "案件",
-        "addDeal": "案件を追加",
+        "addDeal": "新規案件",
         "newButton": "新規",
         "revenueTrend": "収益トレンド",
         "stageRatio": "ステージ分布",

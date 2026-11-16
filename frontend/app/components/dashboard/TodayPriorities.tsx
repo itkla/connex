@@ -80,7 +80,6 @@ function Strip({
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
             <Link
                 href="/me"
-                aria-label={cta}
                 className="group flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/50"
             >
                 <span className={`grid size-9 shrink-0 place-items-center rounded-lg ${muted ? 'bg-muted text-muted-foreground' : 'bg-brand-light/60 text-foreground'}`}>

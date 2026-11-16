@@ -246,8 +246,8 @@ function fileInputs(source: string, file: string): JsxElementNode[] {
     });
 }
 
-function translationKey(input: JsxElementNode): string | null {
-    const label = attribute(input, "aria-label");
+function translationKey(input: JsxElementNode, name = "aria-label"): string | null {
+    const label = attribute(input, name);
     if (label === undefined || label.initializer === undefined) return null;
     if (!ts.isJsxExpression(label.initializer)) return null;
     const expression = label.initializer.expression;
@@ -277,6 +277,47 @@ describe("photo picker names", () => {
             for (const locale of LOCALES) {
                 expect(message(locale, catalog, namespace, key ?? "")).toBeTruthy();
             }
+        }
+    });
+});
+
+describe("records label in name", () => {
+    const browsers = [
+        { file: "contacts/ContactsBrowser", catalog: "contacts", namespace: "ContactsBrowser" },
+        { file: "companies/CompaniesBrowser", catalog: "companies", namespace: "CompaniesBrowser" },
+        { file: "deals/DealsBrowser", catalog: "deals", namespace: "DealsBrowser" },
+    ];
+
+    it.each(browsers)("starts the New action name with its visible label in $file", ({ file, catalog, namespace }) => {
+        const path = `app/components/records/${file}.tsx`;
+        const actions = descendants(parse(readFileSync(join(ROOT, path), "utf8"), path),
+            (candidate) => tagName(candidate) === "RecordsActions");
+        expect(actions).toHaveLength(1);
+        for (const action of actions) {
+            const visibleKey = translationKey(action, "newLabel");
+            const accessibleKey = translationKey(action, "newAriaLabel");
+            expect(visibleKey).not.toBeNull();
+            expect(accessibleKey).not.toBeNull();
+            for (const locale of LOCALES) {
+                const visible = message(locale, catalog, namespace, visibleKey ?? "");
+                const accessible = message(locale, catalog, namespace, accessibleKey ?? "");
+                expect(typeof visible).toBe("string");
+                expect(typeof accessible).toBe("string");
+                if (typeof visible !== "string" || typeof accessible !== "string") throw new Error("Missing action label");
+                expect(accessible.startsWith(visible), `${locale}: ${accessible} must start with ${visible}`).toBe(true);
+            }
+        }
+    });
+
+    it("passes the translated contact noun to the select-all control", () => {
+        const file = "app/components/records/contacts/ContactsBrowser.tsx";
+        const views = descendants(parse(readFileSync(join(ROOT, file), "utf8"), file),
+            (candidate) => tagName(candidate) === "RecordsRenderView");
+        expect(views).toHaveLength(1);
+        for (const view of views) {
+            const key = translationKey(view, "entityLabel");
+            expect(key).not.toBeNull();
+            expect(message("ja", "contacts", "ContactsBrowser", key ?? "")).toBe("連絡先");
         }
     });
 });

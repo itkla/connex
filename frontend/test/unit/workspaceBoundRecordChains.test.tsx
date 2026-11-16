@@ -132,7 +132,7 @@ vi.mock("@/app/components/motion/Rise", () => ({
     default: ({ children }: { children?: ReactNode }) => {
         if (!browser.showSelectionActions || !isValidElement<{ selectionActions?: ReactNode; children?: ReactNode }>(children)) return null;
         const nested = children.props.children;
-        if (isValidElement<{ columns?: ColumnDef<Contact>[]; entityLabel?: string }>(nested) && nested.props.entityLabel === "contact") {
+        if (isValidElement<{ columns?: ColumnDef<Contact>[] }>(nested) && nested.props.columns?.some((column) => column.key === "email")) {
             captured.contactColumns = nested.props.columns ?? null;
         }
         const actions = children.props.selectionActions ?? (isValidElement<{ selectionActions?: ReactNode }>(nested) ? nested.props.selectionActions : null);

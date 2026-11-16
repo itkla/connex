@@ -1,7 +1,7 @@
 {
     "WorkspaceSwitcher": {
         "label": "Workspace",
-        "switchAria": "Switch workspace",
+        "switchAria": "{workspace}, {count}, switch workspace",
         "oneWorkspace": "1 workspace",
         "manyWorkspaces": "{count} workspaces",
         "createOrJoin": "Add workspace",
@@ -1132,7 +1132,7 @@
     },
     "WorkspaceCustomFields": {
         "newField": "Add field",
-        "fieldActions": "Field actions",
+        "fieldActions": "Actions for {field}",
         "edit": "Edit",
         "delete": "Delete",
         "created": "Field created",

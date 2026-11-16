@@ -117,7 +117,7 @@ async function workspaceCookie(context: BrowserContext): Promise<string | undefi
 
 /** Chooses a workspace in the sidebar switcher, the explicit reselection a member makes. */
 async function switchWorkspace(page: Page, name: string): Promise<void> {
-    const switcher = page.getByRole("button", { name: "Switch workspace" });
+    const switcher = page.getByRole("button", { name: /, switch workspace$/ });
     await switcher.click();
     await page.getByRole("menuitem").filter({ hasText: name }).click();
     await expect(page).toHaveURL(/\/dashboard$/);
@@ -183,7 +183,7 @@ test.describe("drafts stay in the workspace they were started in", () => {
             expect(await workspaceCookie(memberContext)).toBe(String(revokedWorkspaceId));
 
             const page = await memberContext.newPage();
-            const switcher = page.getByRole("button", { name: "Switch workspace" });
+            const switcher = page.getByRole("button", { name: /, switch workspace$/ });
             const flushedBody = `Switch flush ${runId}`;
             await page.goto("/activity/notes/new");
             await expect(switcher).toContainText(revokedName);

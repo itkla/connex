@@ -217,7 +217,7 @@
     "DealsBrowser": {
         "columnClosedAt": "Closed at",
         "title": "Deals",
-        "addDeal": "Add deal",
+        "addDeal": "New deal",
         "newButton": "New",
         "revenueTrend": "Revenue trend",
         "stageRatio": "Stage distribution",
