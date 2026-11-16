@@ -65,6 +65,7 @@
             "runWorkflow": "ワークフローを実行"
         },
         "workspace": {
+            "runWorkflow": "ワークフローを選んで実行…",
             "themeLight": "ライトテーマ",
             "themeDark": "ダークテーマ",
             "themeSystem": "システムテーマ",

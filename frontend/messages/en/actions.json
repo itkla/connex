@@ -65,6 +65,7 @@
             "runWorkflow": "Run workflow"
         },
         "workspace": {
+            "runWorkflow": "Run a workflow…",
             "themeLight": "Light theme",
             "themeDark": "Dark theme",
             "themeSystem": "System theme",

@@ -255,9 +255,7 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         order: 20,
         isAvailable: (context) => {
             const recordType = context.record?.type ?? context.selection?.type;
-            return recordType === undefined
-                ? context.workspace !== null
-                : recordType === "person" || recordType === "company" || recordType === "deal";
+            return recordType === "person" || recordType === "company" || recordType === "deal";
         },
         execute: (context, helpers) => {
             const resolvedScope = context.record && typeof context.record.id === "number"

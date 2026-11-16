@@ -25,6 +25,17 @@ Normal page titles use `PageHeader` rather than a bare page-level `<h1>`.
 - Use compact/secondary treatment only for genuinely secondary pages.
 - Domain identity heroes (record identity, Me, report/document hero surfaces) may keep their bespoke identity header while still following the page-shell grammar.
 
+## Command palette and shortcuts
+
+The palette carries the header search query across and selects it on every open so typing replaces it.
+Record actions require a focused record or list selection. The context-free workflow launcher belongs
+to Workspace and is offered only with effective `RULE_MANAGE` permission and an enabled, unpaused,
+published workflow whose execution and record type support manual runs. Catalogue failures keep it hidden.
+The action provider dispatches registered shortcuts through the same availability and execution path
+as menus. Editable controls, composition (including key code 229), repeated and already-handled keys
+retain their native behavior. Selected command rows use the accent text pair and a brand-text inset
+outline, with immediate feedback and no selection animation.
+
 ## Record details
 
 Contact, Company, and Deal detail pages share a long-form grammar rather than one rigid template.

@@ -36,7 +36,13 @@ import {
 } from "@/app/lib/actions/types";
 import { actionNamesItself } from "@/app/lib/actions/actionLabels";
 import { devInvariant } from "@/app/lib/actions/devInvariant";
-import { normalizeShortcut, RESERVED_CHORDS } from "@/app/lib/actions/shortcut";
+import {
+    isEditableShortcutTarget,
+    matchesShortcut,
+    normalizeShortcut,
+    RESERVED_CHORDS,
+    resolveShortcutPlatform,
+} from "@/app/lib/actions/shortcut";
 import { resolveCan } from "@/app/lib/actions/permissions";
 import { SEED_ACTIONS } from "@/app/lib/actions/seedActions";
 
@@ -344,6 +350,32 @@ export function ActionProvider({ user, children }: { user: User | null; children
         },
         [router, openOverlay, closeOverlay, showApiError, translate],
     );
+
+    useEffect(() => {
+        let composing = false;
+        const onCompositionStart = () => { composing = true; };
+        const onCompositionEnd = () => { composing = false; };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.defaultPrevented || event.repeat || composing || event.isComposing || event.keyCode === 229
+                || event.composedPath().some(isEditableShortcutTarget)) return;
+            const platform = resolveShortcutPlatform(navigator.platform);
+            for (const action of registryMapRef.current.values()) {
+                if (!action.shortcut || !matchesShortcut(event, action.shortcut, platform)
+                    || (action.isAvailable && !action.isAvailable(contextRef.current))) continue;
+                event.preventDefault();
+                void run(action.id, { source: "shortcut" });
+                return;
+            }
+        };
+        document.addEventListener("keydown", onKeyDown);
+        document.addEventListener("compositionstart", onCompositionStart);
+        document.addEventListener("compositionend", onCompositionEnd);
+        return () => {
+            document.removeEventListener("keydown", onKeyDown);
+            document.removeEventListener("compositionstart", onCompositionStart);
+            document.removeEventListener("compositionend", onCompositionEnd);
+        };
+    }, [run]);
 
     const getAction = useCallback((id: ActionId) => registryMapRef.current.get(id), []);
 

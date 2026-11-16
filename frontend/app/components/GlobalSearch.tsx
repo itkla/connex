@@ -263,7 +263,10 @@ export default function GlobalSearch() {
 
     useEffect(() => {
         if (mode !== 'palette') return;
-        const raf = requestAnimationFrame(() => paletteInputRef.current?.focus());
+        const raf = requestAnimationFrame(() => {
+            paletteInputRef.current?.focus();
+            paletteInputRef.current?.select();
+        });
         return () => cancelAnimationFrame(raf);
     }, [mode]);
 

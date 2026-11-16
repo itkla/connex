@@ -72,6 +72,15 @@ const surfaces = ["--background", "--card", "--popover", "--muted", "--sidebar",
 const feedback = ["--color-brand", "--color-destructive", "--color-info", "--color-warning"];
 
 for (const theme of ["light", "dark"] as const) {
+    it(`the selected command row has readable text and a distinct outline in ${theme} mode`, () => {
+        const tokens = themeTokens(theme);
+        const accent = color(tokens, "--accent");
+        expect(contrast(color(tokens, "--accent-foreground"), accent)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(color(tokens, "--muted-foreground"), accent)).toBeGreaterThanOrEqual(4.5);
+        for (const surface of ["--accent", "--popover"]) {
+            expect(contrast(color(tokens, "--color-brand-text"), color(tokens, surface))).toBeGreaterThanOrEqual(3);
+        }
+    });
     describe(`${theme} WCAG AA text contrast`, () => {
         const tokens = themeTokens(theme);
         for (const surface of surfaces) {
@@ -90,6 +99,14 @@ for (const theme of ["light", "dark"] as const) {
         }
     });
 }
+
+it("applies the contrast-checked selection tokens without delaying keyboard navigation", () => {
+    const command = readFileSync("components/ui/command.tsx", "utf8");
+    expect(command).toContain("data-selected:bg-accent");
+    expect(command).toContain("data-selected:text-accent-foreground");
+    expect(command).toContain("data-selected:ring-1 data-selected:ring-inset data-selected:ring-brand-text");
+    expect(command).not.toMatch(/transition|animate-/);
+});
 
 it("preserves the brand lime and makes Sonner descriptions inherit their variant foreground", () => {
     expect(themeTokens("light")["--color-brand"]).toBe("#73d200");

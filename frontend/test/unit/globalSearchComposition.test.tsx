@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
+import type { PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import GlobalSearch from '@/app/components/GlobalSearch';
@@ -17,6 +18,10 @@ vi.mock('next/navigation', () => ({
     useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/app/lib/api', () => ({ search: mocks.search }));
+vi.mock('motion/react', async (importOriginal) => ({
+    ...await importOriginal<typeof import('motion/react')>(),
+    AnimatePresence: ({ children }: PropsWithChildren) => <>{children}</>,
+}));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 7 }) }));
 vi.mock('@/app/hooks/useActions', () => ({
     useActions: () => ({ run: mocks.run, pendingIds: new Set<string>() }),
@@ -61,6 +66,36 @@ describe.each([
     ['en', { ...enMessages, ...enActions }],
     ['ja', { ...jaMessages, ...jaActions }],
 ] as const)('global search composition in %s', (locale, messages) => {
+    it('selects the carried query on reopen so new typing replaces it', async () => {
+        render(<NextIntlClientProvider locale={locale} messages={messages}><GlobalSearch /></NextIntlClientProvider>);
+        fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+        const first = screen.getByRole('combobox');
+        fireEvent.change(first, { target: { value: 'log' } });
+        fireEvent.keyDown(first, { key: 'Escape' });
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+        fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+        const input = screen.getByRole('combobox');
+        if (!(input instanceof HTMLInputElement)) throw new Error('Missing palette input');
+        await waitFor(() => expect([input.selectionStart, input.selectionEnd]).toEqual([0, 3]));
+        expect(input.value).toBe('log');
+        const replacement = input.value.slice(0, input.selectionStart ?? 0)
+            + 'task' + input.value.slice(input.selectionEnd ?? 0);
+        fireEvent.change(input, { target: { value: replacement } });
+        expect(input.value).toBe('task');
+    });
+
+    it('preserves and selects the inline query when handing it to the palette', async () => {
+        render(<NextIntlClientProvider locale={locale} messages={messages}><GlobalSearch /></NextIntlClientProvider>);
+        const inline = screen.getByRole('combobox');
+        fireEvent.focus(inline);
+        fireEvent.change(inline, { target: { value: '山田' } });
+        fireEvent.keyDown(inline, { key: 'k', ctrlKey: true });
+        const input = screen.getByRole('combobox');
+        if (!(input instanceof HTMLInputElement)) throw new Error('Missing palette input');
+        expect(input.value).toBe('山田');
+        await waitFor(() => expect([input.selectionStart, input.selectionEnd]).toEqual([0, 2]));
+    });
+
     it('keeps a selected cmdk result inactive for native composition and Safari confirmation', async () => {
         render(<NextIntlClientProvider locale={locale} messages={messages}><GlobalSearch /></NextIntlClientProvider>);
         fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
