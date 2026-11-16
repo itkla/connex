@@ -141,7 +141,7 @@
     "nextPage": "次のメモページ",
     "pageStatus": "{total}ページ中{page}ページ",
     "showMore": "さらにメモを表示",
-    "showingCount": "{total} 件中 {shown} 件を表示"
+    "showingCount": "{total, number} 件中 {shown, number} 件を表示"
   },
   "NotesQuickEditSheet": {
     "titleSingle": "メモをクイック編集",

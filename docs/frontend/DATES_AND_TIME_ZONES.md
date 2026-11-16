@@ -6,6 +6,10 @@ with `parseMysqlDateTime`, never with `new Date(rawApiValue)`. Display them with
 from next-intl's `useTimeZone` / `getTimeZone`. Relative-time helpers also take that zone for their
 absolute-date fallback. Do not use the browser or server host's zone as a preference.
 
+Record-list Created and Updated columns use `formatDateTime(value, locale, timeZone)` with the
+profile display zone. Contact and company Added/Updated facts use that same medium-date,
+short-time style, so both timestamps show the same precision without raw API datetime text.
+
 `i18n/request.ts` supplies the request zone and shared request clock. Its cached `requestPreferences`
 resolver shares one authenticated profile read for language and time zone; `requestTimeZone`
 delegates to that same resolver. The zone uses the authenticated profile first, then the active

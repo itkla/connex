@@ -141,7 +141,7 @@
     "nextPage": "Next notes page",
     "pageStatus": "Page {page} of {total}",
     "showMore": "Show more notes",
-    "showingCount": "Showing {shown} of {total}"
+    "showingCount": "Showing {shown, number} of {total, number}"
   },
   "NotesQuickEditSheet": {
     "titleSingle": "Quick edit note",
