@@ -11,7 +11,7 @@ function contactCopy(locale: Locale, key: string): string {
 async function openContact(page: Page, locale: Locale) {
     await setLocale(page, locale);
     await page.goto('/records/contacts');
-    await page.getByRole('button', { name: message(locale, 'contacts', 'ContactsBrowser.newAria'), exact: true }).click();
+    await page.getByRole('main').locator('[data-slot="split-button"]').getByRole('button', { name: message(locale, 'contacts', 'ContactsBrowser.newAria'), exact: true }).click();
     const dialog = page.getByRole('dialog', { name: contactCopy(locale, 'dialogTitle'), exact: true });
     await expect(dialog).toBeVisible();
     return dialog;

@@ -11,7 +11,7 @@ for (const locale of ["en", "ja"] as const) {
             ["deals", "deals", "DealsBrowser", "addDeal"],
         ]) {
             await page.goto(`/records/${entity}`);
-            const action = page.getByRole("main").getByRole("button", {
+            const action = page.getByRole("main").locator('[data-slot="split-button"]').getByRole("button", {
                 name: message(locale, catalog, `${namespace}.${key}`), exact: true,
             });
             await expect(action).toBeVisible();

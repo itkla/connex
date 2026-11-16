@@ -97,7 +97,9 @@ test.describe("authenticated shell navigation", () => {
             failMedia = true;
             await page.reload();
             await expect.poll(() => requestCount).toBe(2);
-            const profileMenu = page.locator("#app-sidebar").getByRole("button", { name: /^E2E Harness/ });
+            const profileMenu = page.locator("#app-sidebar")
+                .locator('button[aria-haspopup="menu"]')
+                .filter({ hasText: `@${runId}` });
             await expect(profileMenu).toBeVisible();
             await expect(profileMenu.locator("img")).toHaveCount(0);
         } finally {

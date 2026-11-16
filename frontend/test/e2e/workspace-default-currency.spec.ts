@@ -94,7 +94,7 @@ for (const locale of ['en', 'ja'] as const) {
         await expect(page.locator('#workspace-default-currency')).toContainText('EUR');
 
         await page.goto('/records/deals');
-        await page.getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
+        await page.getByRole('main').locator('[data-slot="split-button"]').getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
         const dialog = page.getByRole('dialog', { name: message(locale, 'deals', 'DealsNewDialog.title'), exact: true });
         await expect(dialog.locator('#deal-currency')).toHaveValue('EUR');
         await dialog.locator('#deal-name').fill(`Euro default ${key}`);

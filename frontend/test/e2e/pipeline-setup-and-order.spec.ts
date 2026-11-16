@@ -22,7 +22,7 @@ for (const locale of ['en', 'ja'] as const) {
         await useLocale(context, locale);
         await page.addInitScript((theme) => localStorage.setItem('theme', theme), locale === 'ja' ? 'dark' : 'light');
         await page.goto('/records/deals');
-        await page.getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
+        await page.getByRole('main').locator('[data-slot="split-button"]').getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
         const deal = page.getByRole('dialog', { name: message(locale, 'deals', 'DealsNewDialog.title'), exact: true });
         const name = `First renewal ${key}`;
         await deal.locator('#deal-name').fill(name);
@@ -67,7 +67,7 @@ for (const locale of ['en', 'ja'] as const) {
         expect((await created).status()).toBe(200);
         await expect(deal).not.toBeVisible();
 
-        await page.getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
+        await page.getByRole('main').locator('[data-slot="split-button"]').getByRole('button', { name: message(locale, 'deals', 'DealsBrowser.addDeal'), exact: true }).click();
         await expect(deal.getByRole('button', { name: message(locale, 'deals', 'DealsNewDialog.setupPipeline'), exact: true })).not.toBeVisible();
         await deal.locator('#deal-pipeline').click();
         await expect(page.getByRole('option', { name: pipelineName, exact: true })).toBeVisible();
