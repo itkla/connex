@@ -1,5 +1,6 @@
 'use client';
 
+import { autoYAxisWidth, monthAxisTicks } from '@/app/lib/chartAxes';
 import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
@@ -14,6 +15,7 @@ import { type IntroSuggestion, type IntroductionRecord } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import {
     buildCalendarBuckets,
+    formatPeriodTick,
     type AnalyticsWindow,
     type Granularity,
 } from '@/app/components/overview/analytics/metrics';
@@ -34,7 +36,15 @@ export default function IntroActivity({
 
     const { data, made } = useMemo(() => {
         const buckets = buildCalendarBuckets(analyticsWindow, granularity, locale);
-        const rows = buckets.map((bucket) => ({ label: bucket.label, made: 0 }));
+        const rows = buckets.map((bucket, index) => {
+            const date = new Date(bucket.start);
+            const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            return {
+                key,
+                label: granularity === 'month' ? formatPeriodTick(key, granularity, locale, index === 0 || date.getMonth() === 0) : bucket.label,
+                made: 0,
+            };
+        });
         let total = 0;
         for (const record of lineage) {
             const ts = parseMysqlDateTime(record.introducedAt);
@@ -71,10 +81,14 @@ export default function IntroActivity({
                 </div>
             ) : (
                 <ChartContainer config={chartConfig} className="aspect-auto h-40 w-full">
-                    <BarChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
+                    <BarChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                         <CartesianGrid vertical={false} strokeDasharray="3 3" />
                         <XAxis
-                            dataKey="label"
+                            dataKey="key"
+                            padding={{ left: 12, right: 32 }}
+                            tickFormatter={(value: string) => data.find((row) => row.key === value)?.label ?? value}
+                            ticks={granularity === 'month' ? monthAxisTicks(data.map((row) => row.key)) : undefined}
+                            interval={granularity === 'month' ? 0 : 'preserveStartEnd'}
                             tickLine={false}
                             axisLine={false}
                             tickMargin={10}
@@ -83,14 +97,13 @@ export default function IntroActivity({
                         <YAxis
                             tickLine={false}
                             axisLine={false}
-                            tickMargin={4}
-                            width={28}
+                            {...autoYAxisWidth()}
                             allowDecimals={false}
                             tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                         />
                         <ChartTooltip
                             cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
-                            content={<ChartTooltipContent />}
+                            content={<ChartTooltipContent labelFormatter={(value) => data.find((row) => row.key === value)?.label ?? String(value)} />}
                         />
                         <Bar dataKey="made" fill="var(--color-brand)" radius={[4, 4, 0, 0]} />
                     </BarChart>
