@@ -94,6 +94,9 @@ for (const locale of ["en", "ja"] as const) {
             await page.goto("/settings/workspace/audit-diagnostics");
             const search = page.getByRole("textbox", { name: message(locale, "admin", "AdminAuditLog.searchAria") });
             await search.fill(companyName);
+            await expect(page).toHaveURL((url) => url.searchParams.get("q") === companyName);
+            await page.reload();
+            await expect(search).toHaveValue(companyName);
             await exportLoadedRows(page, locale, "/api/audit/export", expected);
             await search.fill("No matching audit event");
             await expect(page.getByRole("button", { name: message(locale, "admin", "AdminAuditLog.exportCsv"), exact: true })).toBeDisabled();
@@ -112,6 +115,9 @@ for (const locale of ["en", "ja"] as const) {
             const orgExpected = orgRows.filter((row) => matchesSearch(row, action)).map(({ id }) => id);
             await page.goto("/settings/organization/audit-diagnostics");
             await page.getByRole("textbox", { name: message(locale, "admin", "AdminAuditLog.searchAria") }).fill(action);
+            await expect(page).toHaveURL((url) => url.searchParams.get("q") === action);
+            await page.reload();
+            await expect(page.getByRole("textbox", { name: message(locale, "admin", "AdminAuditLog.searchAria") })).toHaveValue(action);
             await expect(page.getByRole("button", { name: message(locale, "admin", "AdminAuditLog.filterOutcome"), exact: true })).toBeVisible();
             await exportLoadedRows(page, locale, `${orgPath}/export`, orgExpected);
 
