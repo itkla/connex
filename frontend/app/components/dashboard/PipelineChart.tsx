@@ -172,7 +172,7 @@ export default function PipelineChart({
             </div>
 
             <div className="flex-1 px-2 pt-4 pb-2 sm:px-4">
-                <ChartContainer config={chartConfig} className="aspect-auto h-60 w-full">
+                <ChartContainer config={chartConfig} className="aspect-auto h-60 w-full" data-chart-kind="dashboard-pipeline">
                     <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                         <defs>
                             <linearGradient id="fill-pipeline" x1="0" y1="0" x2="0" y2="1">

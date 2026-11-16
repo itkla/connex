@@ -5,6 +5,7 @@ import type { ReportDefinition, ReportDefinitionInput, ReportDocument } from '@/
 import { activeWorkspaceId, csrfBootstrap, registerUser, seeder } from './support/api';
 import { useLocale } from './support/locale';
 import { message } from './support/messages';
+import { chartAxisLabelOverflow, X_AXIS_TICK_LABELS, Y_AXIS_TICK_LABELS } from './support/chart-labels';
 
 declare global {
     interface Window { axe: typeof axe }
@@ -20,19 +21,8 @@ function id(record: Record<string, unknown>): number {
 
 /** Checks the actual painted label boxes against the SVG and the space allocated before the plot. */
 async function expectAxisLabelsToFit(chart: Locator) {
-    await expect(chart.locator('.recharts-yAxis .recharts-cartesian-axis-tick-value').first()).toBeVisible();
-    await expect.poll(() => chart.evaluate((element) => {
-        const svg = element.querySelector('svg.recharts-surface');
-        if (!svg) return ['Missing chart surface'];
-        const bounds = svg.getBoundingClientRect();
-        const ticks = Array.from(element.querySelectorAll('.recharts-yAxis .recharts-cartesian-axis-tick-value'));
-        return ticks.flatMap((tick) => {
-            const box = tick.getBoundingClientRect();
-            const axisWidth = box.right - bounds.left + 8;
-            return box.left < bounds.left - 0.5 || box.right > bounds.right + 0.5 || box.width > axisWidth + 0.5
-                ? [`Clipped tick: ${tick.textContent}`] : [];
-        });
-    })).toEqual([]);
+    await expect(chart.locator(Y_AXIS_TICK_LABELS).first()).toBeVisible();
+    await expect.poll(() => chart.evaluate(chartAxisLabelOverflow, Y_AXIS_TICK_LABELS)).toEqual([]);
 }
 
 for (const [locale, currency, theme] of [['en', 'USD', 'light'], ['ja', 'JPY', 'dark']] as const) {
@@ -54,10 +44,8 @@ for (const [locale, currency, theme] of [['en', 'USD', 'light'], ['ja', 'JPY', '
         await useLocale(context, locale);
         await context.addInitScript((value) => localStorage.setItem('theme', value), theme);
         await page.goto(`/dashboard?currency=${currency}`);
-        const pipelineCard = page.locator('div').filter({ has: page.getByRole('button', {
-            name: new RegExp(message(locale, 'dashboard', 'DashboardPipelineChart.projections')),
-        }) }).filter({ has: page.locator('[data-slot="chart"]') }).last();
-        const pipelineChart = pipelineCard.locator('[data-slot="chart"]').first();
+        const pipelineChart = page.locator('[data-chart-kind="dashboard-pipeline"]');
+        await expect(pipelineChart).toHaveCount(1);
         await expectAxisLabelsToFit(pipelineChart);
         await pipelineChart.locator('.recharts-wrapper').hover();
         await expect(pipelineChart.locator('.recharts-tooltip-wrapper')).toBeVisible();
@@ -71,7 +59,7 @@ for (const [locale, currency, theme] of [['en', 'USD', 'light'], ['ja', 'JPY', '
         await expect(legend).toContainText(message(locale, 'analytics', 'AnalyticsRevenue.actual'));
         await expect(legend).toContainText(message(locale, 'analytics', 'AnalyticsRevenue.projected'));
         await expect(legend.locator('line[stroke-dasharray="5 4"]')).toHaveCount(1);
-        await expect(revenue.locator('.recharts-xAxis')).toContainText(String(now.getUTCFullYear()));
+        await expect(revenue.locator(X_AXIS_TICK_LABELS).filter({ hasText: String(now.getUTCFullYear()) }).first()).toBeVisible();
 
         const input: ReportDefinitionInput = {
             name: `Chart axes ${key}`, description: null, templateKey: null, cadence: 'monthly',

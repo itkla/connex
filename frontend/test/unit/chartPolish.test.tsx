@@ -159,6 +159,7 @@ describe('DEAL-45 / JA-12 / MOB-31 chart axes', () => {
 describe('DEAL-24 readable pipeline tooltip and MOB-31 tile names', () => {
     it.each(['en', 'ja'] as const)('uses the displayed month label and revenue vocabulary (%s)', (locale) => {
         const html = markup(<PipelineChart series={series} openValue={8_000_000_000} currency="JPY" range="12m" />, locale);
+        expect(html.match(/data-chart-kind="dashboard-pipeline"/g)).toHaveLength(1);
         const axis = probe.xAxes[0];
         const label = axis.tickFormatter?.('2026-11', 0);
         expect(html).toContain(String(label));
