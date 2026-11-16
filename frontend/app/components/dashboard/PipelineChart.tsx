@@ -1,5 +1,6 @@
 'use client';
 
+import { autoYAxisWidth, monthAxisTicks } from '@/app/lib/chartAxes';
 import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import * as React from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
@@ -48,20 +49,20 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ra
     const start = new Date(Date.UTC(current.year, current.month - MONTHS_BACK[range], 1));
 
     const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
-    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: 'numeric', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
     const total = MONTHS_BACK[range] + forwardHorizon(series, now, timezone);
 
     for (let i = 0; i < total; i++) {
         const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1));
-        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+        const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
         keyToIndex.set(key, buckets.length);
         const label = d.getUTCMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
         buckets.push({ key, label, profit: 0, projections: 0 });
     }
 
-    const bucketKeyOf = (point: DealMonthTotal) => `${point.year}-${point.month - 1}`;
+    const bucketKeyOf = (point: DealMonthTotal) => `${point.year}-${String(point.month).padStart(2, '0')}`;
     for (const point of series.closed) {
         const idx = keyToIndex.get(bucketKeyOf(point));
         if (idx !== undefined) buckets[idx].profit += point.total;
@@ -171,8 +172,8 @@ export default function PipelineChart({
             </div>
 
             <div className="flex-1 px-2 pt-4 pb-2 sm:px-4">
-                <ChartContainer config={chartConfig} className="aspect-auto h-60 w-full">
-                    <AreaChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                <ChartContainer config={chartConfig} className="aspect-auto h-60 w-full" data-chart-kind="dashboard-pipeline">
+                    <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                         <defs>
                             <linearGradient id="fill-pipeline" x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="0%" stopColor="var(--color-brand)" stopOpacity={0.25} />
@@ -182,26 +183,27 @@ export default function PipelineChart({
                         <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--chart-grid)" />
                         <XAxis
                             dataKey="key"
+                            padding={{ left: 12, right: 32 }}
                             tickFormatter={(value: string) => labelByKey.get(value) ?? value}
                             tickLine={false}
                             axisLine={false}
                             tickMargin={8}
-                            minTickGap={24}
+                            ticks={monthAxisTicks(data.map((bucket) => bucket.key))}
+                            interval={0}
                             tick={{ fill: 'var(--muted-foreground)' }}
                         />
                         <YAxis
                             tickLine={false}
                             axisLine={false}
-                            tickMargin={4}
-                            width={48}
+                            {...autoYAxisWidth((value) => formatCompactCurrency(value, currency, locale))}
                             tick={{ fill: 'var(--muted-foreground)' }}
-                            tickFormatter={(v: number) => formatCompactCurrency(v, currency, locale)}
                         />
                         <ChartTooltip
                             cursor={false}
                             content={
                                 <ChartTooltipContent
                                     indicator="dot"
+                                    labelFormatter={(value) => labelByKey.get(String(value)) ?? String(value)}
                                     formatter={(value) => (
                                         <div className="flex w-full items-center gap-2">
                                             <span

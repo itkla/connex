@@ -36,10 +36,12 @@ export default function DealActivityBreakdown({ activities }: { activities: Acti
                 <p className="mt-3 text-xs text-muted-foreground">{t('noActivitiesYet')}</p>
             ) : (
                 <div className="mt-1 flex items-center gap-4">
-                    <div className="relative h-28 w-28 shrink-0">
+                    <div className="relative h-28 w-28 shrink-0" role="img"
+                        aria-label={t('chartSummary', { total, types: data.length })}>
                         <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
+                            <PieChart accessibilityLayer={false}>
                                 <Pie
+                                    rootTabIndex={-1}
                                     data={data}
                                     dataKey="value"
                                     nameKey="type"
