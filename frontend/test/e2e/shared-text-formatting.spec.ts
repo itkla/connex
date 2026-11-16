@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 import { activeWorkspaceId, csrfBootstrap, registerUser, seeder } from './support/api';
 import { useLocale } from './support/locale';
 import { message } from './support/messages';
@@ -7,6 +7,21 @@ import { message } from './support/messages';
 function recordId(record: Record<string, unknown>): number {
     if (typeof record.id !== 'number') throw new Error('Expected a record id');
     return record.id;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function persistedRecord(api: APIRequestContext, workspaceId: number, path: string, id: number): Promise<Record<string, unknown>> {
+    const response = await api.get(path, { headers: { 'X-Workspace-Id': String(workspaceId) } });
+    expect(response.ok(), `GET ${path}`).toBe(true);
+    const payload: unknown = await response.json();
+    const items: unknown[] = Array.isArray(payload) ? payload
+        : isRecord(payload) && Array.isArray(payload.items) ? payload.items : [];
+    const record = items.find((item) => isRecord(item) && item.id === id);
+    if (!isRecord(record)) throw new Error(`Expected persisted record ${id} from ${path}`);
+    return record;
 }
 
 function timestamp(record: Record<string, unknown>, field: 'createdAt' | 'updatedAt'): Date {
@@ -34,10 +49,16 @@ for (const locale of ['en', 'ja'] as const) {
             const csrf = await csrfBootstrap(context.request);
             const headers = { [csrf.headerName]: csrf.token };
             expect((await context.request.patch('/api/users/me', { headers, data: { timezone: 'Asia/Tokyo' } })).ok()).toBe(true);
-            const write = seeder(context.request, await activeWorkspaceId(context.request), csrf);
+            const workspaceId = await activeWorkspaceId(context.request);
+            const write = seeder(context.request, workspaceId, csrf);
             const contact = await write.post('/api/persons', { name: '🚀 宇宙 太郎' });
             const company = await write.post('/api/companies', { name: '株式会社サンプル' });
             const pipeline = await write.post('/api/pipelines', { name: 'Formatting pipeline' });
+            const records = [
+                ['contacts', await persistedRecord(context.request, workspaceId, '/api/persons/page?page=1&size=25', recordId(contact))],
+                ['companies', await persistedRecord(context.request, workspaceId, '/api/companies/page?page=1&size=25', recordId(company))],
+                ['pipelines', await persistedRecord(context.request, workspaceId, '/api/pipelines', recordId(pipeline))],
+            ] as const;
             const page = await context.newPage();
             await useLocale(context, locale);
             for (const timeZone of ['Asia/Tokyo', 'UTC']) {
@@ -45,7 +66,7 @@ for (const locale of ['en', 'ja'] as const) {
                     expect((await context.request.patch('/api/users/me', { headers, data: { timezone: timeZone } })).ok()).toBe(true);
                 }
                 const formatter = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone });
-                for (const [entity, record] of [['contacts', contact], ['companies', company], ['pipelines', pipeline]] as const) {
+                for (const [entity, record] of records) {
                     await page.goto(`/records/${entity}?view=table`);
                     const table = page.getByRole('table');
                     const row = table.locator(`[data-record-row-id="${recordId(record)}"]`);
