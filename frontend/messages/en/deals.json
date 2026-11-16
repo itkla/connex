@@ -117,6 +117,7 @@
         "failedToLoadDeal": "Couldn't load the deal"
     },
     "DealsActivityBreakdown": {
+        "chartSummary": "Activity mix: {total, plural, one {# activity} other {# activities}} across {types, plural, one {# type} other {# types}}",
         "activityMix": "Activity mix",
         "noActivitiesYet": "No activities yet",
         "total": "total"
@@ -166,6 +167,7 @@
         "delete": "Delete"
     },
     "DealsAging": {
+        "chartSummary": "Open deal age: {fresh} at 0–7 days, {active} at 8–30 days, {aging} at 31–60 days, {stalled} over 60 days",
         "bucketFresh": "0-7d",
         "bucketActive": "8-30d",
         "bucketAging": "31-60d",
@@ -311,6 +313,7 @@
         "valueDerivedFromLineItems": "This value is derived from the deal's line items. Edit or remove the line items to change it."
     },
     "DealsRevenueChart": {
+        "chartSummary": "Revenue by month: realized revenue {actual}; all deal value {projected}, in {currency}",
         "actualRevenue": "Actual revenue",
         "projectedRevenue": "All deal value by expected close",
         "today": "Today",
@@ -395,6 +398,7 @@
         "valueDerivedFromLineItems": "This value is derived from the deal's line items. Edit or remove the line items to change it."
     },
     "DealsStageRatio": {
+        "chartSummary": "Stage distribution in {currency}: {open, plural, one {# open deal} other {# open deals}} and {closed, plural, one {# closed deal} other {# closed deals}}",
         "open": "Open",
         "closed": "Closed",
         "deals": "{value, plural, one {# deal} other {# deals}}"

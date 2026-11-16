@@ -73,6 +73,13 @@ The full matrix runs with `pnpm exec playwright test --config=playwright.matrix.
 the production frontend, seeded backend, and fault proxy described by `test/e2e/matrix/matrix.setup.ts`.
 Set `PLAYWRIGHT_BROWSERS_PATH` when Chromium is installed outside Playwright's default cache.
 
+`test/unit/chartPolish.test.tsx` covers chart axis sizing, year-boundary ticks, revenue labels,
+legends and Deals chart summaries; `pickerInputSafety.test.tsx` covers localized chevron names.
+Numeric axes share `app/lib/chartAxes.ts`, which uses Recharts' measured `width="auto"` behavior.
+`test/e2e/chart-polish.spec.ts` measures actual tick boxes on Dashboard, Analytics and both Reports
+chart types with billion-scale USD/JPY data, and checks Deals chart focus and axe accessible-name
+rules. It runs in EN/light and JA/dark on desktop and phone in the normal browser suite.
+
 ## How auth bootstrap works
 
 The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` and `setup-mobile` projects (`frontend/test/e2e/global.setup.ts`) each provision an isolated tenant:

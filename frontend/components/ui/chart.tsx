@@ -277,11 +277,13 @@ const ChartLegend = RechartsPrimitive.Legend
 function ChartLegendContent({
   className,
   hideIcon = false,
+  indicator = "dot",
   payload,
   verticalAlign = "bottom",
   nameKey,
 }: React.ComponentProps<"div"> & {
   hideIcon?: boolean
+  indicator?: "dot" | "line"
   nameKey?: string
 } & RechartsPrimitive.DefaultLegendContentProps) {
   const { config } = useChart()
@@ -296,16 +298,23 @@ function ChartLegendContent({
     const index = legendItems.length
     const key = `${nameKey ?? item.dataKey ?? "value"}`
     const itemConfig = getPayloadConfigFromPayload(config, item, key)
+    const strokeDasharray = item.payload && "strokeDasharray" in item.payload
+      && typeof item.payload.strokeDasharray === "string" ? item.payload.strokeDasharray : undefined
 
     legendItems.push(
       <div
         key={index}
         className={cn(
-          "flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground"
+          "flex items-center gap-1.5 [&>svg]:text-muted-foreground",
+          indicator === "line" ? "[&>svg]:h-1 [&>svg]:w-4" : "[&>svg]:h-3 [&>svg]:w-3"
         )}
       >
         {itemConfig?.icon && !hideIcon ? (
           <itemConfig.icon />
+        ) : indicator === "line" ? (
+          <svg aria-hidden="true" viewBox="0 0 16 4" className="h-1 w-4 shrink-0">
+            <line x1="0" y1="2" x2="16" y2="2" stroke={item.color} strokeWidth="2" strokeDasharray={strokeDasharray} />
+          </svg>
         ) : (
           <div
             className="h-2 w-2 shrink-0 rounded-[2px]"
