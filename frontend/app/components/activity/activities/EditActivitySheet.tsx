@@ -3,7 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTimeZone, useTranslations } from 'next-intl';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 
@@ -22,7 +22,8 @@ import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ACTIVITY_REFERENCE_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import RecordSelect from '@/app/components/records/RecordSelect';
 
-import { updateActivity } from '@/app/lib/api';
+import { isFieldError, updateActivity } from '@/app/lib/api';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { ActivityTypePicker, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -96,6 +97,7 @@ export default function EditActivitySheet({
     const router = useRouter();
     const t = useTranslations('ActivityEditActivitySheet');
     const timeZone = useTimeZone();
+    const { fieldErrors, setFieldErrors, clearError, reset: resetFieldErrors } = useFieldErrors();
     const showApiError = useApiErrorToast('ActivityEditActivitySheet');
     const { activeWorkspaceId, switching } = useWorkspace();
     const [draft, setDraft] = useState<ActivityDraft>(() => toDraft(activity, timeZone));
@@ -124,8 +126,9 @@ export default function EditActivitySheet({
     const closeSheet = useCallback(() => {
         closeSession();
         setDraft(toDraft(latestActivityRef.current, timeZone));
+        resetFieldErrors();
         onOpenChange(false);
-    }, [closeSession, onOpenChange, timeZone]);
+    }, [closeSession, onOpenChange, resetFieldErrors, timeZone]);
 
     const finishSaving = useCallback((current: EditSession) => {
         if (sessionRef.current !== current || current.controller.signal.aborted) return;
@@ -184,8 +187,10 @@ export default function EditActivitySheet({
             closeSheet();
             return;
         }
-        if (!draft.subject.trim()) {
-            toastError(t('subjectRequired'));
+        resetFieldErrors();
+        if (!draft.subject.trim() || draft.subject.length > 255) {
+            setFieldErrors({ subject: t(!draft.subject.trim() ? 'subjectRequired' : 'subjectTooLong') });
+            requestAnimationFrame(() => document.getElementById('activity-subject')?.focus());
             return;
         }
         setSavingSession(current);
@@ -207,6 +212,15 @@ export default function EditActivitySheet({
             router.refresh();
         } catch (err) {
             if (sessionRef.current !== current || current.controller.signal.aborted) return;
+            if (isFieldError(err) && err.fieldErrors.subject) {
+                const code = err.fieldErrorCodes?.subject;
+                setFieldErrors({ subject: t(
+                    code === 'NotBlank' || code === 'NotNull' ? 'subjectRequired'
+                        : code === 'Size' ? 'subjectTooLong' : 'subjectInvalid',
+                ) });
+                requestAnimationFrame(() => document.getElementById('activity-subject')?.focus());
+                return;
+            }
             showApiError(err, 'updateFailed');
         } finally {
             finishSaving(current);
@@ -241,6 +255,7 @@ export default function EditActivitySheet({
                     </div>
                 </DrawerHeader>
 
+                <form noValidate onSubmit={(event) => { event.preventDefault(); void saveUpdates(); }} className="flex min-h-0 flex-1 flex-col">
                 <div className="flex-1 overflow-y-auto px-4 py-2">
                     <div className="grid gap-4 pt-6">
                         <div className="grid gap-1.5">
@@ -253,16 +268,24 @@ export default function EditActivitySheet({
                         </div>
 
                         <div className="grid gap-1.5">
-                            <Label htmlFor="activity-subject">{t('subjectLabel')}</Label>
+                            <Label htmlFor="activity-subject">{t('subjectLabel')} <span aria-hidden="true" className="text-muted-foreground">*</span></Label>
                             <input
                                 id="activity-subject"
                                 type="text"
+                                maxLength={255}
                                 value={draft.subject}
-                                onChange={(e) => setDraft((d) => ({ ...d, subject: e.target.value }))}
+                                onChange={(e) => {
+                                    setDraft((d) => ({ ...d, subject: e.target.value }));
+                                    clearError('subject');
+                                }}
+                                aria-invalid={Boolean(fieldErrors.subject)}
+                                aria-describedby={[fieldErrors.subject && 'activity-subject-error', draft.subject.length >= 230 && 'activity-subject-count'].filter(Boolean).join(' ') || undefined}
                                 className={inputClass}
                                 required
                                 autoFocus
                             />
+                            {draft.subject.length >= 230 && <p id="activity-subject-count" className="text-right text-xs text-muted-foreground">{t('subjectCount', { count: draft.subject.length, max: 255 })}</p>}
+                            {fieldErrors.subject && <p id="activity-subject-error" className="text-sm text-destructive">{fieldErrors.subject}</p>}
                         </div>
 
                         <div className="grid gap-1.5">
@@ -353,7 +376,7 @@ export default function EditActivitySheet({
                         {t('cancel')}
                     </DrawerClose>
                     <Button
-                        onClick={saveUpdates}
+                        type="submit"
                         variant="brand"
                         disabled={isSaving || activeSession === null}
                         className="transition-transform active:scale-[0.98]"
@@ -361,6 +384,7 @@ export default function EditActivitySheet({
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </DrawerFooter>
+                </form>
             </DrawerContent>
         </Drawer>
     );

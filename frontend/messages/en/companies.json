@@ -158,6 +158,7 @@
     "toastSaveFailed": "Couldn't save the company"
   },
   "CompaniesNewDialog": {
+    "nameRequired": "Name is required",
     "title": "New company",
     "description": "Add a company to your records. These companies will be shared with everyone in this workspace.",
     "labelName": "Name",

@@ -229,6 +229,7 @@
         "save": "保存"
     },
     "ContactsNewContactDialog": {
+        "nameRequired": "氏名を入力してください",
         "companySelectionRequired": "検索結果から会社を選択するか、検索欄を空にして続けてください。",
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "dialogTitle": "新規連絡先",

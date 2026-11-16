@@ -325,7 +325,7 @@ export function NewContactForm({
     const recoveryDecisionRequired = !manualRecoveryOverride
         && (businessCard.recoveryStatus === 'error'
             || businessCard.recoveryStatus === 'storageUnavailable');
-    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const companySearch = useCompanySearch(
         active,
         [newContactPayload.companyId],
@@ -509,6 +509,11 @@ export function NewContactForm({
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        if (!reuseExistingPerson && !businessCard.requiresExactImportRetry && !newContactPayload.name.trim()) {
+            setFieldErrors({ name: t('nameRequired') });
+            requestAnimationFrame(() => nameInputRef.current?.focus());
+            return;
+        }
         if (unresolvedCompany) {
             setCompanySubmitAttempt(companyDraft.inputValue);
             document.getElementById('company')?.focus();
@@ -738,7 +743,7 @@ export function NewContactForm({
                     <p className="text-sm text-muted-foreground">{t('description')}</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="grid gap-5">
+                <form noValidate onSubmit={handleSubmit} className="grid gap-5">
                     {businessCard.recoveryStatus === 'checking'
                         || businessCard.recoveryStatus === 'acknowledging' ? (
                         <BusinessCardRecoveryStatus />
@@ -979,7 +984,7 @@ function ContactDetailsFields({
     return (
         <>
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
-                <Label htmlFor="name">{t('name')}</Label>
+                <Label htmlFor="name">{t('name')} <span aria-hidden="true" className="text-muted-foreground">*</span></Label>
                 <div className="group relative">
                     <UserIcon className={fieldLeadIconClass} />
                     <input

@@ -229,6 +229,7 @@
         "save": "Save"
     },
     "ContactsNewContactDialog": {
+        "nameRequired": "Name is required",
         "companySelectionRequired": "Select a company from the results, or clear the company search to continue.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "dialogTitle": "New contact",

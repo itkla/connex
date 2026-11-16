@@ -27,7 +27,7 @@ public class ActivityDto {
     private String type;
 
     @NotBlank
-    @Size(max = 255)
+    @Size(max = 255, message = "{activity.subject.size}")
     private String subject;
 
     private String notes;

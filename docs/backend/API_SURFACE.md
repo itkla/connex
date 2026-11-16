@@ -313,3 +313,13 @@ Authentication, CSRF and the pinned workspace remain mandatory. Each item commit
 HTTP 200 batch stop results preserve prior outcomes, including explicit indeterminate status
 when fresh authorized reconciliation cannot establish a failing item's outcome. Safe metadata
 and cancellation remain accessible when content is withheld or schemas are unsupported.
+
+## Field validation responses
+
+Body binding failures return HTTP 400 with `code: VALIDATION_FAILED`, `message`, and
+`fieldErrors` (one message per field). Constraint selection is ordered: `NotBlank`/`NotNull`,
+then `Size`, then `Pattern`, then other constraints; code and message break remaining ties.
+An additive `fieldErrorCodes` map carries the selected Bean Validation constraint names when
+available. Clients use these codes to select localized product copy, with a localized fallback
+for unknown or missing codes. Existing custom binding errors without codes retain their messages.
+English and Japanese `ValidationMessages` catalogs supply the constraint messages.

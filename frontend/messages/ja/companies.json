@@ -158,6 +158,7 @@
     "toastSaveFailed": "会社を保存できませんでした"
   },
   "CompaniesNewDialog": {
+    "nameRequired": "会社名を入力してください",
     "title": "新規会社",
     "description": "会社をレコードに追加します。追加した会社はこのワークスペースのメンバー全員と共有されます。",
     "labelName": "名前",

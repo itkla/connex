@@ -15,12 +15,12 @@ import lombok.ToString;
 public class RegisterDto {
 
     @NotBlank
-    @Size(min = 3, max = 64)
-    @Pattern(regexp = "^[a-zA-Z0-9._-]+$", message = "Username must contain only letters, numbers, dots, underscores, and hyphens")
+    @Size(min = 3, max = 64, message = "{register.username.size}")
+    @Pattern(regexp = "^[a-zA-Z0-9._-]+$", message = "{register.username.pattern}")
     private String username;
 
     @NotBlank
-    @Size(min = 8, max = 72, message = "Password must be between 8 and 72 characters")
+    @Size(min = 8, max = 72, message = "{register.password.size}")
     @ValidPasswordCharacters
     private String password;
 

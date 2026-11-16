@@ -382,6 +382,38 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void validationSelectsConstraintsIndependentlyOfBindingOrder() {
+        List<String> codes = List.of("NotBlank", "NotNull", "Size", "Pattern", "Email");
+        for (String required : List.of("NotBlank", "NotNull")) {
+            for (int rotation = 0; rotation < 4; rotation++) {
+                BeanPropertyBindingResult binding = new BeanPropertyBindingResult(new Object(), "request");
+                List<String> constraints = List.of(required, "Size", "Pattern", "Email");
+                for (int index = 0; index < constraints.size(); index++) {
+                    String code = constraints.get((index + rotation) % constraints.size());
+                    binding.addError(new FieldError("request", "username", null, false,
+                        new String[] { code }, null, code + " copy"));
+                }
+                var response = handler.validation(new BindException(binding));
+                assertNotNull(response.getBody());
+                assertEquals(Map.of("username", required + " copy"), response.getBody().get("fieldErrors"));
+                assertEquals(Map.of("username", required), response.getBody().get("fieldErrorCodes"));
+            }
+        }
+        for (int first = 0; first < codes.size(); first++) {
+            for (int second = first + 1; second < codes.size(); second++) {
+                BeanPropertyBindingResult binding = new BeanPropertyBindingResult(new Object(), "request");
+                for (String code : List.of(codes.get(second), codes.get(first))) {
+                    binding.addError(new FieldError("request", "value", null, false,
+                        new String[] { code }, null, code + " copy"));
+                }
+                var body = handler.validation(new BindException(binding)).getBody();
+                assertNotNull(body);
+                assertEquals(Map.of("value", codes.get(first)), body.get("fieldErrorCodes"));
+            }
+        }
+    }
+
+    @Test
     void shareBlockedPrivacyHoldReturnsStableStructuredCode() {
         ResponseEntity<Map<String, String>> response = handler.badRequest(
             new ShareBlockedPrivacyHoldException());

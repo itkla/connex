@@ -332,7 +332,7 @@ The ad-hoc-button lint baseline represents legacy debt. It may shrink; do not ra
 
 ## Validation
 
-Create and edit surfaces validate fixable field problems inline. Controls expose invalid/described-by state and render the field error next to the field. Toasts report request outcomes; they are not a substitute for field validation the user can fix in place.
+Create and edit surfaces validate fixable field problems inline. Auth forms, activity create/edit forms, and new contact/company composers use `noValidate` and localized required errors, then focus the first invalid control. Registration checks required fields, lengths, username format, email format, and the shared password policy before sending. Auth keeps its submit control focusable during requests with `aria-disabled`/`aria-busy` and announces one polite summary. Activity subjects allow at most 255 characters and show a counter from 230 characters. Controls expose invalid/described-by state and render the field error next to the field. Toasts report request outcomes; they are not a substitute for field validation the user can fix in place.
 
 ## Motion and color
 

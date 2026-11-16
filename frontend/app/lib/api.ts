@@ -1740,6 +1740,8 @@ export class ApiError extends Error {
     status: number;
     code?: string;
     fieldErrors?: ApiFieldErrors;
+    /** Bean Validation constraint names for localized field copy. */
+    fieldErrorCodes?: ApiFieldErrors;
     correlationId?: string;
     /**
      * For {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} only: how many members the
@@ -1901,7 +1903,7 @@ async function getApiError(res: Response): Promise<ApiError> {
         const data = JSON.parse(text) as unknown;
 
         if (isErrorRecord(data)) {
-            const { message, error, code, correlationId, fieldErrors, affectedCount, currentVersion, ...rest } = data;
+            const { message, error, code, correlationId, fieldErrors, fieldErrorCodes, affectedCount, currentVersion, ...rest } = data;
             const flat = Object.fromEntries(
                 Object.entries(rest).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
             );
@@ -1915,6 +1917,7 @@ async function getApiError(res: Response): Promise<ApiError> {
                 fields,
                 asString(correlationId),
             );
+            apiError.fieldErrorCodes = isStringRecord(fieldErrorCodes) ? fieldErrorCodes : undefined;
             if (apiError.code === PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE
                     && typeof affectedCount === "number"
                     && Number.isSafeInteger(affectedCount)

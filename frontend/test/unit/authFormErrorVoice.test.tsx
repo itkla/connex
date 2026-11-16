@@ -89,6 +89,7 @@ type Rendered = {
 
 async function renderAuthForm(mode: "login" | "register", redirectUrl: string | null = null): Promise<Rendered> {
     const interactive = installInteractiveDocument("connex_workspace=7");
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 0; });
     Object.defineProperty(window, "location", { configurable: true, value: new URL("http://localhost/auth/register") });
     const { createRoot } = await import("react-dom/client");
     const root = createRoot(interactive.container);
@@ -97,6 +98,9 @@ async function renderAuthForm(mode: "login" | "register", redirectUrl: string | 
     });
 
     if (mode === "register") {
+        await fillInput(interactive.elements, "register-username", "form_probe");
+        await fillInput(interactive.elements, "register-email", "form@example.test");
+        await fillInput(interactive.elements, "register-displayName", "Form probe");
         await fillInput(interactive.elements, "register-password", "Aa12345#");
     }
     const form = interactive.elements.find((element) => element.tagName === "FORM");
@@ -200,7 +204,7 @@ describe("auth form failure copy", () => {
 });
 
 describe("auth form field errors", () => {
-    it("announces the field's own text rather than a generic summary", async () => {
+    it("announces one summary and describes the field with localized fallback copy", async () => {
         const { ApiError } = await import("@/app/lib/api");
         loginMock.mockRejectedValueOnce(
             new ApiError(RAW_BACKEND_TEXT, 400, undefined, { password: "Password is too short" }),
@@ -208,14 +212,15 @@ describe("auth form field errors", () => {
 
         const rendered = await renderAuthForm("login");
 
-        expect(alertText(rendered.elements)).toContain("Password is too short");
-        expect(alertText(rendered.elements)).not.toContain("AuthForm.formHasErrors");
+        expect(alertText(rendered.elements)).toBe("");
+        expect(rendered.elements.find((element) => element.attributes.get("aria-live") === "polite")?.textContent)
+            .toBe("AuthForm.formHasErrors");
 
         const fieldError = rendered.elements.find(
             (element) => element.attributes.get("id") === "login-password-error",
         );
-        expect(fieldError?.textContent).toBe("Password is too short");
-        expect(fieldError?.attributes.get("role")).toBe("alert");
+        expect(fieldError?.textContent).toContain("AuthForm.fieldInvalid");
+        expect(fieldError?.attributes.has("role")).toBe(false);
 
         const passwordInput = rendered.elements.find(
             (element) => element.tagName === "INPUT" && element.attributes.get("id") === "login-password",
@@ -232,7 +237,8 @@ describe("auth form field errors", () => {
 
         const rendered = await renderAuthForm("register");
 
-        expect(alertText(rendered.elements)).toContain("AuthForm.breachedPassword");
+        expect(rendered.elements.find((element) => element.attributes.get("id") === "register-password-error")?.textContent)
+            .toBe("AuthForm.breachedPassword");
         expect(alertText(rendered.elements)).not.toContain("AuthForm.formHasErrors");
         expect(toastErrorMock).not.toHaveBeenCalled();
         await rendered.unmount();

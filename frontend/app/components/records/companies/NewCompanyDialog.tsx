@@ -181,7 +181,7 @@ export default function NewCompanyDialog({
     const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
     const [submissionPending, setSubmissionPending] = useState(false);
     const submissionPendingRef = useRef(false);
-    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const {
         logoPreview,
         selectionPending: logoSelectionPending,
@@ -302,6 +302,11 @@ export default function NewCompanyDialog({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        if (!payload.name.trim()) {
+            setFieldErrors({ name: t('nameRequired') });
+            requestAnimationFrame(() => document.getElementById('company-name')?.focus());
+            return;
+        }
         const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current
                 || isCreating
@@ -545,11 +550,11 @@ export default function NewCompanyDialog({
                                 </div>
 
                                 <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
-                    <form id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
+                    <form noValidate id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
                         <fieldset disabled={formPending} className="contents">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company-name">
-                                {t('labelName')} <span className="text-muted-foreground">*</span>
+                                {t('labelName')} <span aria-hidden="true" className="text-muted-foreground">*</span>
                             </Label>
                             <div className="group relative">
                                 <BuildingOffice2Icon className={leadIcon} />
@@ -819,7 +824,7 @@ export function NewCompanyForm({
     const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
     const [submissionPending, setSubmissionPending] = useState(false);
     const submissionPendingRef = useRef(false);
-    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const {
         logoPreview,
         selectionPending: logoSelectionPending,
@@ -896,6 +901,11 @@ export function NewCompanyForm({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        if (!payload.name.trim()) {
+            setFieldErrors({ name: t('nameRequired') });
+            requestAnimationFrame(() => document.getElementById('company-name')?.focus());
+            return;
+        }
         const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current
                 || isCreating
@@ -989,11 +999,11 @@ export function NewCompanyForm({
                     <p className="text-sm text-muted-foreground">{t('description')}</p>
                 </div>
 
-                <form id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
+                <form noValidate id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
                     <fieldset disabled={formPending} className="contents">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="company-name">
-                            {t('labelName')} <span className="text-muted-foreground">*</span>
+                            {t('labelName')} <span aria-hidden="true" className="text-muted-foreground">*</span>
                         </Label>
                         <div className="group relative">
                             <BuildingOffice2Icon className={leadIcon} />

@@ -39,6 +39,9 @@
     "toastFailedDelete": "Couldn't delete the activity"
   },
   "ActivityCreateDialog": {
+    "subjectTooLong": "Keep the subject to 255 characters or fewer",
+    "subjectInvalid": "Check the subject and try again",
+    "subjectCount": "{count}/{max} characters",
     "titleCreate": "Log activity",
     "description": "Record a call, email, meeting, or other touchpoint. Link it to a contact or deal so it shows up in their timeline.",
     "typeLabel": "Type",
@@ -295,6 +298,9 @@
     "noCompanyForPeople": "This deal has no company yet, so there are no contacts to link."
   },
   "ActivityEditActivitySheet": {
+    "subjectTooLong": "Keep the subject to 255 characters or fewer",
+    "subjectInvalid": "Check the subject and try again",
+    "subjectCount": "{count}/{max} characters",
     "title": "Edit activity",
     "description": "Update fields below and save.",
     "typeLabel": "Type",
