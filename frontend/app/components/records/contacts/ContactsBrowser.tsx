@@ -732,8 +732,10 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             label: t('columnName'),
             getSortValue: (c) => c.name ?? null,
             widthClass: 'min-w-48',
+            maxWidth: '20rem',
+            getTextValue: (c) => c.name,
             render: (c) => (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
                     <span className="truncate">{c.name}</span>
                     <CommentIndicatorChip count={commentCounts.get(c.id)} />
                 </span>
@@ -749,6 +751,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         {
             key: 'email',
             label: t('columnEmail'),
+            maxWidth: '16rem',
             getSortValue: (c) => c.email ?? null,
             editable: { disabled: () => isSaving || isPreparingEdit ? t('inlineSavePending') : null, getValue: (c) => c.email, save: (c, v) => inlineEdit.commit(c, 'email', v, saveContact) },
         },
@@ -761,6 +764,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         {
             key: 'company',
             label: t('columnCompany'),
+            maxWidth: '20rem',
             getSortValue: (c) => c.company?.name ?? null,
             render: (c) => c.company?.name,
             copyable: { label: t('copyableCompany'), getValue: (c) => c.company?.name ?? '' },
@@ -768,6 +772,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         {
             key: 'title',
             label: t('columnTitle'),
+            maxWidth: '16rem',
             getSortValue: (c) => c.title ?? null,
             editable: { disabled: () => isSaving || isPreparingEdit ? t('inlineSavePending') : null, getValue: (c) => c.title, save: (c, v) => inlineEdit.commit(c, 'title', v, saveContact) },
         },

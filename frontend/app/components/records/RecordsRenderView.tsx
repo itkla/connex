@@ -720,25 +720,27 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 col.widthClass,
                                                 colIndex === 0 && cn('md:sticky md:z-20', stickyHeaderBg, stickySeam),
                                             )}
-                                            style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                            style={{ maxWidth: col.maxWidth, left: colIndex === 0 ? frozenOffsets.name : undefined }}
                                         >
-                                            {col.renderHeader ? (
-                                                col.renderHeader()
-                                            ) : sortable ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => onSort(col.key)}
-                                                    className={cn(
-                                                        'inline-flex items-center gap-1 transition-colors hover:text-foreground',
-                                                        active && 'text-foreground',
-                                                    )}
-                                                >
-                                                    {col.label}
-                                                    <Icon className={cn('size-3.5', !active && 'opacity-40')} aria-hidden="true" />
-                                                </button>
-                                            ) : (
-                                                <span>{col.label}</span>
-                                            )}
+                                            <span className={cn(col.maxWidth != null && 'block truncate')} style={{ maxWidth: col.maxWidth }} title={col.label}>
+                                                {col.renderHeader ? (
+                                                    col.renderHeader()
+                                                ) : sortable ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onSort(col.key)}
+                                                        className={cn(
+                                                            'inline-flex items-center gap-1 transition-colors hover:text-foreground',
+                                                            active && 'text-foreground',
+                                                        )}
+                                                    >
+                                                        {col.label}
+                                                        <Icon className={cn('size-3.5', !active && 'opacity-40')} aria-hidden="true" />
+                                                    </button>
+                                                ) : (
+                                                    <span>{col.label}</span>
+                                                )}
+                                            </span>
                                         </th>
                                     );
                                 })}
@@ -796,6 +798,16 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             const content = col.render
                                                 ? col.render(item)
                                                 : (item as unknown as Record<string, ReactNode>)[col.key];
+                                            const cellStyle = { maxWidth: col.maxWidth, left: colIndex === 0 ? frozenOffsets.name : undefined };
+                                            const boundedContent = col.maxWidth != null ? (
+                                                <span
+                                                    className="block truncate"
+                                                    style={{ maxWidth: col.maxWidth }}
+                                                    title={col.getTextValue?.(item) ?? (typeof content === 'string' || typeof content === 'number' ? String(content) : undefined)}
+                                                >
+                                                    {content}
+                                                </span>
+                                            ) : content;
                                             const editDisabledReason = col.editable?.disabled?.(item) ?? null;
                                             if (!readOnly && col.editable && editDisabledReason) {
                                                 return (
@@ -805,7 +817,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                             'px-4 py-2.5 whitespace-nowrap text-foreground',
                                                             colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                         )}
-                                                        style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                        style={cellStyle}
                                                     >
                                                         <Tooltip>
                                                             <TooltipTrigger asChild>
@@ -814,7 +826,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                                     aria-label={`${content} — ${editDisabledReason}`}
                                                                     className="cursor-help rounded-sm text-left decoration-border decoration-dotted underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                                                                 >
-                                                                    {content}
+                                                                    {boundedContent}
                                                                 </button>
                                                             </TooltipTrigger>
                                                             <TooltipContent>
@@ -833,16 +845,18 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                             'px-4 py-2.5 whitespace-nowrap text-foreground',
                                                             colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                         )}
-                                                        style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                        style={cellStyle}
                                                     >
-                                                        <EditableCell
-                                                            value={editable.getValue(item)}
-                                                            display={col.render ? content : undefined}
-                                                            onCommit={(next) => editable.save(item, next)}
-                                                            inputType={editable.inputType}
-                                                            validate={editable.validate}
-                                                            ariaLabel={t('editFieldAria', { field: col.label, name: item.name ?? entityLabel })}
-                                                        />
+                                                        <span className="block" style={{ maxWidth: col.maxWidth }}>
+                                                            <EditableCell
+                                                                value={editable.getValue(item)}
+                                                                display={col.render ? boundedContent : undefined}
+                                                                onCommit={(next) => editable.save(item, next)}
+                                                                inputType={editable.inputType}
+                                                                validate={editable.validate}
+                                                                ariaLabel={t('editFieldAria', { field: col.label, name: item.name ?? entityLabel })}
+                                                            />
+                                                        </span>
                                                     </td>
                                                 );
                                             }
@@ -855,7 +869,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                             'px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-text',
                                                             colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                         )}
-                                                        style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                        style={cellStyle}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             const v = getValue(item) ?? '';
@@ -866,7 +880,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                             }
                                                         }}
                                                     >
-                                                        {content}
+                                                        {boundedContent}
                                                     </td>
                                                 );
                                             }
@@ -877,9 +891,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                         'px-4 py-2.5 whitespace-nowrap text-foreground',
                                                         colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                     )}
-                                                    style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                    style={cellStyle}
                                                 >
-                                                    {content}
+                                                    {boundedContent}
                                                 </td>
                                             );
                                         })}

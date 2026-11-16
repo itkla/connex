@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
 
 // test code - move to lib/types.ts or elsewhere later
@@ -89,6 +89,10 @@ export interface ColumnDef<T> {
     };
     filter?: FilterDef<T>;
     widthClass?: string;
+    /** Caps the header, cell and intrinsic content width without fixing the column's normal width. */
+    maxWidth?: CSSProperties['maxWidth'];
+    /** Full text for a capped rich-rendered value; plain text and numbers supply their own title. */
+    getTextValue?: (item: T) => string | null | undefined;
 }
 
 export type FilterState = Record<string, string[]>;
