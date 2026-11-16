@@ -19,6 +19,38 @@ async function choose(page: Page, trigger: Locator, label: string) {
 }
 
 for (const locale of ['en', 'ja'] as const) {
+    test(`announces automatic company creation during import review in ${locale} @mobile`, async ({ page }) => {
+        const key = `autocompany${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+        await registerUser(page.request, { username: key, password: `Review!${key}A1`, email: `${key}@example.invalid` });
+        const workspaceId = await activeWorkspaceId(page.request);
+        await useLocale(page, locale);
+        const t = createTranslator({ locale, messages: locale === 'en' ? en : ja, namespace: 'importExport' });
+        const companyName = `㈱テスト ${key}`;
+        await page.goto('/records/contacts?view=table');
+        await page.getByRole('button', { name: t('moreActions'), exact: true }).click();
+        const fieldsLoaded = page.waitForResponse((response) => response.url().includes('/api/custom-fields/schema?entityType=person') && response.status() === 200);
+        await page.getByRole('menuitem', { name: t('openImport'), exact: true }).click();
+        await fieldsLoaded;
+        const dialog = page.getByRole('dialog');
+        await dialog.locator('input[type="file"]').setInputFiles({ name: 'automatic-company.csv', mimeType: 'text/csv',
+            buffer: Buffer.from(`Name,Email,Company\n山田太郎,${key}@example.invalid,${companyName}\n`) });
+        await dialog.getByRole('button', { name: t('next'), exact: true }).click();
+        const row = dialog.locator('[data-import-row="0"]');
+        await expect(row.getByText(t('companyWillCreate', { name: companyName }), { exact: true })).toBeVisible();
+        await expect(row.getByText(t('companyChoice', { name: companyName }), { exact: true })).toHaveCount(0);
+        await expect(dialog.getByRole('button', { name: t('import'), exact: true })).toBeEnabled();
+        const committed = page.waitForResponse((response) => response.url().endsWith('/api/imports/persons') && response.request().method() === 'POST');
+        await dialog.getByRole('button', { name: t('import'), exact: true }).click();
+        const response = await committed;
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toMatchObject({ created: 1, failed: [] });
+        const people = await page.request.get('/api/persons/page?page=1&size=25', { headers: { 'X-Workspace-Id': String(workspaceId) } });
+        expect(people.status()).toBe(200);
+        expect(await people.json()).toMatchObject({ items: expect.arrayContaining([
+            expect.objectContaining({ name: '山田太郎', company: expect.objectContaining({ name: companyName }) }),
+        ]) });
+    });
+
     test(`recovers colliding custom mappings and a replaced field in ${locale} @mobile`, async ({ page }) => {
         const key = `fields${randomUUID().replaceAll('-', '').slice(0, 12)}`;
         await registerUser(page.request, { username: key, password: `Fields!${key}A1`, email: `${key}@example.invalid` });

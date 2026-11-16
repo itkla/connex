@@ -28,6 +28,10 @@ vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: () => api.wor
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => api.reportError }));
 vi.mock("@/app/components/motion/Rise", () => ({ default: ({ children }: PropsWithChildren) => children }));
 vi.mock("@/app/components/PageShell", () => ({ PageShell: ({ children }: PropsWithChildren) => <main>{children}</main> }));
+vi.mock("next/navigation", () => ({
+    usePathname: () => window.location.pathname,
+    useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 
 const entries: AuditLogEntry[] = [
     { id: 42, action: "company.export", entityType: "company", actorLabel: "Auditor", currentActorLabel: "Current auditor", outcome: "success", createdAt: "2026-11-05T10:00:00Z" },
@@ -50,14 +54,47 @@ function view(locale: "en" | "ja", organization: boolean, rows = entries) {
 }
 
 beforeEach(() => {
+    window.history.replaceState(null, '', '/settings/workspace/audit-diagnostics');
     api.workspaceExport = "granted";
     api.orgExport = true;
     api.getOrgExportPermissions.mockImplementation(async () => ({ owner: api.orgExport, admin: api.orgExport, member: false }));
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
 
 describe("audit export controls", () => {
+    it.each([false, true])("restores and clears shareable audit filters (organization: %s)", async (organization) => {
+        const params = new URLSearchParams({ q: 'company', verbs: 'export', entities: 'company', outcome: 'success',
+            actors: JSON.stringify([organization ? 'Current auditor' : 'Auditor']), range: '30d', sort: 'oldest', context: 'keep' });
+        const path = `/settings/${organization ? 'organization' : 'workspace'}/audit-diagnostics`;
+        window.history.replaceState({ connexRecordReturn: 'keep' }, '', `${path}?${params}#audit`);
+        vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-06T12:00:00Z'));
+        const labels = englishAdmin.AdminAuditLog;
+        view("en", organization);
+        const search = await screen.findByRole('textbox', { name: labels.searchAria });
+        expect(search.getAttribute('value')).toBe('company');
+        await waitFor(() => expect(screen.getByRole('button', { name: labels.exportCsv }).hasAttribute('disabled')).toBe(false));
+        fireEvent.click(screen.getByRole('button', { name: labels.exportCsv }));
+        await waitFor(() => expect(api.exportRows).toHaveBeenCalledWith([42], organization ? 3 : undefined, expect.anything()));
+
+        fireEvent.change(search, { target: { value: 'export' } });
+        expect(new URLSearchParams(window.location.search).get('q')).toBe('export');
+        expect(new URLSearchParams(window.location.search).get('outcome')).toBe('success');
+        expect(window.location.hash).toBe('#audit');
+        expect(window.history.state).toMatchObject({ connexRecordReturn: 'keep' });
+        cleanup();
+        view("en", organization);
+        expect((await screen.findByRole('textbox', { name: labels.searchAria })).getAttribute('value')).toBe('export');
+        fireEvent.click(screen.getByRole('button', { name: labels.clearAll }));
+        expect(new URLSearchParams(window.location.search).get('q')).toBeNull();
+        for (const key of ['verbs', 'entities', 'outcome', 'actors', 'range']) {
+            expect(new URLSearchParams(window.location.search).get(key)).toBeNull();
+        }
+        expect(new URLSearchParams(window.location.search).get('sort')).toBe('oldest');
+        expect(new URLSearchParams(window.location.search).get('context')).toBe('keep');
+        expect(window.location.hash).toBe('#audit');
+    });
+
     it("translates organization action/entity options and chips without changing the filter values", async () => {
         const labels = japaneseAdmin.AdminAuditLog;
         view("ja", true, [

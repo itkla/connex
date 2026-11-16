@@ -90,11 +90,22 @@ for (const { locale, theme } of scenarios) {
         await seedDeals(seed, pipelineId, stageId, "USD");
         await page.goto("/me");
         await expectMoney(signals, locale, "USD");
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await signals.evaluate((root, zeroes) => {
+            root.setAttribute('data-zero-total', 'false');
+            const observer = new MutationObserver(() => {
+                if ([...root.querySelectorAll('span')].some((span) => zeroes.includes(span.textContent ?? ''))) {
+                    root.setAttribute('data-zero-total', 'true');
+                }
+            });
+            observer.observe(root, { childList: true, characterData: true, subtree: true });
+        }, [formatCompactCurrency(0, "USD", locale), formatCompactCurrency(0, "JPY", locale)]);
         const picker = signals.getByRole("button", { name: currencyLabel, exact: true });
         await picker.focus();
         await picker.press("Enter");
         await page.getByRole("menuitem", { name: /JPY/ }).click();
         await expectMoney(signals, locale, "JPY");
+        await expect(signals).toHaveAttribute('data-zero-total', 'false');
         await expect(page).toHaveURL(/currency=JPY/);
         await page.reload();
         await expectMoney(signals, locale, "JPY");

@@ -311,6 +311,12 @@ Same-document Back/Forward uses that early `popstate` dispatcher, which delegate
 
 List-state writers check their owning pathname against the address bar before changing history. Native Back/Forward moves the address bar before React unmounts the outgoing list; late query, view/filter, saved-view, owned-param or peek writes must not overwrite an editor entry. Deals deliberately canonicalizes its selected desktop view into `?view=table`; this is valid list state, not a failed editor departure.
 
+Workspace and organization audit browsers restore search, action, entity, outcome, actor, date range,
+and sort from their URL. They write only their owned parameters through `useOwnedUrlParams`, preserving
+other parameters, section fragments and router history state without navigation. Clearing filters
+removes their parameters while retaining the selected sort. Actor labels use a JSON array so commas
+and Japanese names survive sharing and reload.
+
 No indices are added to history state, no global history tracker is installed, and no entries or guessed distances are used. If native positions are unavailable or do not identify a nonzero delta, the existing safe fallback restores the rendered editor's URL/state in the reached slot using the native history prototype. This unknown-distance fallback replaces that slot rather than restoring the cursor: Keep editing can consume a Back/Forward destination and lose its query context. Discard explicitly routes to the captured destination. This bounded limitation preserves URL/page consistency without guessing. Cross-document departures retain the native leave warning.
 
 Use the shared record delete confirmation for ordinary record deletion. Organization-level permanent deletion may use stronger typed confirmation. A surface contributes its object label and consequence details; it does not rewrite the common destructive grammar.
