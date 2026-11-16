@@ -140,9 +140,12 @@ prepare_arguments() {
         } else error("unsupported resource settings") end
     ' "$SCRATCH/inspect.json" > "$SCRATCH/runtime-arguments.json"
     # Known Linux Docker defaults may be omitted. Unknown fields, including future API fields,
-    # are refused rather than silently inheriting daemon defaults. Masked/readonly path defaults:
+    # are refused rather than silently inheriting daemon defaults. Path order is insignificant,
+    # but extra, missing or duplicate paths still refuse. Masked/readonly path defaults:
     # https://github.com/moby/moby/blob/v28.5.2/oci/defaults.go
     jq -e --slurpfile arguments "$SCRATCH/runtime-arguments.json" '
+        def normalize($key):
+            if ($key | IN("MaskedPaths", "ReadonlyPaths")) and type == "array" then sort else . end;
         {
             AutoRemove: [false], Privileged: [false], PublishAllPorts: [false],
             Binds: [null, []], Mounts: [null, []], VolumesFrom: [null, []], VolumeDriver: [""],
@@ -164,7 +167,8 @@ prepare_arguments() {
         } as $defaults |
         all(.[0].HostConfig | to_entries[]; . as $field |
             ($arguments[0].host | has($field.key)) or
-            (($defaults | has($field.key)) and any($defaults[$field.key][]; . == $field.value)))
+            (($defaults | has($field.key)) and any($defaults[$field.key][];
+                normalize($field.key) == ($field.value | normalize($field.key)))))
     ' "$SCRATCH/inspect.json" >/dev/null
     # One argument per line avoids eval and shell interpretation of inspected values.
     jq -r '.host[], .config[], .network[] | .[]' "$SCRATCH/runtime-arguments.json" > "$SCRATCH/args"

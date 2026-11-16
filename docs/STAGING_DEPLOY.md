@@ -348,8 +348,10 @@ Configuration validation and Docker arguments share one field registry. PID limi
 swappiness (including zero), CPU shares/quotas expressed as `NanoCpus`, ulimits, init, runtime,
 and IPC/cgroup namespace settings are reproduced when present. Every other `HostConfig` field
 must match an explicitly listed Docker Linux default; unknown fields or unsupported overrides
-refuse the refresh before the build or swap. The default path-mask lists follow Docker 28.5.2;
-additional host-specific masks also refuse the refresh pending an explicit policy update.
+refuse the refresh before the build or swap. The default `MaskedPaths` and `ReadonlyPaths` sets
+match Docker 28.5.2 and the staging Docker 29.6.1 inspect fixture regardless of list order.
+Extra, missing or duplicate paths (including host-specific masks) still refuse the refresh pending
+an explicit policy update; a Docker version never bypasses validation.
 
 The old scanner is stopped and renamed to `connex-staging-clamav-previous` while the replacement
 starts with the original name. Uploads may briefly fail closed during this interval. The job waits
