@@ -8,7 +8,7 @@ import { ArrowUpRightIcon } from "@heroicons/react/24/outline";
 import type { TemperatureBand, TemperatureTrend, User } from "@/app/lib/types";
 import ProtectedMediaImage from "@/app/components/ProtectedMediaImage";
 import { cn } from "@/lib/utils";
-import { warmthDotClass } from "@/app/lib/utils";
+import { initials, warmthDotClass } from "@/app/lib/utils";
 
 /** A single relationship rendered as a node in the warmth constellation. */
 export type ConstellationNode = {
@@ -93,11 +93,6 @@ function round3(n: number): number {
     return Math.round(n * 1000) / 1000;
 }
 
-function initialsOf(name: string): string {
-    const parts = name.trim().split(/\s+/);
-    return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
-}
-
 export default function MeHero({ user, greeting, nodes, distribution, coolingCount }: Props) {
     const t = useTranslations("MePage");
     const placed = useMemo(() => placeNodes(nodes), [nodes]);
@@ -105,7 +100,7 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
     const total = BANDS.reduce((sum, b) => sum + distribution[b], 0);
     const dominant = BANDS.reduce((best, b) => (distribution[b] > distribution[best] ? b : best), "warm" as TemperatureBand);
     const warmShare = total > 0 ? (distribution.hot + distribution.warm) / total : 0;
-    const initials = initialsOf(user.displayName || user.username || "?");
+    const userInitials = initials(user.displayName || user.username || "?");
 
     const signalRead =
         total === 0
@@ -152,7 +147,7 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                                     src={user.profilePictureUrl}
                                     alt=""
                                     className="size-full object-cover"
-                                    fallback={initials}
+                                    fallback={userInitials}
                                 />
                             </span>
                         </div>
@@ -259,7 +254,7 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                                         src={n.imageUrl}
                                         alt=""
                                         className="size-full object-cover"
-                                        fallback={initialsOf(n.name)}
+                                        fallback={initials(n.name)}
                                     />
                                 </span>
                                 <span
