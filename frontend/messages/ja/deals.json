@@ -117,6 +117,7 @@
         "failedToLoadDeal": "案件を読み込めませんでした"
     },
     "DealsActivityBreakdown": {
+        "chartSummary": "活動の内訳：{types}種類、合計{total}件",
         "activityMix": "アクティビティ構成",
         "noActivitiesYet": "アクティビティはまだありません",
         "total": "合計"
@@ -166,6 +167,7 @@
         "delete": "削除"
     },
     "DealsAging": {
+        "chartSummary": "進行中案件の経過日数：7日以内 {fresh}件、8〜30日 {active}件、31〜60日 {aging}件、61日以上 {stalled}件",
         "bucketFresh": "0-7日",
         "bucketActive": "8-30日",
         "bucketAging": "31-60日",
@@ -311,6 +313,7 @@
         "valueDerivedFromLineItems": "この金額は明細から自動計算されています。変更するには明細を編集または削除してください。"
     },
     "DealsRevenueChart": {
+        "chartSummary": "月別売上：実績売上 {actual}、全案件の金額 {projected}（通貨：{currency}）",
         "actualRevenue": "実績収益",
         "projectedRevenue": "全案件の金額（予定成約日別）",
         "today": "本日",
@@ -395,6 +398,7 @@
         "valueDerivedFromLineItems": "この金額は明細から自動計算されています。変更するには明細を編集または削除してください。"
     },
     "DealsStageRatio": {
+        "chartSummary": "ステージ別の案件数（通貨：{currency}）：進行中 {open}件、終了 {closed}件",
         "open": "オープン",
         "closed": "決着",
         "deals": "{value, plural, one {# 件の案件} other {# 件の案件}}"

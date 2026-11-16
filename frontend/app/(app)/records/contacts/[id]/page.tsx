@@ -41,7 +41,7 @@ import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPane
 import RecordSignalsPanel from "@/app/components/records/RecordSignalsPanel";
 import ContactIntroAskProvider from "@/app/components/records/contacts/ContactIntroAskProvider";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
-import { formatCompactCurrency, formatDate, formatDateTime } from "@/app/lib/utils";
+import { formatCompactCurrency, formatDateTime } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
 
@@ -286,7 +286,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                         label={t("owner")}
                                         value={contact.ownerId != null ? owner?.displayName ?? '' : t("ownerUnassigned")}
                                     />
-                                    <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale, timeZone)} />
+                                    <InfoRow label={t("added")} value={formatDateTime(contact.createdAt, locale, timeZone)} />
                                     <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale, timeZone)} />
                                     <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                                 </dl>
