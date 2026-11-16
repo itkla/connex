@@ -5,6 +5,7 @@ import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { useTimeZone, useLocale, useTranslations } from "next-intl";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
     ClipboardDocumentListIcon,
@@ -39,6 +40,8 @@ import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePermissionCheck } from "@/app/hooks/usePermissions";
 import { useOrgExportPermissions } from "@/app/hooks/useOrgExportPermissions";
+import { useOwnedUrlParams } from "@/app/hooks/useOwnedUrlParams";
+import { AUDIT_SYSTEM_ACTOR, auditListParams, readAuditListState, type AuditFilters as Filters, type AuditOutcomeFilter as OutcomeFilter, type AuditRangeFilter as RangeFilter, type AuditSort as Sort } from "@/app/lib/auditListState";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
@@ -184,19 +187,7 @@ const NODE_ANCHOR = 18;
 const DATE_ANCHOR = 18;
 const PULSE_DAYS = 14;
 
-type OutcomeFilter = "all" | "success" | "failed";
-type RangeFilter = "all" | "today" | "7d" | "30d";
-type Sort = "newest" | "oldest";
 type FacetExcept = "query" | "verbs" | "entities" | "outcome" | "actors" | "range" | null;
-
-type Filters = {
-    query: string;
-    verbs: Set<string>;
-    entities: Set<string>;
-    outcome: OutcomeFilter;
-    actors: Set<string>;
-    range: RangeFilter;
-};
 
 type FeedEntry =
     | { kind: "day"; id: string; label: string; count: number; connectUp: boolean; connectDown: boolean }
@@ -313,15 +304,10 @@ export default function AuditLogBrowser({
         }
     }
 
-    const [filters, setFilters] = useState<Filters>({
-        query: "",
-        verbs: new Set(),
-        entities: new Set(),
-        outcome: "all",
-        actors: new Set(),
-        range: "all",
-    });
-    const [sort, setSort] = useState<Sort>("newest");
+    const searchParams = useSearchParams();
+    const [filters, setFilters] = useState<Filters>(() => readAuditListState(searchParams).filters);
+    const [sort, setSort] = useState<Sort>(() => readAuditListState(searchParams).sort);
+    useOwnedUrlParams(auditListParams(filters, sort));
     const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
 
     const [now, setNow] = useState<number | null>(null);
@@ -337,8 +323,8 @@ export default function AuditLogBrowser({
     const systemLabel = t("actorSystem");
 
     const actorKeyOf = useMemo(
-        () => (e: AuditLogEntry) => (orgId === undefined ? e.actorLabel : e.currentActorLabel ?? e.actorLabel) ?? systemLabel,
-        [orgId, systemLabel],
+        () => (e: AuditLogEntry) => (orgId === undefined ? e.actorLabel : e.currentActorLabel ?? e.actorLabel) ?? AUDIT_SYSTEM_ACTOR,
+        [orgId],
     );
 
     const verbTotal = useMemo(() => {
@@ -378,8 +364,10 @@ export default function AuditLogBrowser({
     );
 
     const actorOptions = useMemo(
-        () => [...actorTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({ value, total })),
-        [actorTotal],
+        () => [...actorTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({
+            value, total, label: value === AUDIT_SYSTEM_ACTOR ? systemLabel : value,
+        })),
+        [actorTotal, systemLabel],
     );
 
     const matches = useMemo(
@@ -628,7 +616,7 @@ export default function AuditLogBrowser({
             chips.push({ id: "r", label: map[filters.range], onRemove: () => setFilters((p) => ({ ...p, range: "all" })) });
         }
         for (const a of filters.actors) {
-            chips.push({ id: `a-${a}`, label: a, onRemove: () => toggleSet("actors", a) });
+            chips.push({ id: `a-${a}`, label: a === AUDIT_SYSTEM_ACTOR ? systemLabel : a, onRemove: () => toggleSet("actors", a) });
         }
         return chips;
     })();

@@ -19,6 +19,38 @@ async function choose(page: Page, trigger: Locator, label: string) {
 }
 
 for (const locale of ['en', 'ja'] as const) {
+    test(`announces automatic company creation during import review in ${locale} @mobile`, async ({ page }) => {
+        const key = `autocompany${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+        await registerUser(page.request, { username: key, password: `Review!${key}A1`, email: `${key}@example.invalid` });
+        const workspaceId = await activeWorkspaceId(page.request);
+        await useLocale(page, locale);
+        const t = createTranslator({ locale, messages: locale === 'en' ? en : ja, namespace: 'importExport' });
+        const companyName = `㈱テスト ${key}`;
+        await page.goto('/records/contacts?view=table');
+        await page.getByRole('button', { name: t('moreActions'), exact: true }).click();
+        const fieldsLoaded = page.waitForResponse((response) => response.url().includes('/api/custom-fields/schema?entityType=person') && response.status() === 200);
+        await page.getByRole('menuitem', { name: t('openImport'), exact: true }).click();
+        await fieldsLoaded;
+        const dialog = page.getByRole('dialog');
+        await dialog.locator('input[type="file"]').setInputFiles({ name: 'automatic-company.csv', mimeType: 'text/csv',
+            buffer: Buffer.from(`Name,Email,Company\n山田太郎,${key}@example.invalid,${companyName}\n`) });
+        await dialog.getByRole('button', { name: t('next'), exact: true }).click();
+        const row = dialog.locator('[data-import-row="0"]');
+        await expect(row.getByText(t('companyWillCreate', { name: companyName }), { exact: true })).toBeVisible();
+        await expect(row.getByText(t('companyChoice', { name: companyName }), { exact: true })).toHaveCount(0);
+        await expect(dialog.getByRole('button', { name: t('import'), exact: true })).toBeEnabled();
+        const committed = page.waitForResponse((response) => response.url().endsWith('/api/imports/persons') && response.request().method() === 'POST');
+        await dialog.getByRole('button', { name: t('import'), exact: true }).click();
+        const response = await committed;
+        expect(response.status()).toBe(200);
+        expect(await response.json()).toMatchObject({ created: 1, failed: [] });
+        const people = await page.request.get('/api/persons/page?page=1&size=25', { headers: { 'X-Workspace-Id': String(workspaceId) } });
+        expect(people.status()).toBe(200);
+        expect(await people.json()).toMatchObject({ items: expect.arrayContaining([
+            expect.objectContaining({ name: '山田太郎', company: expect.objectContaining({ name: companyName }) }),
+        ]) });
+    });
+
     test(`recovers colliding custom mappings and a replaced field in ${locale} @mobile`, async ({ page }) => {
         const key = `fields${randomUUID().replaceAll('-', '').slice(0, 12)}`;
         await registerUser(page.request, { username: key, password: `Fields!${key}A1`, email: `${key}@example.invalid` });
@@ -136,13 +168,25 @@ for (const locale of ['en', 'ja'] as const) {
         await choose(page, mapColumn('Phone'), t('fields.phone'));
         await dialog.getByRole('button', { name: t('next'), exact: true }).click();
         const firstRow = dialog.locator('[data-import-row="0"]');
-        await expect(firstRow.getByText(t('problems.COMPANY_CHOICE_REQUIRED'), { exact: true })).toBeVisible();
+        for (const rowIndex of [0, 1]) {
+            await expect(dialog.locator(`[data-import-row="${rowIndex}"]`).getByText(t('problems.COMPANY_CHOICE_REQUIRED'), { exact: true })).toBeVisible();
+        }
         const secondCandidate = firstRow.getByLabel(t('candidateListLabel')).locator('[data-import-candidate]').filter({ hasText: 'Second division' });
+        const candidateId = await secondCandidate.getAttribute('data-import-candidate');
+        if (!candidateId) throw new Error('Selected company candidate is missing its id');
+        const selectedCompanyId = Number(candidateId);
+        expect(Number.isSafeInteger(selectedCompanyId)).toBe(true);
+        expect(selectedCompanyId).toBeGreaterThan(0);
         await secondCandidate.getByRole('button', { name: t('candidateUse'), exact: true }).click();
-        await firstRow.locator('summary').filter({ hasText: t('companyChoice', { name: companyName }) }).click();
+        await expect(firstRow.locator('summary').filter({ hasText: t('companyChoice', { name: companyName }) })).toHaveCount(0);
+        await firstRow.locator('summary').filter({ hasText: t('companySelected', { name: companyName }) }).click();
         await firstRow.getByRole('button', { name: t('applyCompanyChoice', { count: 2 }), exact: true }).click();
         await dialog.getByRole('button', { name: t('refreshReview'), exact: true }).click();
-        await expect(firstRow.getByText(t('problems.COMPANY_CHOICE_REQUIRED'), { exact: true })).toHaveCount(0);
+        for (const rowIndex of [0, 1]) {
+            const row = dialog.locator(`[data-import-row="${rowIndex}"]`);
+            await expect(row.getByText(t('problems.COMPANY_CHOICE_REQUIRED'), { exact: true })).toHaveCount(0);
+            await expect(row.locator('summary').filter({ hasText: t('companySelected', { name: companyName }) })).toBeVisible();
+        }
         for (let pageIndex = 0; pageIndex < 6; pageIndex += 1) {
             await dialog.getByRole('button', { name: t('nextPage'), exact: true }).click();
         }
@@ -180,19 +224,24 @@ for (const locale of ['en', 'ja'] as const) {
         expect(await committed.json()).toMatchObject({ created: 120, skipped: 1, failed: [] });
         const payload: unknown = committed.request().postDataJSON();
         if (!isRecord(payload) || !isRecord(payload.companyLinks)) throw new Error('Company choices missing from commit');
-        expect(payload.companyLinks['0']).toBe(payload.companyLinks['1']);
+        expect(payload.companyLinks['0']).toBe(selectedCompanyId);
+        expect(payload.companyLinks['1']).toBe(selectedCompanyId);
         expect(payload.skippedRows).toEqual([120]);
         let first: unknown;
+        let second: unknown;
         for (let pageIndex = 1; pageIndex <= 5; pageIndex += 1) {
             const people = await page.request.get(`/api/persons/page?page=${pageIndex}&size=25`, { headers: { 'X-Workspace-Id': String(workspaceId) } });
             expect(people.status()).toBe(200);
             const persisted: unknown = await people.json();
             if (!isRecord(persisted) || !Array.isArray(persisted.items)) throw new Error('Contact page is missing');
             expect(persisted.total).toBe(120);
-            first = persisted.items.find((item: unknown) => isRecord(item) && item.name === 'Review person 1');
-            if (first) break;
+            first ??= persisted.items.find((item: unknown) => isRecord(item) && item.name === 'Review person 1');
+            second ??= persisted.items.find((item: unknown) => isRecord(item) && item.name === 'Review person 2');
+            if (first && second) break;
         }
-        if (!isRecord(first) || !isRecord(first.company)) throw new Error('Selected company was not persisted');
-        expect(first.company.id).toBe(payload.companyLinks['0']);
+        for (const person of [first, second]) {
+            if (!isRecord(person) || !isRecord(person.company)) throw new Error('Selected company was not persisted');
+            expect(person.company.id).toBe(selectedCompanyId);
+        }
     });
 }
