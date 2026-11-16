@@ -1,5 +1,6 @@
 {
   "UI": {
+    "showOptions": "候補を表示",
     "searching": "検索中…",
     "close": "閉じる"
   },

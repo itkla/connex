@@ -173,9 +173,11 @@ function ComboboxTrigger({
   children,
   ...props
 }: ComboboxPrimitive.Trigger.Props) {
+  const t = useTranslations("UI")
   return (
     <ComboboxPrimitive.Trigger
       data-slot="combobox-trigger"
+      aria-label={t("showOptions")}
       className={cn("[&_svg:not([class*='size-'])]:size-4", className)}
       {...props}
     >

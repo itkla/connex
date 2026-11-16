@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { ArrowDownIcon, ArrowUpIcon } from "@heroicons/react/16/solid";
 import {
     ArrowTrendingUpIcon,
@@ -10,7 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 
 import type { Kpi } from "@/app/components/overview/analytics/metrics";
-import CountUp from "@/app/components/dashboard/CountUp";
+import { formatCompactCurrency } from "@/app/lib/utils";
 import { cn } from "@/lib/utils";
 
 const ICONS = {
@@ -78,20 +78,12 @@ function Delta({ kpi, label }: { kpi: Kpi; label: string }) {
 
 export default function SignalStrip({ kpis, currency }: { kpis: Kpi[]; currency: string }) {
     const t = useTranslations("MePage");
+    const locale = useLocale();
 
     const renderValue = (kpi: Kpi) => {
-        if (kpi.format === "currency") return <CountUp value={kpi.value} format="currency" currency={currency} />;
-        if (kpi.format === "percent")
-            return (
-                <>
-                    <CountUp value={Math.round(kpi.value * 100)} format="count" />%
-                </>
-            );
-        return (
-            <>
-                <CountUp value={Math.round(kpi.value)} format="count" /> {t("daysUnit")}
-            </>
-        );
+        if (kpi.format === "currency") return <span>{formatCompactCurrency(kpi.value, currency, locale)}</span>;
+        if (kpi.format === "percent") return <><span>{Math.round(kpi.value * 100).toLocaleString(locale)}</span>%</>;
+        return <><span>{Math.round(kpi.value).toLocaleString(locale)}</span> {t("daysUnit")}</>;
     };
 
     return (

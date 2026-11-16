@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Autocomplete, AutocompleteContent, AutocompleteList, AutocompleteItem, AutocompleteEmpty, AutocompleteInput } from '@/components/ui/autocomplete';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { cn } from '@/lib/utils';
-import { ensureUrlScheme, isLikelyUrl, normalizeWebsiteForCompare } from '@/app/lib/utils';
+import { companyInitial, ensureUrlScheme, isLikelyUrl, normalizeWebsiteForCompare } from '@/app/lib/utils';
 import {
     type Company,
     type CreateCompanyPayload,
@@ -193,7 +193,7 @@ export default function NewCompanyDialog({
         onInvalid: () => toastError(t('logoUnsupported')),
     });
 
-    const initial = payload.name.trim().charAt(0).toUpperCase();
+    const initial = companyInitial(payload.name);
 
     const websiteByDomain = useMemo(() => {
         const map = new Map<string, Company>();
@@ -837,7 +837,7 @@ export function NewCompanyForm({
         onInvalid: () => toastError(t('logoUnsupported')),
     });
 
-    const initial = payload.name.trim().charAt(0).toUpperCase();
+    const initial = companyInitial(payload.name);
 
     const websiteByDomain = useMemo(() => {
         const map = new Map<string, Company>();

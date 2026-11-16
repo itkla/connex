@@ -1,5 +1,6 @@
 'use client';
 
+import { autoYAxisWidth } from '@/app/lib/chartAxes';
 import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { useMemo, type ComponentProps } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -289,10 +290,10 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
     if (widget.chartType === 'line-area') {
         return (
             <ChartContainer config={config} className="aspect-auto h-64 w-full">
-                <AreaChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
+                <AreaChart data={data} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} accessibilityLayer>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
                     <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
-                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale, 'compact')} />
+                    <YAxis tickLine={false} axisLine={false} {...autoYAxisWidth((value) => formatReportValue(value, widget.unit, locale, 'compact'))} />
                     <ChartTooltip content={<ChartTooltipContent formatter={tooltipFormatter} />} />
                     <Area dataKey="prior" type="monotone" stroke="var(--chart-2)" fill="var(--chart-2)" fillOpacity={0.08} strokeWidth={1.5} />
                     <Area dataKey="current" type="monotone" stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.18} strokeWidth={2} />
@@ -303,10 +304,10 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
 
     return (
         <ChartContainer config={config} className="aspect-auto h-64 w-full">
-            <BarChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
+            <BarChart data={data} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} accessibilityLayer>
                 <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
                 <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
-                <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale, 'compact')} />
+                <YAxis tickLine={false} axisLine={false} {...autoYAxisWidth((value) => formatReportValue(value, widget.unit, locale, 'compact'))} />
                 <ChartTooltip content={<ChartTooltipContent formatter={tooltipFormatter} />} />
                 {isAttainment ? <ChartLegend content={<ChartLegendContent />} /> : null}
                 {isAttainment ? <Bar dataKey="prior" fill="var(--chart-2)" radius={[6, 6, 0, 0]} /> : null}

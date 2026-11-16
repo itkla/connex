@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTimeZone, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -48,7 +48,7 @@ import {
     updatePipeline,
 } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { formatDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { PIPELINE_EDIT_URL_KEY, writeOwnedParamsToUrl } from '@/app/hooks/listStateUrl';
 import type {
     Activity,
@@ -91,6 +91,8 @@ const EMPTY_PIPELINE_DRAFT: CreatePipelinePayload = { name: '' };
 
 export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] }) {
     const router = useRouter();
+    const locale = useLocale();
+    const timeZone = useTimeZone();
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const t = useTranslations('PipelinesBrowser');
@@ -439,15 +441,15 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             key: 'createdAt',
             label: t('columnCreated'),
             getSortValue: (p) => (p.createdAt ? Date.parse(p.createdAt) : null),
-            render: (p) => p.createdAt,
+            render: (p) => formatDateTime(p.createdAt, locale, timeZone),
         },
         {
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (p) => (p.updatedAt ? Date.parse(p.updatedAt) : null),
-            render: (p) => p.updatedAt,
+            render: (p) => formatDateTime(p.updatedAt, locale, timeZone),
         },
-    ], [t]);
+    ], [locale, timeZone, t]);
 
     const metricsByPipelineId = useMemo(() => {
         const map = new Map<number, PipelineMetrics>();

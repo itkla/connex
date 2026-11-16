@@ -6,7 +6,7 @@ import { CheckCircleIcon, FireIcon, ExclamationTriangleIcon } from "@heroicons/r
 
 import type { DealRiskFactorCode, DealRiskLevel, RelationshipTemperature } from "@/app/lib/types";
 import { cn } from "@/lib/utils";
-import { formatCompactCurrency } from "@/app/lib/utils";
+import { formatCompactCurrency, initials } from "@/app/lib/utils";
 import WarmthPill from "@/app/components/records/WarmthPill";
 
 /** A relationship that is cooling and needs a touch, joined to its contact. */
@@ -38,11 +38,6 @@ const RISK_DOT: Record<Exclude<DealRiskLevel, "none">, string> = {
     medium: "bg-risk-medium",
     low: "bg-risk-low",
 };
-
-function initials(name: string): string {
-    const p = name.trim().split(/\s+/);
-    return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase() || "?";
-}
 
 function PanelShell({
     title,

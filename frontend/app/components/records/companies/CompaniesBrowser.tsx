@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTimeZone, useTranslations } from 'next-intl';
+import { formatDateTime } from '@/app/lib/utils';
 import { useReducedMotion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
@@ -175,6 +176,8 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
 
 export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
+    const locale = useLocale();
+    const timeZone = useTimeZone();
     const t = useTranslations('CompaniesBrowser');
     const tActions = useTranslations('Actions');
     const tf = useTranslations('Filters');
@@ -714,8 +717,10 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             label: t('columnName'),
             getSortValue: (c) => c.name ?? null,
             widthClass: 'min-w-48',
+            maxWidth: '20rem',
+            getTextValue: (c) => c.name,
             render: (c) => (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
                     <span className="truncate">{c.name}</span>
                     <CommentIndicatorChip count={commentCounts.get(c.id)} />
                 </span>
@@ -762,15 +767,15 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             key: 'createdAt',
             label: t('columnCreated'),
             getSortValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : null),
-            render: (c) => c.createdAt,
+            render: (c) => formatDateTime(c.createdAt, locale, timeZone),
         },
         {
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
-            render: (c) => c.updatedAt,
+            render: (c) => formatDateTime(c.updatedAt, locale, timeZone),
         },
-    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, commentCounts]);
+    ], [locale, timeZone, t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, commentCounts]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 

@@ -57,7 +57,11 @@ Cards represent genuine semantic units: an actionable insight, record preview, g
 
 Comfortable density is the default. Compactness is explicit, scoped, reversible, and persistent only for bounded work modes such as tables, bulk cleanup, imports, or pipeline review. Do not globally compact dashboards, forms, detail pages, or mobile.
 
+Record-table column definitions may cap intrinsic text width through `ColumnDef.maxWidth`, shared by the header, body cell, and truncating content. Contacts, Companies, and Deals cap names at 20rem; contact titles and email at 16rem. Truncated values retain their full text in a title, including rich names and inline-edit displays. These are default content bounds; user-controlled resizing and its persistence remain under #413.
+
 Mobile keeps the same capability semantics but uses task-adaptive lists and focused sheets rather than horizontally scrolled desktop tables or indiscriminate desktop-card stacks. Prefer one focused task at a time and generous touch targets.
+
+Below 400px, contact-list names span the available text width and may wrap to two lines so Japanese names remain identifiable; Latin words wrap at normal word boundaries, with emergency wrapping for an oversized word. Warmth shares the secondary line. Wider mobile lists retain single-line name truncation and the trailing warmth cue. Keep the full name in a title.
 
 ## Operation → surface mapping
 
@@ -310,6 +314,13 @@ Dirty protection lasts for each mounted draft's entire lifetime. A synchronous `
 Same-document Back/Forward uses that early `popstate` dispatcher, which delegates to the current editor in the shared registry. With no editor registered or a clean editor and no guarded restoration/replay in progress, it leaves routing and custom history state untouched for Next. Capture alone is not the ordering guarantee. Editors supply their rendered pathname and search from Next's route context. When native Navigation API entry indices provide a known delta, a dirty editor's guard traverses back to the original editor entry before asking. Keep editing therefore preserves the native cursor, destination entry and its query context. Discard replays that known traversal once, then explicitly calls the router's `replace` so even a null-state destination renders. No dirty-state latch is disabled during replay. Same-path/search fragment traversal in a dirty editor also explicitly reconciles the router and keeps protection active.
 
 List-state writers check their owning pathname against the address bar before changing history. Native Back/Forward moves the address bar before React unmounts the outgoing list; late query, view/filter, saved-view, owned-param or peek writes must not overwrite an editor entry. Deals deliberately canonicalizes its selected desktop view into `?view=table`; this is valid list state, not a failed editor departure.
+
+Workspace and organization audit browsers restore search, action, entity, outcome, actor, date range,
+and sort from their URL. They write only their owned parameters through `useOwnedUrlParams`, preserving
+other parameters, section fragments and router history state without navigation. Clearing filters
+removes their parameters while retaining the selected sort. Actor keys use a JSON array so commas
+and Japanese names survive sharing and reload. Unattributed events use the locale-independent
+`__system__` key; options and chips translate its label only for display.
 
 No indices are added to history state, no global history tracker is installed, and no entries or guessed distances are used. If native positions are unavailable or do not identify a nonzero delta, the existing safe fallback restores the rendered editor's URL/state in the reached slot using the native history prototype. This unknown-distance fallback replaces that slot rather than restoring the cursor: Keep editing can consume a Back/Forward destination and lose its query context. Discard explicitly routes to the captured destination. This bounded limitation preserves URL/page consistency without guessing. Cross-document departures retain the native leave warning.
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     ensureUrlScheme,
+    companyInitial,
     fixedOffsetSeconds,
     formatCompactCurrency,
     formatCurrency,
@@ -216,10 +217,45 @@ describe("color helpers", () => {
 });
 
 describe("initials / pickDominantCurrency", () => {
-    it("takes the first letters of at most two name parts, uppercased", () => {
+    it("takes the first and last name initials, uppercased", () => {
         expect(initials("Jane Doe")).toBe("JD");
-        expect(initials("Jane Alexandra Doe")).toBe("JA");
+        expect(initials("Jane Alexandra Doe")).toBe("JD");
         expect(initials("jane")).toBe("J");
+    });
+
+    it.each([
+        ['🚀 宇宙 太郎', '宇'],
+        ['𠮷野 家', '𠮷'],
+        ['山田 太郎', '山'],
+        ['ヤマダ タロウ', 'ヤ'],
+        ['やまだ たろう', 'や'],
+        ['김 민수', '김'],
+        ['Jane Q Doe', 'JD'],
+        ['  jane\tq\n doe  ', 'JD'],
+        ['👩🏽‍🚀 Jane 🚀 Doe', 'JD'],
+        ['E\u0301mile Doe', 'E\u0301D'],
+        ['か\u3099く たろう', 'か\u3099'],
+        ['', '?'],
+        ['  \t\n', '?'],
+        ['👩🏽‍🚀 🚀', '?'],
+    ])('formats %s without splitting graphemes', (name, expected) => {
+        const result = initials(name);
+        expect(result).toBe(expected);
+        expect(result).not.toContain('\uFFFD');
+        expect(result.isWellFormed()).toBe(true);
+    });
+
+    it('preserves supplementary characters when Intl.Segmenter is unavailable', () => {
+        vi.stubGlobal('Intl', new Proxy(Intl, {
+            get: (target, property) => property === 'Segmenter' ? undefined : Reflect.get(target, property),
+        }));
+        try {
+            expect(initials('𠮷野 家')).toBe('𠮷');
+            expect(initials('🚀 宇宙 太郎')).toBe('宇');
+            expect(companyInitial('株式会社𠮷野')).toBe('𠮷');
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 
     it("picks the most frequent currency, defaulting to USD", () => {
@@ -228,6 +264,33 @@ describe("initials / pickDominantCurrency", () => {
             pickDominantCurrency([{ currency: "JPY" }, { currency: "JPY" }, { currency: "EUR" }]),
         ).toBe("JPY");
         expect(pickDominantCurrency([{ currency: null }])).toBe("USD");
+    });
+});
+
+describe('company avatar previews', () => {
+    it.each([
+        ['株式会社サンプル', 'サ'],
+        ['サンプル株式会社', 'サ'],
+        ['(株)サンプル', 'サ'],
+        ['（株）サンプル', 'サ'],
+        ['㈱サンプル', 'サ'],
+        ['有限会社 サンプル', 'サ'],
+        ['サンプル 有限会社', 'サ'],
+        ['合同会社サンプル', 'サ'],
+        ['サンプル合同会社', 'サ'],
+        ['(有)サンプル', 'サ'],
+        ['(同)サンプル', 'サ'],
+        ['株式会社 サンプル (株)', 'サ'],
+        ['株式会社𠮷野', '𠮷'],
+        ['E\u0301clair Inc.', 'É'],
+        ['株式会社🚀研究所', '🚀'],
+        ['株式会社', ''],
+        ['', ''],
+        ['  ', ''],
+        ['株価研究所', '株'],
+        ['The 株式会社 Studio', 'T'],
+    ])('uses the brand grapheme in %s', (name, expected) => {
+        expect(companyInitial(name)).toBe(expected);
     });
 });
 
