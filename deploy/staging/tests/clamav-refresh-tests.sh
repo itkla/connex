@@ -5,9 +5,9 @@ set -Eeuo pipefail
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REFRESH="${CONNEX_CLAMAV_REFRESH_TEST_SCRIPT:-$TESTS_DIR/../connex-staging-clamav-refresh.sh}"
 DEPLOYED=dddddddddddddddddddddddddddddddddddddddd
-OLD_ID=1111111111111111111111111111111111111111111111111111111111111111
+OLD_ID="${OLD_ID:-1111111111111111111111111111111111111111111111111111111111111111}"
 NEW_ID=2222222222222222222222222222222222222222222222222222222222222222
-OLD_IMAGE=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+OLD_IMAGE="${OLD_IMAGE:-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
 NEW_IMAGE=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 LIVE=connex-staging-clamav
 PREVIOUS=connex-staging-clamav-previous
@@ -164,7 +164,9 @@ stub_git() {
 
 stub_curl() {
     echo "$CANARY" >&2
-    [ "${!#}" = http://127.0.0.1:8094/health ] || return 1
+    local url=http://127.0.0.1:8094/health
+    if [[ "$SCENARIO" = field_staging_* ]]; then url=http://127.0.0.1:8091/health; fi
+    [ "${!#}" = "$url" ] || return 1
     touch "$CASE/curled"
     [ "$SCENARIO" != curl_failure ] || return 1
     if [ "$SCENARIO" = not_ready ]; then echo '{"ready":false}'; else echo '{"ready":true}'; fi
@@ -202,7 +204,10 @@ setup() {
     echo "$DEPLOYED" > "$CASE/staging/.staging/deployed-sha"
     echo 'deployed release fixture' > "$CASE/archive/clamav/Dockerfile"
     touch "$CASE/deploy.lock" "$CASE/actions" "$CASE/env.paths" "$CASE/removed.images"
-    cat > "$CASE/original.json" <<'JSON'
+    if [ "$#" -gt 1 ]; then
+        jq '.[0]' "$2" > "$CASE/original.json"
+    else
+        cat > "$CASE/original.json" <<'JSON'
 {
   "Id": "1111111111111111111111111111111111111111111111111111111111111111",
   "Image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -226,6 +231,10 @@ setup() {
   "NetworkSettings": {"Networks": {"staging-scanner": {"Aliases": ["scanner"]}}}
 }
 JSON
+    fi
+    OLD_ID="$(jq -r '.Id' "$CASE/original.json")"
+    OLD_IMAGE="$(jq -r '.Image' "$CASE/original.json")"
+    export OLD_ID OLD_IMAGE
     cp "$CASE/original.json" "$CASE/containers/$LIVE.json"
     local command
     for command in docker git curl id sleep rm; do
@@ -414,6 +423,7 @@ main() {
     assert_private_cleanup
 
     security_field_cases
+    staging_inspect_cases
 
     setup old_container_cleanup_failure
     run_refresh
@@ -432,6 +442,82 @@ main() {
 
     echo "$ASSERTIONS assertions; $FAILURES failures"
     [ "$FAILURES" -eq 0 ]
+}
+
+staging_inspect_cases() {
+    local fixture="${CONNEX_CLAMAV_REFRESH_TEST_INSPECT:-$TESTS_DIR/fixtures/clamav-docker29-inspect.json}"
+    local field change scenario
+    for scenario in original MaskedPaths_reordered ReadonlyPaths_reordered; do
+        setup "field_staging_$scenario" "$fixture"
+        case "$scenario" in
+            MaskedPaths_reordered) jq '.HostConfig.MaskedPaths |= reverse' "$CASE/original.json" > "$CASE/containers/$LIVE.json" ;;
+            ReadonlyPaths_reordered) jq '.HostConfig.ReadonlyPaths |= reverse' "$CASE/original.json" > "$CASE/containers/$LIVE.json" ;;
+        esac
+        run_refresh
+        assert staging_inspect_accepted test "$STATUS" = 0
+        assert healthy_replacement_running running_id "$NEW_ID"
+        # Compare the entire create invocation, including omitted defaults, against independent
+        # expectations from the staging inspect rather than the script's argument registry.
+        cat > "$CASE/expected-create.args" <<ARGS
+--name
+connex-staging-clamav
+--memory
+1992294400
+--memory-swap
+1992294400
+--read-only=true
+--shm-size
+67108864
+--restart
+unless-stopped
+--network
+bridge
+--log-driver
+json-file
+--tmpfs
+/tmp:size=512m,mode=1777,noexec,nosuid,nodev
+--publish
+127.0.0.1:8091:8091/tcp
+--cpu-shares
+0
+--cpus
+0
+--cgroupns
+private
+--ipc
+private
+--runtime
+runc
+--user
+10002
+--env-file
+$(cat "$CASE/env.paths")
+connex-clamav:staging-candidate
+ARGS
+        assert all_create_arguments_reproduced cmp -s "$CASE/expected-create.args" "$CASE/create.args"
+        jq -r '.Config.Env[] | select(startswith("CONNEX_CLAMAV_"))' "$CASE/original.json" > "$CASE/expected.env"
+        assert scanner_environment_reproduced cmp -s "$CASE/expected.env" "$CASE/copied.env"
+        assert staging_readiness_checked test -e "$CASE/curled"
+        assert_private_cleanup
+    done
+
+    for field in MaskedPaths ReadonlyPaths; do
+        for change in added removed replaced duplicate; do
+            setup "field_staging_${field}_$change" "$fixture"
+            jq --arg field "$field" --arg change "$change" '.HostConfig[$field] |=
+                if $change == "added" then . + ["/custom"]
+                elif $change == "removed" then .[1:]
+                elif $change == "replaced" then .[1:] + ["/custom"]
+                else . + [.[0]] end' "$CASE/original.json" > "$CASE/containers/$LIVE.json"
+            run_refresh
+            assert changed_path_set_refused test "$STATUS" -ne 0
+            assert refused_at_settings grep -q 'result=failed stage=settings' "$CASE/run.log"
+            assert no_build test ! -e "$CASE/built"
+            assert no_container_mutation test "$(grep -cE '^(stop|rename|create|start|rm|tag)$' "$CASE/actions" || true)" = 0
+            assert_original_running
+            assert_private_cleanup
+        done
+    done
 }
 
 security_field_cases() {
