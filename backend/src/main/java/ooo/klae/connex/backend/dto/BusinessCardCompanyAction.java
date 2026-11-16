@@ -34,7 +34,7 @@ public sealed interface BusinessCardCompanyAction {
      * @param duplicateReviewToken token from the explicitly accepted company duplicate review
      */
     record Create(
-            @NotBlank @Size(max = 255) String companyName,
+            @NotBlank @Size(max = 255, message = "{validation.string.max}") String companyName,
             @Pattern(regexp = "^[0-9a-f]{64}$") String duplicateReviewToken)
             implements BusinessCardCompanyAction {
 

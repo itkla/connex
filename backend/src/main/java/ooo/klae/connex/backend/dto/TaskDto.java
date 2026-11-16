@@ -27,7 +27,7 @@ public class TaskDto {
     private Integer workspaceId;
 
     @NotBlank
-    @Size(max = 1000)
+    @Size(max = 1000, message = "{validation.string.max}")
     private String description;
 
     private boolean completed;
@@ -38,7 +38,7 @@ public class TaskDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Integer position;
 
-    @Size(max = 10)
+    @Size(max = 10, message = "{validation.string.max}")
     @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$", message = "Due date must use YYYY-MM-DD")
     private String dueDate;
 

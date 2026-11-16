@@ -77,8 +77,8 @@ class FormValidationHttpTest {
             Arguments.of(Locale.JAPANESE, "abc!", "valid@example.test", "username", "Pattern", "ユーザー名は半角英数字、ピリオド、アンダースコア、ハイフンで入力してください"),
             Arguments.of(Locale.ENGLISH, "valid", "bad-email", "email", "Email", "Please enter a valid email address"),
             Arguments.of(Locale.JAPANESE, "valid", "bad-email", "email", "Email", "正しいメールアドレスを入力してください"),
-            Arguments.of(Locale.ENGLISH, "valid", "a".repeat(256), "email", "Size", "Use between 0 and 255 characters"),
-            Arguments.of(Locale.JAPANESE, "valid", "a".repeat(256), "email", "Size", "0〜255文字で入力してください"));
+            Arguments.of(Locale.ENGLISH, "valid", "a".repeat(256), "email", "Size", "Use 255 characters or fewer"),
+            Arguments.of(Locale.JAPANESE, "valid", "a".repeat(256), "email", "Size", "255文字以内で入力してください"));
     }
 
     @ParameterizedTest

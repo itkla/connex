@@ -51,7 +51,7 @@ for (const locale of ['en', 'ja'] as const) {
         await page.getByRole('button', { name: message(locale, 'actions', 'Actions.quickCreate.trigger'), exact: true }).click();
         await page.getByRole('option', { name: message(locale, 'actions', 'Actions.create.company'), exact: true }).click();
         const companyName = page.locator('#new-company-form').getByRole('textbox', {
-            name: `${message(locale, 'companies', 'CompaniesNewDialog.labelName')} *`, exact: true,
+            name: message(locale, 'companies', 'CompaniesNewDialog.labelName'), exact: true,
         });
         await expect(companyName).toBeEditable();
         await companyName.fill(`${fixture.companyName}${locale === 'ja' ? ' ＬＬＣ' : ' LLC'}`);

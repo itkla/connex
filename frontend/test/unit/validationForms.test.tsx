@@ -117,6 +117,20 @@ for (const { locale, auth, activities, contacts, companies, common } of [
         return render(<NextIntlClientProvider locale={locale} timeZone="UTC" messages={{ ...auth, ...activities, ...contacts, ...companies, ...common }}><TooltipProvider>{child}</TooltipProvider></NextIntlClientProvider>);
     }
     describe(`localized validation in ${locale}`, () => {
+        it.each(['login', 'register'] as const)('keeps %s fields editable through exact localized labels', (mode) => {
+            const view = surface(<AuthForm mode={mode} redirectUrl={null} />);
+            const labels = mode === 'register'
+                ? { username: auth.AuthForm.labelUsername, email: auth.AuthForm.labelEmail, displayName: auth.AuthForm.labelDisplayName, password: auth.AuthForm.labelPassword }
+                : { username: auth.AuthForm.labelLoginIdentifier, password: auth.AuthForm.labelPassword };
+            for (const [key, label] of Object.entries(labels)) {
+                const field = input(`${mode}-${key}`);
+                expect(view.getByLabelText(label, { exact: true })).toBe(field);
+                expect(field.required).toBe(true);
+                expect(field.disabled).toBe(false);
+                fireEvent.change(field, { target: { value: 'editable' } });
+                expect(field.value).toBe('editable');
+            }
+        });
         it('A11Y-23/A11Y-22 checks required fields before sending and focuses username with one summary', async () => {
             const view = surface(<AuthForm mode="register" redirectUrl={null} />);
             submit(view.container);
@@ -164,6 +178,11 @@ for (const { locale, auth, activities, contacts, companies, common } of [
         it.each(['create', 'edit'] as const)('ACT-28 validates %s subject inline and focuses after rendering the error', async (mode) => {
             const create = vi.fn();
             const view = surface(mode === 'create' ? <ActivityDialogForm persons={[]} deals={[]} currentUserId={7} createRequest={create} onSubmittingChange={noop} onCancel={noop} onClose={noop} /> : <EditActivitySheet activity={activity} open onOpenChange={noop} persons={[]} deals={[]} originWorkspaceId={9} />);
+            const label = mode === 'create' ? activities.ActivityCreateDialog.subjectLabel : activities.ActivityEditActivitySheet.subjectLabel;
+            expect(view.getByLabelText(label, { exact: true })).toBe(input('activity-subject'));
+            expect(view.getByRole('textbox', { name: label })).toBe(input('activity-subject'));
+            expect(input('activity-subject').required).toBe(true);
+            expect(view.container.querySelector('label[for="activity-subject"] [aria-hidden="true"]')?.textContent).toBe('*');
             fireEvent.change(input('activity-subject'), { target: { value: '   ' } }); submit(view.container);
             await waitFor(() => expect(document.activeElement).toBe(input('activity-subject')));
             expect(document.getElementById('activity-subject-error')?.textContent).toBe(mode === 'create' ? activities.ActivityCreateDialog.toastSubjectRequired : activities.ActivityEditActivitySheet.subjectRequired);
@@ -198,11 +217,19 @@ for (const { locale, auth, activities, contacts, companies, common } of [
         it.each(['contact', 'company', 'company-dialog'] as const)('REC-27 validates %s name before duplicate review and focuses it', async (kind) => {
             const create = vi.fn(); const view = surface(<RecordForm kind={kind} create={create} />);
             const field = input(kind === 'contact' ? 'name' : 'company-name');
+            const label = kind === 'contact' ? contacts.ContactsNewContactDialog.name : companies.CompaniesNewDialog.labelName;
+            expect(view.getByLabelText(label, { exact: true })).toBe(field);
+            expect(view.getByRole('textbox', { name: label })).toBe(field);
             await waitFor(() => expect(field.disabled).toBe(false));
+            expect(field.required).toBe(true);
+            expect(view.container.querySelector(`label[for="${field.id}"] [aria-hidden="true"]`)?.textContent).toBe('*');
             expect(view.container.querySelector(`label[for="${field.id}"]`)?.textContent).toContain('*'); submit(view.container);
             await waitFor(() => expect(document.activeElement).toBe(field)); expect(field.getAttribute('aria-invalid')).toBe('true');
             expect(document.getElementById(kind === 'contact' ? 'name-error' : 'company-name-error')?.textContent).toBe(kind === 'contact' ? contacts.ContactsNewContactDialog.nameRequired : companies.CompaniesNewDialog.nameRequired);
             expect(create).not.toHaveBeenCalled(); expect(api.review).not.toHaveBeenCalled();
+            fireEvent.change(view.getByLabelText(label, { exact: true }), { target: { value: 'Editable name' } });
+            expect(field.value).toBe('Editable name');
+            expect(field.getAttribute('aria-invalid')).toBe('false');
         });
     });
 }

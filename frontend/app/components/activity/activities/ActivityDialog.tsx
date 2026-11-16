@@ -482,11 +482,12 @@ export function ActivityDialogForm({
                     </div>
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
-                        <Label htmlFor="activity-subject">{t('subjectLabel')} <span aria-hidden="true" className="text-muted-foreground">*</span></Label>
+                        <Label htmlFor="activity-subject"><span id="activity-subject-label">{t('subjectLabel')}</span> <span aria-hidden="true" className="text-muted-foreground">*</span></Label>
                         <div className="group relative">
                             <PencilSquareIcon className={fieldLeadIconClass} />
                             <input
                                 id="activity-subject"
+                                aria-labelledby="activity-subject-label"
                                 type="text"
                                 maxLength={255}
                                 value={subject}

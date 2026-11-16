@@ -19,7 +19,8 @@ for (const locale of ['en', 'ja'] as const) {
                 }) });
             });
             await page.goto('/auth/register');
-            const submit = page.getByRole('button', { name: message(locale, 'auth', 'AuthRegister.submitLabel'), exact: true });
+            const submit = page.locator('form button[type="submit"]');
+            await expect(submit).toHaveText(message(locale, 'auth', 'AuthRegister.submitLabel'));
             await submit.click();
             await expect(page.locator('#register-username')).toBeFocused();
             await expect(page.locator('form [aria-invalid="true"]')).toHaveCount(4);
@@ -31,13 +32,19 @@ for (const locale of ['en', 'ja'] as const) {
             await page.locator('#register-displayName').fill('Validation probe');
             await page.locator('#register-password').fill('Aa12345#');
             await submit.click();
-            await expect(submit).toHaveAttribute('aria-busy', 'true');
-            expect(await submit.getAttribute('disabled')).toBeNull();
-            await expect(submit).toBeFocused();
-            pending.resolve();
+            try {
+                await expect(submit).toHaveAttribute('aria-busy', 'true');
+                await expect(submit).toHaveAttribute('aria-disabled', 'true');
+                await expect(submit).toHaveText(message(locale, 'auth', 'AuthRegister.submittingLabel'));
+                expect(await submit.getAttribute('disabled')).toBeNull();
+                await expect(submit).toBeFocused();
+            } finally {
+                pending.resolve();
+            }
             await expect(page.locator('#register-username')).toBeFocused();
             await expect(page.locator('#register-username-error')).toHaveText(message(locale, 'auth', 'AuthForm.usernameFormat'));
             await expect(submit).toHaveText(message(locale, 'auth', 'AuthRegister.submitLabel'));
+            await expect(submit).toHaveAttribute('aria-busy', 'false');
             expect(requests).toBe(1);
         });
     });
@@ -47,7 +54,7 @@ for (const locale of ['en', 'ja'] as const) {
         await useLocale(page, locale);
         await page.goto(`/records/contacts/${contact.id}`);
         await page.getByRole('button', { name: message(locale, 'activity', 'ActivityCreateDialog.titleCreate'), exact: true }).first().click();
-        const subject = page.locator('#activity-subject');
+        const subject = page.getByLabel(message(locale, 'activity', 'ActivityCreateDialog.subjectLabel'), { exact: true });
         await expect(subject).toHaveAttribute('maxlength', '255');
         await page.getByRole('button', { name: message(locale, 'activity', 'ActivityCreateDialog.create'), exact: true }).click();
         await expect(subject).toBeFocused();
@@ -72,10 +79,11 @@ for (const locale of ['en', 'ja'] as const) {
             await page.getByRole('complementary').getByRole('button', { name: message(locale, 'actions', 'Actions.quickCreate.trigger'), exact: true }).click();
             const optionKey = kind === 'contact' ? 'Actions.create.person' : 'Actions.create.company';
             await page.getByRole('option', { name: message(locale, 'actions', optionKey), exact: true }).click();
-            const field = page.locator(kind === 'contact' ? '#name' : '#company-name');
-            await expect(field).toBeVisible();
             const namespace = kind === 'contact' ? 'contacts' : 'companies';
             const prefix = kind === 'contact' ? 'ContactsNewContactDialog' : 'CompaniesNewDialog';
+            const field = page.getByLabel(message(locale, namespace, `${prefix}.${kind === 'contact' ? 'name' : 'labelName'}`), { exact: true });
+            await expect(field).toBeEditable();
+            await expect(field).toHaveAttribute('required', '');
             await page.getByRole('button', { name: message(locale, namespace, `${prefix}.create`), exact: true }).click();
             await expect(field).toBeFocused();
             await expect(page.locator(kind === 'contact' ? '#name-error' : '#company-name-error')).toHaveText(message(locale, namespace, `${prefix}.nameRequired`));

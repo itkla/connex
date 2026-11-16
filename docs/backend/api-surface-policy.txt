@@ -330,7 +330,7 @@ src/main/java/ooo/klae/connex/backend/dto/OrganizationLayoutDto.java	4f456f3ccd9
 src/main/java/ooo/klae/connex/backend/dto/PersonCampaignTouchDto.java	5591bf3249c29db9a0713452a144fb85b453dc24c225a583da2419d328e2ccad
 src/main/java/ooo/klae/connex/backend/dto/PrivilegedMembershipDto.java	8a2511f8cf9301af8b164d4402aada40c89b66a569a1d2deb9d766dca45c3e6d
 src/main/java/ooo/klae/connex/backend/dto/ProductFacetFilter.java	f061cadd88fa419cb65bcc87ce5045422568f1f813e36893a18ac8d0ae13fc9c
-src/main/java/ooo/klae/connex/backend/dto/RegisterDto.java	60a79dd1d6d1657d2995e835986a0f50d1a973184900c3c70a7090c80441c280
+src/main/java/ooo/klae/connex/backend/dto/RegisterDto.java	bce951479da3ca2c45a0839a45d0585bc3321cd10547625c3eef51869f7b096e
 src/main/java/ooo/klae/connex/backend/dto/RelationshipEvidenceDto.java	81d90e2342119fbdcf293f84243c06a534c269ef832315624558471af09f9151
 src/main/java/ooo/klae/connex/backend/dto/ReportFilters.java	4c4f8ee610d35b6a3d7485aec452d59f7c94361ca76cb1380243b5ddde5318f3
 src/main/java/ooo/klae/connex/backend/dto/RoleRequest.java	183356e8a395c14021adb8e588b57b1f4e45028aec08bd57b3abaabd26b7634c

@@ -334,6 +334,8 @@ The ad-hoc-button lint baseline represents legacy debt. It may shrink; do not ra
 
 Create and edit surfaces validate fixable field problems inline. Auth forms, activity create/edit forms, and new contact/company composers use `noValidate` and localized required errors, then focus the first invalid control. Registration checks required fields, lengths, username format, email format, and the shared password policy before sending. Auth keeps its submit control focusable during requests with `aria-disabled`/`aria-busy` and announces one polite summary. Activity subjects allow at most 255 characters and show a counter from 230 characters. Controls expose invalid/described-by state and render the field error next to the field. Toasts report request outcomes; they are not a substitute for field validation the user can fix in place.
 
+Required asterisks are hidden from assistive technology, and controls retain native `required` semantics. Their label references identify only the translated field text, so exact label lookups and accessible names exclude the marker.
+
 ## Motion and color
 
 Motion follows `docs/frontend/MOTION.md`. Repeated chrome such as `PageShell` and `PageHeader` does not animate independently when page arrival already owns the transition.

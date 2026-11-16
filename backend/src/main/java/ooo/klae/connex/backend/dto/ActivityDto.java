@@ -23,7 +23,7 @@ public class ActivityDto {
     private Integer id;
 
     @NotBlank
-    @Size(max = 32)
+    @Size(max = 32, message = "{validation.string.max}")
     private String type;
 
     @NotBlank
@@ -45,7 +45,7 @@ public class ActivityDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Integer createdById;
 
-    @Size(max = 32)
+    @Size(max = 32, message = "{validation.string.max}")
     @ValidMysqlDateTime
     private String timestamp;
 

@@ -25,15 +25,15 @@ public class RegisterDto {
     private String password;
 
     @NotBlank
-    @Size(max = 128)
+    @Size(max = 128, message = "{validation.string.max}")
     private String displayName;
 
     @NotBlank
     @Email
-    @Size(max = 255)
+    @Size(max = 255, message = "{validation.string.max}")
     private String email;
 
-    @Size(max = 64)
+    @Size(max = 64, message = "{validation.string.max}")
     private String timezone;
 
     /** Skips optional personal workspace creation; never grants invitation or membership authority. */

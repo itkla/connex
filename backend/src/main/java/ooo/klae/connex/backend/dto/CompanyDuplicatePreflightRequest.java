@@ -12,7 +12,7 @@ import jakarta.validation.constraints.Size;
  * @param phones candidate phone values
  */
 public record CompanyDuplicatePreflightRequest(
-        @Size(max = 255) String name,
-        @Size(max = 8) List<@Size(max = 2048) String> websites,
-        @Size(max = 8) List<@Size(max = 2048) String> phones) {
+        @Size(max = 255, message = "{validation.string.max}") String name,
+        @Size(max = 8) List<@Size(max = 2048, message = "{validation.string.max}") String> websites,
+        @Size(max = 8) List<@Size(max = 2048, message = "{validation.string.max}") String> phones) {
 }

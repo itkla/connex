@@ -984,12 +984,13 @@ function ContactDetailsFields({
     return (
         <>
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
-                <Label htmlFor="name">{t('name')} <span aria-hidden="true" className="text-muted-foreground">*</span></Label>
+                <Label htmlFor="name"><span id="name-label">{t('name')}</span> <span aria-hidden="true" className="text-muted-foreground">*</span></Label>
                 <div className="group relative">
                     <UserIcon className={fieldLeadIconClass} />
                     <input
                         ref={nameInputRef}
                         id="name"
+                        aria-labelledby="name-label"
                         type="text"
                         autoFocus
                         data-autofocus=""

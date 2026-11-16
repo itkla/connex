@@ -554,12 +554,13 @@ export default function NewCompanyDialog({
                         <fieldset disabled={formPending} className="contents">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company-name">
-                                {t('labelName')} <span aria-hidden="true" className="text-muted-foreground">*</span>
+                                <span id="company-name-label">{t('labelName')}</span> <span aria-hidden="true" className="text-muted-foreground">*</span>
                             </Label>
                             <div className="group relative">
                                 <BuildingOffice2Icon className={leadIcon} />
                                 <input
                                     id="company-name"
+                                    aria-labelledby="company-name-label"
                                     type="text"
                                     value={payload.name}
                                     onChange={(e) => {
@@ -1003,12 +1004,13 @@ export function NewCompanyForm({
                     <fieldset disabled={formPending} className="contents">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="company-name">
-                            {t('labelName')} <span aria-hidden="true" className="text-muted-foreground">*</span>
+                            <span id="company-name-label">{t('labelName')}</span> <span aria-hidden="true" className="text-muted-foreground">*</span>
                         </Label>
                         <div className="group relative">
                             <BuildingOffice2Icon className={leadIcon} />
                             <input
                                 id="company-name"
+                                aria-labelledby="company-name-label"
                                 type="text"
                                 value={payload.name}
                                 onChange={(e) => {

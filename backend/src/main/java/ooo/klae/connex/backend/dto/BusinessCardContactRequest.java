@@ -17,10 +17,10 @@ import jakarta.validation.constraints.Size;
  * @param duplicateReviewToken token from the explicitly accepted person duplicate review
  */
 public record BusinessCardContactRequest(
-        @NotBlank @Size(max = 255) String name,
-        @Email @Size(max = 255) String email,
-        @Size(max = 64) String phone,
-        @Size(max = 128) String title,
+        @NotBlank @Size(max = 255, message = "{validation.string.max}") String name,
+        @Email @Size(max = 255, message = "{validation.string.max}") String email,
+        @Size(max = 64, message = "{validation.string.max}") String phone,
+        @Size(max = 128, message = "{validation.string.max}") String title,
         @Positive Integer companyId,
         @Pattern(regexp = "^[0-9a-f]{64}$") String duplicateReviewToken) {
 
