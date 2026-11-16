@@ -138,8 +138,13 @@ export default function StageRatio({ distribution, currency }: { distribution: D
     }, [pipelines, pipelineColorById]);
 
     return (
-        <ChartContainer config={chartConfig} className="aspect-square h-64 w-full">
-            <PieChart>
+        <ChartContainer config={chartConfig} className="aspect-square h-64 w-full" role="img"
+            aria-label={t('chartSummary', {
+                open: distribution.reduce((sum, row) => sum + row.openCount, 0),
+                closed: distribution.reduce((sum, row) => sum + row.closedCount, 0),
+                currency,
+            })}>
+            <PieChart accessibilityLayer={false}>
                 <RechartsTooltip
                     cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
                     content={
@@ -151,6 +156,7 @@ export default function StageRatio({ distribution, currency }: { distribution: D
                     }
                 />
                 <Pie
+                    rootTabIndex={-1}
                     data={pipelineData}
                     dataKey="value"
                     nameKey="name"
@@ -161,6 +167,7 @@ export default function StageRatio({ distribution, currency }: { distribution: D
                     strokeWidth={1}
                 />
                 <Pie
+                    rootTabIndex={-1}
                     data={stageData}
                     dataKey="value"
                     nameKey="name"

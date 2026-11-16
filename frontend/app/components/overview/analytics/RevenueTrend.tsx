@@ -1,11 +1,12 @@
 'use client';
 
+import { autoYAxisWidth, monthAxisTicks } from '@/app/lib/chartAxes';
 import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { useMemo, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, Line, ReferenceLine, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
 
-import { ChartContainer, type ChartConfig } from '@/components/ui/chart';
+import { ChartContainer, ChartLegend, ChartLegendContent, type ChartConfig } from '@/components/ui/chart';
 import {
     type DealMonthTotal,
     type DealRevenuePeriodSeries,
@@ -83,7 +84,7 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ra
     const startIndex = currentIndex - (MONTHS_BACK[range] - 1);
 
     const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
-    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: 'numeric', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
     const total = MONTHS_BACK[range] + forwardHorizon(series, currentIndex);
@@ -93,15 +94,15 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ra
         const year = Math.floor(monthIndex / 12);
         const month = ((monthIndex % 12) + 12) % 12;
         const d = new Date(Date.UTC(year, month, 1));
-        const key = `${year}-${month}`;
+        const key = `${year}-${String(month + 1).padStart(2, '0')}`;
         keyToIndex.set(key, buckets.length);
         const label = month === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
         buckets.push({ key, label, tooltipLabel: label, won: 0, projected: 0 });
     }
 
-    const todayKey = `${current.year}-${current.month - 1}`;
+    const todayKey = `${current.year}-${String(current.month).padStart(2, '0')}`;
 
-    const bucketKeyOf = (point: DealMonthTotal) => `${point.year}-${point.month - 1}`;
+    const bucketKeyOf = (point: DealMonthTotal) => `${point.year}-${String(point.month).padStart(2, '0')}`;
     for (const point of series.closed) {
         const idx = keyToIndex.get(bucketKeyOf(point));
         if (idx !== undefined) buckets[idx].won += point.total;
@@ -175,7 +176,7 @@ export default function RevenueTrend({
 
     return (
         <ChartContainer config={chartConfig} className="aspect-auto h-72 w-full">
-            <AreaChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
+            <AreaChart data={data} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                     <linearGradient id="revenue-won-fill" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="var(--color-brand)" stopOpacity={0.22} />
@@ -185,21 +186,21 @@ export default function RevenueTrend({
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
                 <XAxis
                     dataKey="key"
+                    padding={{ left: 12, right: 32 }}
                     tickFormatter={(value: string) => labelByKey.get(value) ?? value}
                     tickLine={false}
                     axisLine={false}
                     tickMargin={10}
                     minTickGap={16}
-                    interval="preserveStartEnd"
+                    ticks={!periods || periods.granularity === 'month' ? monthAxisTicks(data.map((bucket) => bucket.key)) : undefined}
+                    interval={!periods || periods.granularity === 'month' ? 0 : 'preserveStartEnd'}
                     tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                 />
                 <YAxis
                     tickLine={false}
                     axisLine={false}
-                    tickMargin={4}
-                    width={56}
+                    {...autoYAxisWidth((value) => formatCompactCurrency(value, currency, locale))}
                     tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
-                    tickFormatter={(v: number) => formatCompactCurrency(v, currency, locale)}
                 />
                 <RechartsTooltip
                     cursor={{ stroke: 'var(--color-brand)', strokeOpacity: 0.25, strokeWidth: 1 }}
@@ -239,6 +240,7 @@ export default function RevenueTrend({
                     activeDot={{ r: 3, strokeWidth: 0 }}
                     isAnimationActive={false}
                 />
+                <ChartLegend content={<ChartLegendContent indicator="line" />} />
             </AreaChart>
         </ChartContainer>
     );

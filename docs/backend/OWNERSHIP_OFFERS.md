@@ -73,7 +73,14 @@ Delivery routes before opening its transaction. It retains sorted parties S with
 Read-all traverses a fixed candidate cutoff with an advancing notification-id watermark. It skips
 only candidates whose offer or notice no longer exists after a not-found refusal; other failures
 propagate. Disappearing or unchanged candidates cannot prevent ordinary notifications from being
-marked read or trap the traversal on its first page. Closure and cleanup counters use a sorted, deduplicated control-only UPDATE of existing recipient-state rows. The ordinary state upsert takes a recipient-account FK lock even on a duplicate; using it here would acquire a counterpart account after roots. Delivery commits DELIVERED, the notice and that state row together. A missing state row refuses closure and rolls it back instead of creating a reference. The counter queue unbinds/rebinds on transaction suspension so AFTER_COMMIT lifecycle closures have their own transaction state. Generic invalidation uses the existing transaction-aware realtime publisher.
+marked read or trap the traversal on its first page. Each notice read keeps its own offer-lock
+transaction but defers its version bump and invalidation. The final ordinary batch advances the
+recipient once if either phase changed any notices, including an ownership-only inbox. An unchanged
+retry does not advance it. If a later mutation fails after an offer read committed, a fresh transaction
+advances and invalidates that committed change before the original failure propagates; a failed
+invalidation is retained as a suppressed failure. Single-notice mutations retain their immediate bump.
+
+Closure and cleanup counters use a sorted, deduplicated control-only UPDATE of existing recipient-state rows. The ordinary state upsert takes a recipient-account FK lock even on a duplicate; using it here would acquire a counterpart account after roots. Delivery commits DELIVERED, the notice and that state row together. A missing state row refuses closure and rolls it back instead of creating a reference. The counter queue unbinds/rebinds on transaction suspension so AFTER_COMMIT lifecycle closures have their own transaction state. Generic invalidation uses the existing transaction-aware realtime publisher.
 
 When membership cleanup also queues the ordinary notification writer, both share one recipient bump
 through the existing-row-only writer; see [the notification-state tail](LOCKING.md).

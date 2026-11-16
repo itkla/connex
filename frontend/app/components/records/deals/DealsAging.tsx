@@ -57,8 +57,9 @@ export default function DealsAging({ aging, stageById }: { aging: DealAging[]; s
     }
 
     return (
-        <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
-            <BarChart data={data} layout="vertical" margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full" role="img"
+            aria-label={t('chartSummary', Object.fromEntries(BUCKETS.map(({ key }) => [key, data.reduce((sum, row) => sum + row[key], 0)])))}>
+            <BarChart accessibilityLayer={false} data={data} layout="vertical" margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid horizontal={false} strokeDasharray="3 3" />
                 <XAxis
                     type="number"
