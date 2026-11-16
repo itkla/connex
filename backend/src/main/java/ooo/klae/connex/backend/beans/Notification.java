@@ -38,6 +38,7 @@ public class Notification {
     private String resolvedAt;
     private String snoozedUntil;
     private String snoozeTimezone;
+    private String invitationExpiresAt;
     private String createdAt;
     private String updatedAt;
 

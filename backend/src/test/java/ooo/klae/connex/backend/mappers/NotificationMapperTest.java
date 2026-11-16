@@ -867,6 +867,16 @@ class NotificationMapperTest extends AbstractMapperTest {
         User recipient = newUser();
         Notification expired = invitationWithDeadline(recipient, false);
         Notification future = invitationWithDeadline(recipient, true);
+        String deadline = jdbcTemplate.queryForObject(
+            "SELECT expires_at FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+            String.class, future.getWorkspaceId(), recipient.getId());
+        assertNotNull(deadline);
+        assertEquals(deadline, notificationMapper.findPage(
+            recipient.getId(), "unread", null, null, null, 50, 0).getFirst().getInvitationExpiresAt());
+        assertEquals(deadline, notificationMapper.findById(
+            recipient.getId(), future.getId()).getInvitationExpiresAt());
+        assertEquals(deadline, notificationMapper.findByIdForUpdate(
+            recipient.getId(), future.getId()).getInvitationExpiresAt());
         assertEquals(List.of(future.getId()), notificationMapper.findPage(
             recipient.getId(), "unread", null, null, null, 50, 0).stream().map(Notification::getId).toList());
         assertTrue(notificationMapper.findPage(recipient.getId(), "active", null, null, null,
@@ -890,6 +900,23 @@ class NotificationMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void acceptedInvitationAndOrdinaryNoticesHaveNoPendingDeadline() {
+        User recipient = newUser();
+        Notification invitation = invitationWithDeadline(recipient, true);
+        assertEquals(1, workspaceMapper.activateMember(invitation.getWorkspaceId(), recipient.getId()));
+        User otherInvitee = newUser();
+        workspaceMapper.addPendingMember(invitation.getWorkspaceId(), otherInvitee.getId(), "member");
+        Notification accepted = notificationMapper.findById(recipient.getId(), invitation.getId());
+        assertNotNull(accepted);
+        assertNull(accepted.getInvitationExpiresAt());
+        Notification ordinary = reminder(recipient, "info", notificationMapper.getDatabaseUtcTimestamp());
+        notificationMapper.upsert(ordinary);
+        Notification visible = notificationMapper.findById(recipient.getId(), ordinary.getId());
+        assertNotNull(visible);
+        assertNull(visible.getInvitationExpiresAt());
+    }
+
+    @Test
     void expiredInvitationsCannotBeLookedUpDirectlyOrReadByAnotherRecipient() {
         User recipient = newUser();
         User stranger = newUser();
@@ -902,6 +929,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertEquals("Stored inviter identity", visible.getActorLabel());
         assertEquals("Invitation workspace", visible.getWorkspaceName());
         assertNull(notificationMapper.findById(stranger.getId(), future.getId()));
+        assertNull(notificationMapper.findByIdForUpdate(stranger.getId(), future.getId()));
         assertEquals(0, notificationMapper.markRead(recipient.getId(), expired.getId()));
     }
 
@@ -912,7 +940,15 @@ class NotificationMapperTest extends AbstractMapperTest {
         jdbcTemplate.update("UPDATE workspace_member SET expires_at = NULL WHERE workspace_id = ? AND user_id = ?",
             legacy.getWorkspaceId(), recipient.getId());
 
-        assertNotNull(notificationMapper.findById(recipient.getId(), legacy.getId()));
+        String cutoff = jdbcTemplate.queryForObject("""
+            SELECT CAST(installed_on AT TIME ZONE '+00:00' AS DATETIME) + INTERVAL 30 DAY
+            FROM flyway_schema_history WHERE version = '247' AND success = 1
+            """, String.class);
+        assertNotNull(cutoff);
+        assertEquals(cutoff, notificationMapper.findById(
+            recipient.getId(), legacy.getId()).getInvitationExpiresAt());
+        assertEquals(cutoff, notificationMapper.findPage(
+            recipient.getId(), "unread", null, null, null, 50, 0).getFirst().getInvitationExpiresAt());
         assertEquals(1, notificationMapper.countPage(recipient.getId(), "unread", null, null, null));
         assertEquals(1, notificationMapper.getUnreadCounts(recipient.getId(),
             notificationMapper.getDatabaseUtcTimestamp()).getUnread());

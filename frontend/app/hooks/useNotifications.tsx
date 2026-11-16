@@ -15,6 +15,14 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
 import { notificationSnoozeDelayMs } from "@/app/components/notifications/notificationSnooze";
+import {
+    excludeExpiredInvitationCounts,
+    needsInvitationCountRefresh,
+    notificationCountQueryUpperBound,
+    notificationInvitationDeadline,
+} from "@/app/components/notifications/notificationExpiry";
+import { useLiveNow } from "@/app/hooks/useNow";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import {
     emitNotificationStateChanged,
@@ -32,7 +40,8 @@ import {
     type RealtimeNotificationFrame,
 } from "@/app/lib/realtime";
 import { toastError, toastInfo, toastWarn, type ToastOptions } from "@/app/lib/toast";
-import { type Notification } from "@/app/lib/types";
+import { parseMysqlDateTime } from "@/app/lib/utils";
+import { type Notification, type NotificationCounts } from "@/app/lib/types";
 
 const POLL_INTERVAL_MS = 45_000;
 const POLL_SAFETY_INTERVAL_MS = 300_000;
@@ -44,6 +53,7 @@ type NotificationContextValue = {
     snoozed: number;
     quietHoursActive: boolean;
     refreshUnread: () => Promise<void>;
+    expireInvitations: (items: Notification[]) => void;
 };
 
 const MAX_TIMEOUT_DELAY_MS = 2_147_483_647;
@@ -77,6 +87,10 @@ export function NotificationProvider({
     const snoozeExpiryTimerRef = useRef<number | null>(null);
     const snoozeExpiryDueRef = useRef(false);
     const seenRef = useRef<Set<string>>(new Set());
+    const expiredInvitationsRef = useRef(new Map<number, Notification>());
+    const expiredSnapshotStatesRef = useRef(new Map<number, Notification>());
+    const countsSnapshotRef = useRef<NotificationCounts | null>(null);
+    const countsQueryUpperBoundRef = useRef(Number.POSITIVE_INFINITY);
 
     const t = useTranslations("Notifications");
     const locale = useLocale();
@@ -108,10 +122,15 @@ export function NotificationProvider({
                 requestRef.current = controller;
                 try {
                     const requestStartedAt = performance.now();
-                    const counts = await getNotificationCounts({ signal: controller.signal });
+                    const snapshot = await getNotificationCounts({ signal: controller.signal });
                     const roundTripMs = performance.now() - requestStartedAt;
+                    const queryUpperBound = notificationCountQueryUpperBound(snapshot, roundTripMs);
+                    const counts = excludeExpiredInvitationCounts(
+                        snapshot, expiredInvitationsRef.current.values(), expiredSnapshotStatesRef.current.values(), queryUpperBound,
+                    );
                     if (generation === mutationGenerationRef.current) {
-                        if (counts.stateVersion < observedStateVersionRef.current && staleRetryAvailable) {
+                        if (staleRetryAvailable && (counts.stateVersion < observedStateVersionRef.current
+                                || needsInvitationCountRefresh(snapshot, expiredInvitationsRef.current.values(), queryUpperBound))) {
                             staleRetryAvailable = false;
                             pendingRef.current = true;
                         } else if (counts.stateVersion >= observedStateVersionRef.current) {
@@ -120,6 +139,15 @@ export function NotificationProvider({
                             const snoozeExpiryDue = snoozeExpiryDueRef.current;
                             snoozeExpiryDueRef.current = false;
                             observedStateVersionRef.current = counts.stateVersion;
+                            countsSnapshotRef.current = snapshot;
+                            countsQueryUpperBoundRef.current = queryUpperBound;
+                            for (const [id, item] of expiredInvitationsRef.current) {
+                                const deadline = notificationInvitationDeadline(item);
+                                if (deadline != null && deadline <= parseMysqlDateTime(snapshot.asOf)) {
+                                    expiredInvitationsRef.current.delete(id);
+                                    expiredSnapshotStatesRef.current.delete(id);
+                                }
+                            }
                             unreadRef.current = counts.unread;
                             setUnread(counts.unread);
                             setSnoozed(counts.snoozed);
@@ -164,6 +192,31 @@ export function NotificationProvider({
         }
     }, [privilegedMfaReadsBlocked, recipientId]);
 
+    const expireInvitations = useCallback((items: Notification[]) => {
+        const snapshot = countsSnapshotRef.current;
+        const changedItems = items.filter((item) => {
+            const previous = expiredInvitationsRef.current.get(item.id);
+            return !previous || (previous.stateVersion ?? 0) < (item.stateVersion ?? 0);
+        });
+        for (const item of items) {
+            const previous = expiredInvitationsRef.current.get(item.id);
+            if ((previous?.stateVersion ?? 0) <= (item.stateVersion ?? 0)) {
+                expiredInvitationsRef.current.set(item.id, item);
+            }
+            if (snapshot != null && item.stateVersion === snapshot.stateVersion) {
+                expiredSnapshotStatesRef.current.set(item.id, item);
+            }
+        }
+        if (!snapshot) return;
+        const counts = excludeExpiredInvitationCounts(
+            snapshot, expiredInvitationsRef.current.values(), expiredSnapshotStatesRef.current.values(), countsQueryUpperBoundRef.current,
+        );
+        unreadRef.current = counts.unread;
+        setUnread(counts.unread);
+        setSnoozed(counts.snoozed);
+        if (needsInvitationCountRefresh(snapshot, changedItems, countsQueryUpperBoundRef.current)) void refreshUnread();
+    }, [refreshUnread]);
+
     useEffect(() => {
         const invalidateRequest = () => {
             mutationGenerationRef.current += 1;
@@ -172,11 +225,14 @@ export function NotificationProvider({
         };
         const stopAllRead = onAllNotificationsRead(
             recipientId,
-            ({ stateVersion, unread: nextUnread }) => {
+            (result) => {
+                const { stateVersion, unread: nextUnread } = result;
                 invalidateRequest();
                 if (stateVersion >= observedStateVersionRef.current) {
                     observedStateVersionRef.current = stateVersion;
                     unreadRef.current = nextUnread;
+                    countsSnapshotRef.current = result;
+                    countsQueryUpperBoundRef.current = Number.POSITIVE_INFINITY;
                     setUnread(nextUnread);
                 }
             },
@@ -284,7 +340,7 @@ export function NotificationProvider({
     }, [privilegedMfaReadsBlocked, refreshUnread]);
 
     return (
-        <NotificationContext.Provider value={{ recipientId, unread, snoozed, quietHoursActive, refreshUnread }}>
+        <NotificationContext.Provider value={{ recipientId, unread, snoozed, quietHoursActive, refreshUnread, expireInvitations }}>
             {children}
         </NotificationContext.Provider>
     );
@@ -294,4 +350,39 @@ export function useNotifications() {
     const value = useContext(NotificationContext);
     if (!value) throw new Error("useNotifications must be used within NotificationProvider");
     return value;
+}
+
+/** Hides expired invitations locally and wakes once at the earliest loaded deadline. */
+export function useUnexpiredNotifications(items: Notification[], scopeKey = "", stateVersion = 0) {
+    const { expireInvitations } = useNotifications();
+    const { activeWorkspaceId } = useWorkspace();
+    const liveNow = useLiveNow();
+    const [expiryNow, setExpiryNow] = useState(0);
+    const now = Math.max(liveNow, expiryNow);
+
+    useEffect(() => {
+        const deadlines = items.flatMap((item) => {
+            const deadline = notificationInvitationDeadline(item);
+            return deadline != null && deadline > expiryNow ? [deadline] : [];
+        });
+        if (deadlines.length === 0) return;
+        const delay = Math.min(MAX_TIMEOUT_DELAY_MS, Math.max(0, Math.min(...deadlines) - Date.now()));
+        const timer = window.setTimeout(() => {
+            const current = Date.now();
+            const expired = items.filter((item) => {
+                const deadline = notificationInvitationDeadline(item);
+                return deadline != null && deadline <= current;
+            });
+            expireInvitations(expired.map((item) => ({
+                ...item, stateVersion: Math.max(stateVersion, item.stateVersion ?? 0),
+            })));
+            setExpiryNow(current);
+        }, delay);
+        return () => window.clearTimeout(timer);
+    }, [activeWorkspaceId, expireInvitations, expiryNow, items, scopeKey, stateVersion]);
+
+    return items.filter((item) => {
+        const deadline = notificationInvitationDeadline(item);
+        return deadline == null || deadline > now;
+    });
 }

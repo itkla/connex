@@ -31,6 +31,7 @@
     <result property="resolvedAt" column="resolved_at"/>
     <result property="snoozedUntil" column="snoozed_until"/>
     <result property="snoozeTimezone" column="snooze_timezone"/>
+    <result property="invitationExpiresAt" column="invitation_expires_at"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
@@ -89,6 +90,16 @@
   <sql id="recipientScope">
     n.workspace_id = #{workspaceId}
     AND n.recipient_id = #{recipientId}
+  </sql>
+
+  <sql id="invitationExpiryColumn">
+    CASE WHEN n.type = 'workspace.join' THEN (
+      SELECT COALESCE(invited_member.expires_at, #{pendingInvitationCutoverDeadline,jdbcType=VARCHAR})
+      FROM workspace_member invited_member
+      WHERE invited_member.workspace_id = n.workspace_id
+        AND invited_member.user_id = n.recipient_id
+        AND invited_member.status = 'pending'
+    ) END AS invitation_expires_at
   </sql>
 
   <sql id="visiblePersonJoin">
@@ -393,7 +404,8 @@
   </sql>
 
   <select id="findPage" resultMap="NotificationResult">
-    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name
+    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name,
+      <include refid="invitationExpiryColumn"/>
     FROM notification n
     JOIN workspace w ON w.id = n.workspace_id
     WHERE <include refid="inboxScope"/>
@@ -550,7 +562,8 @@
   </select>
 
   <select id="findById" resultMap="NotificationResult">
-    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name
+    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name,
+      <include refid="invitationExpiryColumn"/>
     FROM notification n
     JOIN workspace w ON w.id = n.workspace_id
     WHERE <include refid="inboxScope"/>
@@ -560,7 +573,8 @@
   </select>
 
   <select id="findByIdForUpdate" resultMap="NotificationResult">
-    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name
+    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name,
+      <include refid="invitationExpiryColumn"/>
     FROM notification n
     JOIN workspace w ON w.id = n.workspace_id
     WHERE <include refid="inboxScope"/>

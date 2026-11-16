@@ -23,7 +23,7 @@ import { type Notification, type NotificationFacets, type NotificationState, typ
 import { useLiveNow } from "@/app/hooks/useNow";
 import { formatDateTime, formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
-import { useNotifications } from "@/app/hooks/useNotifications";
+import { useNotifications, useUnexpiredNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationIcon, notificationSeverityStyle, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
 import {
     emitAllNotificationsRead,
@@ -157,6 +157,7 @@ export default function NotificationsInbox() {
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [pageAsOf, setPageAsOf] = useState("");
+    const [pageStateVersion, setPageStateVersion] = useState(0);
     const [loading, setLoading] = useState(true);
     const [categories, setCategories] = useState<Set<string>>(new Set());
     const [severities, setSeverities] = useState<Set<string>>(new Set());
@@ -225,6 +226,7 @@ export default function NotificationsInbox() {
                 optimisticTotalRef.current = result.total;
                 setTotal(result.total);
                 setPageAsOf(result.asOf);
+                setPageStateVersion(result.stateVersion);
                 if (restoreFocus) {
                     requestAnimationFrame(() => inboxSectionRef.current?.focus());
                 }
@@ -648,7 +650,9 @@ export default function NotificationsInbox() {
         setLoading(true);
     }
 
-    const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const visibleItems = useUnexpiredNotifications(items, workspaceFilter, pageStateVersion);
+    const visibleTotal = Math.max(0, total - (items.length - visibleItems.length));
+    const pageCount = Math.max(1, Math.ceil(visibleTotal / PAGE_SIZE));
     const loadFailed = loadFailure?.recipientId === recipientId;
     const facetFailed = facetFailure?.recipientId === recipientId;
     const hasFacetFilters = categories.size > 0 || severities.size > 0 || workspaceFilter !== "all";
@@ -811,7 +815,7 @@ export default function NotificationsInbox() {
                     <section ref={inboxSectionRef} tabIndex={-1} aria-label={t("inbox")} aria-busy={loading} className="outline-none">
                         <SectionHeader title={t("inbox")} />
                         <p className="sr-only" aria-live="polite" aria-atomic="true">
-                            {loading || loadFailed || listRetrying ? "" : t("resultCount", { count: total })}
+                            {loading || loadFailed || listRetrying ? "" : t("resultCount", { count: visibleTotal })}
                         </p>
                         <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 {loadFailed || listRetrying ? (
@@ -842,7 +846,7 @@ export default function NotificationsInbox() {
                             </div>
                         ))}
                     </div>
-                ) : items.length === 0 ? (
+                ) : visibleItems.length === 0 ? (
                     <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
                         <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
                             {hasFacetFilters ? <FunnelIcon className="size-6" /> : <CheckCircleIcon className="size-6" />}
@@ -861,7 +865,7 @@ export default function NotificationsInbox() {
                     </div>
                 ) : (
                     <div className="divide-y divide-border">
-                        {items.map((item) => {
+                        {visibleItems.map((item) => {
                             const content = notificationContent(item, t, locale);
                             const Icon = notificationIcon(item);
                             const style = notificationSeverityStyle(item.severity);
