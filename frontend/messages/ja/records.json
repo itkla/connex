@@ -347,7 +347,7 @@
     "quickEdit": "クイック編集",
     "delete": "削除",
     "rowsPerPage": "表示件数",
-    "showing": "{total} 件中 {from}–{to} 件",
+    "showing": "{total, number} 件中 {from, number}–{to, number} 件",
     "previousPage": "前のページへ",
     "nextPage": "次のページへ",
     "noResults": "この条件に一致するものはありません",

@@ -347,7 +347,7 @@
     "quickEdit": "Quick edit",
     "delete": "Delete",
     "rowsPerPage": "Rows per page",
-    "showing": "Showing {from}–{to} of {total}",
+    "showing": "Showing {from, number}–{to, number} of {total, number}",
     "previousPage": "Go to previous page",
     "nextPage": "Go to next page",
     "noResults": "No matches for these filters",
