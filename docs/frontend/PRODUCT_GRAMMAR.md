@@ -35,11 +35,20 @@ Do not turn record details into dense multi-panel consoles or promote aggregate 
 
 ## Loading, empty, error, and permission states
 
+Client collections using `useServerRecords` wrap their list content in `RecordListState`, keeping search and filter controls outside it so members can change or clear a failed filter. Failed loads show the shared alert and Retry, suppress empty and onboarding copy, and preserve the last successful rows only within the same workspace. A pending retry keeps its error visible with a disabled busy control; success clears the error. Expired sessions use the shared sign-in redirect and suppress collection content. Authentication and permission failures discard the cached page until a successful load; permission refusals use access guidance. API support references appear when available.
+
+Client-owned activity/task lists subscribe to the shared record-mutation signal. Canonical composers
+publish after acknowledged creation, including activity follow-up tasks; rejected or aborted writes
+publish nothing. This reloads the current filtered page and total even when Quick Create lives outside
+the list tree. A server-component refresh alone does not invalidate those client-owned pages.
+
+Server-loaded detail collections use `loadDetailSection`, a record/workspace-scoped `DetailSectionsProvider`, and `DetailSectionState`. Retry fetches only failed collections and updates their consumers without refreshing the route or reloading successful sections. Failed entry collections hide dependent totals/history; failed editor choices disable the affected editing actions while independently loaded chronology remains visible. Campaign messages, sends and exports recover separately; send creation and queueing additionally require messages. Permission denials hide the affected content, and expired sessions preserve the current path/query through the existing sign-in `redirect` parameter. Late responses cannot publish into another workspace. The recovery wrapper owns the section landmark; embedded content must not add a second region with the same name. A successful retry announces a localized status and transfers focus from its removed Retry control to the named section, unless the user has moved focus elsewhere.
+
 Every collection/list surface distinguishes all four states:
 
 - Loading: shape-matched `loading.tsx` skeletons, not a centered spinner over content.
 - Empty: shared `EmptyState`; use an encouraging first-run treatment only when it is truly a first-run empty, and a neutral treatment for no-results/filtered empties.
-- Error: shared `ErrorState`, normally within `SectionBoundary` so a section failure does not blank the whole page.
+- Error: shared `ErrorState`, normally within `SectionBoundary` so a section failure does not blank the whole page. A route `error.tsx` under `app/(app)` hands it Next's `retry`, so "Try again" re-fetches the failed segment; the root `app/error.tsx` and `app/global-error.tsx` hand it `reset` because the one-time-link entry routes sit beneath them (see `frontend/AGENTS.md`, #1781).
 - Permission: `AccessDenied`/localized page equivalent. A 403 must never masquerade as an empty result.
 
 ## Cards, density, and mobile
@@ -66,13 +75,102 @@ Per-surface deviations are product decisions, not precedent for inventing a new 
 
 ## Signed-off adaptations
 
+### My Work
+
+`/me` is the personal daily surface. Its existing source-owned queue streams independently of
+relationship intelligence, deal KPIs, attention panels, the pulse, and recent history. Every section
+keeps failed, permission-denied, and genuinely empty reads distinct; Retry refreshes the server read,
+and an expired session follows the sign-in flow. Previously loaded values never substitute for a
+failed or denied section.
+
+Supporting reads use `/api/my-work/{relationships,deal-kpis,risks,pulse,history}`. The server resolves
+the active workspace and current actor; callers cannot select another member. Personal relationships
+are active, processable contacts owned by that member and visible in the active workspace, including
+shared-in contacts under the contact list's canonical `scope=me` visibility and organization ceiling.
+Full-corpus warmth counts are aggregated in SQL; only the warmest 18 and the six most urgent cooling
+contacts are hydrated. History loads the latest 25 assigned tasks, 25 authored activities, and 25
+visible authored note previews, with the
+existing note continuation. The 84-day UTC pulse remains complete independently of those previews,
+using activity timestamps, completed-task update timestamps, and visible-note creation timestamps.
+Risk ranking retains the existing 1,000-candidate interactive ceiling; overflow shows unavailable
+guidance instead of an incomplete all-clear. Currency changes re-fetch the personal KPI partition,
+preserve other URL parameters, and acknowledge the pending navigation. The reporting window and
+currency semantics remain those in `PRODUCT.md`.
+
+### Pipeline setup and order
+
+When New deal has no pipelines, offer pipeline creation in a nested responsive dialog and retain
+the pending deal. Seed editable open, Won, and Lost stages; require a named open stage before
+returning to the deal, then select that pipeline and its first open stage. Members without pipeline
+management permission see guidance to ask a pipeline manager. A failed stage save keeps setup open
+and retries against the pipeline already created.
+Publish the new pipeline and stages to the calling container so later deal dialogs and the current
+page's pipeline choices include them without a reload.
+Pipeline choices and late setup completions belong to one workspace visit. Switching workspaces
+clears those choices and discards pending completions, including a completion during dialog closing.
+If pipeline creation finishes after a switch, initialize its stages under the original request pin
+without publishing that pipeline into the newly selected workspace.
+Before retrying a stage write whose response was lost, reconcile saved stage identities with the
+previous submission rather than inserting the same stage set again.
+
+Stage editors use explicit up/down controls for pointer and keyboard ordering. Reordering retains
+stage identities and outcome flags and uses the existing transactional stage replacement API.
+Existing order is not normalized: the server does not require terminal stages to be last. Newly
+added open stages go before the first terminal stage, receive input focus, and can be moved explicitly.
+Editor rows retain a persisted or client-generated identity while moving. A rejected save restores
+the order from before the move, retains other field edits, and announces the restoration.
+
+### Map capacity
+
+The relationship map loads the workspace as a whole, including when a record is focused. Keep its
+2,000 combined contacts/companies/deals and 4,000 combined activities/tasks/notes limits. A capacity
+refusal explains both limits and links to the ordinary record lists; a valid focused-record link also
+offers that record's detail page. Fetch failures use the shared segment error and retry state.
+Record action bars preserve available, over-capacity and unknown results from bounded first-page reads.
+Only confirmed capacity limits hide focused-map navigation. Failed checks keep navigation available;
+the map page handles any continuing fetch failure through its error boundary and retry. The bounded
+neighbourhood map and scalable rendering remain deferred under [#2262](https://github.com/itkla/connex/issues/2262).
+
 ### Campaigns
+
+Contact details expose marketing preferences for contacts owned by the rendered workspace. Consent and contact-restriction details and changes require `CONSENT_MANAGE`; privacy holds independently require `PERSON_UPDATE`. Consent updates are explicit manual records, and never remove contact restrictions. Removing a restriction requires separate confirmation explaining the shared-address effect. The panel uses the server marketing-status projection for current blocks and explains the existing opt-out default without promising delivery. Missing or unknown consent alone does not block; explicit revocation, contact restrictions, privacy holds, and final dispatch checks still apply. LINE and WhatsApp preferences are recordable but have no delivery support.
+
+Consent confirmations retain the reviewed mutation version, including explicit row absence. A stale
+write reloads preferences and requires a new action; it never retries automatically. Restriction
+details come from the contact-scoped, cursor-paged endpoint (50 entries per page), matched server-side
+by person link or canonical channel address. The contact panel never downloads the workspace-wide
+restriction list or unrelated addresses, operator notes, creator ids, or person ids. Cancelling a
+confirmation restores focus to the initiating action; confirmed changes return focus to the labeled
+preferences section, including while refreshed data is still pending. Background route refreshes
+revalidate preferences in place, preserving an open confirmation and its captured mutation version.
+Workspace/contact identity changes still replace the controls. Older reads cannot replace a newer post-save result.
+Privacy controls submit only deliberately changed flags.
 
 Campaign creation asks for the minimum facts required by the backend (name and type) before entering the campaign builder. Objective/status/budget/window belong in the builder rather than an oversized create dialog. Campaign settings use the established quick-edit sheet shell.
 
 ### Calendar peek
 
 Fine-pointer calendar interaction may use an anchored event peek followed by the detail sheet; coarse pointers may go directly to the sheet. This is a sequenced handoff between different overlay primitives, not a shared-element morph. Keep header continuity and clear an anchored peek when its owning calendar period/view/filter changes.
+
+### Tags and deal stakeholders
+
+Library tag tiles open a membership drawer; the row menu retains tag editing. Membership lists
+contacts, companies and deals with links to their records, counts for the visible membership,
+and permission-gated add/remove actions. Removing membership preserves the record. The contacts
+link opens the list with its Tag facet applied; page results, select-all and export share that
+filter. Selecting several tags matches any of them. A workflow launched from a tag-filtered
+contact list or saved view stays bounded to the selected matching contacts.
+
+The deal stakeholder panel adds contacts directly, including when the deal has no company.
+Its focused editor selects a workspace contact and an optional role; role edits reuse the same
+guarded sheet. Successful writes refresh stakeholder membership and deal risk evidence.
+
+Segment and workflow name fields always mean the selected record's own name: Company name,
+Contact name or Deal name. Linked company means the company record selected on a contact,
+not a text comparison with the company's name. The condition builder explains that distinction
+without adding unsupported operators or changing saved conditions. Workflow condition controls
+and summaries describe conditions rather than creating saved smart segments. Summaries preserve
+negated comparisons and wrap negated groups explicitly, including nested groups.
 
 ### Products
 
@@ -199,7 +297,25 @@ The same principle applies generally: extend an existing shared composer/control
 
 Any dialog/drawer that accumulates meaningful input participates in the shared unsaved-changes/discard-confirm pattern. Quick-edit shells inherit this through their existing dirty-state contract. Keep the draft-guard inventory/gate current when adding an eligible surface; do not increase a baseline to hide a missing guard.
 
+Workflow, report, and document-template pages reuse `useUnsavedChangesGuard` and `ConfirmDiscardDialog` for dirty editor exits, including links, global search/actions, browser Back/Forward, and native document-leave warnings. Keep editing preserves content and restores the requesting control's focus. Back returns workflows to `/workflows` and templates to `/library/documents`. Report Cancel returns to `/insights/reports/{id}` when editing, or `/insights/reports` when creating, even on a direct entry with no prior app history. Pending and failed saves stay protected; only a successful save bypasses confirmation.
+
+Shell operations that own their router, including Ask Connex full view, notification opens/actions that depart, and workspace selection, must request the shared guard before changing their surface or workspace. Notification operations request confirmation before selecting or publishing their workspace, marking state, executing a cross-workspace action, or routing. Same-workspace notification actions that do not navigate stay local. Organization overview and saved-view workspace departures follow the same rule. Every confirmed editor departure invalidates workflow creation continuations synchronously. Ordinary dismissals resolve the latest close callback at confirmation; explicit navigation keeps its chosen destination. Template initialization and editability changes do not count as user edits, and empty document bodies normalize to null.
+
+Route callers within a stable workspace supply their destination to the existing guard helper. Workspace-changing operations cannot use a pathname/search match to skip selection or its guard. A request matching the current origin, pathname and search is a no-op: it neither asks to discard nor disables draft protection. Hash-only destinations do not count as editor departures.
+
+Discard disposes the entire draft instance, even when the accepted navigation keeps the same editor route mounted. The editor owner refreshes server props and remounts its form (including workflow canvas/undo state); existing records reload persisted state and creation routes show a fresh form. Discarded requests may still complete server-side, but cannot lock, clean, redirect or supply identity to the replacement draft. Keep editing preserves the current instance and any pending save. Known history replay completes and explicitly reconciles the router before disposal, so remounting cannot remove its traversal handler too early.
+
+Dirty protection lasts for each mounted draft's entire lifetime. A synchronous `instrumentation-client.ts` entry installs the existing guard registry's one native history dispatcher before hydration registers Next's popstate listener. Native Chromium Window events visit target listeners in registration order even when capture is requested; a capture listener added after Next can run too late. Each mounted editor publishes its current handler, mount state and native leave predicate in layout effects with the rendered edit. A browser event before passive effects therefore cannot use the prior clean predicate or miss the mounted guard. Accepted navigation versions invalidate older redirect continuations; they never disable the dirty predicate or native leave warning. Successful saves update their matching draft's saved baseline independently of redirect permission. The draft instance/record identity and rendered workspace must still match the submission; an old response cannot clean another draft or workspace. Workspace-selection epochs also fence redirects, without preventing a matching draft's saved baseline from updating.
+
+Same-document Back/Forward uses that early `popstate` dispatcher, which delegates to the current editor in the shared registry. With no editor registered or a clean editor and no guarded restoration/replay in progress, it leaves routing and custom history state untouched for Next. Capture alone is not the ordering guarantee. Editors supply their rendered pathname and search from Next's route context. When native Navigation API entry indices provide a known delta, a dirty editor's guard traverses back to the original editor entry before asking. Keep editing therefore preserves the native cursor, destination entry and its query context. Discard replays that known traversal once, then explicitly calls the router's `replace` so even a null-state destination renders. No dirty-state latch is disabled during replay. Same-path/search fragment traversal in a dirty editor also explicitly reconciles the router and keeps protection active.
+
+List-state writers check their owning pathname against the address bar before changing history. Native Back/Forward moves the address bar before React unmounts the outgoing list; late query, view/filter, saved-view, owned-param or peek writes must not overwrite an editor entry. Deals deliberately canonicalizes its selected desktop view into `?view=table`; this is valid list state, not a failed editor departure.
+
+No indices are added to history state, no global history tracker is installed, and no entries or guessed distances are used. If native positions are unavailable or do not identify a nonzero delta, the existing safe fallback restores the rendered editor's URL/state in the reached slot using the native history prototype. This unknown-distance fallback replaces that slot rather than restoring the cursor: Keep editing can consume a Back/Forward destination and lose its query context. Discard explicitly routes to the captured destination. This bounded limitation preserves URL/page consistency without guessing. Cross-document departures retain the native leave warning.
+
 Use the shared record delete confirmation for ordinary record deletion. Organization-level permanent deletion may use stronger typed confirmation. A surface contributes its object label and consequence details; it does not rewrite the common destructive grammar.
+
+When a row menu opens a delete confirmation, cancellation returns keyboard focus to that row's action button.
 
 ## Buttons and controls
 
@@ -223,6 +339,23 @@ Create and edit surfaces validate fixable field problems inline. Controls expose
 Motion follows `docs/frontend/MOTION.md`. Repeated chrome such as `PageShell` and `PageHeader` does not animate independently when page arrival already owns the transition.
 
 Use semantic design tokens for color. Relationship warmth, charts, success/warning/destructive, ranking, and other semantic palettes communicate meaning consistently. Never rely on color alone.
+
+Brand fills and decorative marks keep `brand`. Green text, links, active navigation, and labels use
+`brand-text`, which adapts to light and dark surfaces; `brand-dark` remains a palette shade, not a text
+contrast guarantee. Muted labels must also meet 4.5:1 on their surface, including filled inputs.
+Forced-light and print surfaces set the light `brand-text` value even under a dark theme.
+`test/unit/colorContrast.test.ts` calculates WCAG AA ratios from the shipped tokens for both themes.
+Feedback uses paired surface/foreground tokens, and Sonner descriptions inherit the toast foreground.
+The feedback aliases are static theme variables because inline styles consume them without utilities.
+
+The authenticated shell puts a localized skip link first. After route changes, it focuses main
+without scrolling only when focus is on the body or a removed element; destination autofocus wins.
+Its closed mobile sidebar is inert; opening it moves focus into the drawer and makes the page inert,
+and dismissing it restores the opener (or the toolbar trigger when the bottom-bar opener unmounts).
+Settings and organization row menus share `rowActionTrigger` from `SettingsListPrimitives`: hover
+reveals actions on mouse devices, while `(hover: none)` or `(any-pointer: coarse)` shows them
+without interaction on touch, including hybrid devices that also support hover.
+
 
 ## New page/redesign checklist
 

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.notifications;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -16,12 +18,19 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -63,6 +72,8 @@ class NotificationDeliveryTest {
         }).when(inApp).dispatch(any());
         lenient().when(notificationMapper.findById(eq(9), anyInt()))
             .thenAnswer(invocation -> existingRow(invocation.getArgument(1), "info", null));
+        lenient().when(notificationMapper.existsDelivery(eq(1), eq(9), anyInt(), any()))
+            .thenReturn(true);
         lenient().when(notificationMapper.claimEmailDelivery(eq(1), eq(9), any()))
             .thenReturn(1);
         lenient().when(quietHoursControlAccess.evaluateForUser(
@@ -233,6 +244,7 @@ class NotificationDeliveryTest {
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey()))
                 .thenReturn(existingRow(77, "info", null));
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "warning", null));
+        when(inApp.dispatch(n)).thenReturn(2);
 
         delivery.deliver(n);
 
@@ -246,6 +258,7 @@ class NotificationDeliveryTest {
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey()))
                 .thenReturn(existingRow(77, "info", "2026-07-01T00:00:00"));
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(n)).thenReturn(2);
 
         delivery.deliver(n);
 
@@ -261,11 +274,133 @@ class NotificationDeliveryTest {
         existing.setTitle("Old title");
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(existing);
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(n)).thenReturn(2);
 
         delivery.deliver(n);
 
         verify(stateVersionService).markChangedWithDetailedPush(9);
         verify(pushPublisher).updated(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
+    }
+
+    @Test
+    void equivalentJsonDoesNotAdvanceRecipientStateOrPush() {
+        Notification incoming = notification();
+        incoming.setData("{\"taskId\":7,\"kind\":\"due\"}");
+        Notification existing = existingRow(77, "info", null);
+        existing.setData("{\"kind\": \"due\", \"taskId\": 7}");
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey())).thenReturn(existing);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        verify(inApp).dispatch(incoming);
+        verify(notificationMapper, never()).findById(anyInt(), anyInt());
+        verify(stateVersionService, never()).markChangedWithDetailedPush(anyInt());
+        verify(stateVersionService, never()).markChanged(anyInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    void persistenceNoOpOverridesAnApparentInputChange(int affectedRows) {
+        Notification incoming = notification();
+        incoming.setActorId(0);
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey()))
+            .thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(incoming)).thenReturn(affectedRows);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher, quietHoursControlAccess);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"created", "updated", "persisted_missing", "quiet_hours", "unchanged"})
+    void debugDecisionsNameTheBranchWithoutNotificationContent(String branch) {
+        Notification incoming = notification();
+        incoming.setTitle("private-title");
+        incoming.setBody("private-body");
+        incoming.setActorLabel("private-actor");
+        incoming.setSourceLabel("private-source");
+        incoming.setContextLabel("private-context");
+        incoming.setData("{\"private-payload\":true}");
+        incoming.setDedupeKey("private-dedupe");
+        if (!"created".equals(branch)) {
+            when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey()))
+                .thenReturn(existingRow(77, "info", null));
+            when(inApp.dispatch(incoming)).thenReturn("unchanged".equals(branch) ? 1 : 2);
+        }
+        if ("persisted_missing".equals(branch)) {
+            when(notificationMapper.findById(9, 77)).thenReturn(null);
+        }
+        if ("quiet_hours".equals(branch)) {
+            when(quietHoursControlAccess.evaluateForUser(9, Instant.parse("2026-07-20T02:00:00Z")))
+                .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(true, null));
+        }
+        Logger logger = (Logger) LoggerFactory.getLogger(NotificationDelivery.class);
+        Level previous = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(Level.DEBUG);
+        try {
+            delivery.deliver(incoming);
+
+            List<String> messages = appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+            assertTrue(messages.stream().anyMatch(message -> message.startsWith("Notification delivery decision ")
+                && message.contains("persistedChange=" + !"unchanged".equals(branch))
+                && message.contains("inAppRows=") && message.contains("transactionActive=")));
+            if ("unchanged".equals(branch)) {
+                assertFalse(messages.stream().anyMatch(message -> message.startsWith("Notification state change ")));
+            } else {
+                assertTrue(messages.stream().anyMatch(message -> message.startsWith("Notification state change branch=" + branch)
+                    && message.contains("lookupId=77") && message.contains("synchronizationActive=")));
+            }
+            assertTrue(appender.list.stream().allMatch(event -> event.getLevel() == Level.DEBUG));
+            assertFalse(messages.stream().anyMatch(message -> message.contains("private-")));
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previous);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void missingPreReadWithoutAPersistedWriteDoesNotBumpPushOrEmail() {
+        Notification incoming = notification();
+        when(inApp.dispatch(incoming)).thenReturn(0);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher, preferenceMapper);
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void burnedGeneratedKeyForAFoundRowDoesNotBumpOrPush() {
+        Notification incoming = notification();
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey()))
+            .thenReturn(existingRow(77, "info", null));
+        doAnswer(invocation -> {
+            invocation.<Notification>getArgument(0).setId(88);
+            return 1;
+        }).when(inApp).dispatch(incoming);
+        when(notificationMapper.existsDelivery(1, 9, 88, incoming.getDedupeKey())).thenReturn(false);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher, quietHoursControlAccess);
+    }
+
+    @Test
+    void staleInputIdCannotMakeAFoundRowLookLikeAnInsert() {
+        Notification incoming = notification();
+        incoming.setId(88);
+        when(notificationMapper.findByDedupe(1, 9, incoming.getDedupeKey()))
+            .thenReturn(existingRow(77, "info", null));
+        when(inApp.dispatch(incoming)).thenReturn(1);
+
+        org.junit.jupiter.api.Assertions.assertFalse(delivery.deliver(incoming));
+
+        org.mockito.Mockito.verifyNoInteractions(stateVersionService, pushPublisher);
     }
 
     @Test

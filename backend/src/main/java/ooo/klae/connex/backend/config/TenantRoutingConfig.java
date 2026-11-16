@@ -16,6 +16,7 @@ import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 import com.zaxxer.hikari.HikariDataSource;
 
@@ -30,7 +31,9 @@ import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
  * catalog reset by giving the pool an explicit default catalog (Hikari only
  * restores a dirtied catalog on return when one is configured). In the default
  * {@code single-database} mode this configuration is inert and the connection
- * path is byte-identical to a deployment without routing.
+ * path is byte-identical to a deployment without routing. Catalog routing requires
+ * scope enforcement: unscoped background tenant SQL must never fall through to
+ * the default catalog.
  */
 @Configuration
 @ConditionalOnProperty(name = "connex.tenancy.routing.mode", havingValue = "catalog-per-placement")
@@ -47,10 +50,17 @@ public class TenantRoutingConfig {
 
     private static final Pattern JDBC_URL_DATABASE = Pattern.compile("^jdbc:mysql://[^/]+/([^?/]+)");
 
+    /** Validates scope enforcement before any datasource can be initialized or decorated. */
     @Bean
     static BeanPostProcessor tenantRoutingDataSourceDecorator(
             ObjectProvider<TenantRoutingProperties> properties,
-            ObjectProvider<TenantContext> tenantContext) {
+            ObjectProvider<TenantContext> tenantContext,
+            Environment environment) {
+        if (!environment.getProperty("connex.tenancy.enforce-scope", Boolean.class, true)) {
+            throw new IllegalStateException(
+                "connex.tenancy.routing.mode=catalog-per-placement requires connex.tenancy.enforce-scope=true; "
+                    + "refusing to start because unscoped tenant SQL would use the default catalog");
+        }
         return new BeanPostProcessor() {
             @Override
             public Object postProcessAfterInitialization(Object bean, String beanName) {

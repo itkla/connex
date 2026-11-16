@@ -82,7 +82,7 @@ export default function ChangeEmailDialog({ open, onOpenChange }: Props) {
                         <DialogHeader>
                             <span
                                 aria-hidden
-                                className="mb-1 grid size-11 place-items-center rounded-xl bg-brand-light text-brand-dark"
+                                className="mb-1 grid size-11 place-items-center rounded-xl bg-brand-light text-brand-text"
                             >
                                 <EnvelopeIcon className="size-5" />
                             </span>

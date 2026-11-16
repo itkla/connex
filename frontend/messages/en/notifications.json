@@ -29,6 +29,9 @@
     "priority": "Priority",
     "logTouch": "Log a touch",
     "viewAll": "View all notifications",
+    "openingEmailLink": "Opening the notification…",
+    "emailLinkError": "Couldn't open the notification",
+    "emailLinkHelp": "Open your inbox to try again or review your other notifications.",
     "viewAction": "View",
     "loading": "Loading notifications…",
     "loadingMembers": "Loading teammates…",
@@ -108,6 +111,8 @@
     "documentApprovalPolicyInvalidatedBody": "The approval request for {document} ended because its approval policy changed.",
     "documentApprovalUnsatisfiableBody": "The approval request for {document} ended because its approver chain can no longer be completed.",
     "documentApprovalTerminatedBody": "The approval request for {document} ended.",
+    "taskAssignedTitle": "Task assigned to you",
+    "taskAssignedBody": "{actor} assigned you: {task}",
     "taskDueTitle": "Task due soon",
     "taskDueBody": "{task} is due {date}.",
     "taskOverdueTitle": "Task overdue",
@@ -167,7 +172,10 @@
     "noUsers": "No users found",
     "noCollaborators": "No teammates available",
     "cancel": "Cancel",
-    "inbox": "Inbox"
+    "inbox": "Inbox",
+    "ownershipOfferTitle": "Ownership offer",
+    "ownershipOfferWorkspaceBody": "You've been offered ownership of {workspace}. Review it in Settings.",
+    "ownershipOfferOrganizationBody": "You've been offered ownership of an organization. Review it in Settings."
   },
   "NotificationsLayout": {
     "title": "Notifications",

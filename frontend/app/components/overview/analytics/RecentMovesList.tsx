@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { ArrowLongRightIcon } from '@heroicons/react/24/outline';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -16,6 +16,7 @@ const MAX_ROWS = 6;
  * inside an analytics {@link Panel}.
  */
 export default function RecentMovesList({ moves }: { moves: JobMove[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('RecentMoves');
     const locale = useLocale();
 
@@ -44,7 +45,7 @@ export default function RecentMovesList({ moves }: { moves: JobMove[] }) {
                             </p>
                         </div>
                         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                            {formatShortDate(move.movedAt ?? undefined, locale)}
+                            {formatShortDate(move.movedAt ?? undefined, locale, timeZone)}
                         </span>
                     </Link>
                 </li>

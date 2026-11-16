@@ -91,6 +91,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /** Exercises mailbox ownership across tenant-created identities and both invitation endpoints. */
 @SpringBootTest(properties = {
@@ -140,7 +141,7 @@ class IdentityInvitationTrustIntegrationTest {
         target = newWorkspace();
         manager = memberManager(target);
         managerSession = login(manager);
-        PublicApiTestSecuritySupport.stepUp(managerSession, manager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, managerSession, manager.getId());
         orgAllowedDomainMapper.add(target.getOrgId(), "victim.example");
     }
 
@@ -149,7 +150,7 @@ class IdentityInvitationTrustIntegrationTest {
         Workspace source = newWorkspace();
         User sourceManager = memberManager(source);
         MockHttpSession sourceSession = login(sourceManager);
-        PublicApiTestSecuritySupport.stepUp(sourceSession, sourceManager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, sourceSession, sourceManager.getId());
         String username = "forged_" + unique();
         String address = unique() + "@victim.example";
 
@@ -206,7 +207,7 @@ class IdentityInvitationTrustIntegrationTest {
         Workspace source = newWorkspace();
         User sourceManager = memberManager(source);
         MockHttpSession sourceSession = login(sourceManager);
-        PublicApiTestSecuritySupport.stepUp(sourceSession, sourceManager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, sourceSession, sourceManager.getId());
         String username = "forged_" + unique();
         String address = unique() + "@victim.example";
 
@@ -260,11 +261,16 @@ class IdentityInvitationTrustIntegrationTest {
             .andExpect(jsonPath("$.message").value("Verify your email address before joining this workspace"));
         assertNoMembership(forged);
 
-        invite("members", address)
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("This account's email is unverified; send an invite instead"));
+        MvcResult targetedInvite = invite("members", address)
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(address))
+            .andExpect(jsonPath("$.invite.token").isString())
+            .andReturn();
         assertNoMembership(forged);
         assertCrmDenied(browser.session());
+        acceptEmailInvite(targetedInvite, browser.session(), target.getId());
+        assertTrue(workspaceMapper.isMember(target.getId(), forged.getId()));
         User persisted = userMapper.getUserById(forged.getId());
         assertNotNull(persisted);
         assertFalse(persisted.isEmailVerified());
@@ -310,28 +316,37 @@ class IdentityInvitationTrustIntegrationTest {
         Workspace second = newWorkspace();
         User secondManager = memberManager(second);
         MockHttpSession secondSession = login(secondManager);
-        PublicApiTestSecuritySupport.stepUp(secondSession, secondManager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, secondSession, secondManager.getId());
         mockMvc.perform(post("/api/workspaces/{id}/members", second.getId())
                 .session(secondSession).header("X-Workspace-Id", second.getId())
                 .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
                     Map.of("email", account.user().getEmail(), "role", "member"))))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("This account's email is unverified; send an invite instead"));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(account.user().getEmail()))
+            .andExpect(jsonPath("$.invite.token").isString());
         assertFalse(workspaceMapper.isMemberIncludingPending(second.getId(), account.user().getId()));
+        assertCrmDenied(account.session(), second.getId());
 
         verificationService.confirm(verificationTokenFor(account.user()));
         User verified = userMapper.getUserById(account.user().getId());
         assertNotNull(verified);
         assertTrue(verified.isEmailVerified());
-        mockMvc.perform(post("/api/workspaces/{id}/members", second.getId())
+        MvcResult verifiedInvite = mockMvc.perform(post("/api/workspaces/{id}/members", second.getId())
                 .session(secondSession).header("X-Workspace-Id", second.getId())
                 .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
                     Map.of("email", account.user().getEmail(), "role", "member"))))
-            .andExpect(result -> assertEquals(200, result.getResponse().getStatus(),
-                () -> String.valueOf(result.getResolvedException())));
-        assertTrue(workspaceMapper.isMemberIncludingPending(second.getId(), account.user().getId()));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(account.user().getEmail()))
+            .andExpect(jsonPath("$.invite.token").isString())
+            .andReturn();
+        assertFalse(workspaceMapper.isMemberIncludingPending(second.getId(), account.user().getId()));
+        assertCrmDenied(account.session(), second.getId());
+        acceptEmailInvite(verifiedInvite, account.session(), second.getId());
+        assertTrue(workspaceMapper.isMember(second.getId(), account.user().getId()));
     }
 
     @ParameterizedTest
@@ -386,18 +401,26 @@ class IdentityInvitationTrustIntegrationTest {
     }
 
     @Test
-    void membersEndpointRejectsUnverifiedPreregistration() throws Exception {
+    void membersEndpointIssuesScopedTokenForUnverifiedPreregistration() throws Exception {
         Account account = preregister();
 
-        invite("members", account.user().getEmail())
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("This account's email is unverified; send an invite instead"));
+        MvcResult created = invite("members", account.user().getEmail())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(account.user().getEmail()))
+            .andExpect(jsonPath("$.invite.token").isString())
+            .andReturn();
 
         assertNoMembership(account.user());
         mockMvc.perform(post("/api/workspaces/{id}/accept", target.getId())
                 .session(account.session()).with(csrf().asHeader()))
             .andExpect(status().isNotFound());
         assertCrmDenied(account.session());
+        acceptEmailInvite(created, account.session(), target.getId());
+        assertTrue(workspaceMapper.isMember(target.getId(), account.user().getId()));
+        User accepted = userMapper.getUserById(account.user().getId());
+        assertNotNull(accepted);
+        assertFalse(accepted.isEmailVerified());
     }
 
     @Test
@@ -470,6 +493,33 @@ class IdentityInvitationTrustIntegrationTest {
         assertTrue(workspaceMapper.isMember(active.getId(), account.user().getId()));
         assertPendingNotFound(account);
         assertCrmDenied(account.session());
+    }
+
+    @Test
+    void emailChangeClearsRevokedGrantNotificationsButKeepsAnActiveMembershipsRows() throws Exception {
+        Account account = preregister();
+        orgAllowedDomainMapper.remove(target.getOrgId(), "victim.example");
+        Workspace other = newWorkspace();
+        Workspace active = newWorkspace();
+        int userId = account.user().getId();
+        workspaceMapper.addPendingMember(target.getId(), userId, "member");
+        workspaceMapper.addPendingMember(other.getId(), userId, "member");
+        workspaceMapper.addMember(active.getId(), userId, "member");
+        lifecycleMapper.markWorkspaceTearingDown(other.getOrgId(), other.getId());
+        lifecycleMapper.markOrganizationTearingDown(other.getOrgId());
+        for (Workspace workspace : List.of(target, other, active)) {
+            seedNotificationRows(workspace.getId(), userId);
+        }
+
+        confirmEmailChange(prepareEmailChange(account, unique() + "@attacker.example"));
+
+        assertEquals(0, notificationRows(target.getId(), userId));
+        assertEquals(0, notificationRows(other.getId(), userId));
+        assertEquals(2, notificationRows(active.getId(), userId));
+        jdbcTemplate.update("DELETE FROM notification WHERE workspace_id = ? AND recipient_id = ?",
+            active.getId(), userId);
+        jdbcTemplate.update("DELETE FROM historical_notification_baseline"
+            + " WHERE workspace_id = ? AND recipient_id = ?", active.getId(), userId);
     }
 
     @Test
@@ -689,8 +739,9 @@ class IdentityInvitationTrustIntegrationTest {
     void organizationAddByEmailRequiresMailboxVerification() throws Exception {
         Account account = preregister();
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
+        workspaceMapper.addMember(target.getId(), account.user().getId(), "member");
         String body = objectMapper.writeValueAsString(Map.of(
-            "email", account.user().getEmail(), "orgRole", "admin"));
+            "email", account.user().getEmail(), "orgRole", "admin", "acknowledgeConfinement", true));
 
         mockMvc.perform(post("/api/orgs/{id}/members", target.getOrgId())
                 .session(managerSession).with(csrf().asHeader())
@@ -712,7 +763,8 @@ class IdentityInvitationTrustIntegrationTest {
     void organizationRoleWriteByIdRequiresMailboxVerification() throws Exception {
         Account account = preregister();
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
-        String body = objectMapper.writeValueAsString(Map.of("orgRole", "admin"));
+        workspaceMapper.addMember(target.getId(), account.user().getId(), "member");
+        String body = objectMapper.writeValueAsString(Map.of("orgRole", "admin", "acknowledgeConfinement", true));
 
         mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
                 .session(managerSession).with(csrf().asHeader())
@@ -736,12 +788,20 @@ class IdentityInvitationTrustIntegrationTest {
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
         orgMemberMapper.addMember(target.getOrgId(), account.user().getId(), "admin");
 
-        mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
+        int managerCredential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, manager);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, manager, managerSession, managerCredential);
+        MvcResult offered = mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
                 .session(managerSession).with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("orgRole", "owner"))))
-            .andExpect(result -> assertEquals(204, result.getResponse().getStatus(),
-                () -> String.valueOf(result.getResolvedException())));
+            .andExpect(status().isAccepted()).andExpect(jsonPath("$.outcome").value("ownership_offer")).andReturn();
+        assertEquals("admin", orgMemberMapper.getRole(target.getOrgId(), account.user().getId()));
+        int offereeCredential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, account.user());
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, account.user(), account.session(), offereeCredential);
+        String offerId = objectMapper.readTree(offered.getResponse().getContentAsString()).path("offer").path("id").asString();
+        mockMvc.perform(post("/api/ownership-offers/{id}/accept", offerId).session(account.session())
+                .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isOk());
         assertEquals("owner", orgMemberMapper.getRole(target.getOrgId(), account.user().getId()));
         assertFalse(userMapper.getUserById(account.user().getId()).isEmailVerified());
 
@@ -890,9 +950,27 @@ class IdentityInvitationTrustIntegrationTest {
     }
 
     private void assertCrmDenied(MockHttpSession session) throws Exception {
+        assertCrmDenied(session, target.getId());
+    }
+
+    private void assertCrmDenied(MockHttpSession session, int workspaceId) throws Exception {
         mockMvc.perform(get("/api/companies/page").session(session)
-                .header("X-Workspace-Id", target.getId()))
+                .header("X-Workspace-Id", workspaceId))
             .andExpect(status().isForbidden());
+    }
+
+    private void acceptEmailInvite(MvcResult invitation, MockHttpSession session, int workspaceId) throws Exception {
+        String token = objectMapper.readTree(invitation.getResponse().getContentAsString())
+            .get("invite").get("token").asString();
+        Browser browser = bootstrap(session);
+        Flow flow = exchange("/api/invites", OneTimeLinkFlowCookie.WORKSPACE_INVITE, token, browser);
+        assertCrmDenied(browser.session(), workspaceId);
+        mockMvc.perform(post("/api/invites/accept")
+                .session(browser.session()).cookie(browser.bindingCookie(), flow.cookie())
+                .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("flowId", flow.id()))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(workspaceId));
     }
 
     private Browser bootstrap(MockHttpSession session) throws Exception {
@@ -943,8 +1021,32 @@ class IdentityInvitationTrustIntegrationTest {
         } finally {
             tenantContext.clear();
         }
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, user);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, user);
         return user;
+    }
+
+    private void seedNotificationRows(int workspaceId, int recipientId) {
+        jdbcTemplate.update(
+            "INSERT INTO notification (workspace_id, recipient_id, type, category, severity,"
+                + " template_version, title, dedupe_key, triggered_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())",
+            workspaceId, recipientId, "workspace.join", "workspace", "info", 1,
+            "Workspace invitation", "workspace.join:" + workspaceId);
+        jdbcTemplate.update(
+            "INSERT INTO historical_notification_baseline (workspace_id, recipient_id, dedupe_key,"
+                + " notification_type, baseline_severity, source_state_hash, import_run_id)"
+                + " VALUES (?, ?, ?, ?, ?, UNHEX(SHA2(?, 256)), UNHEX(SHA2(?, 256)))",
+            workspaceId, recipientId, "baseline:" + workspaceId, "workspace.join", "info",
+            "state:" + workspaceId, "run:" + workspaceId);
+    }
+
+    private int notificationRows(int workspaceId, int recipientId) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT (SELECT COUNT(*) FROM notification WHERE workspace_id = ? AND recipient_id = ?)"
+                + " + (SELECT COUNT(*) FROM historical_notification_baseline"
+                + " WHERE workspace_id = ? AND recipient_id = ?)",
+            Integer.class, workspaceId, recipientId, workspaceId, recipientId);
+        return count == null ? 0 : count;
     }
 
     private Workspace newWorkspace() {

@@ -1,10 +1,12 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { PlusIcon, XMarkIcon, FunnelIcon } from '@heroicons/react/24/outline';
 
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { type Pipeline } from '@/app/lib/types';
@@ -16,6 +18,8 @@ import {
     QuickEditSheetShell,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
 import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
+import { StageOrderControls } from './StageOrderControls';
+import { moveStage, stageDraftKey } from './stageDrafts';
 
 export type StageKind = 'normal' | 'won' | 'lost';
 
@@ -32,6 +36,7 @@ const STAGE_DOT: Record<StageKind, string> = {
 };
 
 export type PipelineStageDraft = {
+    clientId?: string;
     id: number | null;
     name: string;
     success: boolean;
@@ -41,6 +46,7 @@ export type PipelineStageDraft = {
 export type PipelineDraft = {
     name: string;
     stages: PipelineStageDraft[];
+    stageOrderBeforeMove?: string[];
 };
 
 type Props = {
@@ -56,6 +62,7 @@ type Props = {
     removeStage: (pipelineId: number, index: number) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    orderRestorationVersion?: number;
     /** Per-pipeline inline validation messages, keyed by pipeline id then `name` or `stages`. */
     fieldErrors?: Record<number, Record<string, string>>;
 };
@@ -73,9 +80,20 @@ export default function QuickEditPipelineSheet({
     isSaving,
     saveEdits,
     fieldErrors,
+    orderRestorationVersion = 0,
 }: Props) {
     const t = useTranslations('PipelinesQuickEditSheet');
     const total = selectedPipelines.length;
+    const tOrder = useTranslations('PipelineStageOrder');
+    const pendingFocus = useRef<string | null>(null);
+    const [announcement, setAnnouncement] = useState({ open, version: orderRestorationVersion, text: '' });
+    if (announcement.open !== open) setAnnouncement({ open, version: orderRestorationVersion, text: '' });
+
+    useLayoutEffect(() => {
+        if (!pendingFocus.current) return;
+        document.getElementById(pendingFocus.current)?.focus();
+        pendingFocus.current = null;
+    });
 
     return (
         <QuickEditSheetShell
@@ -91,6 +109,7 @@ export default function QuickEditPipelineSheet({
             cancelLabel={t('cancel')}
             dirtySnapshot={drafts}
         >
+            <p role="status" className="sr-only">{announcement.version === orderRestorationVersion ? announcement.text : tOrder('restored')}</p>
             {selectedPipelines.map((p, idx) => {
                 const draft = drafts[p.id];
                 if (!draft) return null;
@@ -117,18 +136,24 @@ export default function QuickEditPipelineSheet({
                             <Label>{t('stages')}</Label>
                             <div className="flex flex-col gap-2">
                                 {draft.stages.map((s, i) => (
-                                    <div key={s.id ?? `new-${i}`} className="flex items-center gap-2">
+                                    <div key={stageDraftKey(s)} className="flex flex-wrap items-center gap-2">
                                         <span className={cn('size-2 shrink-0 rounded-full', STAGE_DOT[stageKindOf(s)])} />
                                         <Input
+                                            id={`pipeline-stage-${p.id}-${i}`}
                                             type="text"
                                             value={s.name}
                                             onChange={(e) => updateStageName(p.id, i, e.target.value)}
-                                            className="flex-1"
+                                            className="min-w-24 flex-1"
                                             placeholder={t('stageNamePlaceholder')}
+                                            aria-label={tOrder('stageName', { position: i + 1 })}
+                                            disabled={isSaving}
                                         />
                                         <Select
                                             value={stageKindOf(s)}
-                                            onValueChange={(value) => updateStageKind(p.id, i, value as StageKind)}
+                                            onValueChange={(value) => {
+                                                if (value === 'normal' || value === 'won' || value === 'lost') updateStageKind(p.id, i, value);
+                                            }}
+                                            disabled={isSaving}
                                             aria-label={t('stageKindAriaLabel')}
                                         >
                                             <SelectTrigger className="w-32 shrink-0">
@@ -140,26 +165,46 @@ export default function QuickEditPipelineSheet({
                                                 <SelectItem value="lost">{t('stageLost')}</SelectItem>
                                             </SelectContent>
                                         </Select>
-                                        <Button
+                                        <StageOrderControls
+                                            id={`pipeline-stage-${p.id}-${i}`}
+                                            index={i}
+                                            count={draft.stages.length}
+                                            disabled={isSaving}
+                                            onMove={(to, direction) => {
+                                                pendingFocus.current = `pipeline-stage-${p.id}-${to}-${direction}`;
+                                                updateDraft(p.id, {
+                                                    stages: moveStage(draft.stages, i, to),
+                                                    stageOrderBeforeMove: draft.stageOrderBeforeMove ?? draft.stages.map(stageDraftKey),
+                                                });
+                                                setAnnouncement({ open, version: orderRestorationVersion, text: tOrder('moved', { name: s.name, position: to + 1, count: draft.stages.length }) });
+                                            }}
+                                        />
+                                        <IconButton
                                             type="button"
                                             variant="ghost"
-                                            size="icon-sm"
-                                            aria-label={t('removeStageAriaLabel')}
+                                            size="icon-inline"
+                                            label={t('removeStageAriaLabel')}
+                                            disabled={isSaving}
                                             onClick={() => removeStage(p.id, i)}
                                             className="shrink-0 text-muted-foreground hover:text-destructive"
                                         >
                                             <XMarkIcon className="size-4" />
-                                        </Button>
+                                        </IconButton>
                                     </div>
                                 ))}
-                                <button
+                                <Button
                                     type="button"
-                                    onClick={() => addStage(p.id)}
-                                    className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border py-2 text-sm font-medium text-muted-foreground transition hover:border-brand hover:text-foreground"
+                                    variant="outline"
+                                    disabled={isSaving}
+                                    onClick={() => {
+                                        const terminalIndex = draft.stages.findIndex((stage) => stage.success || stage.failure);
+                                        pendingFocus.current = `pipeline-stage-${p.id}-${terminalIndex < 0 ? draft.stages.length : terminalIndex}`;
+                                        addStage(p.id);
+                                    }}
                                 >
                                     <PlusIcon className="size-4" />
                                     {t('addStage')}
-                                </button>
+                                </Button>
                             </div>
                             {fieldErrors?.[p.id]?.stages ? (
                                 <p className="text-sm text-destructive">{fieldErrors[p.id].stages}</p>

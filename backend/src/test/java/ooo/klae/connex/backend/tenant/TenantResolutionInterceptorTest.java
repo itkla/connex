@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,6 +32,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
@@ -95,6 +97,40 @@ class TenantResolutionInterceptorTest {
         verifyNoMoreInteractions(tenantContext);
     }
 
+    @ParameterizedTest
+    @CsvSource(value = {"false,SHARED", "true,SHARED", "false,cnx_tenant", "true,cnx_tenant"}, nullValues = "SHARED")
+    void workspaceSnapshotIsPreparedBeforeIdentityAndReleasedOnCompletionOrAsyncHandoff(boolean async, String catalog) throws Exception {
+        var scopes = new TenantWorkspaceScopeSnapshot(11, 3, catalog, java.util.Optional.empty(),
+            new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
+                3, java.util.List.of(11), "[11]"));
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(workspaceService.getRole(11, 7)).thenReturn("member");
+        when(workspaceService.getOrgId(11)).thenReturn(3);
+        when(catalogResolver.resolveCatalog(3)).thenReturn(catalog);
+        when(workspaceService.prepareWorkspaceScopes(11, 3, catalog)).thenAnswer(call -> {
+            assertFalse(liveContext.isResolved());
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            return scopes;
+        });
+        var resolver = new TenantResolutionInterceptor(workspaceService, liveContext, catalogResolver,
+            requestResolver, workspaceCookie, correlationPseudonymizer);
+        var request = new MockHttpServletRequest("GET", "/api/companies");
+
+        assertTrue(resolver.preHandle(request, response, handler));
+        assertSame(scopes, liveContext.getWorkspaceScopes());
+        verify(workspaceService).getOrgId(11);
+        verify(catalogResolver).resolveCatalog(3);
+        verify(workspaceService).prepareWorkspaceScopes(11, 3, catalog);
+        if (async) {
+            resolver.afterConcurrentHandlingStarted(request, response, handler);
+        } else {
+            resolver.afterCompletion(request, response, handler, null);
+        }
+        assertFalse(liveContext.isResolved());
+        assertNull(liveContext.getWorkspaceScopes());
+        assertNull(liveContext.getCatalog());
+    }
+
     @Test
     void lifecycleEndpointsBypassOrdinaryResolutionUnderADeploymentContextPath() {
         when(requestResolver.resolve(any(), eq(7))).thenReturn(null);
@@ -144,6 +180,61 @@ class TenantResolutionInterceptorTest {
         assertFalse(liveContext.isResolved());
         verify(workspaceService).rememberedWorkspaceIdFor(7);
         verify(workspaceService).firstMembershipWorkspaceIdFor(7);
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "GET, /api/ownership-offers, ''",
+        "POST, /api/ownership-offers/23/accept, ''",
+        "POST, /api/ownership-offers/23/decline, ''",
+        "GET, /connex/api/ownership-offers, /connex",
+        "POST, /connex/api/ownership-offers/23/accept, /connex",
+        "POST, /connex/api/ownership-offers/23/decline, /connex",
+        "GET, /api/%6fwnership-offers, ''",
+        "POST, /api/ownership-offers/23/%61ccept, ''",
+        "POST, /api/ownership-offers/23/%64ecline, ''"
+    })
+    void ownershipSelfRoutesBypassStaleSelectionWithoutInstallingAScope(
+            String method, String uri, String contextPath) {
+        liveContext.set(11, 3, 7, "member", null);
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setContextPath(contextPath);
+        request.addHeader("X-Workspace-Id", "11");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, "11"));
+
+        assertTrue(interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertFalse(liveContext.isResolved());
+        assertNull(request.getAttribute(TenantResolutionInterceptor.ORGANIZATION_ID_ATTRIBUTE));
+        verifyNoInteractions(workspaceService, workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "/connexx/api/ownership-offers/23/decline, /connex",
+        "/api/ownership-offers/23/decline%01, ''",
+        "/api/ownership-offers/23%2Fdecline, ''",
+        "/api/ownership-offers/23/%2e%2e/decline, ''"
+    })
+    void rejectedOwnershipSelfPathsTakeOrdinaryStaleWriteResolution(
+            String uri, String contextPath) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", uri);
+        request.setContextPath(contextPath);
+        request.addHeader("X-Workspace-Id", "11");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, "11"));
+
+        ForbiddenException exception = assertThrows(ForbiddenException.class,
+            () -> interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertEquals("Not a member of workspace 11", exception.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService).getRole(11, 7);
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verify(workspaceService, never()).forgetActive(anyInt());
         verifyNoInteractions(workspaceCookie, catalogResolver);
     }
 
@@ -467,6 +558,7 @@ class TenantResolutionInterceptorTest {
         "/api/workspaces/11/accept",
         "/api/workspaces/11/decline",
         "/api/workspaces/11/leave",
+        "/api/orgs/3/leave",
         "/api/invites/exchange",
         "/api/invites/accept",
         "/api/invite-links/exchange",
@@ -490,11 +582,33 @@ class TenantResolutionInterceptorTest {
     }
 
     @ParameterizedTest
+    @ValueSource(ints = {11, 19})
+    void workspaceCreationRefusesAnUnavailableExplicitOriginBeforeSelectionRecovery(int cookieWorkspace) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/workspaces");
+        request.addHeader("X-Workspace-Id", "11");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace)));
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class,
+            () -> interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertEquals("Not a member of workspace 11", failure.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).defaultWorkspaceIdFor(anyInt());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verify(workspaceService, never()).forgetActive(anyInt());
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {
         "/api/workspaces/11",
         "/api/workspaces/11/members",
         "/api/workspaces/11/invites",
         "/api/workspaces/11/switch/extra",
+        "/api/orgs/3/leave/extra",
+        "/api/orgs/3/members",
         "/api/invites/exchange/extra",
         "/api/invite-links/exchange/extra",
         "/api/delivery/unsubscribe/exchange/extra",

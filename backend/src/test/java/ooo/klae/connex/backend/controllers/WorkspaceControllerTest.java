@@ -22,6 +22,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.UpdateWorkspaceIdentityRequest;
 import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
@@ -29,8 +30,10 @@ import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,8 +41,10 @@ class WorkspaceControllerTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private InviteService inviteService;
     @Mock private InviteLinkService inviteLinkService;
+    @Mock private PrivilegedMfaAttestationService attestationService;
     @Mock private AllowedDomainService allowedDomainService;
     @Mock private AuthService authService;
+    @Mock private TenantWorkScope tenantWorkScope;
     @Mock private WorkspaceCookie workspaceCookie;
 
     private WorkspaceController controller;
@@ -48,10 +53,13 @@ class WorkspaceControllerTest {
     void setUp() {
         controller = new WorkspaceController(
             workspaceService,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.services.OwnershipOfferService.class),
+            attestationService,
             inviteService,
             inviteLinkService,
             allowedDomainService,
             authService,
+            tenantWorkScope,
             workspaceCookie
         );
         User user = new User();
@@ -97,6 +105,17 @@ class WorkspaceControllerTest {
     }
 
     @Test
+    void currencySettingUsesAuthenticatedActorAndVersionPrecondition() {
+        var request = new ooo.klae.connex.backend.dto.UpdateWorkspaceCurrencyRequest();
+        request.setDefaultCurrency("EUR");
+        request.setExpectedIdentityVersion(4L);
+        when(workspaceService.updateDefaultCurrency(9, 7, "EUR", 4L)).thenReturn(
+            new WorkspaceIdentityDto(9, 3, "Workspace", "workspace", null, "EUR", 5L, null));
+        assertEquals("EUR", controller.updateDefaultCurrency(9, request).defaultCurrency());
+        verify(workspaceService).updateDefaultCurrency(9, 7, "EUR", 4L);
+    }
+
+    @Test
     void updateIdentityDelegatesActorAndCompleteMutableIdentity() {
         UpdateWorkspaceIdentityRequest request = new UpdateWorkspaceIdentityRequest();
         request.setName("Renamed");
@@ -105,7 +124,7 @@ class WorkspaceControllerTest {
         request.setExpectedTimezone(null);
         request.setExpectedIdentityVersion(4L);
         WorkspaceIdentityDto expected = new WorkspaceIdentityDto(
-            9, 3, "Renamed", "immutable", "Pacific/Honolulu", 5L, "2026-08-03 12:00:00");
+            9, 3, "Renamed", "immutable", "Pacific/Honolulu", null, 5L, "2026-08-03 12:00:00");
         when(workspaceService.updateIdentity(
             9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L)).thenReturn(expected);
 
@@ -114,5 +133,16 @@ class WorkspaceControllerTest {
         assertSame(expected, actual);
         verify(workspaceService).updateIdentity(
             9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L);
+    }
+
+    @Test
+    void attestationCodesAreIssuedAndRevokedAsTheCurrentUser() {
+        MfaAttestationCodeDto issued = new MfaAttestationCodeDto("0123-4567-89AB-CDEF", "2026-10-09T00:00:00Z");
+        when(attestationService.issueForWorkspace(3, 7, 9)).thenReturn(issued);
+
+        assertEquals(issued, controller.issueMfaAttestation(3, 9));
+        controller.revokeMfaAttestation(3, 9);
+
+        verify(attestationService).revokeForWorkspace(3, 7, 9);
     }
 }

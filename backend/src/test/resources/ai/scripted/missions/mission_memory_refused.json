@@ -1,0 +1,17 @@
+{
+  "id": "mission_memory_refused",
+  "selector": "connex_script_mission_memory_refused",
+  "capabilityClass": "scripted-json",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "checkpoint_segment",
+        "arguments": "{\"expectedPlanRevision\":\"1\",\"expectedCheckpointRevision\":\"1\",\"nextPlanItemKey\":null,\"memory\":{\"summary\":\"Contact sensitive@example.invalid\",\"citations\":[\"r1\"]},\"phase\":\"reporting\"}"
+      }
+    }
+  ]
+}

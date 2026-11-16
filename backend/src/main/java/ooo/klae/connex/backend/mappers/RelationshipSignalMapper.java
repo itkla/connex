@@ -12,11 +12,27 @@ import ooo.klae.connex.backend.beans.RelationshipSignalFamilyState;
 public interface RelationshipSignalMapper {
     int upsertSignal(RelationshipSignal signal);
 
+    /** Locks the signal root before rebasing any actor state during a model change. */
+    RelationshipSignal lockByDedupeKey(@Param("workspaceId") int workspaceId, @Param("dedupeKey") String dedupeKey);
+
+    /** Retains actor decisions that matched the previous model's persisted source evidence. */
+    int rebaseModelState(@Param("workspaceId") int workspaceId, @Param("signalId") long signalId,
+        @Param("previousHash") String previousHash, @Param("currentHash") String currentHash);
+
+
     int resolveMissing(
             @Param("workspaceId") int workspaceId,
             @Param("family") String family,
             @Param("generationToken") String generationToken,
             @Param("resolvedAt") LocalDateTime resolvedAt);
+
+    /** Resolves absent candidates while retaining unchanged rows from earlier generations. */
+    int resolveMissingExcept(
+            @Param("workspaceId") int workspaceId,
+            @Param("family") String family,
+            @Param("generationToken") String generationToken,
+            @Param("resolvedAt") LocalDateTime resolvedAt,
+            @Param("dedupeKeys") List<String> dedupeKeys);
 
     int resolveByIds(
             @Param("workspaceId") int workspaceId,

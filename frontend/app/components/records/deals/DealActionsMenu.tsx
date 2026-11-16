@@ -36,6 +36,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import DealTeamDialog from '@/app/components/records/deals/DealTeamDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
+import { latestDealSnapshot } from './dealEditConflict';
 import {
     RecordActivityComposer,
     RecordTaskComposer,
@@ -43,12 +44,15 @@ import {
 } from '@/app/components/records/RecordComposers';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { usePermission } from '@/app/hooks/usePermissions';
 import {
     useContactTargetSearch,
     useDealTargetSearch,
 } from '@/app/hooks/useRecordTargetSearch';
 
-import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
+import { closeDeal, deleteDeal, getDealById, reopenDeal } from '@/app/lib/api';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 
@@ -56,28 +60,49 @@ const EMPTY_CONTACTS: Contact[] = [];
 const EMPTY_DEALS: Deal[] = [];
 const EMPTY_USERS: User[] = [];
 
+/**
+ * The deal detail page's action bar. Each mutation shows only when the member's live effective
+ * permissions allow it, read from the same fail-closed provider the deal cards use, so a read-only
+ * member sees no affordance the server would refuse, and an entitled member's controls return as soon
+ * as the provider resolves. Edit, team and won/lost/open need `DEAL_UPDATE`, Delete `DEAL_DELETE`,
+ * attachments `ATTACHMENT_CREATE`, and each New item its record's create permission. The server
+ * still decides, and its refusals reach the shared error toast.
+ */
 export default function DealActionsMenu({
     deal,
+    timezone,
     pipelines,
     stagesByPipeline,
     currentUserId,
+    mapAvailability = 'unknown',
     personSeeds = EMPTY_CONTACTS,
     dealSeeds = EMPTY_DEALS,
     collaborators = EMPTY_USERS,
 }: {
     deal: Deal;
+    timezone: string;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
+    mapAvailability?: RelationshipMapAvailability;
     personSeeds?: Contact[];
     dealSeeds?: Deal[];
     collaborators?: User[];
 }) {
     const router = useRouter();
     const t = useTranslations('DealsActionsMenu');
+    const canUpdate = usePermission('DEAL_UPDATE');
+    const canDelete = usePermission('DEAL_DELETE');
+    const canAttach = usePermission('ATTACHMENT_CREATE');
+    const canAddActivity = usePermission('ACTIVITY_CREATE');
+    const canAddNote = usePermission('NOTE_CREATE');
+    const canAddTask = usePermission('TASK_CREATE');
     const showApiError = useApiErrorToast('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
+    const [lastSavedDeal, setLastSavedDeal] = useState<Deal | null>(null);
+    const editDeal = latestDealSnapshot(deal, lastSavedDeal);
     const [editOpen, setEditOpen] = useState(false);
+    const [isPreparingEdit, setIsPreparingEdit] = useState(false);
     const [teamOpen, setTeamOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
@@ -95,13 +120,27 @@ export default function DealActionsMenu({
     const personSearch = useContactTargetSearch(noteOpen, [], personSeeds);
     const dealSearch = useDealTargetSearch(noteOpen, [deal.id], stableDealSeeds);
 
-    const closed = isDealClosed(deal);
+    const closed = isDealClosed(editDeal);
+
+    const prepareEdit = async () => {
+        const originWorkspaceId = renderedWorkspaceId();
+        setIsPreparingEdit(true);
+        try {
+            const current = await getDealById(deal.id, workspacePinnedRequest(originWorkspaceId));
+            if (renderedWorkspaceId() !== originWorkspaceId) return;
+            setLastSavedDeal(current);
+            setEditOpen(true);
+        } catch (err) {
+            showApiError(err, 'failedToLoadDeal');
+        } finally {
+            setIsPreparingEdit(false);
+        }
+    };
 
     const toggleDealStatus = async (won: boolean | null) => {
         setIsUpdatingStatus(true);
         try {
-            if (won === null) await reopenDeal(deal.id);
-            else await closeDeal(deal.id, { won });
+            setLastSavedDeal(won === null ? await reopenDeal(deal.id) : await closeDeal(deal.id, { won }));
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {
@@ -127,126 +166,147 @@ export default function DealActionsMenu({
     return (
         <div className="flex flex-row gap-2">
             <ButtonGroup orientation="horizontal">
-                <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
-                    <PencilSquareIcon className="size-4" />
-                    {t('edit')}
-                </Button>
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    disabled={deal.company == null}
-                    onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
-                >
-                    <EyeIcon className="size-4" />
-                    {t('viewInMap')}
-                </Button>
+                {canUpdate && (
+                    <Button variant="outline" size="toolbar" onClick={prepareEdit} disabled={isPreparingEdit} aria-busy={isPreparingEdit}>
+                        {isPreparingEdit ? <LoaderCircle className="size-4 animate-spin" /> : <PencilSquareIcon className="size-4" />}
+                        {t('edit')}
+                    </Button>
+                )}
+                {mapAvailability !== 'overCapacity' && deal.company != null && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
+                    >
+                        <EyeIcon className="size-4" />
+                        {t('viewInMap')}
+                    </Button>
+                )}
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    onClick={openAttachmentPicker}
-                    disabled={attachmentsUploading}
-                >
-                    {attachmentsUploading ? (
-                        <LoaderCircle className="size-4 animate-spin" />
-                    ) : (
-                        <PaperClipIcon className="size-4" />
-                    )}
-                    {t('add')}
-                </Button>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="brand" size="toolbar" menu>
-                            <PlusIcon className="size-4" />
-                            {t('new')}
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                            onSelect={() => setActivityOpen(true)}
-                        >
-                            <ChatBubbleLeftRightIcon className="size-4" />
-                            <span>{t('addActivity')}</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            onSelect={() => setNoteOpen(true)}
-                        >
-                            <DocumentTextIcon className="size-4" />
-                            <span>{t('addNote')}</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            onSelect={() => setTaskOpen(true)}
-                        >
-                            <CheckCircleIcon className="size-4" />
-                            <span>{t('addTask')}</span>
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
-                            <EllipsisVerticalIcon className="size-4" />
-                        </IconButton>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setTeamOpen(true);
-                            }}
-                        >
-                            <UsersIcon className="size-4" />
-                            <span>{t('manageTeam')}</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {closed ? (
-                            <DropdownMenuItem
-                                disabled={isUpdatingStatus}
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    toggleDealStatus(null);
-                                }}
-                            >
-                                <ArrowUturnLeftIcon className="size-4" />
-                                <span>{t('markOpen')}</span>
-                            </DropdownMenuItem>
+                {canAttach && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={openAttachmentPicker}
+                        disabled={attachmentsUploading}
+                    >
+                        {attachmentsUploading ? (
+                            <LoaderCircle className="size-4 animate-spin" />
                         ) : (
-                            <>
+                            <PaperClipIcon className="size-4" />
+                        )}
+                        {t('add')}
+                    </Button>
+                )}
+                {(canAddActivity || canAddNote || canAddTask) && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="brand" size="toolbar" menu>
+                                <PlusIcon className="size-4" />
+                                {t('new')}
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                            {canAddActivity && (
                                 <DropdownMenuItem
-                                    disabled={isUpdatingStatus}
-                                    onSelect={(e) => {
-                                        e.preventDefault();
-                                        toggleDealStatus(true);
-                                    }}
+                                    onSelect={() => setActivityOpen(true)}
+                                >
+                                    <ChatBubbleLeftRightIcon className="size-4" />
+                                    <span>{t('addActivity')}</span>
+                                </DropdownMenuItem>
+                            )}
+                            {canAddNote && (
+                                <DropdownMenuItem
+                                    onSelect={() => setNoteOpen(true)}
+                                >
+                                    <DocumentTextIcon className="size-4" />
+                                    <span>{t('addNote')}</span>
+                                </DropdownMenuItem>
+                            )}
+                            {canAddTask && (
+                                <DropdownMenuItem
+                                    onSelect={() => setTaskOpen(true)}
                                 >
                                     <CheckCircleIcon className="size-4" />
-                                    <span>{t('markWon')}</span>
+                                    <span>{t('addTask')}</span>
                                 </DropdownMenuItem>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
+                {(canUpdate || canDelete) && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
+                                <EllipsisVerticalIcon className="size-4" />
+                            </IconButton>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                            {canUpdate && (
+                                <>
+                                    <DropdownMenuItem
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            setTeamOpen(true);
+                                        }}
+                                    >
+                                        <UsersIcon className="size-4" />
+                                        <span>{t('manageTeam')}</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    {closed ? (
+                                        <DropdownMenuItem
+                                            disabled={isUpdatingStatus}
+                                            onSelect={(e) => {
+                                                e.preventDefault();
+                                                toggleDealStatus(null);
+                                            }}
+                                        >
+                                            <ArrowUturnLeftIcon className="size-4" />
+                                            <span>{t('markOpen')}</span>
+                                        </DropdownMenuItem>
+                                    ) : (
+                                        <>
+                                            <DropdownMenuItem
+                                                disabled={isUpdatingStatus}
+                                                onSelect={(e) => {
+                                                    e.preventDefault();
+                                                    toggleDealStatus(true);
+                                                }}
+                                            >
+                                                <CheckCircleIcon className="size-4" />
+                                                <span>{t('markWon')}</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                                disabled={isUpdatingStatus}
+                                                onSelect={(e) => {
+                                                    e.preventDefault();
+                                                    toggleDealStatus(false);
+                                                }}
+                                            >
+                                                <XCircleIcon className="size-4" />
+                                                <span>{t('markLost')}</span>
+                                            </DropdownMenuItem>
+                                        </>
+                                    )}
+                                </>
+                            )}
+                            {canDelete && (
                                 <DropdownMenuItem
-                                    disabled={isUpdatingStatus}
+                                    variant="destructive"
                                     onSelect={(e) => {
                                         e.preventDefault();
-                                        toggleDealStatus(false);
+                                        setDeleteOpen(true);
                                     }}
                                 >
-                                    <XCircleIcon className="size-4" />
-                                    <span>{t('markLost')}</span>
+                                    <TrashIcon className="size-4" />
+                                    <span>{t('delete')}</span>
                                 </DropdownMenuItem>
-                            </>
-                        )}
-                        <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setDeleteOpen(true);
-                            }}
-                        >
-                            <TrashIcon className="size-4" />
-                            <span>{t('delete')}</span>
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
             </ButtonGroup>
 
             <input
@@ -258,19 +318,22 @@ export default function DealActionsMenu({
             />
 
             <EditDealSheet
-                deal={deal}
+                timezone={timezone}
+                deal={editDeal}
                 open={editOpen}
                 onOpenChange={setEditOpen}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onDealUpdated={setLastSavedDeal}
             />
 
             <DealTeamDialog
                 open={teamOpen}
                 onOpenChange={setTeamOpen}
                 dealId={deal.id}
-                initialOwnerId={deal.ownerId}
+                initialOwnerId={editDeal.ownerId}
                 initialCollaborators={collaborators}
+                onDealUpdated={setLastSavedDeal}
             />
 
             <RecordActivityComposer
@@ -297,7 +360,9 @@ export default function DealActionsMenu({
                 currentUserId={currentUserId}
                 onPersonQueryChange={personSearch.onInputValueChange}
                 onDealQueryChange={dealSearch.onInputValueChange}
+                personServerSearch={personSearch.serverSearch}
                 personOptionsLoading={personSearch.loading}
+                dealServerSearch={dealSearch.serverSearch}
                 dealOptionsLoading={dealSearch.loading}
             />
 

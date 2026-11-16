@@ -18,6 +18,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function messageConstants(value: unknown): string[] {
+    if (typeof value === "string") return value.match(/[A-Z]+_[A-Z_]+/g) ?? [];
+    if (Array.isArray(value)) return value.flatMap((entry: unknown) => messageConstants(entry));
+    if (isRecord(value)) return Object.values(value).flatMap(messageConstants);
+    return [];
+}
+
 function diagnosticsMessage(locale: "en" | "ja", key: string): string {
     const parsed: unknown = JSON.parse(source(`messages/${locale}/workspace.json`));
     if (!isRecord(parsed) || !isRecord(parsed.TenantDiagnostics)) {
@@ -82,10 +89,33 @@ describe("diagnostics denial", () => {
         }
     });
 
-    it("never leaks a backend permission constant into user-facing copy", () => {
-        for (const locale of ["en", "ja"] as const) {
-            expect(source(`messages/${locale}/workspace.json`)).not.toContain("WORKSPACE_SETTINGS");
-        }
+    it.each([
+        "messages/en/workspace.json",
+        "messages/ja/workspace.json",
+        "messages/en/account.json",
+        "messages/ja/account.json",
+        "messages/en/errors.json",
+        "messages/ja/errors.json",
+        "../landing/messages/en/errors.json",
+        "../landing/messages/ja/errors.json",
+    ])("never leaks a backend permission constant into user-facing copy in %s", (file) => {
+        const parsed: unknown = JSON.parse(source(file));
+        expect(isRecord(parsed), file).toBe(true);
+        expect(messageConstants(parsed), file).toEqual([]);
+    });
+
+    it("allows internal permission keys with localized business labels", () => {
+        expect(messageConstants({
+            WORKSPACE_SETTINGS: { action: "Manage workspace settings", description: "設定を管理できます。" },
+        })).toEqual([]);
+    });
+
+    it.each([
+        "Ask for WORKSPACE_SETTINGS permission.",
+        "WORKSPACE_SETTINGSの権限が必要です。",
+        "The request was refused: WORKSPACE_LAST_OWNER.",
+    ])("rejects a raw constant in a nested message value: %s", (message) => {
+        expect(messageConstants({ group: { items: [{ description: message }] } })).toHaveLength(1);
     });
 });
 

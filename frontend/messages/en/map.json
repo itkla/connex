@@ -4,8 +4,12 @@
         "emptyTitle": "Your relationship map is empty",
         "emptyBody": "Add companies and contacts to see how your network connects and grows over time.",
         "emptyCta": "Add a company",
-        "limitTitle": "This map is too large to render safely",
-        "limitBody": "Use record search and filters to explore this workspace while a larger map view is prepared."
+        "limitTitle": "This workspace exceeds the map display limit",
+        "limitBody": "The map can show up to 2,000 contacts, companies and deals combined, and 4,000 activities, tasks and notes combined. You can still search and filter your records in the lists below.",
+        "openRecord": "Open record",
+        "browseContacts": "Browse contacts",
+        "browseCompanies": "Browse companies",
+        "browseDeals": "Browse deals"
     },
     "CompanyNode": {
         "title": "Company"

@@ -120,7 +120,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                             <Link
                                 href={safeHref(ensureUrlScheme(company.website))}
                                 target="_blank"
-                                className="nodrag truncate transition-colors hover:text-brand-dark"
+                                className="nodrag truncate transition-colors hover:text-brand-text"
                             >
                                 {company.website}
                             </Link>

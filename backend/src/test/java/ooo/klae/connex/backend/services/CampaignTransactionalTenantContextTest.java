@@ -48,7 +48,7 @@ class CampaignTransactionalTenantContextTest {
         CampaignService campaignService = new CampaignService(
                 campaignMapper, segmentService, audienceEligibilityService, workspaceService,
                 tenantContext, authService, auditService, objectMapper);
-        CampaignSendService campaignSendService = new CampaignSendService(
+        CampaignSendService campaignSendService = new CampaignSendService(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 campaignMapper, campaignMessageMapper, campaignSendMapper, campaignDeliveryMapper,
                 personMapper, capabilityRegistry, deliveryProviderConfigService, workspaceService,
                 tenantContext, authService, auditService);

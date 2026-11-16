@@ -1,9 +1,13 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.PasskeyApprovalGap;
+import ooo.klae.connex.backend.beans.PrivilegedMfaStandingRow;
+import ooo.klae.connex.backend.beans.PrivilegedMembershipRow;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
@@ -20,7 +24,14 @@ import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
  */
 
 public interface UserMapper {
+    /** Bounded control-only discovery for workspace privacy metadata, independent of chat roots. */
+    List<Integer> activeAiChatRecipientIdsAfter(@Param("workspaceId") int workspaceId,
+            @Param("afterId") int afterId, @Param("limit") int limit);
+
     List<User> getAllUsers();
+    List<User> getUserOptions(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    /** Existing control-plane identities only; callers supply a bounded, nonempty set. */
+    List<Integer> findExistingIds(@Param("ids") List<Integer> ids);
     /** Current display labels for the requested control-plane user ids. */
     List<UserDisplayNameDto> getDisplayNamesByIds(@Param("ids") List<Integer> ids);
     /** Authenticated destination identities for a bounded assistant fanout recipient set. */
@@ -73,6 +84,10 @@ public interface UserMapper {
     List<Integer> findAccountDeletionReservedIds(@Param("ids") List<Integer> ids);
     /** Returns current deletion-reservation state while retaining a shared user-row lock, or null if absent. */
     Boolean isAccountDeletionReservedForShare(int id);
+    /**
+     * Proves reservation ownership and database-clock expiry with a current locking read.
+     * The caller must already hold the account lock.
+     */
     boolean isAccountDeletionReservationOwner(
         @Param("id") int id, @Param("owner") String owner);
     int reserveAccountDeletion(
@@ -85,6 +100,108 @@ public interface UserMapper {
     User getUserByEmail(String email);
     /** Current account-wide administrative privilege from active control-plane memberships. */
     boolean isPrivilegedAccount(int id);
+    /**
+     * The facts privileged-MFA standing is derived from, in one statement (#1534): whether the
+     * account is privileged, whether it holds any passkey, and whether one of its passkeys is
+     * sufficient, meaning it carries break-glass assurance or is covered in every organization where
+     * the account is privileged.
+     *
+     * @param id the account
+     * @return the three facts; never null
+     */
+    PrivilegedMfaStandingRow privilegedMfaStanding(int id);
+    /**
+     * Reads owner/admin membership in the workspace's active organization without locks, flushing
+     * MyBatis caches while retaining the caller's database snapshot and transaction isolation.
+     */
+    boolean hasWorkspaceOrganizationPrivilege(@Param("id") int id, @Param("workspaceId") int workspaceId);
+    /**
+     * Current per-passkey sufficiency, including organization coverage only when enforced. The caller
+     * retains account and workspace authorization roots; credential/coverage locks follow authority.
+     * The distinct statement flushes MyBatis caches and takes no consistent-read snapshot.
+     */
+    List<Boolean> lockedWorkspaceMfaPasskeySufficiency(
+        @Param("id") int id, @Param("workspaceId") int workspaceId,
+        @Param("attestationEnforced") boolean attestationEnforced);
+    /**
+     * Whether the passkey belongs to the account and is sufficient for its privileged MFA (#1534).
+     *
+     * @param userId the account
+     * @param credentialRowId the passkey's {@code webauthn_credential.id}
+     * @return true only for the account's own sufficient passkey
+     */
+    boolean isSufficientPasskey(@Param("userId") int userId, @Param("credentialRowId") int credentialRowId);
+    /**
+     * For each of the account's passkeys without break-glass assurance, the organizations where the
+     * account is privileged and that passkey still needs approval (#1534).
+     *
+     * @param userId the account
+     * @return one row per passkey and missing organization, ordered by passkey then organization
+     */
+    List<PasskeyApprovalGap> passkeyApprovalGaps(@Param("userId") int userId);
+    /** Reads the account's active privileged membership sources, deduplicated and ordered by scope. */
+    List<PrivilegedMembershipRow> privilegedMemberships(@Param("userId") int userId);
+    /**
+     * Whether the account holds a sufficient passkey other than the given one (#1534).
+     *
+     * @param userId the account
+     * @param credentialRowId the passkey to leave out, by {@code webauthn_credential.id}
+     * @return true when another of the account's passkeys is sufficient
+     */
+    boolean hasOtherSufficientPasskey(
+            @Param("userId") int userId, @Param("credentialRowId") int credentialRowId);
+    /**
+     * The credential ids of the account's sufficient passkeys (#1534), in row order.
+     *
+     * @param userId the account
+     * @return the raw WebAuthn credential ids; empty when none is sufficient
+     */
+    List<byte[]> sufficientPasskeyCredentialIds(@Param("userId") int userId);
+    /**
+     * Whether the passkey belongs to the account and vouches in the organization (#1534): it
+     * carries break-glass assurance or is covered there.
+     *
+     * @param userId the account that must own the passkey
+     * @param credentialRowId the passkey's {@code webauthn_credential.id}
+     * @param orgId the organization
+     * @return true only for the account's own passkey covered in that organization
+     */
+    boolean isPasskeyCoveredInOrganization(
+            @Param("userId") int userId,
+            @Param("credentialRowId") int credentialRowId,
+            @Param("orgId") int orgId);
+    /**
+     * Whether any of the account's passkeys vouches in the organization (#1534).
+     *
+     * @param userId the account
+     * @param orgId the organization
+     * @return true when one of its passkeys carries break-glass assurance or is covered there
+     */
+    boolean hasPasskeyCoveredInOrganization(@Param("userId") int userId, @Param("orgId") int orgId);
+    /**
+     * The accounts among {@code userIds} that are privileged in the organization (#1534), read with
+     * one statement however many there are. The list must not be empty.
+     *
+     * @param orgId the organization
+     * @param userIds the accounts to test
+     * @return those privileged in the organization
+     */
+    List<Integer> privilegedInOrganizationAmong(
+            @Param("orgId") int orgId, @Param("userIds") Collection<Integer> userIds);
+    /**
+     * The accounts among {@code userIds} holding a passkey that vouches in the organization: one
+     * covered there or carrying break-glass assurance (#1534). The list must not be empty.
+     *
+     * @param orgId the organization
+     * @param userIds the accounts to test
+     * @return those holding such a passkey
+     */
+    List<Integer> coveredInOrganizationAmong(
+            @Param("orgId") int orgId, @Param("userIds") Collection<Integer> userIds);
+    /** Counts privileged accounts that hold passkeys but no sufficient one (#1534). */
+    long countAttestationRequiredAccounts();
+    /** Counts per-organization coverage rows trusted by the privileged-MFA cutover (#1534). */
+    long countGrandfatheredCoverage();
     /**
      * Privileged accounts with no enrolled passkey, in ascending id, capped at {@code limit}. Uses
      * the same privilege predicate as {@link #isPrivilegedAccount(int)}.

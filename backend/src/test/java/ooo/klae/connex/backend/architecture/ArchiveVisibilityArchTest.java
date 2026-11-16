@@ -473,7 +473,44 @@ class ArchiveVisibilityArchTest {
             case CLOSED_PERIOD_ANALYTICS -> REPORT_PERIOD_BOUNDS.stream()
                 .anyMatch(bound -> statement.sql().contains("#{" + bound + "}"))
                 ? null : "the statement is bounded by no report period, so it is a live worklist";
+            case SEARCH_PROJECTION_REPAIR -> searchProjectionRepairFailure(exemption, statement);
         };
+    }
+
+    private String searchProjectionRepairFailure(StatementExemption exemption, Statement statement) {
+        if (!exemption.mapperNamespace().equals("ooo.klae.connex.backend.mappers.RecordSearchMapper")
+                || !statement.namespace().equals(exemption.mapperNamespace())
+                || !statement.statementId().equals("findMissing")
+                || !exemption.aliases().equals(Set.of("p", "c"))
+                || !recordAliases(statement.sql()).equals(Map.of("p", "person", "c", "company"))) {
+            return "only the exact record-search maintenance page may claim this exception";
+        }
+        String sql = statement.sql().replaceAll("\\s+", " ");
+        if (!sql.contains("workspace_id = #{workspaceId}") || !sql.contains("id IN")
+                || !sql.contains("#{id}") || !sql.contains("LIMIT 500") || !sql.contains("1 = 0")
+                || !sql.contains("search_name IS NULL OR search_phone IS NULL")) {
+            return "the search projection page lacks its workspace, exact-id, missing-key or limit bounds";
+        }
+        return columnsFailure(exemption, statement, Set.of("name", "phone"), "search projection sources");
+    }
+
+    @Test
+    void searchProjectionRepairExemptionRejectsBroaderReadsAndMissingBounds() throws Exception {
+        StatementExemption exemption = ArchiveVisibilityRegistry.exemptions().stream()
+            .filter(row -> row.reason() == ExemptionReason.SEARCH_PROJECTION_REPAIR).findFirst().orElseThrow();
+        Statement statement = allMapperXml().get(exemption.mapperNamespace()).statement("findMissing");
+        assertTrue(statement != null);
+        assertEquals(null, searchProjectionRepairFailure(exemption, statement));
+        for (String column : List.of("p.email", "p.title", "c.address", "c.website")) {
+            assertTrue(searchProjectionRepairFailure(exemption,
+                new Statement(statement.namespace(), statement.statementId(), statement.sql() + " " + column)) != null);
+        }
+        assertTrue(searchProjectionRepairFailure(exemption, new Statement(statement.namespace(),
+            statement.statementId(), statement.sql().replace("LIMIT 500", "LIMIT 999999"))) != null);
+        assertTrue(searchProjectionRepairFailure(exemption,
+            new Statement(statement.namespace(), "otherRead", statement.sql())) != null);
+        assertTrue(searchProjectionRepairFailure(exemption, new Statement(statement.namespace(),
+            statement.statementId(), statement.sql() + " JOIN person other ON other.id = p.id")) != null);
     }
 
     private String columnsFailure(

@@ -21,7 +21,9 @@ const BACKEND_SOURCE = path.resolve(process.cwd(), "..", "backend", "src", "main
  *   `AuditService.writeUnchecked` scopes to the org and nulls the workspace;
  * - `auditService.record*Scoped(action, …, workspaceId, orgId, …)` called with a null workspace and
  *   a non-null org: the teardown, workspace-export and support-bundle services pass a literal null,
- *   and `SecretStore`/`SecretStoreLifecycleService` pass null for organization-scoped secrets.
+ *   `SecretStore`/`SecretStoreLifecycleService` pass null for organization-scoped secrets, and
+ *   `PrivilegedMfaAttestationService` passes an organization owner's grant's null workspace when it
+ *   audits creating, turning off or redeeming a passkey approval code (#1534).
  *
  * `AuditService.sensitiveAction` then rewrites any unlisted `secret_store.*` action to
  * `secret_store.operation` before the rows leave the service, so that alias is reachable too.
@@ -40,6 +42,9 @@ const ORG_PLANE_AUDIT_ACTIONS = [
     "appi.subject_request.create",
     "appi.subject_request.disclosure",
     "appi.subject_request.update",
+    "auth.mfa.attestation.issued",
+    "auth.mfa.attestation.redeemed",
+    "auth.mfa.attestation.revoked",
     "org.ai_provider.revoke",
     "org.ai_provider.save",
     "org.ai_provider.zdr_attest",
@@ -52,13 +57,16 @@ const ORG_PLANE_AUDIT_ACTIONS = [
     "org.member.remove",
     "org.member.set",
     "org.rename",
+    "org.role.export_permission",
     "org.sso_config.save",
     "org.sso_user.provision",
     "org.support_bundle.completed",
     "org.support_bundle.download",
     "org.workspace.create",
     "org.workspace.export",
+    "org.workspace.export_started",
     "org.workspace_member.sso_provision",
+    "organization.audit.export",
     "secret_store.diagnostics.read",
     "secret_store.operation",
     "secret_store.secret.rewrap",
@@ -135,6 +143,18 @@ describe("organization audit action labels", () => {
         const stale = ORG_PLANE_AUDIT_ACTIONS.filter((action) => !source.includes(`"${action}"`));
 
         expect(stale, "these actions no longer exist in the backend; drop or rename them").toEqual([]);
+    });
+
+    it("includes export policy changes written to the organization audit scope", () => {
+        const service = readFileSync(path.join(BACKEND_SOURCE, "ooo/klae/connex/backend/services/OrgMemberService.java"), "utf8");
+        const mapper = readFileSync(path.resolve(process.cwd(), "..", "backend/src/main/resources/mappers/AuditLogMapper.xml"), "utf8");
+        const query = mapper.slice(mapper.indexOf('<select id="findRecentByOrg"'), mapper.indexOf('</select>', mapper.indexOf('<select id="findRecentByOrg"')));
+        expect(service).toMatch(/recordScoped\("org\.role\.export_permission",\s*"organization",\s*orgId,\s*null,\s*orgId/);
+        expect(query).toContain("al.org_id = #{orgId}");
+        expect(query).toContain("al.workspace_id IS NULL");
+        for (const locale of LOCALES) {
+            expect(sentence(locale, "org.role.export_permission")).toBeTruthy();
+        }
     });
 
     it("re-derives the entity-typed org-plane actions from the backend", async () => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
     CheckCircleIcon,
@@ -62,6 +62,7 @@ export default function DocumentApprovalChain({
     memberDirectoryStatus = 'hidden',
     members = [],
 }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
     const listFormatter = useMemo(
@@ -218,7 +219,7 @@ export default function DocumentApprovalChain({
                                     {step.dueAt && (
                                         <p className="ml-5">
                                             {t('chainDueAt', {
-                                                date: formatUtcDateTime(step.dueAt, locale),
+                                                date: formatUtcDateTime(step.dueAt, locale, undefined, timeZone),
                                             })}
                                         </p>
                                     )}
@@ -238,7 +239,7 @@ export default function DocumentApprovalChain({
                                                         {assignmentDescription(assignment)}
                                                     </p>
                                                     <p className="text-muted-foreground">
-                                                        {formatUtcDateTime(assignment.createdAt, locale)}
+                                                        {formatUtcDateTime(assignment.createdAt, locale, undefined, timeZone)}
                                                     </p>
                                                     {assignment.comment?.trim() && (
                                                         <p className="text-muted-foreground">

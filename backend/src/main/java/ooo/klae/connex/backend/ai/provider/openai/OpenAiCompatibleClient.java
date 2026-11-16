@@ -53,6 +53,7 @@ import ooo.klae.connex.backend.ai.egress.AiSseEventReader;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 
 /**
@@ -220,6 +221,7 @@ public class OpenAiCompatibleClient {
             }
             beforeSend.run();
             return spec.body(body).exchange((request, response) -> {
+                AiProviderDispatch.responded(beforeSend);
                 if (response.getStatusCode().isError()) {
                     byte[] rejection = readBounded(response.getBody());
                     String providerDetail = rejectionDetail(rejection, apiKey);
@@ -285,8 +287,11 @@ public class OpenAiCompatibleClient {
         }
         beforeSend.run();
         return spec.body(body)
-                .exchange((request, response) -> new OpenAiCompatibleResponse(
-                        response.getStatusCode().value(), readBounded(response.getBody())));
+                .exchange((request, response) -> {
+                    AiProviderDispatch.responded(beforeSend);
+                    return new OpenAiCompatibleResponse(
+                            response.getStatusCode().value(), readBounded(response.getBody()));
+                });
     }
 
     private AiCompletionResult sendStream(
@@ -326,6 +331,7 @@ public class OpenAiCompatibleClient {
             }
             beforeSend.run();
             AiCompletionResult result = pinned.httpClient().execute(request, response -> {
+                AiProviderDispatch.responded(beforeSend);
                 HttpEntity entity = response.getEntity();
                 if (response.getCode() < 200 || response.getCode() > 299) {
                     byte[] rejection = entity == null ? new byte[0] : readBounded(entity.getContent());
@@ -400,6 +406,7 @@ public class OpenAiCompatibleClient {
             }
             beforeSend.run();
             OpenAiCompatibleResponse response = pinned.httpClient().execute(request, providerResponse -> {
+                AiProviderDispatch.responded(beforeSend);
                 HttpEntity entity = providerResponse.getEntity();
                 byte[] responseBody = entity == null
                         ? new byte[0]

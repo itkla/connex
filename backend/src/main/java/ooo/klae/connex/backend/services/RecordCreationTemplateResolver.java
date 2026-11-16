@@ -62,6 +62,7 @@ public class RecordCreationTemplateResolver {
 
     private record ResolutionContext(
         int workspaceId,
+        String orgWorkspaceIdsJson,
         int actorId,
         RecordCreationRecordType recordType,
         Integer relatedCompanyId,
@@ -95,6 +96,7 @@ public class RecordCreationTemplateResolver {
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final TagMapper tagMapper;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
@@ -102,6 +104,13 @@ public class RecordCreationTemplateResolver {
     public ResolvedCreationTemplateDto resolveSystem(
             RecordCreationRecordType recordType,
             RecordCreationContextDto context) {
+        return resolveSystem(recordType, context,
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson());
+    }
+
+    ResolvedCreationTemplateDto resolveSystem(
+            RecordCreationRecordType recordType,
+            RecordCreationContextDto context, String orgWorkspaceIdsJson) {
         SystemPreset preset = fieldRegistry.systemPreset(recordType);
         return resolve(
             preset.id(),
@@ -111,13 +120,21 @@ public class RecordCreationTemplateResolver {
             preset.name(),
             preset.description(),
             preset.definition(),
-            context);
+            context, orgWorkspaceIdsJson);
     }
 
     public ResolvedCreationTemplateDto resolveWorkspace(
             RecordCreationTemplate root,
             RecordCreationTemplateVersion version,
             RecordCreationContextDto context) {
+        return resolveWorkspace(root, version, context,
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson());
+    }
+
+    ResolvedCreationTemplateDto resolveWorkspace(
+            RecordCreationTemplate root,
+            RecordCreationTemplateVersion version,
+            RecordCreationContextDto context, String orgWorkspaceIdsJson) {
         RecordCreationRecordType recordType = RecordCreationRecordType.valueOf(root.getRecordType());
         return resolve(
             "workspace:" + root.getId(),
@@ -127,7 +144,7 @@ public class RecordCreationTemplateResolver {
             new LocalizedTextDto(version.getNameEn(), version.getNameJa()),
             localized(version.getDescriptionEn(), version.getDescriptionJa()),
             validator.parseDefinition(version.getDefinitionJson()),
-            context);
+            context, orgWorkspaceIdsJson);
     }
 
     public ResolvedCreationTemplateDto resolvePreview(
@@ -137,7 +154,18 @@ public class RecordCreationTemplateResolver {
             LocalizedTextDto description,
             RecordCreationTemplateDefinitionDto definition,
             RecordCreationContextDto context) {
-        return resolve(id, recordType, false, 0, name, description, definition, context);
+        return resolvePreview(id, recordType, name, description, definition, context,
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson());
+    }
+
+    ResolvedCreationTemplateDto resolvePreview(
+            String id,
+            RecordCreationRecordType recordType,
+            LocalizedTextDto name,
+            LocalizedTextDto description,
+            RecordCreationTemplateDefinitionDto definition,
+            RecordCreationContextDto context, String orgWorkspaceIdsJson) {
+        return resolve(id, recordType, false, 0, name, description, definition, context, orgWorkspaceIdsJson);
     }
 
     private ResolvedCreationTemplateDto resolve(
@@ -148,8 +176,8 @@ public class RecordCreationTemplateResolver {
             LocalizedTextDto name,
             LocalizedTextDto description,
             RecordCreationTemplateDefinitionDto definition,
-            RecordCreationContextDto requestedContext) {
-        ResolutionContext context = resolutionContext(recordType, requestedContext);
+            RecordCreationContextDto requestedContext, String orgWorkspaceIdsJson) {
+        ResolutionContext context = resolutionContext(recordType, requestedContext, orgWorkspaceIdsJson);
         List<RecordCreationWarningDto> warnings = new ArrayList<>();
         DealDefaults dealDefaults = resolveDealDefaults(id, definition, context, warnings);
         List<ResolvedCreationGroupDto> groups = new ArrayList<>();
@@ -224,7 +252,7 @@ public class RecordCreationTemplateResolver {
 
     private ResolutionContext resolutionContext(
             RecordCreationRecordType recordType,
-            RecordCreationContextDto requestedContext) {
+            RecordCreationContextDto requestedContext, String orgWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         Integer relatedCompanyId = requestedContext == null ? null : requestedContext.relatedCompanyId();
@@ -235,7 +263,7 @@ public class RecordCreationTemplateResolver {
                     "TEMPLATE_DEFINITION_INVALID",
                     "Related company context is valid only for contacts and deals");
             }
-            if (!companyMapper.exists(workspaceId, relatedCompanyId)) {
+            if (!companyMapper.exists(workspaceId, orgWorkspaceIdsJson, relatedCompanyId)) {
                 throw RecordCreationTemplateException.of(
                     HttpStatus.NOT_FOUND,
                     "RELATED_RECORD_NOT_FOUND",
@@ -249,11 +277,11 @@ public class RecordCreationTemplateResolver {
                 customFields.put(definition.getId(), definition);
             }
         }
-        List<Pipeline> pipelines = pipelineMapper.getAllPipelines(workspaceId).stream()
+        List<Pipeline> pipelines = pipelineMapper.getAllPipelines(workspaceId, orgWorkspaceIdsJson).stream()
             .sorted(Comparator.comparingInt(Pipeline::getId))
             .toList();
         Pipeline policyPipeline = pipelines.isEmpty() ? null : pipelines.getFirst();
-        List<Stage> stages = pipelineMapper.getAllStages(workspaceId).stream()
+        List<Stage> stages = pipelineMapper.getAllStages(workspaceId, orgWorkspaceIdsJson).stream()
             .sorted(Comparator.comparingInt((Stage stage) ->
                 stage.getPipeline() == null ? Integer.MAX_VALUE : stage.getPipeline().getId())
                 .thenComparingInt(Stage::getPosition)
@@ -269,6 +297,7 @@ public class RecordCreationTemplateResolver {
             .toList();
         return new ResolutionContext(
             workspaceId,
+            orgWorkspaceIdsJson,
             actorId,
             recordType,
             relatedCompanyId,
@@ -365,6 +394,12 @@ public class RecordCreationTemplateResolver {
             : context.recordType() == RecordCreationRecordType.deal && "stage".equals(field.key())
                 ? dealDefaults.stage()
                 : resolveDefault(field.key(), field.defaultSpec(), context);
+        if ("currency".equals(field.key()) && defaultValue == null
+                && context.recordType() == RecordCreationRecordType.deal) {
+            defaultValue = new DefaultValue(
+                objectMapper.valueToTree(workspaceService.getCurrentDefaultCurrency()),
+                RecordCreationDefaultOrigin.policy);
+        }
         if ("company".equals(field.key()) && context.relatedCompanyId() != null) {
             defaultValue = new DefaultValue(
                 objectMapper.valueToTree(context.relatedCompanyId()),
@@ -532,8 +567,8 @@ public class RecordCreationTemplateResolver {
             return false;
         }
         return switch (fieldKey) {
-            case "company" -> companyMapper.exists(context.workspaceId(), id);
-            case "referrerPerson" -> personMapper.exists(context.workspaceId(), id);
+            case "company" -> companyMapper.exists(context.workspaceId(), context.orgWorkspaceIdsJson(), id);
+            case "referrerPerson" -> personMapper.exists(context.workspaceId(), context.orgWorkspaceIdsJson(), id);
             case "pipeline" -> findPipeline(context, id) != null;
             case "stage" -> findStage(context, id) != null;
             default -> false;

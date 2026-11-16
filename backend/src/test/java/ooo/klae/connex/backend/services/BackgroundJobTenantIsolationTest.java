@@ -100,7 +100,7 @@ class BackgroundJobTenantIsolationTest {
         ReflectionTestUtils.setField(worker, "dispatchEnabled", true);
         when(placementRegistry.activeCatalogs())
                 .thenReturn(Arrays.asList(null, FOREIGN_CATALOG));
-        when(mapper.workspaceIdsWithQueuedSends(false, 30_000_000L))
+        when(mapper.workspaceIdsWithQueuedSends(false, 30_000_000L, 900L))
                 .thenReturn(List.of(SIBLING_WORKSPACE_ID))
                 .thenReturn(List.of(FOREIGN_ORGANIZATION_WORKSPACE_ID));
 
@@ -131,7 +131,7 @@ class BackgroundJobTenantIsolationTest {
         PlacementRegistry placementRegistry = mock(PlacementRegistry.class);
         RecordingTenantWorkScope tenantWorkScope = new RecordingTenantWorkScope();
         JobRunRecorder jobRunRecorder = mock(JobRunRecorder.class);
-        WorkflowRuntimeScheduler scheduler = new WorkflowRuntimeScheduler(
+        WorkflowRuntimeScheduler scheduler = new WorkflowRuntimeScheduler(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 outboxMapper,
                 claimTransaction,
                 outboxWorker,

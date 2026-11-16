@@ -12,10 +12,13 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
+import jakarta.validation.constraints.Size;
+import ooo.klae.connex.backend.password.PasswordPolicy;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Pins the published password length to what the BCrypt encoder can store: 72 bytes, which the
- * ASCII-only complexity pattern makes 72 characters.
+ * ASCII test candidates make 72 characters.
  */
 class PasswordLengthValidationTest {
     private static final ValidatorFactory FACTORY = Validation.buildDefaultValidatorFactory();
@@ -25,6 +28,21 @@ class PasswordLengthValidationTest {
     @AfterAll
     static void closeValidatorFactory() {
         FACTORY.close();
+    }
+
+    @Test
+    void sharedBrowserLimitsMatchBothApiBoundariesAndTheEncoder() throws Exception {
+        try (var input = PasswordPolicy.class.getResourceAsStream("/password-policy.json")) {
+            PasswordPolicy.Definition policy = JsonMapper.builder().build()
+                .readValue(java.util.Objects.requireNonNull(input), PasswordPolicy.Definition.class);
+            for (var field : List.of(RegisterDto.class.getDeclaredField("password"),
+                    ResetPasswordRequest.class.getDeclaredField("newPassword"))) {
+                Size size = field.getAnnotation(Size.class);
+                assertEquals(size.min(), policy.minLength());
+                assertEquals(size.max(), policy.maxLength());
+            }
+            assertEquals(72, policy.maxBytes());
+        }
     }
 
     @Test

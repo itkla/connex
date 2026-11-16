@@ -24,6 +24,29 @@ class AiNativeToolRequestTest {
             JsonMapper.builder().build().createObjectNode().put("type", "object"));
 
     @Test
+    void repairOriginsMustAccountForEveryCharacterAndStayOffTheWire() {
+        var staticPart = new ooo.klae.connex.backend.ai.masking.OutboundSegment("Return JSON: ",
+                ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.SERVER_STATIC);
+        var providerPart = new ooo.klae.connex.backend.ai.masking.OutboundSegment("bad output",
+                ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.PROVIDER_AUTHORED);
+        String text = staticPart.text() + providerPart.text();
+        var request = new AiNativeToolRequest(List.of(DEFINITION), List.of(), text, false, 1,
+                List.of(staticPart, providerPart));
+        var json = JsonMapper.builder().build().valueToTree(request);
+        assertEquals(text, json.path("repairMessage").asString());
+        org.junit.jupiter.api.Assertions.assertFalse(json.has("repairSegments"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new AiNativeToolRequest(List.of(DEFINITION), List.of(), text, false, 1, List.of(staticPart)));
+    }
+
+    @Test
+    void unclassifiedRepairTextDefaultsToTenantData() {
+        var request = new AiNativeToolRequest(List.of(DEFINITION), List.of(), "Return JSON");
+        assertEquals(List.of(new ooo.klae.connex.backend.ai.masking.OutboundSegment("Return JSON",
+                ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.TENANT_DATA)), request.repairSegments());
+    }
+
+    @Test
     void groupsAStepsExchangesIntoOneContiguousAscendingRun() {
         AiNativeToolRequest request = new AiNativeToolRequest(
                 List.of(DEFINITION),

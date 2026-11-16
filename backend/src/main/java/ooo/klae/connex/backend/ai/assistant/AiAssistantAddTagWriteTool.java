@@ -23,9 +23,9 @@ import tools.jackson.databind.JsonNode;
 /**
  * Immediately associates one existing workspace tag with a person, company or deal.
  *
- * <p>The framework holds the target {@code FOR UPDATE} and has run the owner-scope gate before this
- * tool resolves the tag: the request names it, and exactly one workspace tag must match that name
- * case-insensitively, or the write is refused as unavailable or ambiguous. The record's own tag
+ * <p>The framework resolves the tag before locks, retains its definition {@code FOR SHARE}, then
+ * the target {@code FOR UPDATE} and its existing associations before the owner-scope gate. Exactly
+ * one workspace tag must match the requested name case-insensitively. The record's own tag
  * service call then reports whether this invocation created the association or found it already
  * present; the outcome carries that as {@code changed} and the resolved tag's own name.
  *
@@ -90,7 +90,7 @@ public class AiAssistantAddTagWriteTool implements AiAssistantWriteTool {
 
     @Override
     public Lock lock(String targetKind) {
-        return new Lock(false, TargetLock.RECORD_UPDATE);
+        return new Lock(false, TargetLock.RECORD_UPDATE, true);
     }
 
     @Override
@@ -100,32 +100,44 @@ public class AiAssistantAddTagWriteTool implements AiAssistantWriteTool {
     }
 
     @Override
+    public Resolution resolve(Target target, AiAssistantWriteToolRequest request) {
+        if (!(request instanceof AddTag addTag)) {
+            throw new IllegalStateException("Assistant tool request is invalid");
+        }
+        Tag tag = uniqueTag(addTag.tag());
+        return new Resolution("tag", tag.getId(), tag.getName());
+    }
+
+    @Override
     public Outcome apply(Execution execution) {
         if (!(execution.row().request() instanceof AddTag request)) {
             throw new IllegalStateException("Assistant tool request is invalid");
         }
         Target target = execution.row().target();
-        Tag tag = uniqueTag(request.tag());
+        Resolution resolution = execution.resolution();
+        if (resolution == null) {
+            throw new IllegalStateException("Assistant tag was not resolved");
+        }
         boolean changed = switch (target.kind()) {
-            case "person" -> personService.addTag(target.id(), tag.getId());
-            case "company" -> companyService.addTag(target.id(), tag.getId());
-            case "deal" -> dealService.addTag(target.id(), tag.getId());
+            case "person" -> personService.addTag(target.id(), resolution.id(), execution.admission());
+            case "company" -> companyService.addTag(target.id(), resolution.id(), execution.admission());
+            case "deal" -> dealService.addTag(target.id(), resolution.id(), execution.admission());
             default -> throw new BadRequestException("Unsupported tag target");
         };
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", EXECUTED);
         outcome.put("recordType", target.kind());
-        outcome.put("tag", tag.getName());
+        outcome.put("tag", resolution.label());
         outcome.put(CHANGED, changed);
         return new Outcome(
                 outcome,
                 new Inverse(
                         "tag",
                         target.id(),
-                        "present:" + tag.getId(),
+                        "present:" + resolution.id(),
                         false,
-                        Map.of("tagId", tag.getId())),
-                ReadBack.structural("tagId", tag.getId()));
+                        Map.of("tagId", resolution.id())),
+                ReadBack.structural("tagId", resolution.id()));
     }
 
     @Override

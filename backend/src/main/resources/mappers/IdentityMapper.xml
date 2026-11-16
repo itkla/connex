@@ -214,6 +214,17 @@
     ORDER BY normalized_value, record_id
   </select>
 
+  <select id="findVisiblePersonNameMatchState"
+          resultType="ooo.klae.connex.backend.dto.DuplicateNameMatchState">
+    SELECT COUNT(*) AS match_count, COALESCE(MAX(p.id), 0) AS highest_record_id
+    FROM person p
+    WHERE p.archived_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND <include refid="visiblePerson"/>
+      AND p.name LIKE #{pattern}
+  </select>
+
   <select id="findVisibleCompanyNameMatches"
           resultType="ooo.klae.connex.backend.dto.DuplicateCandidateRow">
     <foreach item="key" collection="keys" separator=" UNION ALL ">

@@ -44,7 +44,7 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
-  <select id="lockDefinitions" resultType="int">
+  <select id="lockDefinitions" resultType="int" flushCache="true">
     SELECT id FROM report_definition
     WHERE workspace_id = #{workspaceId}
     ORDER BY id
@@ -266,6 +266,15 @@
     </if>
   </sql>
 
+  <sql id="dealUnit">
+    <choose>
+      <when test="query.measure == 'won_revenue' or query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(d.currency, '')</when>
+      <when test="query.measure == 'win_rate'">'percent'</when>
+      <when test="query.measure == 'avg_cycle_days'">'days'</when>
+      <otherwise>'count'</otherwise>
+    </choose>
+  </sql>
+
   <select id="aggregateDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT
       <choose>
@@ -280,12 +289,7 @@
         </when>
         <otherwise><include refid="dealGroupLabel"/></otherwise>
       </choose> AS group_label,
-      <choose>
-        <when test="query.measure == 'won_revenue' or query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(d.currency, '')</when>
-        <when test="query.measure == 'win_rate'">'percent'</when>
-        <when test="query.measure == 'avg_cycle_days'">'days'</when>
-        <otherwise>'count'</otherwise>
-      </choose> AS unit,
+      <include refid="dealUnit"/> AS unit,
       <choose>
         <when test="query.measure == 'won_revenue'">COALESCE(SUM(d.actual_value), 0)</when>
         <when test="query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(SUM(d.value), 0)</when>
@@ -313,7 +317,7 @@
     <if test="query.measure == 'win_rate'">AND d.won IS NOT NULL</if>
     <if test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">AND d.won IS NULL</if>
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="dealUnit"/>
     <choose>
       <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
       <otherwise>ORDER BY group_key</otherwise>
@@ -388,11 +392,15 @@
     )
   </sql>
 
+  <sql id="forecastUnit">
+    COALESCE(d.currency, '')
+  </sql>
+
   <select id="aggregateForecast" resultType="ooo.klae.connex.backend.dto.ReportForecastAggregateRow">
     SELECT
       CONCAT(COALESCE(d.currency, ''), ':', <include refid="forecastGroupKey"/>) AS group_key,
       CONCAT(COALESCE(d.currency, ''), ' · ', <include refid="forecastGroupLabel"/>) AS group_label,
-      COALESCE(d.currency, '') AS unit,
+      <include refid="forecastUnit"/> AS unit,
       COALESCE(SUM(GREATEST(d.value, 0)), 0) AS best_value,
       COALESCE(SUM(GREATEST(d.value, 0) * <include refid="forecastWinRate"/>), 0)
         AS weighted_value,
@@ -441,7 +449,7 @@
       AND d.expected_close_date &gt;= #{query.startDate}
       AND d.expected_close_date &lt; #{query.endDateExclusive}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="forecastUnit"/>
     <choose>
       <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
       <otherwise>ORDER BY group_key</otherwise>
@@ -867,7 +875,7 @@
       AND dd.generated_at &gt;= #{query.startUtc}
       AND dd.generated_at &lt; #{query.endUtc}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label
     ORDER BY group_key
   </select>
 
@@ -890,7 +898,7 @@
       AND first_document.first_generated_at &gt;= #{query.startUtc}
       AND first_document.first_generated_at &lt; #{query.endUtc}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label
     ORDER BY group_key
   </select>
 
@@ -917,9 +925,16 @@
       AND a.decided_at &gt;= #{query.startUtc}
       AND a.decided_at &lt; #{query.endUtc}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label
     ORDER BY group_key
   </select>
+
+  <sql id="coverageGapUnit">
+    <choose>
+      <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
+      <otherwise>'count'</otherwise>
+    </choose>
+  </sql>
 
   <select id="aggregateCoverageGaps" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT
@@ -945,10 +960,7 @@
         <when test="query.groupBy == 'company'">gap_company.name</when>
         <otherwise>'Total'</otherwise>
       </choose> AS group_label,
-      <choose>
-        <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
-        <otherwise>'count'</otherwise>
-      </choose> AS unit,
+      <include refid="coverageGapUnit"/> AS unit,
       <choose>
         <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(SUM(open_deal.value), 0)</when>
         <otherwise>COUNT(DISTINCT gap_company.id)</otherwise>
@@ -965,12 +977,8 @@
           OR EXISTS (
             SELECT 1
             FROM person_share gap_person_share
-            JOIN workspace gap_person_viewer
-              ON gap_person_viewer.id = gap_person_share.workspace_id
-              AND gap_person_viewer.id = #{query.workspaceId}
-            JOIN workspace gap_person_owner
-              ON gap_person_owner.id = gap_person.workspace_id
-              AND gap_person_owner.org_id = gap_person_viewer.org_id
+            JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+              ON org_workspace.id = gap_person.workspace_id
             WHERE gap_person_share.person_id = gap_person.id
               AND gap_person_share.workspace_id = #{query.workspaceId}
               AND gap_person_share.created_at &lt; #{query.endUtc}
@@ -1008,12 +1016,13 @@
           UNION ALL
           SELECT t.person_id, #{model.taskWeight} AS weight,
                  GREATEST(0.0,
-                   TIMESTAMPDIFF(MICROSECOND, t.created_at, #{warmthReference})
+                   TIMESTAMPDIFF(MICROSECOND, t.completed_at, #{warmthReference})
                      / #{model.microsecondsPerDay}) AS age_days
           FROM task t
           WHERE t.workspace_id = #{query.workspaceId}
             AND t.person_id IS NOT NULL
-            AND t.created_at &lt; #{query.endUtc}
+            AND t.completed = TRUE AND t.completed_at IS NOT NULL
+            AND t.completed_at &lt; #{query.endUtc}
         ) warmth_touch
         GROUP BY warmth_touch.person_id
       ) person_warmth ON person_warmth.person_id = gap_person.id
@@ -1023,12 +1032,8 @@
           OR EXISTS (
             SELECT 1
             FROM company_share gap_company_share
-            JOIN workspace gap_company_viewer
-              ON gap_company_viewer.id = gap_company_share.workspace_id
-              AND gap_company_viewer.id = #{query.workspaceId}
-            JOIN workspace gap_company_owner
-              ON gap_company_owner.id = c.workspace_id
-              AND gap_company_owner.org_id = gap_company_viewer.org_id
+            JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+              ON org_workspace.id = c.workspace_id
             WHERE gap_company_share.company_id = c.id
               AND gap_company_share.workspace_id = #{query.workspaceId}
               AND gap_company_share.created_at &lt; #{query.endUtc}
@@ -1074,9 +1079,16 @@
         or query.statuses != null and !query.statuses.isEmpty()">
       WHERE open_deal.id IS NOT NULL
     </if>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="coverageGapUnit"/>
     ORDER BY value DESC, group_label, group_key
   </select>
+
+  <sql id="singleThreadedDealUnit">
+    <choose>
+      <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
+      <otherwise>'count'</otherwise>
+    </choose>
+  </sql>
 
   <select id="aggregateSingleThreadedDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT
@@ -1106,10 +1118,7 @@
         <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
         <otherwise>'Total'</otherwise>
       </choose> AS group_label,
-      <choose>
-        <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
-        <otherwise>'count'</otherwise>
-      </choose> AS unit,
+      <include refid="singleThreadedDealUnit"/> AS unit,
       <choose>
         <when test="query.measure == 'single_threaded_deal_value'">SUM(single_deal.value)</when>
         <otherwise>COUNT(*)</otherwise>
@@ -1134,18 +1143,14 @@
         OR EXISTS (
           SELECT 1
           FROM company_share single_company_share
-          JOIN workspace single_company_viewer
-            ON single_company_viewer.id = single_company_share.workspace_id
-            AND single_company_viewer.id = #{query.workspaceId}
-          JOIN workspace single_company_owner
-            ON single_company_owner.id = single_company.workspace_id
-            AND single_company_owner.org_id = single_company_viewer.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = single_company.workspace_id
           WHERE single_company_share.company_id = single_company.id
             AND single_company_share.workspace_id = #{query.workspaceId}
         )
       )
       AND single_company.archived_at IS NULL
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="singleThreadedDealUnit"/>
     ORDER BY value DESC, group_label, group_key
   </select>
 
@@ -1162,10 +1167,8 @@
         OR EXISTS (
           SELECT 1
           FROM company_share network_company_share
-          JOIN workspace vws ON vws.id = network_company_share.workspace_id
-            AND vws.id = #{query.workspaceId}
-          JOIN workspace ows ON ows.id = network_company.workspace_id
-            AND ows.org_id = vws.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = network_company.workspace_id
           WHERE network_company_share.company_id = network_company.id
             AND network_company_share.workspace_id = #{query.workspaceId}
         )
@@ -1210,10 +1213,8 @@
         OR EXISTS (
           SELECT 1
           FROM person_share ps
-          JOIN workspace viewer_workspace ON viewer_workspace.id = ps.workspace_id
-            AND viewer_workspace.id = #{workspaceId}
-          JOIN workspace owner_workspace ON owner_workspace.id = p.workspace_id
-            AND owner_workspace.org_id = viewer_workspace.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = p.workspace_id
           WHERE ps.person_id = p.id
             AND ps.workspace_id = #{workspaceId}
             AND ps.created_at &lt;= #{asOf}
@@ -1231,10 +1232,8 @@
         OR EXISTS (
           SELECT 1
           FROM company_share cs
-          JOIN workspace viewer_workspace ON viewer_workspace.id = cs.workspace_id
-            AND viewer_workspace.id = #{workspaceId}
-          JOIN workspace owner_workspace ON owner_workspace.id = c.workspace_id
-            AND owner_workspace.org_id = viewer_workspace.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = c.workspace_id
           WHERE cs.company_id = c.id
             AND cs.workspace_id = #{workspaceId}
             AND cs.created_at &lt;= #{asOf}

@@ -41,7 +41,8 @@ public class WorkItemService {
     private static final List<WorkItemSource> SOURCE_ORDER = List.of(
         WorkItemSource.task,
         WorkItemSource.document_approval,
-        WorkItemSource.notification);
+        WorkItemSource.notification,
+        WorkItemSource.ai_mission);
 
     private final Map<WorkItemSource, WorkItemProvider> providers;
     private final WorkspaceService workspaceService;

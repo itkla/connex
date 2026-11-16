@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import type { Attachment } from '@/app/lib/types';
 import { classifyKind } from '@/app/components/library/files/fileMeta';
@@ -25,6 +25,7 @@ export default function RecentFiles({
     total: number;
     totalSize: number;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DashboardPage');
     const locale = useLocale();
 
@@ -50,7 +51,7 @@ export default function RecentFiles({
                                         </p>
                                     </div>
                                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                        {formatShortDate(a.createdAt, locale)}
+                                        {formatShortDate(a.createdAt, locale, timeZone)}
                                     </span>
                                 </Link>
                             </li>

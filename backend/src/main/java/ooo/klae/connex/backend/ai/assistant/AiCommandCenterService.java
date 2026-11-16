@@ -46,13 +46,14 @@ public class AiCommandCenterService {
     @RequirePermission(Permission.AI_USE)
     public AiCommandCenterDto get() {
         AiBriefSchedule schedule = scheduleService.current();
+        boolean chatAvailable = featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT);
         return new AiCommandCenterDto(
                 AiBriefScheduleDto.from(schedule, AiChatScopeCalendar.zone(workspaceService).getId()),
                 schedule == null ? null : schedule.getLastDeliveredSessionId(),
                 schedule == null ? null : schedule.getLastDeliveredKind(),
                 schedule == null ? null : schedule.getLastDeliveredAt(),
-                skillCatalog.isAvailable("daily_work_brief_v1")
-                        && featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT),
+                skillCatalog.isAvailable("daily_work_brief_v1") && chatAvailable,
+                chatAvailable,
                 featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT),
                 watchService.list(),
                 AiWatchService.MAX_WATCHES_PER_MEMBER);

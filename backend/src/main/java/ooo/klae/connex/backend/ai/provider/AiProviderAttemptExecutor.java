@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.provider;
 
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -42,6 +43,10 @@ public interface AiProviderAttemptExecutor {
     /** Commits durable accounting after preparation and final checks, immediately before model send. */
     default void beforeSend() {
         checkpoint();
+    }
+
+    /** Promotes only the final body's evidence after response headers, before reading provider output. */
+    default void onResponse(Set<String> dispatchedTokens) {
     }
 
     /** Revalidates the current invocation gates immediately before a nested provider send. */

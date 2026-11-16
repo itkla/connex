@@ -57,7 +57,9 @@ record EffectSnapshot(
         String body,
         String actorLabel,
         String sourceType,
-        Integer sourceId
+        Integer sourceId,
+        String sourceLabel,
+        String actionUrl
     ) { }
 
     /** Trigger and dedupe fields validated exactly before phase-specific values are normalized. */

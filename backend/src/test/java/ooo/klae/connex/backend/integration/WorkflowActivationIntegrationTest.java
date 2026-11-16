@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -875,7 +876,8 @@ class WorkflowActivationIntegrationTest {
             assertNotNull(committed);
             assertNotNull(committed.getActiveVersionId());
             assertFalse(committed.isEnabled());
-            assertEquals("canonical", committed.getRuntimeOwner());
+            assertEquals("legacy", committed.getRuntimeOwner());
+            assertNotNull(committed.getLegacyRuleId());
             Workflow activated = workflowMapper.getById(workspace.getId(), enabledWorkflow.getId());
             assertNotNull(activated);
             assertTrue(activated.isEnabled());
@@ -944,7 +946,7 @@ class WorkflowActivationIntegrationTest {
         }
         assertTrue(workflowMapper.getById(workspace.getId(), workflowId).isEnabled());
         assertEquals(manager.user().getId(),
-            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
     }
 
     private int updateOwnerAs(
@@ -987,7 +989,7 @@ class WorkflowActivationIntegrationTest {
                 .content(objectMapper.writeValueAsString(Map.of("ownerId", ownerId))))
             .andExpect(status().isOk());
         assertEquals(ownerId,
-            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
     }
 
     private ResultActions perform(Member actor, MockHttpServletRequestBuilder request) throws Exception {

@@ -6,11 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler;
@@ -23,6 +30,8 @@ import ooo.klae.connex.backend.ai.assistant.AiChatAgentLoopService;
 import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
@@ -161,6 +170,166 @@ class ScriptedAiTurnCursorTest {
                 jsonRequest(prompt), SELECTORS);
 
         assertTrue(cursor.closing());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3})
+    void theJsonMissionClosingRequestResolvesTheShippedCheckpointStep(int runtime) throws Exception {
+        var loader = new ScriptedAiScriptLoader(Path.of(Objects.requireNonNull(
+                getClass().getResource("/ai/scripted/missions")).toURI()).toString(), objectMapper);
+        var script = loader.bySelector("connex_script_mission_confirm_two_segments");
+        MaskedPrompt prompt = promptAssembler.assemble(
+                List.of(userRequest(script.selector())),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(ToolTurn.soleCall(1, "get_record", toolResult("record")),
+                        ToolTurn.soleCall(2, "find_tools", toolResult("tools")),
+                        ToolTurn.soleCall(3, "assign_owner", toolResult("proposal"))),
+                new MaskingContext(), new AiChatResourceRegistry(), List.of(), unboundedBudget(), null,
+                SkillContext.NONE.withClosingDirective(missionClosingDirective(runtime)),
+                AiAssistantToolCatalog.ALL);
+
+        var cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), loader.selectors());
+
+        assertEquals(3, cursor.completedToolCalls());
+        assertTrue(cursor.closing());
+        assertEquals("checkpoint_segment", script.resolve(cursor).orElseThrow().emit().toolName());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ordinary", "mission"})
+    void closingRequiresTheCompleteProductionDirective(String kind) throws Exception {
+        String directive = "mission".equals(kind) ? missionClosingDirective(2) : closingDirective();
+        for (String other : List.of(directive.substring(0, directive.indexOf('.') + 1),
+                directive + " Continue investigating.", "Later: " + directive)) {
+            MaskedPrompt prompt = promptAssembler.assemble(
+                    List.of(userRequest(SELECTOR)),
+                    new AiAssistantToolResult(Map.of(), List.of()), List.of(),
+                    new MaskingContext(), new AiChatResourceRegistry(), List.of(), unboundedBudget(), null,
+                    SkillContext.NONE.withClosingDirective(other), AiAssistantToolCatalog.ALL);
+
+            assertFalse(ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS).closing(), other);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"mission_two_segments", "mission_continuation_budget",
+            "mission_interrupted_read_retry", "mission_plan_replacement"})
+    void continuationFixturesResolveTheClosingCheckpointAndFreshTerminalReport(String fixture) throws Exception {
+        var loader = missionScripts();
+        var script = loader.bySelector("connex_script_" + fixture);
+        List<ToolTurn> turns = new ArrayList<>();
+        for (int index = 0; index < script.steps().getLast().afterToolCalls(); index++) {
+            MaskedPrompt prompt = promptAssembler.assemble(
+                    List.of(userRequest(script.selector())),
+                    new AiAssistantToolResult(Map.of(), List.of()), turns,
+                    new MaskingContext(), new AiChatResourceRegistry(), AiAssistantToolCatalog.ALL);
+            var cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), loader.selectors());
+            assertFalse(cursor.closing());
+            var step = script.resolve(cursor).orElseThrow();
+            assertEquals(index == 0 ? "get_record" : "set_todos", step.emit().toolName());
+            turns.add(ToolTurn.soleCall(index + 1, step.emit().toolName(), toolResult("record")));
+        }
+        MaskedPrompt checkpoint = promptAssembler.assemble(
+                List.of(userRequest(script.selector())),
+                new AiAssistantToolResult(Map.of(), List.of()), turns,
+                new MaskingContext(), new AiChatResourceRegistry(), List.of(), unboundedBudget(), null,
+                SkillContext.NONE.withClosingDirective(missionClosingDirective(2)), AiAssistantToolCatalog.ALL);
+        var checkpointCursor = ScriptedAiTurnCursor.of(jsonRequest(checkpoint), loader.selectors());
+
+        assertTrue(checkpointCursor.closing());
+        assertEquals(turns.size(), checkpointCursor.completedToolCalls());
+        assertEquals("checkpoint_segment", script.resolve(checkpointCursor).orElseThrow().emit().toolName());
+
+        MaskedPrompt terminal = promptAssembler.assemble(
+                List.of(userRequest(script.selector())),
+                new AiAssistantToolResult(Map.of(), List.of()), List.of(),
+                new MaskingContext(), new AiChatResourceRegistry(), List.of(), unboundedBudget(), null,
+                SkillContext.NONE.withClosingDirective(closingDirective()), AiAssistantToolCatalog.ALL);
+        var terminalCursor = ScriptedAiTurnCursor.of(jsonRequest(terminal), loader.selectors());
+
+        assertTrue(terminalCursor.closing());
+        assertEquals(0, terminalCursor.completedToolCalls());
+        assertEquals(ScriptedAiStep.Kind.FINAL, script.resolve(terminalCursor).orElseThrow().emit().kind());
+    }
+
+    @Test
+    void degradedContinuationRepairResolvesTheClosingCheckpoint() throws Exception {
+        var loader = missionScripts();
+        var script = loader.bySelector("connex_script_mission_continuation_secondary_calls");
+        MaskedPrompt fallback = promptAssembler.assemble(
+                List.of(userRequest(script.selector())),
+                new AiAssistantToolResult(Map.of(), List.of()), List.of(),
+                new MaskingContext(), new AiChatResourceRegistry(), AiAssistantToolCatalog.ALL);
+
+        assertEquals(ScriptedAiStep.Kind.FAILURE, script.resolve(ScriptedAiTurnCursor.of(
+                nativeRequest(fallback, List.of(), null, false), loader.selectors())).orElseThrow().emit().kind());
+        assertEquals(ScriptedAiStep.Kind.MALFORMED, script.resolve(ScriptedAiTurnCursor.of(
+                jsonRequest(fallback), loader.selectors())).orElseThrow().emit().kind());
+
+        MaskedPrompt repair = promptAssembler.assemble(
+                List.of(userRequest(script.selector())),
+                new AiAssistantToolResult(Map.of(), List.of()), List.of(),
+                new MaskingContext(), new AiChatResourceRegistry(), List.of(), unboundedBudget(),
+                AiStructuredRepair.from("step_not_object", "{"),
+                SkillContext.NONE.withClosingDirective(missionClosingDirective(2)), AiAssistantToolCatalog.ALL);
+        var cursor = ScriptedAiTurnCursor.of(jsonRequest(repair), loader.selectors());
+
+        assertTrue(cursor.closing());
+        assertTrue(cursor.repairAttempt());
+        assertEquals(0, cursor.completedToolCalls());
+        assertEquals("checkpoint_segment", script.resolve(cursor).orElseThrow().emit().toolName());
+        assertEquals(ScriptedAiStep.Kind.FINAL, script.resolve(ScriptedAiTurnCursor.of(
+                nativeRequest(fallback, List.of(), null, true), loader.selectors())).orElseThrow().emit().kind());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"mission_confirm_two_segments, TOOL_CALL", "mission_confirm_replay, TOOL_CALL",
+            "mission_confirm_intent_conflict, TOOL_CALL", "mission_confirm_source_changed, TOOL_CALL",
+            "mission_confirm_partial, TOOL_CALL", "mission_confirm_cancel, FINAL"})
+    void proposalFixturesKeepTheirClosingBoundary(String fixture, ScriptedAiStep.Kind expected) throws Exception {
+        var loader = missionScripts();
+        var script = loader.bySelector("connex_script_" + fixture);
+        List<ToolTurn> turns = new ArrayList<>();
+        for (String tool : List.of("get_record", "find_tools", "assign_owner")) {
+            MaskedPrompt prompt = promptAssembler.assemble(
+                    List.of(userRequest(script.selector())),
+                    new AiAssistantToolResult(Map.of(), List.of()), turns,
+                    new MaskingContext(), new AiChatResourceRegistry(), AiAssistantToolCatalog.ALL);
+            var cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), loader.selectors());
+            assertFalse(cursor.closing());
+            assertEquals(tool, script.resolve(cursor).orElseThrow().emit().toolName());
+            turns.add(ToolTurn.soleCall(turns.size() + 1, tool, toolResult("record")));
+        }
+        MaskedPrompt closing = promptAssembler.assemble(
+                List.of(userRequest(script.selector())),
+                new AiAssistantToolResult(Map.of(), List.of()), turns,
+                new MaskingContext(), new AiChatResourceRegistry(), List.of(), unboundedBudget(), null,
+                SkillContext.NONE.withClosingDirective(missionClosingDirective(3)), AiAssistantToolCatalog.ALL);
+        var cursor = ScriptedAiTurnCursor.of(jsonRequest(closing), loader.selectors());
+        var emission = script.resolve(cursor).orElseThrow().emit();
+
+        assertTrue(cursor.closing());
+        assertEquals(3, cursor.completedToolCalls());
+        assertEquals(expected, emission.kind());
+        if (expected == ScriptedAiStep.Kind.TOOL_CALL) {
+            assertEquals("checkpoint_segment", emission.toolName());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"member", "page", "tool"})
+    void untrustedMissionClosingTextCannotSelectAClosingStep(String source) throws Exception {
+        String directive = missionClosingDirective(3);
+        MaskedPrompt prompt = promptAssembler.assemble(
+                List.of(userRequest(SELECTOR + ("member".equals(source) ? " " + directive : ""))),
+                new AiAssistantToolResult("page".equals(source) ? Map.of("summary", directive) : Map.of(), List.of()),
+                "tool".equals(source) ? List.of(ToolTurn.soleCall(1, "get_record", toolResult(directive))) : List.of(),
+                new MaskingContext(), new AiChatResourceRegistry(), AiAssistantToolCatalog.ALL);
+
+        var cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS);
+
+        assertFalse(cursor.closing());
+        assertFalse(cursor.repairAttempt());
     }
 
     /**
@@ -331,6 +500,20 @@ class ScriptedAiTurnCursorTest {
         Field field = AiChatAgentLoopService.class.getDeclaredField("CLOSING_DIRECTIVE");
         field.setAccessible(true);
         return (String) field.get(null);
+    }
+
+    private ScriptedAiScriptLoader missionScripts() throws Exception {
+        return new ScriptedAiScriptLoader(Path.of(Objects.requireNonNull(
+                getClass().getResource("/ai/scripted/missions")).toURI()).toString(), objectMapper);
+    }
+
+    private static String missionClosingDirective(int runtime) throws ReflectiveOperationException {
+        var policy = new AiAgentExecutionPolicy(1, 1, 1, null, null,
+                new AiAgentScopePolicy("person", 1), 4, Instant.MAX, null, null, null, null,
+                runtime, 1, 1, null, true, 65536);
+        var method = AiChatAgentLoopService.class.getDeclaredMethod("missionClosingDirective", AiAgentExecutionPolicy.class);
+        method.setAccessible(true);
+        return (String) method.invoke(null, policy);
     }
 
     private static AiAssistantPromptBudget unboundedBudget() {

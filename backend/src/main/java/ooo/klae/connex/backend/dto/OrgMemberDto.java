@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,4 +19,7 @@ public class OrgMemberDto {
     private String email;
     private String profilePictureUrl;
     private String orgRole;
+    /** Org-local approval gap, omitted unless the caller can issue an approval for this member. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean passkeyApprovalNeeded;
 }

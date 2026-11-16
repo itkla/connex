@@ -27,6 +27,20 @@ function render(content: string, references: NoteReference[] = [], block = true)
 }
 
 describe("NoteContent Markdown rendering", () => {
+    it.each([
+        "Note:2026/10/16 meeting with client", "Note：2026年10月16日 打ち合わせ",
+        "Deal:3件 closed this week", "Task：①資料作成", "(note:7)", "Call at 3pm - activity:12 logged",
+        "user:４２", "user:٤٢", "ｕｓｅｒ：４２",
+        "Visit https://example.com/path]user:42 today.", "[Help](https://example.com/path]user:42)",
+        "Visit https://example.com/path`user:42 today.", "[Help](https://example.com/path`user:42)",
+        "Visit https://example.com/path|user:42 today.", "[Help](https://example.com/path|user:42)",
+    ])("preserves prose without literal internal-destination syntax: %s", (content) => {
+        const html = render(content);
+        expect(html).not.toContain("Unavailable reference");
+        expect(html).not.toContain("(private note)");
+        expect(html).toContain(content.startsWith("[Help]") ? "Help" : content.startsWith("Visit") ? "user:42" : content);
+    });
+
     it("renders GFM structure without raw HTML", () => {
         const html = render([
             "## Status",
@@ -98,6 +112,115 @@ describe("NoteContent Markdown rendering", () => {
         expect(html).toContain("Unavailable reference");
         expect(html).not.toContain("Private account");
         expect(html).not.toContain("note:9");
+    });
+
+    const sharedReaderFixtures = [
+        ["separate table cells", "| ` | [Former][m] | ` |\n| --- | --- | --- |\n\n[m]: TYPE:42"],
+        ["separate table rows", "| First | Second |\n| --- | --- |\n| ` | [Former][m] |\n| ` | Other |\n\n[m]: TYPE:42"],
+        ["escaped table pipes", "| Al\\|ice | [Former][m] |\n| --- | --- |\n\n[m]: TYPE:42"],
+        ["lone pipe table rows", "| h |\n| - |\n|\nprefix `\n[Former `]` Member](TYPE:42 \"title\")\nsuffix `"],
+        ["unequal table column counts", "prefix `\n\nh|i\n--|--|--\n[Former|Member](TYPE:42 \"title\")\n`"],
+        ["lone pipe table rows in quotes", "> | h |\n> | - |\n> |\n> prefix `\n> [Former `]` Member](TYPE:42 \"title\")\n> suffix `"],
+        ["unequal table columns in quotes", "> prefix `\n>\n> h|i\n> --|--|--\n> [Former|Member](TYPE:42 \"title\")\n> `"],
+        ["lone pipe table rows in lists", "- | h |\n  | - |\n  |\n  prefix `\n  [Former `]` Member](TYPE:42 \"title\")\n  suffix `"],
+        ["unequal table columns in lists", "- prefix `\n  \n  h|i\n  --|--|--\n  [Former|Member](TYPE:42 \"title\")\n  `"],
+        ["footnote bodies", "See [^f].\n\n[^f]: [Former][m]\n\n[m]: TYPE:42"],
+        ["escaped footnote labels", "[Former][m]\n\nSee [^a\\]b].\n\n[^a\\]b]:\n    [m]:\n    TYPE:42"],
+        ["escaped footnote paragraph interruption", "See [^a\\]b].\n\nprefix `\n[^a\\]b]: [Former](TYPE:42 \"title\")\n    `"],
+        ["footnotes inside containers", "[Former][m]\n\n> > See [^f].\n> >\n> > [^f]:\n> >     [m]:\n> >     TYPE:42"],
+    ] as const;
+
+    it.each(sharedReaderFixtures)("resolves the shared reader differential in %s", (_name, fixture) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            for (const spelling of [type, `&#${type.charCodeAt(0)};${type.slice(1)}`]) {
+                const content = fixture.replace("TYPE", spelling);
+                const authorized = render(content, [{ type, id: 42, label: "Server label" }]);
+                const unresolved = render(content);
+
+                expect(authorized).toContain("Server label");
+                expect(authorized).not.toContain("Former");
+                expect(unresolved).toContain("Unavailable reference");
+                expect(unresolved).not.toContain("Former");
+                expect(unresolved).not.toContain(`${type}:42`);
+            }
+        }
+    });
+
+    it.each([
+        "https://example.com/", "a://", "www.example.com/", "mailto:help@example.test?",
+        "https://example.com/(docs)/", "https://example.com/?q='docs'",
+    ])("recognizes internal autolinks immediately after %s", (prefix) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            for (const content of [
+                `${prefix}<${type}:42>`,
+                `| h |\n| - |\n|\nprefix \`\n${prefix}<${type}:42>\nsuffix \``,
+            ]) {
+                const authorized = render(content, [{ type, id: 42, label: "Server label" }]);
+                const unresolved = render(content);
+
+                expect(authorized).toContain("Server label");
+                expect(unresolved).toContain("Unavailable reference");
+                expect(unresolved).not.toContain(`${type}:42`);
+            }
+        }
+    });
+
+    const censusNormalizations: [string, (type: string) => string][] = [
+        ["full-width digits", (type) => `${type}:４２`],
+        ["Arabic digits", (type) => `${type}:٤٢`],
+        ["mixed case", (type) => `${type.slice(0, -1)}${type.at(-1)?.toUpperCase()}:42`],
+        ["escaped named colon", (type) => `${type}\\&colon;42`],
+        ["entity-encoded backslash", (type) => `${type}&#92;:42`],
+        ["full-width colon", (type) => `${type}：42`],
+        ["full-width type", (type) => `${Array.from(type, (letter) => String.fromCharCode(letter.charCodeAt(0) + 0xfee0)).join("")}:42`],
+        ["full-width type, colon and digits", (type) => `${Array.from(type, (letter) => String.fromCharCode(letter.charCodeAt(0) + 0xfee0)).join("")}：４２`],
+        ["Unicode case fold", (type) => `${type === "task" ? "tasK" : type.toUpperCase()}:42`],
+    ];
+
+    it.each(censusNormalizations)("pins the renderer differential for census %s", (_name, destination) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            for (const fixture of sharedReaderFixtures.slice(3, 5)) {
+                const content = fixture[1].replace("TYPE:42", destination(type));
+                const html = render(content, [{ type, id: 42, label: "Server label" }]);
+
+                expect(html).toContain("Former");
+                expect(html).not.toContain("Server label");
+                expect(html).not.toContain("Unavailable reference");
+
+                const canonical = render(fixture[1].replace("TYPE:42", `${type}:42`));
+                expect(canonical).toContain("Unavailable reference");
+                expect(canonical).not.toContain("Former");
+            }
+        }
+    });
+
+    it.each([
+        ["prose URL", "Visit https://example.com/TYPE:42 today."],
+        ["external link", "[Help](https://example.com/TYPE:42)"],
+        ["embedded word", "/superTYPE:42"],
+        ["colon in a URL", "Visit https://example.com/:TYPE:42 today."],
+        ["parentheses in a URL", "[Help](https://example.com/(TYPE:42))"],
+        ["www autolink", "Visit www.example.com/:TYPE:42 today."],
+        ["mailto URL", "[Help](mailto:help@example.com?subject=:TYPE:42)"],
+        ["balanced parentheses in prose", "Visit https://example.com/(docs)/:TYPE:42 today."],
+        ["balanced parentheses in a link", "[Help](https://example.com/(docs)/:TYPE:42)"],
+        ["nested parentheses in prose", "Visit https://example.com/((docs))/:TYPE:42 today."],
+        ["nested parentheses in a link", "[Help](https://example.com/((docs))/:TYPE:42)"],
+        ["apostrophes in a prose URL", "Visit https://example.com/?q='docs'/:TYPE:42 today."],
+        ["apostrophes in a link URL", "[Help](https://example.com/?q='docs'/:TYPE:42)"],
+        ["quotes in a prose URL", "Visit https://example.com/?q=\"docs\"/:TYPE:42 today."],
+        ["quotes in a link URL", "[Help](https://example.com/?q=\"docs\"/:TYPE:42)"],
+    ])("keeps external census exclusions ordinary in %s", (_name, fixture) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            const html = render(fixture.replace("TYPE", type), [{ type, id: 42, label: "Server label" }]);
+            expect(html).not.toContain("Server label");
+            expect(html).not.toContain("Unavailable reference");
+            expect(html).toContain(fixture.startsWith("[Help]") ? "Help" : `${type}:42`);
+        }
     });
 
     it("rejects executable links and unsafe images", () => {

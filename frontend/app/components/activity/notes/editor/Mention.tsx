@@ -1,12 +1,12 @@
 "use client";
 
 import { Node, mergeAttributes } from "@tiptap/core";
-import type { Editor } from "@tiptap/core";
+import type { Editor, Range } from "@tiptap/core";
 import { NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Fragment, Slice } from "@tiptap/pm/model";
-import { PluginKey } from "@tiptap/pm/state";
+import { PluginKey, TextSelection } from "@tiptap/pm/state";
 import Suggestion from "@tiptap/suggestion";
 import { createSuggestionRenderer } from "./suggestionRenderer";
 import { MentionList } from "./MentionList";
@@ -33,7 +33,7 @@ function MentionView({ node }: NodeViewProps) {
                 data-ref-id={node.attrs.refId as number}
                 className={
                     isUser
-                        ? "rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-dark"
+                        ? "rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-text"
                         : "rounded-sm bg-muted px-1 font-medium text-foreground"
                 }
             >
@@ -57,12 +57,12 @@ function mentionSuggestion(editor: Editor, char: MentionTrigger, excludeUserId?:
         },
         items: ({ query }) => queryMentions(char, query, excludeUserId),
         command: ({ editor: instance, range, props }) => {
-            instance.chain().focus().deleteRange(range).run();
+            instance.commands.focus();
             insertMention(instance, {
                 refType: props.type,
                 refId: props.id,
                 label: props.label,
-            });
+            }, range);
         },
         render: createSuggestionRenderer(MentionList),
     });
@@ -156,14 +156,17 @@ export const Mention = Node.create<MentionOptions>({
  * Insert a mention chip at the current selection and leave a trailing space so
  * the caret stays outside the atom — same shape as the @/# suggestion command.
  * Uses a ProseMirror transaction so Markdown's `insertContent` override cannot
- * re-parse the chip as Markdown HTML.
+ * re-parse the chip as Markdown HTML. An optional range replaces the trigger
+ * and query in the same document transaction.
  */
-export function insertMention(editor: Editor, attrs: MentionAttrs): void {
+export function insertMention(editor: Editor, attrs: MentionAttrs, range?: Range): void {
     const mentionType = editor.schema.nodes.mention;
     if (!mentionType) return;
     const { state } = editor;
     const content = Fragment.from([mentionType.create(attrs), state.schema.text(" ")]);
-    const tr = state.tr.replaceSelection(new Slice(content, 0, 0));
+    const tr = state.tr;
+    if (range) tr.setSelection(TextSelection.create(state.doc, range.from, range.to));
+    tr.replaceSelection(new Slice(content, 0, 0));
     editor.view.dispatch(tr.scrollIntoView());
 }
 

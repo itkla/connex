@@ -32,6 +32,7 @@ class ObjectDeletionTransactionExecutorTest {
     @Mock ObjectDeletionQueueMapper tenantQueueMapper;
     @Mock UserObjectDeletionQueueMapper userQueueMapper;
     @Mock WorkspaceObjectStorageQuotaService quotaService;
+    @Mock ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper privacyObjects;
 
     private ObjectStorageProperties properties;
     private ObjectDeletionTransactionExecutor executor;
@@ -45,7 +46,7 @@ class ObjectDeletionTransactionExecutorTest {
             userQueueMapper,
             quotaService,
             properties,
-            Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC));
+            Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC), privacyObjects);
     }
 
     @Test
@@ -56,10 +57,11 @@ class ObjectDeletionTransactionExecutorTest {
 
         executor.retryTenant(task, NOW);
 
-        InOrder order = inOrder(tenantQueueMapper, objectStorage, quotaService);
+        InOrder order = inOrder(tenantQueueMapper, objectStorage, quotaService, privacyObjects);
         order.verify(tenantQueueMapper).lockDueByIdentity(7, 11, task.objectKey(), NOW);
         order.verify(objectStorage).delete(task.objectKey());
         order.verify(quotaService).release(7, task.objectKey());
+        order.verify(privacyObjects).acknowledgeDeleted(7, 11, task.objectKey());
         order.verify(tenantQueueMapper).deleteById(7, 11);
     }
 
@@ -74,7 +76,7 @@ class ObjectDeletionTransactionExecutorTest {
         executor.retryTenant(task, NOW);
 
         verify(tenantQueueMapper).reschedule(7, 11, RETRY_AT);
-        verifyNoInteractions(quotaService);
+        verifyNoInteractions(quotaService, privacyObjects);
         verify(tenantQueueMapper, never()).deleteById(7, 11);
     }
 
@@ -98,7 +100,7 @@ class ObjectDeletionTransactionExecutorTest {
 
         executor.retryTenant(stale, NOW);
 
-        verifyNoInteractions(objectStorage, quotaService);
+        verifyNoInteractions(objectStorage, quotaService, privacyObjects);
         verify(tenantQueueMapper, never()).deleteById(7, 11);
     }
 
@@ -110,7 +112,7 @@ class ObjectDeletionTransactionExecutorTest {
 
         executor.retryTenant(selected, NOW);
 
-        verifyNoInteractions(objectStorage, quotaService);
+        verifyNoInteractions(objectStorage, quotaService, privacyObjects);
         verify(tenantQueueMapper, never()).reschedule(7, 11, RETRY_AT);
     }
 
@@ -123,7 +125,7 @@ class ObjectDeletionTransactionExecutorTest {
 
         executor.retryUser(stale, NOW);
 
-        verifyNoInteractions(objectStorage, quotaService);
+        verifyNoInteractions(objectStorage, quotaService, privacyObjects);
         verify(userQueueMapper, never()).deleteById(12);
         verify(userQueueMapper, never()).reschedule(12, RETRY_AT);
     }
@@ -138,7 +140,7 @@ class ObjectDeletionTransactionExecutorTest {
 
         verify(objectStorage).delete(task.objectKey());
         verify(tenantQueueMapper).confirmDeletePass(7, 11, RETRY_AT);
-        verifyNoInteractions(quotaService);
+        verifyNoInteractions(quotaService, privacyObjects);
         verify(tenantQueueMapper, never()).deleteById(7, 11);
     }
 
@@ -167,7 +169,7 @@ class ObjectDeletionTransactionExecutorTest {
             userQueueMapper,
             quotaService,
             properties,
-            advancingClock);
+            advancingClock, privacyObjects);
         when(tenantQueueMapper.lockDueByIdentity(7, 11, task.objectKey(), NOW))
             .thenReturn(task);
         org.mockito.Mockito.doAnswer(invocation -> {
@@ -189,6 +191,29 @@ class ObjectDeletionTransactionExecutorTest {
         ObjectDeletionTombstone tombstone = executor.enqueueTenant(7, key, 2, RETRY_AT);
 
         assertEquals(new ObjectDeletionTombstone(19, key), tombstone);
+    }
+
+    @Test
+    void finalDeleteReceiptUsesTheExactQueueIdentityAfterAllPasses() {
+        ObjectDeletionTask task = tenantTask(31, 1);
+        when(tenantQueueMapper.lockDueByIdentity(7, 31, task.objectKey(), NOW)).thenReturn(task);
+        executor.retryTenant(task, NOW);
+        InOrder ordered = inOrder(objectStorage, quotaService, privacyObjects, tenantQueueMapper);
+        ordered.verify(objectStorage).delete(task.objectKey());
+        ordered.verify(quotaService).release(7, task.objectKey());
+        ordered.verify(privacyObjects).acknowledgeDeleted(7, 31, task.objectKey());
+        ordered.verify(tenantQueueMapper).deleteById(7, 31);
+    }
+
+    @Test
+    void quotaFailureCannotCreateAPositiveReceipt() {
+        ObjectDeletionTask task = tenantTask(31, 1);
+        when(tenantQueueMapper.lockDueByIdentity(7, 31, task.objectKey(), NOW)).thenReturn(task);
+        org.mockito.Mockito.doThrow(new IllegalStateException("quota retry"))
+                .when(quotaService).release(7, task.objectKey());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> executor.retryTenant(task, NOW));
+        verifyNoInteractions(privacyObjects);
+        verify(tenantQueueMapper, never()).deleteById(7, 31);
     }
 
     private static ObjectDeletionTask tenantTask(long id, int passes) {

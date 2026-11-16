@@ -30,7 +30,8 @@ import { useRecordPeekController } from '@/app/components/records/useRecordPeekC
 import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
-import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
+import SegmentBuilder from '@/app/components/records/SegmentBuilder';
+import { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/lib/segmentLabels';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
@@ -48,6 +49,7 @@ import FirstRunDoors from '@/app/components/FirstRunDoors';
 import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { RecordListState } from '@/app/components/records/RecordListState';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyListRow from '@/app/components/records/companies/CompanyListRow';
@@ -76,7 +78,6 @@ import {
     warmthFacetOptions,
     warmthRequestParams,
     withValidWarmthHorizon,
-    withoutWarmth,
     withoutWarmthHorizon,
 } from '@/app/components/records/warmthFilters';
 import WarmthPill from '@/app/components/records/WarmthPill';
@@ -85,6 +86,7 @@ import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import {
     recordDetailNavigationPath,
     recordDetailPath,
@@ -203,13 +205,8 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, [tSeg]);
 
-    const validatedFilterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);
-    const showArchived = validatedFilterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
-    const segmentScoped = !showArchived && hasSegments;
-    const filterState = useMemo(
-        () => (segmentScoped ? withoutWarmth(validatedFilterState) : validatedFilterState),
-        [segmentScoped, validatedFilterState],
-    );
+    const filterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);
+    const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
 
     const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
     const filterParams = useMemo<CompanyFilterParams>(() => {
@@ -248,6 +245,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         items: companies,
         total,
         loading,
+        error,
         page,
         setPage,
         size,
@@ -268,7 +266,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         selectedIds,
         setSelectedIds,
         companies,
-        !loading,
+        !loading && !error,
     );
 
     const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
@@ -306,12 +304,6 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         setFilterState(next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest);
         if (next && sortKey === WARMTH_SORT_KEY) applySort(null, 'asc');
     }, [applySort, filterState, setFilterState, sortKey]);
-    const changeDefinition = useCallback((next: SegmentDefinition) => {
-        setDefinition(next);
-        if (sortKey === WARMTH_SORT_KEY && hasSegmentConditions(evaluableSegmentDefinition(next))) {
-            applySort(null, 'asc');
-        }
-    }, [applySort, sortKey]);
     const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
         selectAllRequestRef.current += 1;
         setMatchedSignature(null);
@@ -344,11 +336,11 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
 
     const [companyFacets, setCompanyFacets] = useState<CompanyFacets | null>(null);
     const loadFacets = useCallback(() => {
-        getCompanyFacets({ warmth: !segmentScoped })
+        getCompanyFacets({ warmth: true })
             .catch(() => getCompanyFacets())
             .then(setCompanyFacets)
             .catch(() => setCompanyFacets(null));
-    }, [segmentScoped]);
+    }, []);
     useEffect(() => { loadFacets(); }, [loadFacets]);
     const refresh = useCallback(() => {
         clearSelection();
@@ -429,7 +421,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         setPendingContacts((prev) => prev.map((c) => (c.tempId === tempId ? { tempId, ...draft } : c)));
     const removePendingContact = (tempId: string) =>
         setPendingContacts((prev) => prev.filter((c) => c.tempId !== tempId));
-    const createPendingContact = async (c: PendingContact, companyId: number) => {
+    const createPendingContact = async (c: PendingContact, companyId: number, origin: RequestInit) => {
         const payload = {
             name: c.name.trim(),
             email: c.email.trim(),
@@ -438,9 +430,9 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             companyId,
             duplicateReviewToken: c.duplicateReviewToken ?? undefined,
         };
-        const newContact = await createContact(payload);
+        const newContact = await createContact(payload, origin);
         if (c.imageFile) {
-            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile, origin).catch(() => undefined);
         }
         return newContact;
     };
@@ -508,7 +500,9 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const createNewCompany = async (
         duplicateReviewToken: string | null,
         reviewedContacts: PendingContact[],
+        init?: RequestInit,
     ) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
@@ -516,11 +510,11 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 ...cleanCompanyPayload(newPayload),
                 duplicateReviewToken: duplicateReviewToken ?? undefined,
             };
-            const created = await createCompany(companyPayload);
+            const created = await createCompany(companyPayload, origin);
             let logoUploadFailed = false;
             if (logoFile) {
                 try {
-                    await uploadCompanyLogo(created.id, logoFile);
+                    await uploadCompanyLogo(created.id, logoFile, origin);
                 } catch {
                     logoUploadFailed = true;
                 }
@@ -529,7 +523,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 let failed = 0;
                 for (const contact of reviewedContacts) {
                     try {
-                        await createPendingContact(contact, created.id);
+                        await createPendingContact(contact, created.id, origin);
                     } catch {
                         failed += 1;
                     }
@@ -731,7 +725,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             key: WARMTH_SORT_KEY,
             label: t('columnWarmth'),
             getSortValue: (c) => showArchived ? null : tempByCompanyId.get(c.id)?.score ?? null,
-            sortable: !showArchived && !segmentScoped,
+            sortable: !showArchived,
             render: (c) => <WarmthPill temp={showArchived ? undefined : tempByCompanyId.get(c.id)} />,
         },
         {
@@ -776,7 +770,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, segmentScoped, commentCounts]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, commentCounts]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
@@ -786,7 +780,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         const options = companyFacets.industries.map((name) => ({ key: name, label: name }));
         if (companyFacets.hasNoIndustry) options.push({ key: FILTER_EMPTY, label: t('filterNoIndustry') });
         if (options.length) out.push({ key: 'industry', label: t('columnIndustry'), options });
-        const warmthOptions = segmentScoped ? [] : warmthFacetOptions(
+        const warmthOptions = warmthFacetOptions(
             companyFacets.warmthBands,
             filterState[WARMTH_FILTER_KEY],
             (band) => ttemp(band),
@@ -796,7 +790,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             out.push({ key: WARMTH_FILTER_KEY, label: t('columnWarmth'), options: warmthOptions });
         }
         return out;
-    }, [companyFacets, filterState, segmentScoped, t, ttemp]);
+    }, [companyFacets, filterState, t, ttemp]);
     const facetFilterState = useMemo(() => withoutArchived(filterState), [filterState]);
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(facetFilterState) > 0 || (!showArchived && hasSegments);
     const clearAll = useCallback(() => {
@@ -823,7 +817,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const runCompanyImport = useCallback(() => {
         void runAction(IMPORT_COMPANIES_ACTION, { source: 'empty-state' });
     }, [runAction]);
-    const firstRunEmpty = total === 0 && !hasActiveFiltersOrScope;
+    const firstRunEmpty = !loading && !error && total === 0 && !hasActiveFiltersOrScope;
     const [contactsOutstanding, setContactsOutstanding] = useState(false);
     useEffect(() => {
         if (!firstRunEmpty) return;
@@ -877,7 +871,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         ...facetChips(facets, filterState, setFilterState),
         ...(!showArchived ? segmentConditionEntries(definition) : []).map(({ condition, groupPath, conditionIndex }) => ({
             id: `segment:${[...groupPath, conditionIndex].join(':')}`,
-            label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
+            label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName, 'company', condition.op === 'in' ? segmentOptions : undefined),
             onRemove: () => setDefinition((current) => removeSegmentCondition(current, groupPath, conditionIndex)),
         })),
     ];
@@ -942,10 +936,10 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             setFilterState(filters);
             applyQuery(config.query ?? '');
             applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
-            changeDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
+            setDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
             setActiveSavedView(config, savedViewId);
         },
-        [setFilterState, applyQuery, applySort, changeDefinition, setActiveSavedView],
+        [setFilterState, applyQuery, applySort, setActiveSavedView],
     );
     const workflowSelection = useMemo(() => {
         if (selectedIds.size === 0) return null;
@@ -1098,7 +1092,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                                 fields={segmentFields}
                                                 options={segmentOptions}
                                                 allowGroups
-                                                onChange={changeDefinition}
+                                                onChange={setDefinition}
                                             />
                                         )}
                                     </>
@@ -1116,7 +1110,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                         fields={segmentFields}
                                         options={segmentOptions}
                                         allowGroups
-                                        onChange={changeDefinition}
+                                        onChange={setDefinition}
                                     />
                                 )}
                                 {effectiveDisplayMode !== 'table' && (
@@ -1184,7 +1178,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                             {allMatchingSelected ? (
                                 <>
                                     <span>{t('allMatchingSelected', { total })}</span>
-                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
+                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand-text transition hover:underline">
                                         {t('clearSelection')}
                                     </button>
                                 </>
@@ -1195,7 +1189,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                         type="button"
                                         onClick={selectAllMatching}
                                         disabled={selectingAll || loading}
-                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                        className="font-medium text-brand-text transition hover:underline disabled:opacity-50"
                                     >
                                         {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
                                     </button>
@@ -1206,74 +1200,76 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 })()}
 
                 <Rise delay={0.18}>
-                    <RecordsRenderView<Company>
-                        data={companies}
-                        loading={loading}
-                        columns={visibleColumns}
-                        addColumnSlot={addColumnSlot}
-                        renderCard={(item, { onQuickEdit, onDelete }) => (
-                            <CompanyCard
-                                company={item}
-                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
-                                metrics={metricsByCompanyId.get(item.id)}
-                                metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
-                                onFirstExpand={() => ensureMetricsLoaded(item.id)}
-                                onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                                onDelete={onDelete ? () => onDelete(item) : undefined}
-                                readOnly={showArchived}
-                                removeIntent={showArchived ? 'restore' : 'archive'}
-                                returnSelection={returnSelection}
-                            />
-                        )}
-                        renderListRow={(item) => (
-                            <CompanyListRow
-                                company={item}
-                                temperature={showArchived ? undefined : tempByCompanyId.get(item.id)}
-                            />
-                        )}
-                        renderAvatar={(item) => <CompanyAvatar company={item} />}
-                        detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}
-                        onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
-                        activeId={peek.activeId}
-                        recordRef={recordRef}
-                        displayMode={effectiveDisplayMode}
-                        density={density}
-                        selectedIds={selectedIds}
-                        onSelectedIdsChange={handleSelectedIdsChange}
-                        onQuickEdit={showArchived ? undefined : quickEditOne}
-                        onDelete={archiveOne}
-                        readOnly={showArchived}
-                        removeIntent={showArchived ? 'restore' : 'archive'}
-                        gridClassName="grid grid-cols-1 gap-3"
-                        entityLabel={t('entityLabel')}
-                        selectionActions={selectionActions}
-                        emptyState={
-                            <EmptyState
-                                icon={BuildingOffice2Icon}
-                                title={t('emptyTitle')}
-                                body={!canCreateCompanies
-                                    ? t('emptyReadOnlyBody')
-                                    : contactsOutstanding
-                                    ? t('emptyContactsFirstBody')
-                                    : t('emptyBody')}
-                                action={
-                                    <FirstRunDoors
-                                        doors={firstRunEntryDoors}
-                                        size="page"
-                                        importLabel={tActions('utility.importCompanies')}
-                                        createLabel={t('emptyCta')}
-                                        importPending={companyImportPending}
-                                        onImport={runCompanyImport}
-                                        onCreate={openNewDialog}
-                                    />
-                                }
-                            />
-                        }
-                        filtersActive={hasActiveFiltersOrScope}
-                        onClearFilters={clearFiltersAndScope}
-                        sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
-                        pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
-                    />
+                    <RecordListState error={error} loading={loading} hasRecords={companies.length > 0} onRetry={reload}>
+                        <RecordsRenderView<Company>
+                            data={companies}
+                            loading={loading}
+                            columns={visibleColumns}
+                            addColumnSlot={addColumnSlot}
+                            renderCard={(item, { onQuickEdit, onDelete }) => (
+                                <CompanyCard
+                                    company={item}
+                                    ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
+                                    metrics={metricsByCompanyId.get(item.id)}
+                                    metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
+                                    onFirstExpand={() => ensureMetricsLoaded(item.id)}
+                                    onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                    onDelete={onDelete ? () => onDelete(item) : undefined}
+                                    readOnly={showArchived}
+                                    removeIntent={showArchived ? 'restore' : 'archive'}
+                                    returnSelection={returnSelection}
+                                />
+                            )}
+                            renderListRow={(item) => (
+                                <CompanyListRow
+                                    company={item}
+                                    temperature={showArchived ? undefined : tempByCompanyId.get(item.id)}
+                                />
+                            )}
+                            renderAvatar={(item) => <CompanyAvatar company={item} />}
+                            detailPath={showArchived ? undefined : (item) => `/records/companies/${item.id}`}
+                            onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
+                            activeId={peek.activeId}
+                            recordRef={recordRef}
+                            displayMode={effectiveDisplayMode}
+                            density={density}
+                            selectedIds={selectedIds}
+                            onSelectedIdsChange={handleSelectedIdsChange}
+                            onQuickEdit={showArchived ? undefined : quickEditOne}
+                            onDelete={archiveOne}
+                            readOnly={showArchived}
+                            removeIntent={showArchived ? 'restore' : 'archive'}
+                            gridClassName="grid grid-cols-1 gap-3"
+                            entityLabel={t('entityLabel')}
+                            selectionActions={selectionActions}
+                            emptyState={
+                                <EmptyState
+                                    icon={BuildingOffice2Icon}
+                                    title={t('emptyTitle')}
+                                    body={!canCreateCompanies
+                                        ? t('emptyReadOnlyBody')
+                                        : contactsOutstanding
+                                        ? t('emptyContactsFirstBody')
+                                        : t('emptyBody')}
+                                    action={
+                                        <FirstRunDoors
+                                            doors={firstRunEntryDoors}
+                                            size="page"
+                                            importLabel={tActions('utility.importCompanies')}
+                                            createLabel={t('emptyCta')}
+                                            importPending={companyImportPending}
+                                            onImport={runCompanyImport}
+                                            onCreate={openNewDialog}
+                                        />
+                                    }
+                                />
+                            }
+                            filtersActive={hasActiveFiltersOrScope}
+                            onClearFilters={clearFiltersAndScope}
+                            sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
+                            pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
+                        />
+                    </RecordListState>
                 </Rise>
 
                 {peek.drawer}

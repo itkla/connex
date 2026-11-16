@@ -30,7 +30,9 @@ import ooo.klae.connex.backend.exceptions.RecordCreationTemplateException;
 import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 @Service
 @RequiredArgsConstructor
@@ -40,13 +42,21 @@ public class GuidedRecordCreationService {
     private final DealService dealService;
     private final RecordCreationAugmentationService augmentationService;
     private final WorkspaceService workspaceService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person createPerson(GuidedPersonCreateRequestDto request) {
-        lockPermission(Permission.PERSON_CREATE);
+        return createPerson(request, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_CREATE)
+    public Person createPerson(GuidedPersonCreateRequestDto request, MutationAdmission admission) {
+        RecordVisibilityScope scope = lockPermission(Permission.PERSON_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
-            RecordCreationRecordType.person, request.templateUse());
+            RecordCreationRecordType.person, request.templateUse(), scope);
         Map<Integer, JsonNode> customFields = submittedCustomFields(request.customFields());
         List<Integer> tagIds = submittedTagIds(request.tagIds());
         var record = request.record();
@@ -56,16 +66,23 @@ public class GuidedRecordCreationService {
         validateRequiredPerson(person, customFields, tagIds, resolved);
         augmentationService.validatePersonReferences(
             person.getCompany() == null ? null : person.getCompany().getId(),
-            person.getReferrerPersonId());
+            person.getReferrerPersonId(), scope);
         return personService.createReviewed(
             person,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds));
+            augmentation(request.templateUse(), customFields, tagIds), admission, scope);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(GuidedCompanyCreateRequestDto request) {
+        return createCompany(request, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMPANY_CREATE)
+    public Company createCompany(GuidedCompanyCreateRequestDto request, MutationAdmission admission) {
         lockPermission(Permission.COMPANY_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
             RecordCreationRecordType.company, request.templateUse());
@@ -79,7 +96,7 @@ public class GuidedRecordCreationService {
         return companyService.createCompanyReviewed(
             company,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds));
+            augmentation(request.templateUse(), customFields, tagIds), admission);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -92,30 +109,40 @@ public class GuidedRecordCreationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createDeal(GuidedDealCreateRequestDto request, String reviewedStageName) {
-        lockPermission(Permission.DEAL_CREATE);
+        return createDeal(request, reviewedStageName, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.DEAL_CREATE)
+    public Deal createDeal(GuidedDealCreateRequestDto request, String reviewedStageName, MutationAdmission admission) {
+        RecordVisibilityScope scope = lockPermission(Permission.DEAL_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
-            RecordCreationRecordType.deal, request.templateUse());
+            RecordCreationRecordType.deal, request.templateUse(), scope);
         Map<Integer, JsonNode> customFields = submittedCustomFields(request.customFields());
         List<Integer> tagIds = submittedTagIds(request.tagIds());
         var record = request.record();
         String duplicateReviewToken = record.duplicateReviewToken();
         Deal deal = record.toBean();
         applyDealDefaults(deal, customFields, tagIds, resolved);
+        deal.setCurrency(CurrencyCodes.forDealCreation(deal.getCurrency()));
         validateRequiredDeal(deal, customFields, tagIds, resolved);
         augmentationService.validateDealReferences(
-            deal.getPipelineId(), deal.getStageId(), deal.getCompanyId());
+            deal.getPipelineId(), deal.getStageId(), deal.getCompanyId(), scope);
         return dealService.createReviewed(
             deal,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds, reviewedStageName));
+            augmentation(request.templateUse(), customFields, tagIds, reviewedStageName), admission, scope);
     }
 
-    private void lockPermission(Permission permission) {
+    private RecordVisibilityScope lockPermission(Permission permission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         workspaceService.lockAndRequirePermissions(
             workspaceId,
             Map.of(actorId, Set.of(permission)));
+        return scope;
     }
 
     private void applyPersonDefaults(
@@ -237,6 +264,9 @@ public class GuidedRecordCreationService {
                 default -> {
                 }
             }
+        }
+        if (deal.getCurrency() == null || deal.getCurrency().isBlank()) {
+            deal.setCurrency(workspaceService.getCurrentDefaultCurrency());
         }
     }
 

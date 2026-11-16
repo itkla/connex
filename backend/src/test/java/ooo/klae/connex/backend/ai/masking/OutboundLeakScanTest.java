@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.masking;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,6 +21,101 @@ class OutboundLeakScanTest {
             + "braces; copy every such token exactly as it appears.";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = EntityKind.class, names = "MEMBER",
+            mode = org.junit.jupiter.params.provider.EnumSource.Mode.EXCLUDE)
+    void sharedKindsRetainContainmentAcrossClassifiedAndProviderReplayFields(EntityKind kind) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Acme");
+        context.tokenFor(kind, "Acme");
+        String payload = objectMapper.writeValueAsString(Map.of("content", "AcmeCorp"));
+        for (var origin : List.of(OutboundSegment.Origin.TENANT_DATA, OutboundSegment.Origin.PROVIDER_AUTHORED)) {
+            var segment = new OutboundSegment("AcmeCorp", origin);
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                    payload, List.of(segment), context, objectMapper));
+        }
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                OutboundSegment.admittedProviderField("AcmeCorp", context), context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                OutboundSegment.admittedProviderField("{\"AcmeCorp\":\"safe\"}", context), context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInReplay("AcmeCorp", context));
+    }
+
+    @Test
+    void sharedKindsKeepLegacyStaticExemptionsSeparateFromMemberChecks() {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.COMPANY, "JSON");
+        context.addTrustedStaticText("Return JSON only.");
+        context.registerMemberCandidate("JSON");
+        assertTrue(context.isTrustedNonMemberTextCollision("JSON"));
+        assertEquals("Ask {{C1}}", MaskingEngine.maskFreeText("Ask JSON", context));
+        var staticSegment = new OutboundSegment("Return JSON only.", OutboundSegment.Origin.SERVER_STATIC);
+        var tenant = new OutboundSegment("Ask {{C1}}", OutboundSegment.Origin.TENANT_DATA);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("content", staticSegment.text() + tenant.text())),
+                List.of(staticSegment, tenant), context, objectMapper));
+        var raw = new OutboundSegment("Ask JSON", OutboundSegment.Origin.TENANT_DATA);
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("content", staticSegment.text() + raw.text())),
+                List.of(staticSegment, raw), context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict("myJSONhelper", context, objectMapper));
+    }
+
+    @Test
+    void insertedMarkerExemptionDoesNotHideIdenticalProviderSourceInTheSameField() {
+        var context = new MaskingContext();
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "Literal [redacted] then alice@example.test", context);
+        assertEquals("Literal [redacted] then [redacted]", field.text());
+        assertEquals(1, field.insertedSpans().size());
+        context.registerMemberCandidate("Redacted");
+        var segment = OutboundSegment.jsonString(field, OutboundSegment.Origin.PROVIDER_AUTHORED, objectMapper);
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("messages", List.of(segment.text()))),
+                List.of(segment), context, objectMapper));
+    }
+
+    @Test
+    void insertedMarkerExemptionPreservesJsonDecodingOfEscapedProviderLiterals() {
+        var context = new MaskingContext();
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "{\"email\":\"alice@example.test\",\"query\":\"\\u005bredacted\\u005d\"}", context);
+        assertEquals(1, field.insertedSpans().size());
+        context.registerMemberCandidate("Redacted");
+        var segment = new OutboundSegment(field.text(), OutboundSegment.Origin.PROVIDER_AUTHORED, field.insertedSpans());
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("messages", List.of(segment.text()))),
+                List.of(segment), context, objectMapper));
+    }
+
+    @Test
+    void recordedMemberProvenanceRequiresContainmentOnlyWithinItsMessageForReplacementAndScanning() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        String text = "Bob_team xBob BobBob Little xLi Li_team";
+        String ordinary = "{{M1}}_team xBob BobBob Little xLi {{M2}}_team";
+        assertEquals(ordinary, MaskingEngine.maskConversationalFreeText(text, context));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(text, context, objectMapper));
+        context.withReplayMemberValues(List.of("Bob"), () -> {
+            assertThrows(MaskingLeakException.class,
+                    () -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay("Little xLi {{M2}}_team", context));
+            return null;
+        });
+        String masked = MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of("Bob"));
+        assertEquals("{{M1}}_team x{{M1}} {{M1}}{{M1}} Little xLi {{M2}}_team", masked);
+        context.exposeDispatchedPayload(masked);
+        assertEquals(text, Demasker.demask(masked, context).text());
+        assertEquals(ordinary, MaskingEngine.maskConversationalFreeText(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(ordinary, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay("xBob BobBob Little xLi", context));
+        assertThrows(IllegalStateException.class, () -> context.withReplayMemberValues(List.of("Bob"), () -> {
+            throw new IllegalStateException("scope failed");
+        }));
+        assertEquals(ordinary, MaskingEngine.maskConversationalFreeText(text, context));
+    }
 
     @Test
     void topLevelJsonNullIsSkippedButTheStringNullIsScreened() {
@@ -178,4 +274,115 @@ class OutboundLeakScanTest {
                 "result", "{}")));
         return objectMapper.writeValueAsString(payload);
     }
+    @org.junit.jupiter.api.Test
+    void unissuedMemberCandidatesRemainInTheLeakScanWithUnicodeAndLabelParity() {
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Ａｌｉｃｅ Smith");
+        context.registerMemberCandidate("山田 太郎");
+        org.junit.jupiter.api.Assertions.assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("Alice Smith", context, objectMapper));
+        org.junit.jupiter.api.Assertions.assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("山田 太郎", context, objectMapper));
+        String masked = MaskingEngine.maskFreeText("Alice Smith met 山田 太郎", context);
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+        assertEquals(2, context.tokenBindings().size());
+    }
+
+    @Test
+    void shortMemberCandidatesShareTheReplacersUnicodeAndWordBoundaries() {
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("李");
+        assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("Ask Li", context, objectMapper));
+        assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("Ask 李", context, objectMapper));
+        assertDoesNotThrow(() ->
+                OutboundLeakScan.assertNoLeakStrict("Little", context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(
+                MaskingEngine.maskFreeText("Ask Li and 李", context), context, objectMapper));
+    }
+
+    @Test
+    void shortSymbolMemberRedactionAndScanningShareEveryMatch() throws Exception {
+        for (String member : java.util.List.of("😀", "♞", "🛰️")) {
+            var context = new MaskingContext();
+            context.registerMemberCandidate(member);
+            String text = "Ask" + member + ".";
+            assertThrows(MaskingLeakException.class, () ->
+                    OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                    objectMapper.writeValueAsString(java.util.Map.of("content", text)), context, objectMapper));
+            String masked = MaskingEngine.maskFreeText(text, context);
+            assertEquals("Ask" + MaskingEngine.REDACTED + ".", masked);
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+            assertTrue(context.tokenBindings().isEmpty());
+        }
+        var punctuation = new MaskingContext();
+        punctuation.registerMemberCandidate(".");
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict("Keep ordinary periods.", punctuation, objectMapper));
+    }
+
+    @Test
+    void maskingMarkersAreExemptOnlyInFinalServerMemberScanningAfterSourceReplacement() throws Exception {
+        for (String label : List.of("Redacted", "[redacted]", "Omitted by policy")) {
+            var context = new MaskingContext();
+            context.registerMemberCandidate(label);
+            String email = MaskingEngine.maskFreeText("Contact alice@example.test", context);
+            assertEquals("Contact [redacted]", email);
+            assertTrue(context.tokenBindings().isEmpty());
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                    objectMapper.writeValueAsString(Map.of("content", email)), context, objectMapper));
+            String source = "Ask " + label + " to follow up.";
+            String masked = MaskingEngine.maskFreeText(source, context);
+            assertEquals("Ask {{M1}} to follow up.", masked);
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(masked, context));
+            context.exposeDispatchedPayload(masked);
+            assertEquals(source, Demasker.demask(masked, context).text());
+            assertThrows(MaskingLeakException.class,
+                    () -> OutboundLeakScan.assertNoLeakStrict(source, context, objectMapper));
+        }
+        var omitted = new MaskingContext();
+        omitted.registerMemberCandidate("Omitted by policy");
+        String marker = MaskingEngine.maskFreeText("The note includes a diagnosis from last week.", omitted);
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY, marker);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(marker, omitted));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict(marker, omitted, objectMapper));
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeakInReplay(marker + " Omitted by policy", omitted));
+    }
+
+    @Test
+    void largeMemberDirectoryBuildsEachFieldProjectionOnceWithoutSkippingCandidates() {
+        MaskingContext context = new MaskingContext();
+        for (int index = 0; index < 1_000; index++) {
+            context.registerMemberCandidate("一" + (char) (0x5000 + index));
+        }
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("May");
+        context.registerMemberCandidate("李");
+        assertEquals(1_003, context.identifierDictionary().size());
+        String field = "zebra ".repeat(8_000);
+        var constructions = new java.util.concurrent.atomic.AtomicInteger();
+        try (var engine = org.mockito.Mockito.mockStatic(MaskingEngine.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            engine.when(() -> MaskingEngine.screenText(field)).thenAnswer(invocation -> {
+                assertEquals(1, constructions.incrementAndGet(), "Field projections rebuilt per member label");
+                return invocation.callRealMethod();
+            });
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(field, context, objectMapper));
+            assertEquals(1, constructions.get());
+            constructions.set(0);
+            assertEquals(field, MaskingEngine.maskFreeText(field, context));
+            assertEquals(1, constructions.get());
+        }
+        String last = "一" + (char) (0x5000 + 999);
+        assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict(field + last, context, objectMapper));
+        String masked = MaskingEngine.maskFreeText(field + last, context);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+        assertEquals(1_003, context.identifierDictionary().size());
+        assertEquals(1, context.tokenBindings().size());
+    }
+
 }

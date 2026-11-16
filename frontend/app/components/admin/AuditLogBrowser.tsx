@@ -1,12 +1,16 @@
 "use client";
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
     ClipboardDocumentListIcon,
     FunnelIcon,
     MagnifyingGlassIcon,
+    ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
 import {
     PlusIcon,
@@ -28,7 +32,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/app/components/EmptyState";
-import { getAuditLogs } from "@/app/lib/api";
+import { exportAuditRowsCsv, getAuditLogs, getOrgAudit } from "@/app/lib/api";
+import { AUDIT_EXPORT_SELECTION_LIMIT } from "@/app/lib/auditExport";
+import { workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePermissionCheck } from "@/app/hooks/usePermissions";
+import { useOrgExportPermissions } from "@/app/hooks/useOrgExportPermissions";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
@@ -88,6 +98,7 @@ const VERB_META: Record<string, VerbMeta> = {
     rewrap_failed: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencryptedFailed" },
     call: { tone: "default", icon: BoltIcon, verbKey: "verbCalled" },
     operation: { tone: "default", icon: BoltIcon, verbKey: "verbActedOn" },
+    export: { tone: "view", icon: ArrowDownTrayIcon, verbKey: "verbExported" },
 };
 
 const PROVIDER_LABEL_KEYS: Record<string, string> = {
@@ -99,6 +110,13 @@ const PROVIDER_LABEL_KEYS: Record<string, string> = {
 };
 
 const TARGET_LABEL_KEYS: Record<string, string> = {
+    "export.person": "targetExportContacts",
+    "export.company": "targetExportCompanies",
+    "export.deal": "targetExportDeals",
+    "export.product": "targetExportProducts",
+    "export.audit": "targetExportAudit",
+    "export.report": "targetExportReports",
+    "export.workspace": "exportScopeWorkspace",
     "workspace.smtp.password": "targetSmtpPassword",
     "workspace.delivery.provider_credential": "targetDeliveryCredential",
     "workspace.delivery.webhook_secret": "targetDeliveryWebhookSecret",
@@ -110,6 +128,42 @@ const TARGET_LABEL_KEYS: Record<string, string> = {
     "user.provider.microsoft_token": "targetMicrosoftConnection",
     secret_store: "targetStoredCredential",
     ai_call: "targetAiProvider",
+};
+
+const FILTER_VERB_LABEL_KEYS: Record<string, string> = {
+    add: "verbAdded",
+    remove: "verbRemoved",
+    rename: "verbRenamed",
+    set: "verbChanged",
+    save: "verbSaved",
+    provision: "verbProvisioned",
+    sso_provision: "verbJoinedViaSso",
+    federated_link: "verbSignedInViaSso",
+    founding_owner: "verbFoundingOwner",
+    zdr_attest: "verbConfirmedRetention",
+    completed: "verbCompleted",
+    export_started: "verbExportStarted",
+    download: "verbDownloaded",
+    disclosure: "verbDisclosed",
+    issued: "verbIssued",
+    revoked: "verbRevoked",
+    revoke: "verbRevoked",
+    redeemed: "verbRedeemed",
+    link: "verbLinked",
+    leave: "verbLeft",
+    teardown: "verbDeleted",
+};
+
+const ENTITY_LABEL_KEYS: Record<string, string> = {
+    organization: "exportScopeOrganization",
+    workspace: "exportScopeWorkspace",
+    user: "entityMember",
+    audit_log: "heading",
+    report: "targetExportReports",
+    person: "targetExportContacts",
+    company: "targetExportCompanies",
+    deal: "targetExportDeals",
+    product: "targetExportProducts",
 };
 
 const PLAIN_VERBS = new Set<string>(["login", "logout", "updateAvatar"]);
@@ -153,14 +207,13 @@ function verbOf(action: string): string {
     return i === -1 ? action : action.slice(i + 1);
 }
 
-function startOfLocalDay(ms: number): number {
-    const d = new Date(ms);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+function displayDayKey(ms: number, timeZone: string): number {
+    return parseCalendarDateUtc(calendarDayInTimeZone(ms, timeZone));
 }
 
-function rangeCutoff(range: RangeFilter, now: number | null): number {
+function rangeCutoff(range: RangeFilter, now: number | null, timeZone: string): number {
     if (now == null) return -Infinity;
-    if (range === "today") return startOfLocalDay(now);
+    if (range === "today") return displayDayKey(now, timeZone);
     if (range === "7d") return now - 7 * DAY_MS;
     if (range === "30d") return now - 30 * DAY_MS;
     return -Infinity;
@@ -204,26 +257,48 @@ export default function AuditLogBrowser({
     initialEntries,
     pageSize,
     presentation = "page",
+    orgId,
+    heading,
+    description,
+    actionLabel,
 }: {
     initialEntries: AuditLogEntry[];
     pageSize: number;
     presentation?: AuditLogPresentation;
+    orgId?: number;
+    heading?: string;
+    description?: string;
+    actionLabel?: (action: string) => string;
 }) {
     const t = useTranslations("AdminAuditLog");
+    const showApiError = useApiErrorToast("AdminAuditLog");
+    const { activeWorkspace } = useWorkspace();
+    const workspaceExport = usePermissionCheck("EXPORT_DATA");
+    const { permissions: orgExport } = useOrgExportPermissions(orgId);
+    const orgRole = activeWorkspace?.orgId === orgId ? activeWorkspace?.orgRole : null;
+    const exportPermission = orgId === undefined ? workspaceExport
+        : orgExport === null || orgRole == null ? "unavailable"
+            : orgExport[orgRole] ? "granted" : "denied";
+    const canExport = exportPermission === "granted";
     const locale = useLocale();
+    const timeZone = useTimeZone() ?? 'UTC';
     const reduce = useReducedMotion() ?? false;
 
     const [entries, setEntries] = useState<AuditLogEntry[]>(initialEntries);
     const [hasMore, setHasMore] = useState<boolean>(initialEntries.length >= pageSize);
     const [loadingMore, setLoadingMore] = useState(false);
     const [loadError, setLoadError] = useState(false);
+    const [exporting, setExporting] = useState(false);
 
     async function loadMore() {
         if (loadingMore || !hasMore) return;
         setLoadingMore(true);
         setLoadError(false);
         try {
-            const batch = await getAuditLogs({ limit: pageSize, offset: entries.length });
+            const params = { limit: pageSize, offset: entries.length };
+            const batch = orgId === undefined
+                ? await getAuditLogs(params, workspacePinnedRequest(activeWorkspace?.id ?? null))
+                : await getOrgAudit(orgId, params);
             setEntries((prev) => {
                 const seen = new Set(prev.map((e) => e.id));
                 const merged = [...prev];
@@ -262,8 +337,8 @@ export default function AuditLogBrowser({
     const systemLabel = t("actorSystem");
 
     const actorKeyOf = useMemo(
-        () => (e: AuditLogEntry) => e.actorLabel ?? systemLabel,
-        [systemLabel],
+        () => (e: AuditLogEntry) => (orgId === undefined ? e.actorLabel : e.currentActorLabel ?? e.actorLabel) ?? systemLabel,
+        [orgId, systemLabel],
     );
 
     const verbTotal = useMemo(() => {
@@ -296,8 +371,10 @@ export default function AuditLogBrowser({
     );
 
     const entityOptions = useMemo(
-        () => [...entityTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({ value, total })),
-        [entityTotal],
+        () => [...entityTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({
+            value, total, label: entityLabel(value, t),
+        })),
+        [entityTotal, t],
     );
 
     const actorOptions = useMemo(
@@ -310,7 +387,8 @@ export default function AuditLogBrowser({
             function matchesFn(e: AuditLogEntry, except: FacetExcept): boolean {
                 if (except !== "query") {
                     const q = filters.query.trim().toLowerCase();
-                    if (q && !SEARCH_KEYS.some((k) => String(e[k] ?? "").toLowerCase().includes(q))) return false;
+                    if (q && !SEARCH_KEYS.some((k) => String(e[k] ?? "").toLowerCase().includes(q))
+                        && !(orgId !== undefined && e.currentActorLabel?.toLowerCase().includes(q))) return false;
                 }
                 if (except !== "verbs") {
                     if (filters.verbs.size && !filters.verbs.has(verbOf(e.action))) return false;
@@ -329,11 +407,12 @@ export default function AuditLogBrowser({
                 }
                 if (except !== "range" && filters.range !== "all") {
                     const ms = parseMysqlDateTime(e.createdAt);
-                    if (!Number.isNaN(ms) && ms < rangeCutoff(filters.range, now)) return false;
+                    const value = !Number.isNaN(ms) && filters.range === "today" ? displayDayKey(ms, timeZone) : ms;
+                    if (!Number.isNaN(ms) && value < rangeCutoff(filters.range, now, timeZone)) return false;
                 }
                 return true;
             },
-        [filters, now, actorKeyOf],
+        [filters, now, actorKeyOf, timeZone, orgId],
     );
 
     const filtered = useMemo(
@@ -361,7 +440,7 @@ export default function AuditLogBrowser({
     const rangeCounts = useMemo(() => {
         if (now == null) return { all: 0, today: 0, "7d": 0, "30d": 0 };
         const base = now;
-        const today = startOfLocalDay(base);
+        const today = rangeCutoff("today", base, timeZone);
         const d7 = base - 7 * DAY_MS;
         const d30 = base - 30 * DAY_MS;
         const counts = { all: 0, today: 0, "7d": 0, "30d": 0 };
@@ -370,18 +449,18 @@ export default function AuditLogBrowser({
             counts.all++;
             const ms = parseMysqlDateTime(e.createdAt);
             if (Number.isNaN(ms)) continue;
-            if (ms >= today) counts.today++;
+            if (displayDayKey(ms, timeZone) >= today) counts.today++;
             if (ms >= d7) counts["7d"]++;
             if (ms >= d30) counts["30d"]++;
         }
         return counts;
-    }, [matches, entries, now]);
+    }, [matches, entries, now, timeZone]);
 
     const groups = useMemo(() => {
         const map = new Map<number, AuditLogEntry[]>();
         for (const e of filtered) {
             const ms = parseMysqlDateTime(e.createdAt);
-            const key = Number.isNaN(ms) ? 0 : startOfLocalDay(ms);
+            const key = Number.isNaN(ms) ? 0 : displayDayKey(ms, timeZone);
             const bucket = map.get(key);
             if (bucket) bucket.push(e);
             else map.set(key, [e]);
@@ -396,7 +475,23 @@ export default function AuditLogBrowser({
         }));
         arr.sort((a, b) => (sort === "newest" ? b.key - a.key : a.key - b.key));
         return arr;
-    }, [filtered, sort]);
+    }, [filtered, sort, timeZone]);
+
+    const exportIds = groups.flatMap((group) => group.items.map((entry) => entry.id))
+        .slice(0, AUDIT_EXPORT_SELECTION_LIMIT);
+
+    async function exportRows() {
+        if (!canExport || exporting || exportIds.length === 0) return;
+        setExporting(true);
+        try {
+            await exportAuditRowsCsv(exportIds, orgId,
+                workspacePinnedRequest(activeWorkspace?.id ?? null));
+        } catch (error) {
+            showApiError(error, "exportFailed");
+        } finally {
+            setExporting(false);
+        }
+    }
 
     const feed = useMemo<FeedEntry[]>(() => {
         const out: FeedEntry[] = [];
@@ -404,7 +499,7 @@ export default function AuditLogBrowser({
             out.push({
                 kind: "day",
                 id: `day-${g.key}`,
-                label: dayLabel(g.key, now, locale, t),
+                label: dayLabel(g.key, now, locale, t, timeZone),
                 count: g.items.length,
                 connectUp: false,
                 connectDown: false,
@@ -429,7 +524,7 @@ export default function AuditLogBrowser({
             }
         }
         return out;
-    }, [groups, now, locale, t]);
+    }, [groups, now, locale, t, timeZone]);
 
     const stats = useMemo(() => {
         const failedCount = filtered.reduce((n, e) => (isFailed(e) ? n + 1 : n), 0);
@@ -452,7 +547,7 @@ export default function AuditLogBrowser({
             };
         }
         const base = now;
-        const today = startOfLocalDay(base);
+        const today = displayDayKey(base, timeZone);
         const days = Array.from({ length: PULSE_DAYS }, (_, i) => ({
             key: today - (PULSE_DAYS - 1 - i) * DAY_MS,
             count: 0,
@@ -461,12 +556,12 @@ export default function AuditLogBrowser({
         for (const e of entries) {
             const ms = parseMysqlDateTime(e.createdAt);
             if (Number.isNaN(ms)) continue;
-            const i = idx.get(startOfLocalDay(ms));
+            const i = idx.get(displayDayKey(ms, timeZone));
             if (i != null) days[i].count++;
         }
         const max = Math.max(1, ...days.map((d) => d.count));
         return { days, max, today };
-    }, [entries, now]);
+    }, [entries, now, timeZone]);
 
     const hasActiveFilters =
         filters.query.trim() !== "" ||
@@ -518,7 +613,7 @@ export default function AuditLogBrowser({
             chips.push({ id: `v-${v}`, label: opt ? opt.label : v, onRemove: () => toggleSet("verbs", v) });
         }
         for (const e of filters.entities) {
-            chips.push({ id: `e-${e}`, label: e, onRemove: () => toggleSet("entities", e) });
+            chips.push({ id: `e-${e}`, label: entityLabel(e, t), onRemove: () => toggleSet("entities", e) });
         }
         if (filters.outcome !== "all") {
             const label = filters.outcome === "failed" ? t("outcomeFailed") : t("outcomeSuccess");
@@ -553,18 +648,33 @@ export default function AuditLogBrowser({
                 <Rise delay={0}>
                     {presentation === "section" ? (
                         <SettingsSection
-                            title={t("heading")}
-                            description={t("subtitle")}
+                            title={heading ?? t("heading")}
+                            description={description ?? t("subtitle")}
                             action={statCluster}
                         />
                     ) : (
                         <PageHeader
-                            title={t("heading")}
-                            description={t("subtitle")}
+                            title={heading ?? t("heading")}
+                            description={description ?? t("subtitle")}
                             actions={statCluster}
                         />
                     )}
                 </Rise>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p id={orgId === undefined ? "workspace-audit-export-scope" : "organization-audit-export-scope"}
+                        className="max-w-xl text-xs text-muted-foreground">
+                        {canExport ? t("exportScope", { count: exportIds.length, limit: AUDIT_EXPORT_SELECTION_LIMIT })
+                            : t(exportPermission === "denied" ? "exportPermissionDenied" : "exportPermissionUnavailable")}
+                    </p>
+                    <Button variant="outline" onClick={exportRows}
+                        disabled={!canExport || exporting || exportIds.length === 0}
+                        aria-busy={exporting}
+                        aria-describedby={orgId === undefined ? "workspace-audit-export-scope" : "organization-audit-export-scope"}>
+                        {exporting ? <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" /> : <ArrowDownTrayIcon className="size-4" />}
+                        {exporting ? t("exporting") : t("exportCsv")}
+                    </Button>
+                </div>
 
                 {entries.length > 0 && (
                     <Rise delay={0.06}>
@@ -703,6 +813,7 @@ export default function AuditLogBrowser({
                                         <AuditRow
                                             key={entry.id}
                                             entry={entry.entry}
+                                            actionLabel={actionLabel}
                                             isLastInGroup={entry.isLastInGroup}
                                             connectUp={entry.connectUp}
                                             connectDown={entry.connectDown}
@@ -792,7 +903,13 @@ function countBy(
 }
 
 function verbLabel(verb: string, t: ReturnType<typeof useTranslations>): string {
-    return VERB_META[verb] ? t(VERB_META[verb].verbKey) : verb;
+    const key = VERB_META[verb]?.verbKey ?? FILTER_VERB_LABEL_KEYS[verb];
+    return typeof key === "string" ? t(key) : verb;
+}
+
+function entityLabel(entity: string, t: ReturnType<typeof useTranslations>): string {
+    const key = ENTITY_LABEL_KEYS[entity];
+    return typeof key === "string" ? t(key) : entity;
 }
 
 function dayLabel(
@@ -800,20 +917,22 @@ function dayLabel(
     now: number | null,
     locale: string,
     t: ReturnType<typeof useTranslations>,
+    timeZone: string,
 ): string {
     if (key === 0) return "—";
     if (now != null) {
-        const today = startOfLocalDay(now);
+        const today = displayDayKey(now, timeZone);
         if (key === today) return t("groupToday");
         if (key === today - DAY_MS) return t("groupYesterday");
     }
     const d = new Date(key);
-    const currentYear = new Date(now ?? key).getFullYear();
-    return new Intl.DateTimeFormat(locale, {
+    const currentYear = new Date(now == null ? key : displayDayKey(now, timeZone)).getUTCFullYear();
+    return getDateTimeFormatter(locale, {
         weekday: "long",
         month: "long",
         day: "numeric",
-        year: d.getFullYear() === currentYear ? undefined : "numeric",
+        timeZone: "UTC",
+        year: d.getUTCFullYear() === currentYear ? undefined : "numeric",
     }).format(d);
 }
 
@@ -830,7 +949,8 @@ function StatCluster({
     locale: string;
     t: ReturnType<typeof useTranslations>;
 }) {
-    const last = lastMs == null || now == null ? t("lastEventNever") : formatRelativeTime(new Date(lastMs).toISOString(), locale, now);
+    const timeZone = useTimeZone();
+    const last = lastMs == null || now == null ? t("lastEventNever") : formatRelativeTime(new Date(lastMs).toISOString(), locale, now, timeZone);
     return (
         <div className="flex items-center gap-4 text-sm sm:gap-5">
             <Stat value={stats.total} label={t("statEvents")} />
@@ -874,7 +994,7 @@ function PulseStrip({
     locale: string;
 }) {
     const fmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }),
+        () => getDateTimeFormatter(locale, { month: "short", day: "numeric", timeZone: "UTC" }),
         [locale],
     );
     return (
@@ -916,8 +1036,8 @@ function PulseStrip({
 
 type Translator = ReturnType<typeof useTranslations>;
 
-function targetText(label: string | null, t: Translator): string | null {
-    if (label === null) return null;
+function targetText(label: string | null | undefined, t: Translator): string | null {
+    if (label == null) return null;
     const key = TARGET_LABEL_KEYS[label];
     if (key !== undefined) return t(key);
     const providerKey = PROVIDER_LABEL_KEYS[label.split("/")[0]];
@@ -927,6 +1047,15 @@ function targetText(label: string | null, t: Translator): string | null {
 function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
     if (row.value == null) return t("valueUnknown");
     if (typeof row.value === "boolean") return t(row.value ? "valueYes" : "valueNo");
+    if (row.key === "format") {
+        if (row.value === "csv") return t("exportFormatCsv");
+        if (row.value === "png") return t("exportFormatPng");
+        if (row.value === "zip") return t("exportFormatZip");
+    }
+    if (row.key === "scope") {
+        if (row.value === "workspace") return t("exportScopeWorkspace");
+        if (row.value === "organization") return t("exportScopeOrganization");
+    }
     if (row.key === "result") {
         if (row.value === "success") return t("outcomeSuccess");
         if (row.value === "failure") return t("outcomeFailed");
@@ -985,6 +1114,7 @@ function DayMarker({
 
 function AuditRow({
     entry,
+    actionLabel,
     isLastInGroup,
     connectUp,
     connectDown,
@@ -996,6 +1126,7 @@ function AuditRow({
     reduce,
 }: {
     entry: AuditLogEntry;
+    actionLabel?: (action: string) => string;
     isLastInGroup: boolean;
     connectUp: boolean;
     connectDown: boolean;
@@ -1006,6 +1137,7 @@ function AuditRow({
     t: Translator;
     reduce: boolean;
 }) {
+    const timeZone = useTimeZone();
     const verb = verbOf(entry.action);
     const meta = VERB_META[verb];
     const failure = isFailed(entry);
@@ -1015,17 +1147,19 @@ function AuditRow({
     const ms = parseMysqlDateTime(entry.createdAt);
     const hasMs = !Number.isNaN(ms);
     const absolute = hasMs
-        ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "medium" }).format(ms)
+        ? getDateTimeFormatter(locale, { dateStyle: "medium", timeStyle: "medium", timeZone }).format(ms)
         : entry.createdAt;
-    const timeLabel = now == null ? formatShortDate(entry.createdAt, locale) : formatRelativeTime(entry.createdAt, locale, now);
+    const timeLabel = now == null ? formatShortDate(entry.createdAt, locale, timeZone) : formatRelativeTime(entry.createdAt, locale, now, timeZone);
 
-    const actorName = entry.actorLabel ?? t("actorSystem");
-    const verbText = meta ? t(meta.verbKey) : verb;
+    const actorName = (actionLabel ? entry.currentActorLabel ?? entry.actorLabel : entry.actorLabel) ?? t("actorSystem");
+    const verbText = actionLabel ? actionLabel(entry.action) : meta ? t(meta.verbKey) : verb;
     const actorTag = (chunks: React.ReactNode) => <span className="font-semibold text-foreground">{chunks}</span>;
     const targetTag = (chunks: React.ReactNode) => <span className="font-medium text-foreground">{chunks}</span>;
     const targetLabel = targetText(auditTargetLabel(entry), t);
     const summary = auditSummary(entry);
-    const actionLine = targetLabel && !PLAIN_VERBS.has(verb)
+    const actionLine = actionLabel
+        ? <>{actorTag(actorName)} · {verbText}</>
+        : targetLabel && !PLAIN_VERBS.has(verb)
         ? t.rich("actionEntity", {
               actorName,
               targetName: targetLabel,

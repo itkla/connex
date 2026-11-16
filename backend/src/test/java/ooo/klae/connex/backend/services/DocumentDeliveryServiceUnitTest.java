@@ -32,7 +32,7 @@ class DocumentDeliveryServiceUnitTest {
         .changeDefaultPropertyInclusion(ignored -> JsonInclude.Value.ALL_NON_NULL)
         .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
         .build();
-    private final DocumentDeliveryService deliveryService = new DocumentDeliveryService(
+    private final DocumentDeliveryService deliveryService = new DocumentDeliveryService(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
         mock(DocumentDeliveryMapper.class),
         mock(DealDocumentMapper.class),
         mock(DealMapper.class),

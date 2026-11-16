@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,6 +33,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.MutationAdmission;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -404,7 +406,7 @@ class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
                 new LockedTarget(null, null),
                 (startUtc, endUtc) -> {
                     throw new IllegalStateException("No schedule read");
-                });
+                }, Map.of(), MutationAdmission.UNRESTRICTED);
     }
 
     private void stubGraceHopper() {

@@ -32,6 +32,13 @@
     ORDER BY version DESC, id DESC
   </select>
 
+  <select id="getTargets" resultType="ooo.klae.connex.backend.dto.GeneratedDocumentTargetDto">
+    SELECT id, deal_id, title FROM deal_document
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <!-- Cross-deal index projection. The parent deal is joined for its name and owner: a generated
        document has no owner column of its own, so deal ownership is the only ownership the index
        can scope by. No control-plane join here — creator display names are resolved client-side

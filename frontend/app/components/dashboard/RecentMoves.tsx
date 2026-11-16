@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { ArrowLongRightIcon } from '@heroicons/react/24/outline';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -13,6 +13,7 @@ import { formatShortDate, initials } from '@/app/lib/utils';
  * possible lead at their new account, so each row deep-links to the contact record.
  */
 export default function RecentMoves({ moves }: { moves: JobMove[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('RecentMoves');
     const locale = useLocale();
 
@@ -41,7 +42,7 @@ export default function RecentMoves({ moves }: { moves: JobMove[] }) {
                                     </p>
                                 </div>
                                 <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                    {formatShortDate(move.movedAt ?? undefined, locale)}
+                                    {formatShortDate(move.movedAt ?? undefined, locale, timeZone)}
                                 </span>
                             </Link>
                         </li>

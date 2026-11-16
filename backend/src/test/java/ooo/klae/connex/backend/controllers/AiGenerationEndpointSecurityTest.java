@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.BusinessCardService;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
@@ -75,6 +76,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(
     controllers = {
         AiAssistantController.class,
+        AiAgentRunController.class,
         AiGenerationController.class,
         BusinessCardController.class,
         DealController.class,
@@ -96,6 +98,7 @@ class AiGenerationEndpointSecurityTest {
     @Autowired private MockMvc mockMvc;
 
     @MockitoBean private DealService dealService;
+    @MockitoBean private CurrencyFilterService currencyFilterService;
     @MockitoBean private BulkOperationService bulkOperationService;
     @MockitoBean private DealRiskService dealRiskService;
     @MockitoBean private AiGenerationAdapterService aiGenerationAdapterService;
@@ -131,12 +134,48 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private DenialAuditRateLimiter denialAuditRateLimiter;
     @MockitoBean private ClientIpResolver clientIpResolver;
     @MockitoBean private AiAssistantService aiAssistantService;
+    @MockitoBean private ooo.klae.connex.backend.ai.mission.AiAgentRunService missions;
+    @MockitoBean private ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService missionProposals;
+    @MockitoBean private ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService missionDecisions;
     @MockitoBean private AiAssistantTurnService aiAssistantTurnService;
     @MockitoBean private AiAssistantToolCallReadService aiAssistantToolCallReadService;
     @MockitoBean private AiAssistantWriteToolService aiAssistantWriteToolService;
     @MockitoBean private AiChatAttachmentService aiChatAttachmentService;
     @MockitoBean private SupportBundleService supportBundleService;
     @MockitoBean private AuthService authService;
+
+    @Test
+    void missionControlsRequireCsrf() throws Exception {
+        when(requestBodySizeProperties.getMissionDecisionMaxBodyBytes())
+                .thenReturn(new RequestBodySizeProperties().getMissionDecisionMaxBodyBytes());
+        for (String action : List.of("pause", "resume", "cancel")) {
+            String path = "/api/ai/assistant/missions/17/" + action;
+            mockMvc.perform(post(path).contentType("application/json")
+                    .content("{\"expectedStateVersion\":\"1\"}"))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post(path).with(csrf().asHeader()).contentType("application/json")
+                    .content("{\"expectedStateVersion\":\"1\"}"))
+                    .andExpect(status().isOk());
+        }
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/missions").contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden());
+        String decisions = "/api/ai/assistant/missions/17/proposal-decisions";
+        String body = "{\"expectedProposalRevision\":\"1\",\"items\":[{\"actionSlot\":\"00000000-0000-0000-0000-000000000001\","
+                + "\"expectedPreparationId\":\"00000000-0000-0000-0000-000000000002\",\"decision\":\"approve\"}]}";
+        mockMvc.perform(post(decisions).contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post(decisions).with(csrf().asHeader()).contentType("application/json").content(body))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithAnonymousUser
+    void missionReadsRequireAuthentication() throws Exception {
+        for (String path : List.of("/api/ai/assistant/missions", "/api/ai/assistant/missions/17",
+                "/api/ai/assistant/missions/17/output", "/api/ai/assistant/missions/17/proposals/00000000-0000-0000-0000-000000000001")) {
+            mockMvc.perform(get(path)).andExpect(status().isUnauthorized());
+        }
+    }
 
     /**
      * The routes that were moved off {@code GET} because they write durable {@code audit_log} rows

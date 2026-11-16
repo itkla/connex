@@ -1,5 +1,8 @@
 'use client';
 
+import { publishRecordMutation } from '@/app/lib/record-mutation-events';
+
+import { useContactTargetSearch, useDealTargetSearch, useMemberTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -36,12 +39,13 @@ import { InputGroupAddon } from '@/components/ui/input-group';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
-import { createTask, isFieldError } from '@/app/lib/api';
+import { createTask, isFieldError, isWorkspaceUnavailableError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
-import type { Contact, CreateTaskPayload, Deal, User } from '@/app/lib/types';
+import type { ContactPickerOption, CreateTaskPayload, Deal, User } from '@/app/lib/types';
 
 /** The serializable task-composer fields persisted and restored as one workspace-scoped draft. */
 export type TaskDraftData = {
@@ -55,13 +59,15 @@ export type TaskDraftData = {
 type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     users: User[];
     currentUserId: number;
     defaultAssignee?: User | null;
-    defaultPerson?: Contact | null;
+    defaultPerson?: ContactPickerOption | null;
     defaultDeal?: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     /** Prefills the due date (a `YYYY-MM-DD` value), e.g. the day tapped in the calendar. */
     defaultDueDate?: string;
     /** Prefills the description, e.g. text carried over from the Quick Create panel. */
@@ -106,6 +112,7 @@ function ScopedTaskDialog({
     defaultAssignee = null,
     defaultPerson = null,
     defaultDeal = null,
+    recordScope,
     defaultDueDate = '',
     defaultDescription = '',
     initialDraftGeneration,
@@ -181,6 +188,7 @@ function ScopedTaskDialog({
                         defaultAssignee={defaultAssignee}
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
+                        recordScope={recordScope}
                         defaultDueDate={defaultDueDate}
                         defaultDescription={defaultDescription}
                         ownsInitialDraft={draftPersistence && initialDraftGeneration !== undefined}
@@ -202,27 +210,29 @@ function ScopedTaskDialog({
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={() => {
+                        clearDraft?.();
+                        guard.confirm.onDiscard();
+                    }}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={() => {
-                    clearDraft?.();
-                    guard.confirm.onDiscard();
-                }}
-            />
         </>
     );
 }
 
 type TaskDialogFormProps = {
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     users: User[];
     currentUserId: number;
     defaultAssignee?: User | null;
-    defaultPerson: Contact | null;
+    defaultPerson: ContactPickerOption | null;
     defaultDeal: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     defaultDueDate: string;
     defaultDescription: string;
     ownsInitialDraft?: boolean;
@@ -264,6 +274,7 @@ export function TaskDialogForm({
     defaultAssignee = null,
     defaultPerson,
     defaultDeal,
+    recordScope,
     defaultDueDate,
     defaultDescription,
     ownsInitialDraft = false,
@@ -291,8 +302,11 @@ export function TaskDialogForm({
     const [assignee, setAssignee] = useState<User | null>(() =>
         defaultAssignee ?? users.find((u) => u.id === currentUserId) ?? null,
     );
-    const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
+    const memberSearch = useMemberTargetSearch(!compact, [assignee?.id, currentUserId], users);
+    const [selectedPerson, setSelectedPerson] = useState<ContactPickerOption | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
+    const personSearch = useContactTargetSearch(!compact && !hideLinks && recordScope === undefined, [selectedPerson?.id], persons);
+    const dealSearch = useDealTargetSearch(!compact && !hideLinks && recordScope === undefined, [selectedDeal?.id], deals);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const ownsDraftRef = useRef(ownsInitialDraft);
@@ -307,15 +321,13 @@ export function TaskDialogForm({
         dealId: selectedDeal?.id ?? null,
     }));
 
-    const [sawUsers, setSawUsers] = useState(users.length > 0);
-    if (!sawUsers && users.length > 0) {
-        setSawUsers(true);
+    const [initializedAssignee, setInitializedAssignee] = useState(defaultAssignee != null || users.some((user) => user.id === currentUserId));
+    const self = memberSearch.users.find((user) => user.id === currentUserId);
+    if (!initializedAssignee && self) {
+        setInitializedAssignee(true);
         if (!defaultAssignee && assignee === null) {
-            const self = users.find((u) => u.id === currentUserId);
-            if (self) {
-                setAssignee(self);
-                setInitial((prev) => ({ ...prev, assigneeId: self.id }));
-            }
+            setAssignee(self);
+            setInitial((previous) => ({ ...previous, assigneeId: self.id }));
         }
     }
 
@@ -371,6 +383,7 @@ export function TaskDialogForm({
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionBlockedMessage) return;
         resetFieldErrors();
         const assignedToId = assignee?.id ?? currentUserId;
@@ -385,9 +398,10 @@ export function TaskDialogForm({
                     personId: selectedPerson?.id ?? undefined,
                     dealId: selectedDeal?.id ?? undefined,
                 },
-                requestInit,
+                origin,
             );
             if (requestInit?.signal?.aborted) return;
+            publishRecordMutation('task');
             onClearDraft?.();
             toastSuccess(t('toastCreated'));
             setSucceeded(true);
@@ -404,7 +418,7 @@ export function TaskDialogForm({
                 }
                 return;
             }
-            if (failureMessage && !isSessionExpired(err)) toastError(failureMessage);
+            if (failureMessage && !isSessionExpired(err) && !isWorkspaceUnavailableError(err)) toastError(failureMessage);
             else showApiError(err, 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
@@ -424,7 +438,7 @@ export function TaskDialogForm({
             <div className="px-6 pb-6">
                 <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                             <ClipboardDocumentCheckIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
@@ -484,7 +498,9 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-assignee">{t('assignedToLabel')}</Label>
                             <Combobox
-                                items={users}
+                                items={memberSearch.users}
+                                serverSearch={memberSearch.serverSearch}
+                                onInputValueChange={memberSearch.onInputValueChange}
                                 itemToStringLabel={(u: User) => u.displayName || u.username}
                                 value={assignee}
                                 onValueChange={(u) => setAssignee(u as User | null)}
@@ -499,13 +515,13 @@ export function TaskDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t('noUserFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noUserFound')}</ComboboxEmpty>
-                                        {users.map((u) => (
+                                        {(u: (typeof users)[number]) => (
                                             <ComboboxItem key={u.id} value={u}>
                                                 {u.displayName || u.username}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -516,13 +532,17 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-person">{t('personLabel')}</Label>
                             <Combobox
-                                items={persons}
-                                itemToStringLabel={(p: Contact) => p.name}
+                                items={recordScope ? persons : personSearch.contacts}
+                                disabled={recordScope === 'person'}
+                                serverSearch={recordScope ? undefined : personSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : personSearch.onInputValueChange}
+                                itemToStringLabel={(p: ContactPickerOption) => p.name}
                                 value={selectedPerson}
-                                onValueChange={(p) => setSelectedPerson(p as Contact | null)}
+                                onValueChange={(p) => { if (recordScope !== 'person') setSelectedPerson(p); }}
                             >
                                 <ComboboxInput
                                     id="task-person"
+                                    disabled={recordScope === 'person'}
                                     placeholder={t('personPlaceholder')}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
@@ -531,13 +551,13 @@ export function TaskDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
-                                        {persons.map((p) => (
+                                        {(p: (typeof persons)[number]) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -546,13 +566,17 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-deal">{t('dealLabel')}</Label>
                             <Combobox
-                                items={deals}
+                                items={recordScope ? deals : dealSearch.deals}
+                                disabled={recordScope === 'deal'}
+                                serverSearch={recordScope ? undefined : dealSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : dealSearch.onInputValueChange}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
-                                onValueChange={(d) => setSelectedDeal(d as Deal | null)}
+                                onValueChange={(d) => { if (recordScope !== 'deal') setSelectedDeal(d as Deal | null); }}
                             >
                                 <ComboboxInput
                                     id="task-deal"
+                                    disabled={recordScope === 'deal'}
                                     placeholder={t('dealPlaceholder')}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
@@ -561,13 +585,13 @@ export function TaskDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
-                                        {deals.map((d) => (
+                                        {(d: (typeof deals)[number]) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

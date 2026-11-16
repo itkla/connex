@@ -20,7 +20,7 @@ function readJson(editor: Editor): string {
 
 type Props = {
     value: string | null;
-    onChange: (json: string) => void;
+    onChange: (json: string | null) => void;
     editable?: boolean;
 };
 
@@ -56,7 +56,7 @@ export default function DocumentBodyEditor({ value, onChange, editable = true }:
         },
         onUpdate: ({ editor: instance }) => {
             if (loadingRef.current) return;
-            onChangeRef.current(readJson(instance));
+            onChangeRef.current(instance.isEmpty ? null : readJson(instance));
         },
     });
 
@@ -66,7 +66,7 @@ export default function DocumentBodyEditor({ value, onChange, editable = true }:
         if (incoming === null) {
             if (!editor.isEmpty) {
                 loadingRef.current = true;
-                editor.commands.clearContent();
+                editor.commands.clearContent(false);
                 loadingRef.current = false;
             }
             return;
@@ -75,7 +75,7 @@ export default function DocumentBodyEditor({ value, onChange, editable = true }:
         try {
             const parsed: unknown = JSON.parse(incoming);
             loadingRef.current = true;
-            editor.commands.setContent(parsed as Parameters<typeof editor.commands.setContent>[0]);
+            editor.commands.setContent(parsed as Parameters<typeof editor.commands.setContent>[0], { emitUpdate: false });
             loadingRef.current = false;
         } catch {
             loadingRef.current = false;
@@ -83,7 +83,7 @@ export default function DocumentBodyEditor({ value, onChange, editable = true }:
     }, [editor, value]);
 
     useEffect(() => {
-        editor?.setEditable(editable);
+        editor?.setEditable(editable, false);
     }, [editor, editable]);
 
     return (

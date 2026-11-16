@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "connex.request-limits")
 public class RequestBodySizeProperties {
+    private long missionDecisionMaxBodyBytes = 16L * 1024L;
     private long maxBodyBytes = 10L * 1024L * 1024L;
     private long importMaxBodyBytes = 64L * 1024L * 1024L;
     private long uploadMaxBodyBytes = 27L * 1024L * 1024L;
@@ -18,6 +19,14 @@ public class RequestBodySizeProperties {
     private long webauthnMaxBodyBytes = 64L * 1024L;
     private long workflowMaxBodyBytes = 96L * 1024L;
     private long formMaxBodyBytes = 1L * 1024L * 1024L;
+
+    public long getMissionDecisionMaxBodyBytes() {
+        return missionDecisionMaxBodyBytes;
+    }
+
+    public void setMissionDecisionMaxBodyBytes(long missionDecisionMaxBodyBytes) {
+        this.missionDecisionMaxBodyBytes = missionDecisionMaxBodyBytes;
+    }
 
     public long getMaxBodyBytes() {
         return maxBodyBytes;

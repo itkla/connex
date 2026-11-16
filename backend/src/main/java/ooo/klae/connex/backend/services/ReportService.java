@@ -76,6 +76,7 @@ import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
@@ -198,6 +199,7 @@ public class ReportService {
     private final ScoringService scoringService;
     private final DealRiskService dealRiskService;
     private final ReportNetworkService reportNetworkService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final AiReportNarrativeService aiReportNarrativeService;
     private final AiGenerationService aiGenerationService;
     private final AiRestrictionEpoch aiRestrictionEpoch;
@@ -371,6 +373,13 @@ public class ReportService {
     @Transactional
     @RequirePermission(Permission.REPORT_CREATE)
     public ReportDefinitionDto create(ReportDefinitionRequest request) {
+        return create(request, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.REPORT_CREATE)
+    public ReportDefinitionDto create(ReportDefinitionRequest request, MutationAdmission admission) {
         ValidatedDefinition validated = validate(request);
         ReportDefinition definition = new ReportDefinition();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -381,6 +390,7 @@ public class ReportService {
         definition.setWorkspaceId(workspaceId);
         definition.setCreatedBy(authService.getCurrentUser().getId());
         apply(definition, request, validated);
+        admission.beforeMutation();
         reportMapper.insertDefinition(definition);
         auditService.record("report.create", "report", definition.getId(), definition.getName(),
                 "Created report " + definition.getName(), null);
@@ -444,9 +454,8 @@ public class ReportService {
         if (userMapper.lockByIdForShare(actorId) == null) {
             throw new ForbiddenException("Authenticated user is unavailable");
         }
-        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
-            workspaceId, currentUserId);
-        userMapper.lockAssignedCustomRoleRowsForShare(actorId);
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministratorWithAssignedRoles(
+            workspaceId, currentUserId, actorId);
         reportMapper.lockDefinitions(workspaceId);
         ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
         if (definition == null) {
@@ -498,8 +507,9 @@ public class ReportService {
         validateAttainmentPeriod(config, period);
         WidgetSelection selected = selectWidget(config, widgetId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         GenerationInputs inputs = generationInputs(
-                workspaceId, config, List.of(selected.widget()), period, RiskInputScope.KPI_BOUNDED);
+                workspaceId, config, List.of(selected.widget()), period, scope, RiskInputScope.KPI_BOUNDED);
         if (inputs.riskInputLimitExceeded()) {
             ReportWidgetDataDto widget = new ReportWidgetDataDto(
                     selected.widget().id(),
@@ -807,17 +817,51 @@ public class ReportService {
     }
 
     /** Exports a live report appendix as RFC-4180 CSV. */
-    @RequirePermission(Permission.REPORT_READ)
+    @RequirePermission(Permission.EXPORT_DATA)
     public String exportCsv(int id, ReportGenerateRequest request) {
+        workspaceService.requirePermission(Permission.REPORT_READ);
         requireExportStepUp();
-        return appendixCsv(generateInternal(id, request, NarrativeMode.NONE));
+        ReportDocumentDto document = generateInternal(id, request, NarrativeMode.NONE);
+        return completedCsv(id, document, false);
     }
 
     /** Exports a frozen report appendix as RFC-4180 CSV. */
-    @RequirePermission(Permission.REPORT_READ)
+    @RequirePermission(Permission.EXPORT_DATA)
     public String exportSnapshotCsv(int reportId, int snapshotId) {
+        workspaceService.requirePermission(Permission.REPORT_READ);
         requireExportStepUp();
-        return appendixCsv(getSnapshot(reportId, snapshotId).computedResult());
+        return completedCsv(reportId, getSnapshot(reportId, snapshotId).computedResult(), true);
+    }
+
+    /**
+     * Records a client-prepared PNG release attempt without trusting client counts or image content.
+     * Saved configuration supplies the widget count; no row count is claimed for the client image.
+     */
+    @RequirePermission(Permission.EXPORT_DATA)
+    public void completeImageExport(int id, String format) {
+        workspaceService.requirePermission(Permission.REPORT_READ);
+        requireExportStepUp();
+        if (!"png".equals(format)) {
+            throw new BadRequestException("Report image export format must be png");
+        }
+        ReportDefinition definition = requireDefinition(id);
+        for (Permission permission : reportPermissionPolicy.requiredFor(definition)) {
+            workspaceService.requirePermission(permission);
+        }
+        ReportConfig config = parseConfig(definition.getConfigJson());
+        validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
+        auditService.recordStrict("report.export", "report", id, null,
+            "Client-prepared report image release attempted", Map.of(
+                "format", "png", "scope", "workspace", "imageCount", 1, "documentCount", 1,
+                "widgetCount", config.widgets().size(), "clientPrepared", true));
+    }
+
+    private String completedCsv(int id, ReportDocumentDto document, boolean snapshot) {
+        String csv = appendixCsv(document);
+        auditService.recordStrict("report.export", "report", id, null, "Report CSV export prepared", Map.of(
+            "format", "csv", "scope", "workspace", "rowCount", document.appendix().size(),
+            "documentCount", 1, "widgetCount", document.widgets().size(), "snapshot", snapshot));
+        return csv;
     }
 
     /**
@@ -879,8 +923,9 @@ public class ReportService {
         PeriodWindow period = resolvePeriod(definition.getCadence(), config.range(), request, config.bucket());
         validateAttainmentPeriod(config, period);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         long restrictionEpoch = aiRestrictionEpoch.current(workspaceId);
-        GeneratedFigures figures = generateFigures(workspaceId, config, period);
+        GeneratedFigures figures = generateFigures(workspaceId, config, period, scope);
         return new PreparedReport(
                 toDefinitionDto(definition),
                 definition.getName(),
@@ -923,10 +968,11 @@ public class ReportService {
     }
 
     /** Generates every widget's figures and appendix rows for the resolved reporting period. */
-    private GeneratedFigures generateFigures(int workspaceId, ReportConfig config, PeriodWindow period) {
+    private GeneratedFigures generateFigures(
+            int workspaceId, ReportConfig config, PeriodWindow period, RecordVisibilityScope scope) {
         List<ReportWidgetDataDto> widgets = new ArrayList<>();
         List<ReportAppendixRowDto> appendix = new ArrayList<>();
-        GenerationInputs inputs = generationInputs(workspaceId, config, config.widgets(), period);
+        GenerationInputs inputs = generationInputs(workspaceId, config, config.widgets(), period, scope);
         int widgetIndex = 0;
         for (ReportWidgetConfig widget : config.widgets()) {
             WidgetResult result = generateWidget(
@@ -1023,12 +1069,14 @@ public class ReportService {
             List<ReportAggregateRow> current = reportMapper.aggregateCoverageGaps(query(
                     workspaceId, widget, filters, bucket, period.currentStartUtc(),
                     period.currentEndUtc(), period.zone()),
+                    inputs.orgWorkspaceIdsJson(),
                     period.currentEndUtc().minusNanos(1_000_000),
                     WARMTH_MODEL.sqlParameters());
             List<ReportAggregateRow> prior = priorComparable(widget, filters)
                     ? reportMapper.aggregateCoverageGaps(query(
                             workspaceId, widget, filters, bucket, period.priorStartUtc(),
                             period.priorEndUtc(), period.zone()),
+                            inputs.orgWorkspaceIdsJson(),
                             period.priorEndUtc().minusNanos(1_000_000),
                             WARMTH_MODEL.sqlParameters())
                     : List.of();
@@ -1039,7 +1087,7 @@ public class ReportService {
                 .contains(widget.measure())) {
             List<ReportAggregateRow> current = reportMapper.aggregateSingleThreadedDeals(query(
                     workspaceId, widget, filters, bucket, period.currentStartUtc(),
-                    period.currentEndUtc(), period.zone()));
+                    period.currentEndUtc(), period.zone()), inputs.orgWorkspaceIdsJson());
             return new RowPair(countTotalRow(widget, current), List.of());
         } else if (WARM_INTRO_MEASURES.contains(widget.measure())) {
             return new RowPair(
@@ -1438,8 +1486,9 @@ public class ReportService {
             int workspaceId,
             ReportConfig config,
             List<ReportWidgetConfig> requestedWidgets,
-            PeriodWindow period) {
-        return generationInputs(workspaceId, config, requestedWidgets, period, RiskInputScope.COMPLETE);
+            PeriodWindow period,
+            RecordVisibilityScope scope) {
+        return generationInputs(workspaceId, config, requestedWidgets, period, scope, RiskInputScope.COMPLETE);
     }
 
     private GenerationInputs generationInputs(
@@ -1447,7 +1496,20 @@ public class ReportService {
             ReportConfig config,
             List<ReportWidgetConfig> requestedWidgets,
             PeriodWindow period,
+            RecordVisibilityScope scope,
             RiskInputScope riskInputScope) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope,
+            () -> generationInputsWithinDealVisibility(workspaceId, config, requestedWidgets, period, scope, riskInputScope));
+    }
+
+    private GenerationInputs generationInputsWithinDealVisibility(
+            int workspaceId,
+            ReportConfig config,
+            List<ReportWidgetConfig> requestedWidgets,
+            PeriodWindow period,
+            RecordVisibilityScope scope,
+            RiskInputScope riskInputScope) {
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         boolean contactRelationships = requestedWidgets.stream()
                 .anyMatch(widget -> "relationships".equals(widget.dataSource())
                         && "count".equals(widget.measure()));
@@ -1473,7 +1535,7 @@ public class ReportService {
             networkSnapshot = new ReportNetworkService.NetworkSnapshot(
                     List.of(),
                     includeReverseIntros
-                            ? reportNetworkService.reverseIntroSuggestions(workspaceId)
+                            ? reportNetworkService.reverseIntroSuggestions(workspaceId, scope)
                             : List.of());
         } else {
             ReportWidgetConfig networkWidget = warmIntroWidgets.getFirst();
@@ -1484,16 +1546,18 @@ public class ReportService {
                         config.bucket(),
                         period.currentStartUtc(),
                         period.currentEndUtc(),
-                        period.zone()), includeReverseIntros);
+                        period.zone()), includeReverseIntros, scope);
         }
         Set<Integer> currentPeople = contactRelationships
                 ? new HashSet<>(reportMapper.getVisiblePersonIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.currentEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         Set<Integer> priorPeople = contactRelationships
                 ? new HashSet<>(reportMapper.getVisiblePersonIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.priorEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         List<RelationshipTemperatureDto> currentRelationships = contactRelationships
@@ -1509,21 +1573,23 @@ public class ReportService {
         Set<Integer> currentCompanies = companyRelationships
                 ? new HashSet<>(reportMapper.getVisibleCompanyIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.currentEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         Set<Integer> priorCompanies = companyRelationships
                 ? new HashSet<>(reportMapper.getVisibleCompanyIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.priorEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         List<RelationshipTemperatureDto> currentCompanyRelationships = companyRelationships
                 ? visibleRelationshipScores(
-                        scoringService.scoreCompanies(workspaceId, period.currentEndInstant()),
+                        scoringService.scoreCompanies(workspaceId, period.currentEndInstant(), orgWorkspaceIdsJson),
                         currentCompanies)
                 : List.of();
         List<RelationshipTemperatureDto> priorCompanyRelationships = companyRelationships
                 ? visibleRelationshipScores(
-                        scoringService.scoreCompanies(workspaceId, period.priorEndInstant()),
+                        scoringService.scoreCompanies(workspaceId, period.priorEndInstant(), orgWorkspaceIdsJson),
                         priorCompanies)
                 : List.of();
         Map<String, String> ownerLabels = new HashMap<>();
@@ -1542,6 +1608,7 @@ public class ReportService {
                         ? dealRiskService.assessWorkspace(workspaceId)
                         : boundedRiskAssessment.assessments();
         return new GenerationInputs(
+                orgWorkspaceIdsJson,
                 currentRelationships,
                 priorRelationships,
                 currentCompanyRelationships,
@@ -2198,6 +2265,7 @@ public class ReportService {
     }
 
     private record GenerationInputs(
+            String orgWorkspaceIdsJson,
             List<RelationshipTemperatureDto> currentRelationships,
             List<RelationshipTemperatureDto> priorRelationships,
             List<RelationshipTemperatureDto> currentCompanyRelationships,

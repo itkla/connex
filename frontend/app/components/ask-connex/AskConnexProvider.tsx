@@ -6,35 +6,50 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useReducer,
     useRef,
     useState,
     type ReactNode,
 } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
-import { useParams, usePathname, useRouter } from 'next/navigation';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowsPointingOutIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import AskConnexDrawer, {
     type AskConnexJobOffer,
     type AskConnexScopeSurface,
 } from '@/app/components/ask-connex/AskConnexDrawer';
+import AskConnexMissionCreate from '@/app/components/ask-connex/AskConnexMissionCreate';
+import AskConnexMissionProgress from '@/app/components/ask-connex/AskConnexMissionProgress';
+import {
+    ASK_CONNEX_REALTIME_REFRESH_DELAY_MS,
+    createRealtimeRefreshCoalescer,
+    type RealtimeRefreshCoalescer,
+} from '@/app/components/ask-connex/realtimeRefreshCoalescer';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
+import { useAskConnexMissions } from '@/app/hooks/useAskConnexMissions';
 import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useLiveNow } from '@/app/hooks/useNow';
+import { usePrivilegedMfaConfinement, usePrivilegedMfaReadiness } from '@/app/hooks/usePrivilegedMfaConfinement';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { requestGuardedNavigation } from '@/app/hooks/useUnsavedChangesGuard';
+import { subscribeAiAvailabilityChange } from '@/app/lib/aiAvailabilityEvents';
 import {
     ApiError,
+    currentPrivilegedMfaReadiness,
+    privilegedMfaConfinementReason,
     approveAiAssistantToolCall,
     archiveAiChatSession,
     cancelAiChatTurn,
     createAiChatSession,
     deleteAiChatAttachment,
     getActiveWorkspaceMembers,
+    getAiCommandCenter,
     getAiAssistantToolCall,
     getAiAssistantToolCalls,
     getAiChatAttachments,
@@ -77,10 +92,10 @@ import {
     askConnexPinnedStorageKey,
     askConnexPromptContent,
     askConnexRequestScope,
-    askConnexRetryPrompt,
     askConnexScopePreview,
     askConnexSessionStorageKey,
     askConnexTemplateDefaultsText,
+    askConnexToolCardAffordances,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     formatAnswerInstant,
@@ -115,6 +130,7 @@ import {
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
+import { reconcileAskConnexDurableMessages } from '@/app/lib/askConnexMissions';
 import { askConnexJobContext, askConnexJobs } from '@/app/lib/askConnexEntryPoints';
 import {
     ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS,
@@ -136,17 +152,24 @@ import {
 import {
     ASK_CONNEX_DEFAULT_WIDTH,
     askConnexActiveState,
+    askConnexBoundRetryPrompt,
+    askConnexRecovery,
     askConnexTerminalKind,
     askConnexTimedOutMessage,
+    askConnexTurnWriteState,
     askConnexWidthStorageKey,
+    isAskConnexAuthorizationWithdrawal,
     parseStoredAskConnexWidth,
     type AskConnexActiveState,
     type AskConnexFailureMessage,
+    type AskConnexRetryTarget,
     type AskConnexSessionGroupKey,
     type AskConnexWidth,
 } from '@/app/lib/askConnexSurface';
 import {
     absorbAskConnexStreamPartial,
+    adoptSettledAskConnexStreamPartial,
+    adoptsSettledAskConnexPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -163,11 +186,15 @@ import {
 import type { AppAction } from '@/app/lib/actions/types';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
+import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
+import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
+import { renderedWorkspaceId, renderedWorkspaceNavigationVersion, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
     AiAssistantCreatedRecordKind,
+    AiAssistantToolCall,
     AiAssistantToolCallChangeField,
     AiChatCitation,
     AiChatAttachment,
@@ -218,6 +245,10 @@ export type AskConnexOpenRequest = {
 };
 
 type AskConnexContextValue = {
+    /** Whether a question can run under the current workspace readiness snapshot. */
+    canAsk: boolean;
+    /** Whether provider-independent watches are governed on for this member. */
+    canWatch: boolean;
     open: boolean;
     instantOpen: boolean;
     /**
@@ -278,6 +309,14 @@ function isActiveTurnStatus(status: string): boolean {
     return status === 'accepted' || status === 'queued' || status === 'running';
 }
 
+/** Unknown provenance is withheld once a committed workspace cutoff has been observed. */
+function isInvalidatedAiChatSession(session: AiChatSession, cutoff: bigint | undefined): boolean {
+    if (cutoff === undefined) return false;
+    const generation = session.organizationPrivacyGeneration;
+    return typeof generation !== 'string' || generation.length > 19 || !/^[1-9][0-9]*$/.test(generation)
+        || BigInt(generation) > BigInt('9223372036854775807') || BigInt(generation) <= cutoff;
+}
+
 function routeSessionId(value: string | string[] | undefined): number | null {
     const candidate = Array.isArray(value) ? value[0] : value;
     if (candidate === undefined || !/^[1-9]\d*$/.test(candidate)) return null;
@@ -321,6 +360,7 @@ function scopeRefusalReason(error: unknown): AskConnexScopeReason | null {
 
 function toolCardFailure(error: unknown, action: AskConnexToolAction): AskConnexToolCardFailure {
     if (!(error instanceof ApiError)) return 'actionFailed';
+    if (action !== 'undo' && error.code === 'AI_PROPOSAL_EXPIRED') return 'proposalExpired';
     if (action === 'undo' && error.status === 409) return 'undoConflict';
     if (action !== 'undo' && error.status === 409) return 'proposalChanged';
     if (action !== 'undo' && error.status === 403) return 'proposalPermissionLost';
@@ -379,7 +419,9 @@ export function useAskConnexMount(): AskConnexMountValue {
 
 /** Owns Ask Connex continuity, transcript, accepted-turn reconciliation, and responsive surfaces. */
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AskConnex');
+    const tRoot = useTranslations();
     const showApiError = useApiErrorToast('AskConnex');
     const deferApiError = useCallback(
         (error: unknown, fallbackKey?: string) => {
@@ -419,12 +461,23 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const now = useLiveNow();
     const router = useRouter();
     const pathname = usePathname() ?? '';
+    const searchParams = useSearchParams();
+    const missionOutputId = parseStoredAskConnexSession(searchParams?.get('mission') ?? null);
+    const openedMissionRef = useRef<string | null>(null);
     const params = useParams<{ sessionId?: string | string[] }>();
     const workspaceMode = pathname === '/ask-connex' || pathname.startsWith('/ask-connex/');
     const workspaceSessionId = workspaceMode ? routeSessionId(params.sessionId) : null;
     const { context } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
+    const confined = usePrivilegedMfaConfinement();
+    const policyReadiness = usePrivilegedMfaReadiness();
+    const policyReady = policyReadiness === 'ready';
+    const assistantEnabled = policyReady && permission === 'granted' && !confined;
+    const assistantEnabledRef = useRef(assistantEnabled && !switching);
+    useLayoutEffect(() => {
+        assistantEnabledRef.current = assistantEnabled && !switching;
+    }, [assistantEnabled, switching]);
     const skills = useAskConnexSkills();
     const attachmentCreatePermission = usePermissionCheck('ATTACHMENT_CREATE');
     const attachmentDeletePermission = usePermissionCheck('ATTACHMENT_DELETE');
@@ -501,6 +554,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
     const [workspaceRoot, setWorkspaceRoot] = useState<HTMLElement | null>(null);
     const [stateIdentity, setStateIdentity] = useState<string | null>(null);
+    const initializedIdentityRef = useRef<string | null>(null);
+    const policyPausedIdentityRef = useRef<string | null>(null);
     const [sessions, setSessions] = useState<AiChatSession[]>([]);
     const [invitations, setInvitations] = useState<AiChatSession[]>([]);
     const [activeSession, setActiveSession] = useState<AiChatSession | null>(null);
@@ -511,12 +566,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [freshMessageIds, setFreshMessageIds] = useState<ReadonlySet<number>>(new Set());
     const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error' | 'forbidden'>('loading');
     const [loadError, setLoadError] = useState<Error | null>(null);
+    const [privacyUnavailable, setPrivacyUnavailable] = useState(false);
+    const [privacyInitializing, setPrivacyInitializing] = useState(false);
     const [composer, setComposer] = useState('');
     const [fileAttachments, setFileAttachments] = useState<AskConnexFileAttachment[]>([]);
     const [featureUnavailable, setFeatureUnavailable] = useState(false);
+    const [availability, setAvailability] = useState<{ identity: string; chat: boolean; watches: boolean; failed?: boolean; checking?: boolean } | null>(null);
+    const availabilityReadVersionRef = useRef(0);
+    const canAsk = assistantEnabled && !switching && availability?.identity === identity && availability.chat && !availability.checking && !featureUnavailable;
+    const canWatch = assistantEnabled && !switching && availability?.identity === identity && availability.watches && !availability.checking;
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [reloadVersion, setReloadVersion] = useState(0);
+    const [reloadRequest, setReloadRequest] = useState<{ identity: string; version: number } | null>(null);
+    const handledReloadRequestRef = useRef<typeof reloadRequest>(null);
+    const [missionRefreshVersion, setMissionRefreshVersion] = useState(0);
+    const [missionContentVersion, setMissionContentVersion] = useState(0);
     const [promptRequest, setPromptRequest] = useState(0);
     const [scopeDraft, setScopeDraft] = useState<AskConnexScopeDraft>(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
     const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
@@ -537,6 +601,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         reduceAskConnexToolCards,
         EMPTY_ASK_CONNEX_TOOL_CARDS,
     );
+    const [turnRecovery, setTurnRecovery] = useState<{
+        target: AskConnexRetryTarget;
+        reconciled: boolean;
+    } | null>(null);
+    const recoveryTurnRef = useRef({ turn, target: turnRecovery?.target ?? null });
+    useLayoutEffect(() => {
+        recoveryTurnRef.current = { turn, target: turnRecovery?.target ?? null };
+    }, [turn, turnRecovery]);
 
     const messagesRef = useRef<AiChatMessage[]>([]);
     const composerRef = useRef('');
@@ -544,16 +616,25 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const scopeRequestRef = useRef<AiChatQueryScopeRequest | null>(null);
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
+    const sessionContentControllerRef = useRef(new AbortController());
+    /** A v1 withdrawal stays hidden until the member explicitly reloads or selects the session. */
+    const withdrawnSessionsRef = useRef(new Set<string>());
+    const retiredSessionsRef = useRef(new Set<string>());
     const tempMessageIdRef = useRef(-1);
     const sessionCreationRef = useRef<Promise<AiChatSession> | null>(null);
     const sessionEpochRef = useRef(0);
+    const sessionSelectionVersionRef = useRef(0);
     const activeSessionRef = useRef<AiChatSession | null>(null);
+    const knownSessionsRef = useRef<AiChatSession[]>([]);
+    const workspacePrivacyCutoffsRef = useRef(new Map<number, bigint>());
+    const scopePrivacyEpochRef = useRef(0);
     const typingRef = useRef(false);
     const sessionsRefreshVersionRef = useRef(0);
     const transcriptRefreshVersionRef = useRef(0);
-    const realtimeRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const realtimeRefreshCoalescerRef = useRef<RealtimeRefreshCoalescer | null>(null);
     const submittingRef = useRef(false);
     const toolActionsRef = useRef<Set<number>>(new Set());
+    const retryValidationRef = useRef(false);
     const streamRef = useRef<AskConnexStreamState | null>(null);
     const streamEpochRef = useRef(0);
     const streamCoalescerRef = useRef<AskConnexFrameCoalescer | null>(null);
@@ -563,10 +644,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const durableFollowerRef = useRef<number | null>(null);
     const workspaceReturnRef = useRef(false);
     const workspaceSessionIdRef = useRef(workspaceSessionId);
+    const workspaceRouteNavigationRef = useRef<number | null>(null);
+    if (workspaceRouteNavigationRef.current === null) {
+        workspaceRouteNavigationRef.current = renderedWorkspaceNavigationVersion();
+    }
 
+    /** Cleanup-returning refs receive no null callback; React's ref type still requires nullability. */
     const registerDesktopRoot = useCallback((node: HTMLElement | null) => {
-        // A ref callback that returns a cleanup is never re-invoked with null; the parameter stays
-        // nullable only because React's ref type covers both calling conventions.
         if (node === null) return noopCleanup;
         setDesktopRoot(node);
         return () => setDesktopRoot((current) => (current === node ? null : current));
@@ -710,6 +794,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         activeSessionRef.current = activeSession;
     }, [activeSession]);
 
+    useLayoutEffect(() => {
+        knownSessionsRef.current = [...sessions, ...invitations];
+    }, [invitations, sessions]);
+
     useEffect(() => {
         typingRef.current = composer.trim().length > 0;
         composerRef.current = askConnexMessageContent(composer);
@@ -754,8 +842,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      */
     useEffect(() => {
         if (scopePreviewKey === null) return;
-        if (permission !== 'granted' || activeWorkspaceId === null || switching) return;
+        if (!canAsk || activeWorkspaceId === null || switching) return;
         const controller = new AbortController();
+        const privacyEpoch = scopePrivacyEpochRef.current;
         const timer = window.setTimeout(() => {
             const declared = scopeRequestRef.current;
             if (declared === null) return;
@@ -767,7 +856,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 },
                 { signal: controller.signal },
             ).then((preview) => {
-                if (controller.signal.aborted) return;
+                if (controller.signal.aborted || scopePrivacyEpochRef.current !== privacyEpoch) return;
                 setScopeInterpretation({
                     key: scopePreviewKey,
                     state: {
@@ -778,7 +867,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     },
                 });
             }).catch((error: unknown) => {
-                if (controller.signal.aborted) return;
+                if (controller.signal.aborted || scopePrivacyEpochRef.current !== privacyEpoch) return;
                 const status = error instanceof ApiError ? error.status : null;
                 const state: AskConnexScopePreviewState = status === 400
                     ? { status: 'refused', reason: scopeRefusalReason(error) }
@@ -794,11 +883,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [activeWorkspaceId, permission, scopePreviewKey, scopeRoutingContent, switching]);
+    }, [activeWorkspaceId, canAsk, missionContentVersion, scopePreviewKey, scopeRoutingContent, switching]);
 
     useEffect(() => {
+        if (workspaceSessionId !== null && workspaceSessionIdRef.current !== workspaceSessionId) {
+            sessionSelectionVersionRef.current += 1;
+        }
         workspaceSessionIdRef.current = workspaceSessionId;
-    }, [workspaceSessionId]);
+        workspaceRouteNavigationRef.current = renderedWorkspaceNavigationVersion();
+    }, [pathname, workspaceSessionId]);
 
     const turnActive = turn.phase === 'accepted' || turn.phase === 'running';
     const activeTurn = useMemo(
@@ -822,6 +915,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const stream = streamRef.current;
         if (stream === null || stream.text.length === 0) {
             streamStore.publish(null);
+            if (streamingRef.current) {
+                streamingRef.current = false;
+                setStreaming(false);
+            }
             return;
         }
         streamStore.publish({ turnId: stream.turnId, text: stream.text });
@@ -851,9 +948,78 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         streamStore.publish(null);
     }, [streamStore]);
 
+    /** Withdraws local content; only organization-generation invalidation retires the session. */
+    const invalidateSessionContent = useCallback((sessionId: number, retire = false) => {
+        withdrawnSessionsRef.current.add(`${activeWorkspaceId}:${sessionId}`);
+        if (retire) retiredSessionsRef.current.add(`${activeWorkspaceId}:${sessionId}`);
+        sessionsRefreshVersionRef.current += 1;
+        setSessions((current) => current.filter((session) => session.id !== sessionId));
+        setInvitations((current) => current.filter((session) => session.id !== sessionId));
+        if (activeSessionRef.current?.id !== sessionId) return;
+        scopePrivacyEpochRef.current += 1;
+        sessionEpochRef.current += 1;
+        sessionSelectionVersionRef.current += 1;
+        sessionControllerRef.current?.abort();
+        sessionContentControllerRef.current.abort();
+        sessionContentControllerRef.current = new AbortController();
+        transcriptRefreshVersionRef.current += 1;
+        activeTurnRef.current = null;
+        activeSessionRef.current = null;
+        setActiveSession(null);
+        setSessions((current) => current.filter((session) => session.id !== sessionId));
+        setInvitations((current) => current.filter((session) => session.id !== sessionId));
+        safeStorageRemove(turnKey);
+        resetStream();
+        messagesRef.current = [];
+        setMessages([]);
+        setFreshMessageIds(new Set());
+        setThinking(null);
+        setNarration(null);
+        setTodos(null);
+        setComposer('');
+        setFileAttachments([]);
+        setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
+        setScopeInterpretation(null);
+        setScopeRoutingContent('');
+        setScopeEditorOpen(false);
+        setParticipants([]);
+        setPresence(null);
+        setTurnRecovery(null);
+        setPrivacyUnavailable(true);
+        dispatchTurn({ type: 'reset' });
+        dispatchToolCalls({ type: 'reset' });
+        setMissionContentVersion((version) => version + 1);
+        setLoadState('ready');
+        setLoadError(null);
+    }, [activeWorkspaceId, resetStream, turnKey]);
+
+    /** A removed followed turn withdraws its buffered content even when cleanup frames were missed. */
+    const loadFollowedTurn = useCallback(async (
+        sessionId: number,
+        turnId: number,
+        signal: AbortSignal,
+    ): Promise<AiChatTurn> => {
+        try {
+            const durable = await getAiChatTurn(sessionId, turnId, { signal });
+            signal.throwIfAborted();
+            if (durable.terminalReason === 'privacy_invalidated') {
+                invalidateSessionContent(sessionId);
+                throw new DOMException('Session content invalidated', 'AbortError');
+            }
+            return durable;
+        } catch (error) {
+            if (!signal.aborted && error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                invalidateSessionContent(sessionId);
+                throw new DOMException('Session content invalidated', 'AbortError');
+            }
+            throw error;
+        }
+    }, [invalidateSessionContent]);
+
     const hydrateStream = useCallback(async (sessionId: number, turnId: number): Promise<void> => {
-        const signal = identityControllerRef.current?.signal;
-        if (!signal || signal.aborted) return;
+        const identitySignal = identityControllerRef.current?.signal;
+        if (!identitySignal || identitySignal.aborted) return;
+        const signal = AbortSignal.any([identitySignal, sessionContentControllerRef.current.signal]);
         const streamEpoch = streamEpochRef.current;
         for (let attempt = 0; ; attempt++) {
             if (attempt > 0) {
@@ -864,10 +1030,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 if (streamEpoch !== streamEpochRef.current) return;
             }
-            let partial: string;
+            let durable: AiChatTurn;
             try {
-                const durable = await getAiChatTurn(sessionId, turnId, { signal });
-                partial = durable.partialContent ?? '';
+                durable = await loadFollowedTurn(sessionId, turnId, signal);
             } catch {
                 const current = streamRef.current;
                 if (!signal.aborted
@@ -880,12 +1045,25 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (signal.aborted || streamEpoch !== streamEpochRef.current) return;
             const current = streamRef.current;
             if (current?.turnId !== turnId) return;
+            if (isAskConnexAuthorizationWithdrawal(durable.terminalReason)) {
+                activeTurnRef.current = null;
+                resetStream();
+                return;
+            }
+            const partial = durable.partialContent ?? '';
+            const settledTurn = adoptsSettledAskConnexPartial(
+                durable.status, durable.terminalReason, isActiveTurnStatus(durable.status));
+            if (settledTurn) {
+                streamRef.current = adoptSettledAskConnexStreamPartial(current, partial);
+                invalidateStream();
+                return;
+            }
             const settled = settleAskConnexStreamHydration(current, partial);
             streamRef.current = settled.state;
             invalidateStream();
             if (!settled.hydrate) return;
         }
-    }, [invalidateStream]);
+    }, [invalidateStream, loadFollowedTurn, resetStream]);
 
     const handleStreamDelta = useCallback((frame: AiChatDeltaFrame) => {
         const active = activeTurnRef.current;
@@ -1015,6 +1193,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (streamEpoch !== streamEpochRef.current) return;
         if (shouldDropAskConnexStream(durable.status, durable.terminalReason)) return;
         const partial = durable.partialContent ?? '';
+        if (adoptsSettledAskConnexPartial(durable.status, durable.terminalReason, isActiveTurnStatus(durable.status))) {
+            const held = streamRef.current?.turnId === durable.turnId ? streamRef.current : null;
+            if (held === null && partial.length === 0) return;
+            streamRef.current = adoptSettledAskConnexStreamPartial(
+                held ?? createAskConnexStream(durable.turnId), partial);
+            invalidateStream();
+            return;
+        }
         if (partial.length === 0) return;
         const current = streamRef.current?.turnId === durable.turnId
             ? streamRef.current
@@ -1077,7 +1263,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setInstantOpen(true);
         setOpen(false);
     }, []);
-    const openWorkspace = useCallback(() => {
+    const openWorkspace = useCallback(() => requestGuardedNavigation(() => {
         workspaceReturnRef.current = true;
         setWorkspaceSourceContext({
             identity,
@@ -1087,7 +1273,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setOpen(false);
         const session = activeSessionRef.current;
         router.push(session ? `/ask-connex/${session.id}` : '/ask-connex');
-    }, [context.record, context.selection, identity, router]);
+    }), [context.record, context.selection, identity, router]);
     /**
      * Writes one job into the composer and brings Ask Connex on screen.
      *
@@ -1131,7 +1317,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [workspaceMode]);
 
     const contextualActions = useMemo<readonly AppAction[]>(() => {
-        if (workspaceMode) return [];
+        if (workspaceMode || !assistantEnabled) return [];
         const label = selectionContext
             ? t('entryPoint.selection', {
                 count: selectionContext.count,
@@ -1162,7 +1348,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 execute: () => openWorkspace(),
             },
         ];
-    }, [openDrawer, openWorkspace, selectionContext, sourceRecord, t, workspaceMode]);
+    }, [assistantEnabled, openDrawer, openWorkspace, selectionContext, sourceRecord, t, workspaceMode]);
     useRegisterActions(contextualActions);
 
     useEffect(() => {
@@ -1177,16 +1363,20 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [openDrawer]);
 
     const refreshSessions = useCallback(async (signal: AbortSignal): Promise<AiChatSession[]> => {
+        if (!assistantEnabled || signal.aborted) return [];
         const refreshVersion = ++sessionsRefreshVersionRef.current;
         const [page, invitationPage] = await Promise.all([
             getAiChatSessions({ page: 1, size: 25 }, { signal }),
             getAiChatInvitations({ page: 1, size: 25 }, { signal }),
         ]);
         if (signal.aborted || refreshVersion !== sessionsRefreshVersionRef.current) return [];
-        setSessions(page.items.filter((session) => !session.archived));
-        setInvitations(invitationPage.items.filter((session) => !session.archived));
-        return page.items;
-    }, []);
+        const eligible = (session: AiChatSession) => !retiredSessionsRef.current.has(`${session.workspaceId}:${session.id}`)
+            && !isInvalidatedAiChatSession(session, workspacePrivacyCutoffsRef.current.get(session.workspaceId));
+        const current = page.items.filter(eligible);
+        setSessions(current.filter((session) => !session.archived));
+        setInvitations(invitationPage.items.filter((session) => eligible(session) && !session.archived));
+        return current;
+    }, [assistantEnabled]);
 
     const refreshCollaboration = useCallback(async (
         sessionId: number,
@@ -1205,8 +1395,29 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionId: number,
         signal: AbortSignal,
         animateNew: boolean,
-    ): Promise<{ session: AiChatSession; activeTurn: AiChatTurn | null } | null> => {
+        settledTurnId?: number,
+    ): Promise<{
+        session: AiChatSession;
+        activeTurn: AiChatTurn | null;
+        terminalEvidence: AiChatTurn | null;
+        toolCalls: AiAssistantToolCall[];
+        refreshVersion: number;
+    } | null> => {
+        const sessionIdentity = `${activeWorkspaceId}:${sessionId}`;
+        if (retiredSessionsRef.current.has(sessionIdentity)) {
+            setLoadState('ready');
+            return null;
+        }
         const refreshVersion = ++transcriptRefreshVersionRef.current;
+        const recovery = recoveryTurnRef.current;
+        const terminalTurnId = settledTurnId ?? (
+            recovery.target?.sessionId === sessionId
+                && recovery.target.turnId === recovery.turn.turnId
+                && (recovery.turn.phase === 'failed' || recovery.turn.phase === 'timed_out')
+                ? recovery.target.turnId : undefined);
+        if (terminalTurnId !== undefined) {
+            dispatchTurn({ type: 'reconciling', sessionId, turnId: terminalTurnId });
+        }
         const [firstDetail, attachments, historicalToolCalls, pendingToolCalls] = await Promise.all([
             getAiChatSession(
                 sessionId,
@@ -1217,7 +1428,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             getAiAssistantToolCalls(sessionId, {}, { signal }),
             getAiAssistantToolCalls(sessionId, { pendingOnly: true }, { signal }),
         ]);
-        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
+        if (isInvalidatedAiChatSession(firstDetail.session,
+                workspacePrivacyCutoffsRef.current.get(firstDetail.session.workspaceId))) {
+            invalidateSessionContent(sessionId, true);
+            setPrivacyUnavailable(true);
+            setLoadState('ready');
+            return null;
+        }
         const nextMessages = await loadAskConnexLatestMessages(
             firstDetail.messages,
             ASK_CONNEX_MESSAGE_PAGE_SIZE,
@@ -1230,20 +1449,41 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 return detail.messages;
             },
         );
-        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
-        const known = new Set(messagesRef.current.map(
-            (message) => `${message.seq}:${message.authorKind}:${message.content}`,
-        ));
-        messagesRef.current = nextMessages;
-        setMessages(nextMessages);
-        setFreshMessageIds(animateNew
-            ? new Set(nextMessages
-                .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
-                .map((message) => message.id))
-            : new Set());
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
+        const nextToolCalls = mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls);
+        dispatchTurn({ type: 'toolsObserved', sessionId, toolCalls: nextToolCalls });
+        let terminalEvidence: AiChatTurn | null = null;
+        if (terminalTurnId !== undefined) {
+            try {
+                terminalEvidence = await loadFollowedTurn(sessionId, terminalTurnId, signal);
+            } catch (error) {
+                if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
+                throw error;
+            }
+        }
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
+        if (terminalEvidence !== null) dispatchTurn({ type: 'reconciled', turn: terminalEvidence });
+        const reconciled = reconcileAskConnexDurableMessages(messagesRef.current, nextMessages, animateNew);
+        messagesRef.current = reconciled.messages;
+        setMessages(reconciled.messages);
+        setFreshMessageIds(reconciled.freshMessageIds);
+        setMissionRefreshVersion((version) => version + 1);
         dispatchToolCalls({
             type: 'replace',
-            toolCalls: mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls),
+            toolCalls: nextToolCalls,
+        });
+        setTurnRecovery((current) => {
+            if (current === null || current.target.sessionId !== sessionId
+                || (firstDetail.activeTurn != null && firstDetail.activeTurn.turnId !== current.target.turnId)) {
+                return null;
+            }
+            if (askConnexBoundRetryPrompt(current.target, current.target, nextMessages, nextToolCalls) === null) {
+                return { ...current, reconciled: false };
+            }
+            return terminalTurnId === current.target.turnId ? { ...current, reconciled: true } : current;
         });
         setFileAttachments((current) => reconcileAskConnexFileAttachments(
             current,
@@ -1251,20 +1491,31 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         ));
         setActiveSession(firstDetail.session);
         activeSessionRef.current = firstDetail.session;
+        setPrivacyUnavailable(false);
         if (firstDetail.session.visibility === 'shared') {
             await refreshCollaboration(sessionId, signal);
         } else {
             setParticipants([]);
             setPresence(null);
         }
-        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
         setLoadState('ready');
         setLoadError(null);
-        return { session: firstDetail.session, activeTurn: firstDetail.activeTurn };
-    }, [refreshCollaboration]);
+        return {
+            session: firstDetail.session,
+            activeTurn: firstDetail.activeTurn ?? null,
+            terminalEvidence,
+            toolCalls: nextToolCalls,
+            refreshVersion,
+        };
+    }, [activeWorkspaceId, invalidateSessionContent, loadFollowedTurn, refreshCollaboration]);
 
     const clearActiveSession = useCallback(() => {
+        setPrivacyUnavailable(false);
+        setPrivacyInitializing(false);
         sessionEpochRef.current++;
+        sessionSelectionVersionRef.current += 1;
         sessionControllerRef.current?.abort();
         transcriptRefreshVersionRef.current += 1;
         safeStorageRemove(sessionKey);
@@ -1284,6 +1535,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setSubmitting(false);
         resetStream();
         dispatchTurn({ type: 'reset' });
+        setTurnRecovery(null);
         dispatchToolCalls({ type: 'reset' });
         setLoadState('ready');
         setLoadError(null);
@@ -1296,35 +1548,39 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         initial?: { durable: AiChatTurn; streamEpoch: number },
     ): Promise<AiChatTurn> => {
         let streamEpoch = initial?.streamEpoch ?? streamEpochRef.current;
-        let current = initial?.durable ?? await getAiChatTurn(sessionId, turnId, { signal });
+        let current = initial?.durable ?? await loadFollowedTurn(sessionId, turnId, signal);
         while (isActiveTurnStatus(current.status)) {
+            signal.throwIfAborted();
             dispatchTurn({
                 type: 'status',
                 status: current.status,
                 reason: current.terminalReason,
                 progress: current.progress,
+                toolCalls: current.toolCalls,
             });
             absorbTurnPartial(current, streamEpoch);
             await delay(1_000, signal);
             streamEpoch = streamEpochRef.current;
-            current = await getAiChatTurn(sessionId, turnId, { signal });
+            current = await loadFollowedTurn(sessionId, turnId, signal);
         }
         return current;
-    }, [absorbTurnPartial]);
+    }, [absorbTurnPartial, loadFollowedTurn]);
 
     const followTurn = useCallback(async (
         stored: StoredAskConnexTurn,
-        signal: AbortSignal,
+        parentSignal: AbortSignal,
     ): Promise<void> => {
+        const signal = AbortSignal.any([parentSignal, sessionContentControllerRef.current.signal]);
         try {
             let durableStreamEpoch = streamEpochRef.current;
-            let durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
+            let durable = await loadFollowedTurn(stored.sessionId, stored.turnId, signal);
             if (signal.aborted) return;
             dispatchTurn({
                 type: 'status',
                 status: durable.status,
                 reason: durable.terminalReason,
                 progress: durable.progress,
+                toolCalls: durable.toolCalls,
             });
             absorbTurnPartial(durable, durableStreamEpoch);
 
@@ -1345,7 +1601,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (error instanceof ApiError && error.status === 403) throw error;
                 if (!(error instanceof AiGenerationError)) {
                     durableStreamEpoch = streamEpochRef.current;
-                    durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
+                    durable = await loadFollowedTurn(stored.sessionId, stored.turnId, signal);
                 }
             }
 
@@ -1362,6 +1618,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 status: durable.status,
                 reason: durable.terminalReason,
                 progress: durable.progress,
+                toolCalls: durable.toolCalls,
             });
             absorbTurnPartial(durable, streamEpochRef.current);
             safeStorageRemove(turnKey);
@@ -1370,7 +1627,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 durable.status,
                 durable.terminalReason,
                 resetStream,
-                () => refreshTranscript(stored.sessionId, signal, true),
+                () => refreshTranscript(stored.sessionId, signal, true, durable.turnId),
             );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
@@ -1390,14 +1647,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
             deferApiError(error, 'toast.requestFailed');
         }
-    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, loadFollowedTurn, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     const followDurableTurn = useCallback(async (
         initial: AiChatTurn,
-        signal: AbortSignal,
+        parentSignal: AbortSignal,
     ): Promise<void> => {
+        const signal = AbortSignal.any([parentSignal, sessionContentControllerRef.current.signal]);
         if (durableFollowerRef.current === initial.turnId) return;
         durableFollowerRef.current = initial.turnId;
+        setTurnRecovery((current) => current?.target.sessionId === initial.sessionId
+            && current.target.turnId === initial.turnId ? current : null);
         dispatchTurn({
             type: 'accepted',
             sessionId: initial.sessionId,
@@ -1405,6 +1665,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             generationHandle: null,
             status: initial.status,
             progress: initial.progress,
+            toolCalls: initial.toolCalls,
             cancellable: initial.requestedByCurrentUser === true,
         });
         absorbTurnPartial(initial, streamEpochRef.current);
@@ -1421,6 +1682,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 status: durable.status,
                 reason: durable.terminalReason,
                 progress: durable.progress,
+                toolCalls: durable.toolCalls,
             });
             absorbTurnPartial(durable, streamEpochRef.current);
             const stored = parseStoredAskConnexTurn(safeStorageGet(turnKey));
@@ -1430,7 +1692,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 durable.status,
                 durable.terminalReason,
                 resetStream,
-                () => refreshTranscript(durable.sessionId, signal, true),
+                () => refreshTranscript(durable.sessionId, signal, true, durable.turnId),
             );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
@@ -1457,7 +1719,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     useEffect(() => {
+        let cancelled = false;
+        const explicitRetry = reloadRequest !== null && reloadRequest.identity === identity
+            && handledReloadRequestRef.current !== reloadRequest;
         sessionEpochRef.current++;
+        const initializationSelectionVersion = sessionSelectionVersionRef.current;
         const controller = new AbortController();
         identityControllerRef.current?.abort();
         identityControllerRef.current = controller;
@@ -1465,16 +1731,25 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             controller.abort();
             return;
         }
+        if (!policyReady && permission === 'granted' && !confined) {
+            policyPausedIdentityRef.current = initializedIdentityRef.current === identity ? identity : null;
+            controller.abort();
+            return;
+        }
         sessionControllerRef.current?.abort();
         sessionControllerRef.current = null;
         const storedSessionId = parseStoredAskConnexSession(safeStorageGet(sessionKey));
-        const selectedSessionId = workspaceSessionIdRef.current ?? storedSessionId;
+        const selectedSessionId = workspaceRouteNavigationRef.current === renderedWorkspaceNavigationVersion()
+            ? workspaceSessionIdRef.current ?? storedSessionId : storedSessionId;
         const storedTurn = parseStoredAskConnexTurn(safeStorageGet(turnKey));
 
         const initialize = async () => {
             let selectionLoadStarted = false;
             await Promise.resolve();
-            if (controller.signal.aborted) return;
+            if (cancelled || controller.signal.aborted) return;
+            const preserveDraft = assistantEnabled && policyPausedIdentityRef.current === identity && initializedIdentityRef.current === identity;
+            policyPausedIdentityRef.current = null;
+            initializedIdentityRef.current = identity;
             setStateIdentity(identity);
             setSessions([]);
             setInvitations([]);
@@ -1486,43 +1761,58 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             messagesRef.current = [];
             setMessages([]);
             setFreshMessageIds(new Set());
-            setComposer('');
-            setFileAttachments([]);
+            if (!preserveDraft) {
+                setComposer('');
+                setFileAttachments([]);
+                setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
+                setScopeInterpretation(null);
+                setScopeRoutingContent('');
+                setScopeEditorOpen(false);
+            }
             setFeatureUnavailable(false);
+            setAvailability(null);
             setSubmissionBlocked(false);
             submittingRef.current = false;
             setSubmitting(false);
             resetStream();
             dispatchTurn({ type: 'reset' });
+            setTurnRecovery(null);
             dispatchToolCalls({ type: 'reset' });
-            setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
-            setScopeInterpretation(null);
-            setScopeRoutingContent('');
-            setScopeEditorOpen(false);
             setLoadState('loading');
             setLoadError(null);
 
-            if (userId === null || activeWorkspaceId === null || switching) {
-                setLoadState('ready');
+            if (!assistantEnabled || userId === null || activeWorkspaceId === null || switching) {
+                if (explicitRetry) handledReloadRequestRef.current = reloadRequest;
+                setLoadState('forbidden');
                 return;
             }
 
+            const availabilityReadVersion = ++availabilityReadVersionRef.current;
             try {
-                await refreshSessions(controller.signal);
-                if (controller.signal.aborted) return;
+                const [readiness] = await Promise.all([
+                    getAiCommandCenter({ signal: controller.signal }),
+                    refreshSessions(controller.signal),
+                ]);
+                if (cancelled || controller.signal.aborted) return;
+                if (availabilityReadVersion === availabilityReadVersionRef.current) {
+                    setAvailability({ identity, chat: readiness.chatAvailable, watches: readiness.watchesAvailable });
+                }
+                if (cancelled || controller.signal.aborted) return;
                 if (sharePermission === 'granted') {
                     const workspaceMembers = await getActiveWorkspaceMembers({ signal: controller.signal });
-                    if (!controller.signal.aborted) {
-                        setMembers(workspaceMembers.filter((member) => member.status === 'active'));
-                    }
+                    if (cancelled || controller.signal.aborted) return;
+                    setMembers(workspaceMembers.filter((member) => member.status === 'active'));
                 }
+                if (initializationSelectionVersion !== sessionSelectionVersionRef.current) return;
                 if (selectedSessionId === null) {
                     setLoadState('ready');
                     return;
                 }
                 selectionLoadStarted = true;
+                withdrawnSessionsRef.current.delete(`${activeWorkspaceId}:${selectedSessionId}`);
                 const detail = await refreshTranscript(selectedSessionId, controller.signal, false);
-                if (controller.signal.aborted) return;
+                if (cancelled || controller.signal.aborted) return;
+                if (detail === null) return;
                 if (storedTurn?.sessionId === selectedSessionId) {
                     dispatchTurn({
                         type: 'accepted',
@@ -1537,34 +1827,92 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     await followDurableTurn(detail.activeTurn, controller.signal);
                 }
             } catch (error) {
-                if (controller.signal.aborted) return;
+                if (cancelled || controller.signal.aborted) return;
+                if (explicitRetry) {
+                    showApiError(error, 'toast.requestFailed');
+                    setLoadError(error instanceof ApiError ? error : new Error(t('toast.requestFailed')));
+                    if (availabilityReadVersion === availabilityReadVersionRef.current) {
+                        setAvailability({ identity, chat: false, watches: false, failed: true });
+                    }
+                    setLoadState('error');
+                    return;
+                }
                 if (selectionLoadStarted && error instanceof ApiError
                         && (error.status === 403 || error.status === 404)) {
                     clearActiveSession();
+                    setPrivacyUnavailable(true);
+                    return;
+                }
+                if (error instanceof ApiError && error.status === 503
+                        && (error.message === 'assistant_privacy_initializing'
+                            || error.message === 'ai_privacy_initialization_pending')) {
+                    setPrivacyInitializing(true);
+                    setLoadState('ready');
                     return;
                 }
                 if (error instanceof ApiError && error.status === 403) {
                     setFeatureUnavailable(true);
                     setLoadState('forbidden');
-                    deferApiError(error);
                     return;
                 }
                 const nextError = error instanceof ApiError
                     ? error
                     : new Error(t('toast.requestFailed'));
+                if (availabilityReadVersion === availabilityReadVersionRef.current) {
+                    setAvailability({ identity, chat: false, watches: false, failed: true });
+                }
                 setLoadError(nextError);
                 setLoadState('error');
-                deferApiError(error, 'toast.requestFailed');
+            } finally {
+                if (!cancelled && !controller.signal.aborted && explicitRetry) handledReloadRequestRef.current = reloadRequest;
             }
         };
 
         void initialize();
-        return () => controller.abort();
-    }, [canPersist, activeWorkspaceId, clearActiveSession, deferApiError, followDurableTurn, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [assistantEnabled, canPersist, activeWorkspaceId, clearActiveSession, confined, followDurableTurn, followTurn, identity, permission, policyReady, refreshSessions, refreshTranscript, reloadRequest, resetStream, sessionKey, sharePermission, showApiError, switching, t, turnKey, userId]);
+
+    useEffect(() => {
+        if (!assistantEnabled || switching) return;
+        let cancelled = false;
+        let controller: AbortController | null = null;
+        const refresh = () => {
+            if (cancelled || document.hidden) return;
+            controller?.abort();
+            setAvailability((current) => current?.identity === identity ? { ...current, checking: true } : null);
+            const current = new AbortController();
+            controller = current;
+            const availabilityReadVersion = ++availabilityReadVersionRef.current;
+            void getAiCommandCenter({ signal: current.signal }).then((readiness) => {
+                if (!cancelled && !current.signal.aborted && availabilityReadVersion === availabilityReadVersionRef.current) {
+                    setAvailability({ identity, chat: readiness.chatAvailable, watches: readiness.watchesAvailable });
+                    setFeatureUnavailable(false);
+                }
+            }).catch(() => {
+                if (!cancelled && !current.signal.aborted && availabilityReadVersion === availabilityReadVersionRef.current) {
+                    setAvailability({ identity, chat: false, watches: false, failed: true });
+                }
+            });
+        };
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', refresh);
+        const unsubscribe = subscribeAiAvailabilityChange(refresh);
+        return () => {
+            cancelled = true;
+            controller?.abort();
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', refresh);
+            unsubscribe();
+        };
+    }, [assistantEnabled, identity, switching]);
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
         sessionEpochRef.current++;
+        sessionSelectionVersionRef.current += 1;
         sessionControllerRef.current?.abort();
         const controller = new AbortController();
         sessionControllerRef.current = controller;
@@ -1586,9 +1934,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setSubmitting(false);
         resetStream();
         dispatchTurn({ type: 'reset' });
+        setTurnRecovery(null);
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         try {
+            withdrawnSessionsRef.current.delete(`${activeWorkspaceId}:${session.id}`);
             const detail = await refreshTranscript(session.id, signal, false);
             if (workspaceMode) router.replace(`/ask-connex/${session.id}`);
             if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
@@ -1602,7 +1952,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 deferApiError(error, 'toast.requestFailed');
             }
         }
-    }, [canPersist, clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
+    }, [activeWorkspaceId, canPersist, clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
 
     const newChat = useCallback(() => {
         if (working) return;
@@ -1611,7 +1961,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [clearActiveSession, router, working, workspaceMode]);
 
     useEffect(() => {
-        if (!workspaceMode || stateIdentity !== identity || switching) return;
+        if (!assistantEnabled || !workspaceMode || stateIdentity !== identity || switching) return;
+        if (workspaceRouteNavigationRef.current !== renderedWorkspaceNavigationVersion()) return;
+        const navigationVersion = renderedWorkspaceNavigationVersion();
         if (activeTurn !== null) {
             const activeSessionId = activeSessionRef.current?.id ?? null;
             if (activeSessionId !== null && workspaceSessionId !== activeSessionId) {
@@ -1620,7 +1972,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return;
         }
         if (workspaceSessionId === null
-                || activeSessionRef.current?.id === workspaceSessionId) return;
+                || activeSessionRef.current?.id === workspaceSessionId
+                || withdrawnSessionsRef.current.has(`${activeWorkspaceId}:${workspaceSessionId}`)) return;
         sessionEpochRef.current++;
         sessionControllerRef.current?.abort();
         const controller = new AbortController();
@@ -1637,17 +1990,20 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setFileAttachments([]);
         resetStream();
         dispatchTurn({ type: 'reset' });
+        setTurnRecovery(null);
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         const load = async () => {
             try {
                 const detail = await refreshTranscript(workspaceSessionId, signal, false);
+                if (signal.aborted || navigationVersion !== renderedWorkspaceNavigationVersion()) return;
                 if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
             } catch (error) {
                 if (signal.aborted) return;
+                if (navigationVersion !== renderedWorkspaceNavigationVersion()) return;
                 if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
                     clearActiveSession();
-                    router.replace('/ask-connex');
+                    setPrivacyUnavailable(true);
                     return;
                 }
                 setLoadError(error instanceof ApiError ? error : new Error(t('toast.requestFailed')));
@@ -1657,34 +2013,73 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         };
         void load();
         return () => controller.abort();
-    }, [canPersist, activeTurn, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
+    }, [assistantEnabled, canPersist, activeTurn, activeWorkspaceId, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
 
-    const enqueueRealtimeRefresh = useCallback((sessionId: number, signal: AbortSignal) => {
-        realtimeRefreshQueueRef.current = realtimeRefreshQueueRef.current.then(async () => {
+    const runRealtimeRefresh = useCallback(async (sessionIds: ReadonlySet<number>, signal: AbortSignal) => {
+        if (signal.aborted) return;
+        try {
+            await refreshSessions(signal);
             if (signal.aborted) return;
-            try {
-                await refreshSessions(signal);
-                const session = activeSessionRef.current;
-                if (session?.id === sessionId) {
-                    const detail = await refreshTranscript(session.id, signal, true);
-                    if (detail?.activeTurn
-                            && activeTurnRef.current?.turnId !== detail.activeTurn.turnId) {
-                        void followDurableTurn(detail.activeTurn, signal);
-                    }
-                }
-            } catch (error) {
+            const session = activeSessionRef.current;
+            if (session && sessionIds.has(session.id)) {
+                const followedTurnId = streamRef.current?.turnId ?? activeTurnRef.current?.turnId;
+                const streamEpoch = streamEpochRef.current;
+                const detail = await refreshTranscript(session.id, signal, true);
                 if (signal.aborted) return;
-                if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
-                    clearActiveSession();
+                if (followedTurnId !== undefined && detail?.activeTurn?.turnId !== followedTurnId) {
+                    const durable = await loadFollowedTurn(session.id, followedTurnId, signal);
+                    if (signal.aborted) return;
+                    absorbTurnPartial(durable, streamEpoch);
+                }
+                if (detail?.activeTurn
+                        && activeTurnRef.current?.turnId !== detail.activeTurn.turnId) {
+                    void followDurableTurn(detail.activeTurn, signal);
                 }
             }
+        } catch (error) {
+            if (signal.aborted) return;
+            if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                clearActiveSession();
+            }
+        }
+    }, [absorbTurnPartial, clearActiveSession, followDurableTurn, loadFollowedTurn, refreshSessions, refreshTranscript]);
+
+    const runRealtimeRefreshRef = useRef(runRealtimeRefresh);
+    useLayoutEffect(() => {
+        runRealtimeRefreshRef.current = runRealtimeRefresh;
+    }, [runRealtimeRefresh]);
+
+    const enqueueRealtimeRefresh = useCallback((sessionId: number, signal: AbortSignal) => {
+        realtimeRefreshCoalescerRef.current ??= createRealtimeRefreshCoalescer({
+            run: (sessionIds, batchSignal) => runRealtimeRefreshRef.current(sessionIds, batchSignal),
+            delayMs: ASK_CONNEX_REALTIME_REFRESH_DELAY_MS,
         });
-    }, [clearActiveSession, followDurableTurn, refreshSessions, refreshTranscript]);
+        realtimeRefreshCoalescerRef.current.enqueue(sessionId, signal);
+    }, []);
+
+    useEffect(() => () => {
+        realtimeRefreshCoalescerRef.current?.dispose();
+        realtimeRefreshCoalescerRef.current = null;
+    }, []);
 
     useEffect(() => {
-        if (userId === null || activeWorkspaceId === null || switching) return;
-        let connectedBefore = false;
+        if (!assistantEnabled || userId === null || activeWorkspaceId === null || switching) return;
         const socket = createAiChatSocket({
+            onPrivacyFrame: (frame) => {
+                if (frame.workspaceId !== activeWorkspaceId) return;
+                const cutoff = BigInt(frame.cutoffGeneration);
+                const previous = workspacePrivacyCutoffsRef.current.get(frame.workspaceId);
+                if (previous !== undefined && previous >= cutoff) return;
+                workspacePrivacyCutoffsRef.current.set(frame.workspaceId, cutoff);
+                sessionsRefreshVersionRef.current += 1;
+                const active = activeSessionRef.current;
+                const known = active === null ? knownSessionsRef.current : [...knownSessionsRef.current, active];
+                for (const session of known) {
+                    if (isInvalidatedAiChatSession(session, cutoff)) {
+                        invalidateSessionContent(session.id, true);
+                    }
+                }
+            },
             onFrame: (frame) => {
                 if (frame.workspaceId !== activeWorkspaceId) return;
                 if (frame.kind === 'thinking') {
@@ -1701,6 +2096,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
+                if (frame.reason === 'privacy_invalidated') invalidateSessionContent(frame.sessionId);
                 if (activeSessionRef.current?.id === frame.sessionId
                         && shouldResetAskConnexStream(streamRef.current, frame)) {
                     resetStream();
@@ -1719,17 +2115,29 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 enqueueRealtimeRefresh(frame.sessionId, signal);
             },
+            onMissionFrame: (frame) => {
+                if (frame.workspaceId !== activeWorkspaceId || frame.sessionId !== activeSessionRef.current?.id) return;
+                const signal = identityControllerRef.current?.signal;
+                if (!signal || signal.aborted) return;
+                setMissionRefreshVersion((version) => version + 1);
+                enqueueRealtimeRefresh(frame.sessionId, signal);
+            },
             onDelta: handleStreamDelta,
             onStatusChange: (status) => {
                 if (status !== 'connected') return;
-                if (!connectedBefore) {
-                    connectedBefore = true;
-                    return;
-                }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
                 const sessionId = activeSessionRef.current?.id;
                 if (sessionId !== undefined) {
+                    setMissionRefreshVersion((version) => version + 1);
+                    const followedTurnId = streamRef.current?.turnId ?? activeTurnRef.current?.turnId;
+                    if (followedTurnId !== undefined) {
+                        const contentSignal = AbortSignal.any([signal, sessionContentControllerRef.current.signal]);
+                        const streamEpoch = streamEpochRef.current;
+                        void loadFollowedTurn(sessionId, followedTurnId, contentSignal).then((durable) => {
+                            if (!contentSignal.aborted) absorbTurnPartial(durable, streamEpoch);
+                        }).catch(() => undefined);
+                    }
                     enqueueRealtimeRefresh(sessionId, signal);
                     return;
                 }
@@ -1738,16 +2146,19 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, handleTodosFrame, refreshSessions, resetStream, switching, userId]);
+    }, [assistantEnabled, absorbTurnPartial, activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, handleTodosFrame, invalidateSessionContent, loadFollowedTurn, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
-        if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
+        if (!assistantEnabled || switching || !surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
             return;
         }
         const sessionId = presenceSessionId;
         const controller = new AbortController();
         let timeout: number | null = null;
+        const eligible = () => assistantEnabledRef.current && currentPrivilegedMfaReadiness() === 'ready'
+            && privilegedMfaConfinementReason() === null;
         const heartbeat = async () => {
+            if (controller.signal.aborted || !eligible()) return;
             const startedAt = performance.now();
             try {
                 const snapshot = await touchAiChatPresence(
@@ -1772,9 +2183,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         return () => {
             if (timeout !== null) window.clearTimeout(timeout);
             controller.abort();
-            void leaveAiChatPresence(sessionId).catch(() => {});
+            if (eligible()) void leaveAiChatPresence(sessionId).catch(() => {});
         };
-    }, [loadState, presenceSessionId, surfaceVisible]);
+    }, [assistantEnabled, loadState, presenceSessionId, surfaceVisible, switching]);
 
     const shareSession = useCallback(async (shared: boolean): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || sharePermission !== 'granted') return false;
@@ -1878,15 +2289,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [activeSession, showApiError, t]);
 
-    const ensureSession = useCallback(async (signal: AbortSignal): Promise<AiChatSession> => {
+    const ensureSession = useCallback(async (signal: AbortSignal, origin: RequestInit): Promise<AiChatSession> => {
         if (activeSession !== null) return activeSession;
         if (sessionCreationRef.current !== null) return sessionCreationRef.current;
         const creation = createAiChatSession(
             t('newChatTitle'),
             true,
-            { signal },
+            origin,
         ).then((createdSession) => {
             if (signal.aborted) throw signal.reason;
+            if (isInvalidatedAiChatSession(createdSession,
+                    workspacePrivacyCutoffsRef.current.get(createdSession.workspaceId))) {
+                invalidateSessionContent(createdSession.id, true);
+                setPrivacyUnavailable(true);
+                throw new ApiError('assistant_privacy_unavailable', 409);
+            }
             setActiveSession(createdSession);
             activeSessionRef.current = createdSession;
             setSessions((current) => [
@@ -1902,15 +2319,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
+    }, [canPersist, activeSession, invalidateSessionContent, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
+        const workspaceMessage = workspaceUnavailableDescription(error, tRoot);
+        if (workspaceMessage !== null) return workspaceMessage;
         if (!(error instanceof ApiError)) return t('upload.failed');
         if (error.status === 413) return t('upload.tooLarge');
         if (error.status === 415) return t('upload.unsupported');
         if (error.status === 409) return t('upload.limit');
         return t('upload.failed');
-    }, [t]);
+    }, [t, tRoot]);
 
     const attachFiles = useCallback(async (files: File[]) => {
         const signal = identityControllerRef.current?.signal;
@@ -1918,9 +2337,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             !signal
             || signal.aborted
             || working
-            || permission !== 'granted'
+            || !canAsk
             || attachmentCreatePermission !== 'granted'
         ) return;
+        const origin = workspacePinnedRequest(activeWorkspaceId, { signal });
         for (const file of files) {
             const operationEpoch = sessionEpochRef.current;
             const clientId = crypto.randomUUID();
@@ -1937,7 +2357,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             };
             setFileAttachments((current) => [...current, pending]);
             try {
-                const session = await ensureSession(signal);
+                const session = await ensureSession(signal, origin);
                 const uploaded = await uploadAiChatAttachment(
                     session.id,
                     file,
@@ -1945,7 +2365,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         attachment.clientId === clientId
                             ? { ...attachment, progress }
                             : attachment)),
-                    { signal },
+                    origin,
                 );
                 if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
                 setFileAttachments((current) => completeAskConnexFileUpload(
@@ -1966,7 +2386,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         : attachment));
             }
         }
-    }, [attachmentCreatePermission, ensureSession, permission, uploadErrorMessage, working]);
+    }, [activeWorkspaceId, attachmentCreatePermission, canAsk, ensureSession, uploadErrorMessage, working]);
 
     const removeFileAttachment = useCallback(async (attachment: AskConnexFileAttachment) => {
         if (fileOperationPending) return;
@@ -2047,6 +2467,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         toolCallId: number,
         action: AskConnexToolAction,
         deferRefresh = false,
+        init?: RequestInit,
     ): Promise<boolean> => {
         const session = activeSessionRef.current;
         const signal = identityControllerRef.current?.signal;
@@ -2056,23 +2477,32 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || signal.aborted
             || !card
             || !actionableToolCallIds.has(toolCallId)
+            || !askConnexToolCardAffordances(card, action === 'undo' ? Date.now() : proposalReviewNow()).includes(action)
             || toolActionsRef.current.has(toolCallId)) {
             return false;
         }
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId(), { signal });
         const operationEpoch = sessionEpochRef.current;
         let mutated = false;
         toolActionsRef.current.add(toolCallId);
         dispatchToolCalls({ type: 'actionStarted', toolCallId, action });
+        if (action === 'approve') {
+            dispatchTurn({ type: 'reconciling', sessionId: session.id, turnId: card.turnId });
+        }
         try {
             const mutation = action === 'approve'
-                ? await approveAiAssistantToolCall(session.id, toolCallId, { signal })
+                ? await approveAiAssistantToolCall(session.id, toolCallId, origin)
                 : action === 'reject'
-                    ? await rejectAiAssistantToolCall(session.id, toolCallId, { signal })
-                    : await undoAiAssistantToolCall(session.id, toolCallId, { signal });
+                    ? await rejectAiAssistantToolCall(session.id, toolCallId, origin)
+                    : await undoAiAssistantToolCall(session.id, toolCallId, origin);
             if (signal.aborted
                 || operationEpoch !== sessionEpochRef.current
                 || activeSessionRef.current?.id !== session.id) return mutated;
             dispatchToolCalls({ type: 'actionApplied', toolCallId, action, mutation });
+            dispatchTurn({
+                type: 'toolsObserved', sessionId: session.id,
+                toolCalls: [{ ...card, status: mutation.status }],
+            });
             if ((action === 'approve' && mutation.status === 'executed')
                 || (action === 'undo' && mutation.status === 'undone')) {
                 mutated = true;
@@ -2084,6 +2514,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     || operationEpoch !== sessionEpochRef.current
                     || activeSessionRef.current?.id !== session.id) return mutated;
                 dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+                dispatchTurn({ type: 'toolsObserved', sessionId: session.id, toolCalls: [refreshed] });
                 if (mutated && card.toolName === 'draft_document') {
                     const pending = await getAiAssistantToolCalls(
                         session.id, { pendingOnly: true }, { signal },
@@ -2121,16 +2552,24 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     if (!signal.aborted
                         && operationEpoch === sessionEpochRef.current
                         && activeSessionRef.current?.id === session.id
-                        && refreshed.status !== 'proposed') {
+                        && (failure === 'proposalExpired' || refreshed.status !== 'proposed')) {
                         dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+                        dispatchTurn({ type: 'toolsObserved', sessionId: session.id, toolCalls: [refreshed] });
                     }
                 } catch {}
             }
         } finally {
+            if (action === 'approve' && !signal.aborted
+                && operationEpoch === sessionEpochRef.current
+                && activeSessionRef.current?.id === session.id) {
+                transcriptRefreshVersionRef.current += 1;
+                dispatchTurn({ type: 'reconciling', sessionId: session.id, turnId: card.turnId });
+                enqueueRealtimeRefresh(session.id, signal);
+            }
             toolActionsRef.current.delete(toolCallId);
         }
         return mutated;
-    }, [actionableToolCallIds, router, t, toolCalls]);
+    }, [actionableToolCallIds, enqueueRealtimeRefresh, router, t, toolCalls]);
 
     /**
      * Applies one reviewed batch as the single decision the member made.
@@ -2145,9 +2584,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         toolCallIds: readonly number[],
         action: AskConnexToolAction,
     ) => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal: identityControllerRef.current?.signal });
         let mutated = false;
         for (const toolCallId of toolCallIds) {
-            if (await performToolAction(toolCallId, action, true)) mutated = true;
+            if (await performToolAction(toolCallId, action, true, origin)) mutated = true;
         }
         if (mutated) router.refresh();
     }, [performToolAction, router]);
@@ -2179,7 +2619,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (
             !activeSignal
             || activeSignal.aborted
-            || permission !== 'granted'
+            || !canAsk
             || featureUnavailable
             || submissionBlocked
             || submittingRef.current
@@ -2194,7 +2634,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         submittingRef.current = true;
         setSubmitting(true);
+        setTurnRecovery(null);
         resetStream();
+        const originWorkspaceId = activeWorkspaceId;
+        const precedingMessageSeq = messagesRef.current.at(-1)?.seq ?? 0;
         let session = activeSession;
         try {
             if (session === null) {
@@ -2202,9 +2645,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     const createdSession = await createAiChatSession(
                         t('newChatTitle'),
                         true,
-                        { signal: activeSignal },
+                        workspacePinnedRequest(originWorkspaceId, { signal: activeSignal }),
                     );
                     if (activeSignal.aborted) return;
+                    if (isInvalidatedAiChatSession(createdSession,
+                            workspacePrivacyCutoffsRef.current.get(createdSession.workspaceId))) {
+                        invalidateSessionContent(createdSession.id, true);
+                        setPrivacyUnavailable(true);
+                        return;
+                    }
                     session = createdSession;
                     setActiveSession(createdSession);
                     activeSessionRef.current = createdSession;
@@ -2227,9 +2676,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 content,
                 pageContext: requestContext.pageContext,
                 ...(scopeRequest === null ? {} : { scope: scopeRequest }),
-            });
+            }, workspacePinnedRequest(originWorkspaceId));
             if (activeSignal.aborted) return;
             const acceptedScope = accepted.scope;
+            if (userId !== null) {
+                setTurnRecovery({
+                    target: {
+                        sessionId: accepted.sessionId,
+                        turnId: accepted.turnId,
+                        prompt: content,
+                        authorUserId: userId,
+                        requestMessageSeq: precedingMessageSeq + 1,
+                    },
+                    reconciled: false,
+                });
+            }
             if (acceptedScope != null && scopePreviewKey !== null) {
                 setScopeInterpretation((current) => current === null || current.key !== scopePreviewKey
                     ? current
@@ -2284,6 +2745,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             }
             if (error instanceof ApiError && error.status === 403) {
                 setFeatureUnavailable(true);
+                dispatchTurn({ type: 'reset' });
+                showApiError(error, 'toast.requestFailed');
+                return;
             } else {
                 setSubmissionBlocked(true);
             }
@@ -2298,13 +2762,58 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [canPersist, activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+    }, [canAsk, canPersist, activeSession, activeWorkspaceId, composer, corrections, featureUnavailable, invalidateSessionContent, fileContextCount, fileOperationPending, followTurn, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
-    const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
-    const retryTurn = useCallback(() => {
-        if (retryPrompt === null) return;
-        void send(retryPrompt);
-    }, [retryPrompt, send]);
+    const retryPrompt = askConnexBoundRetryPrompt(turnRecovery?.target ?? null, turn, messages, toolCalls);
+    const turnWriteState = askConnexTurnWriteState(turn, toolCalls,
+        turnRecovery?.reconciled === true ? turnRecovery.target.turnId : null);
+    const retryTarget = turnRecovery?.target ?? null;
+    const currentRetryRef = useRef({ target: retryTarget, turn, toolCalls, turnWriteState, send });
+    useLayoutEffect(() => {
+        currentRetryRef.current = { target: retryTarget, turn, toolCalls, turnWriteState, send };
+    }, [retryTarget, send, toolCalls, turn, turnWriteState]);
+    const retryTurn = useCallback(async () => {
+        const current = currentRetryRef.current;
+        if (retryTarget === null || current.target !== retryTarget || toolActionsRef.current.size > 0
+            || retryValidationRef.current) return;
+        const prompt = askConnexBoundRetryPrompt(current.target, current.turn, messagesRef.current, current.toolCalls);
+        if (prompt === null
+            || !askConnexRecovery(current.turn.phase, current.turn.reason, true, false, current.turnWriteState).retry) return;
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
+        const operationEpoch = sessionEpochRef.current;
+        retryValidationRef.current = true;
+        try {
+            const refreshed = await refreshTranscript(retryTarget.sessionId, signal, true, retryTarget.turnId);
+            const latest = currentRetryRef.current;
+            if (signal.aborted || operationEpoch !== sessionEpochRef.current
+                || latest.target !== retryTarget || toolActionsRef.current.size > 0
+                || refreshed === null || refreshed.refreshVersion !== transcriptRefreshVersionRef.current) return;
+            const durable = refreshed.terminalEvidence;
+            if (durable === null || durable.sessionId !== retryTarget.sessionId
+                || durable.turnId !== retryTarget.turnId
+                || (durable.status !== 'failed' && durable.status !== 'timed_out')) {
+                dispatchTurn({ type: 'reconciling', sessionId: retryTarget.sessionId, turnId: retryTarget.turnId });
+                return;
+            }
+            const evidence = reduceAskConnexTurn(latest.turn, { type: 'reconciled', turn: durable });
+            const writeState = askConnexTurnWriteState(evidence, refreshed.toolCalls, retryTarget.turnId);
+            const freshPrompt = askConnexBoundRetryPrompt(
+                retryTarget, durable, messagesRef.current, refreshed.toolCalls,
+            );
+            if (freshPrompt === null
+                || !askConnexRecovery(durable.status, durable.terminalReason, true, false, writeState).retry) return;
+            void latest.send(freshPrompt);
+        } catch {
+            if (!signal.aborted && operationEpoch === sessionEpochRef.current
+                && currentRetryRef.current.target === retryTarget) {
+                transcriptRefreshVersionRef.current += 1;
+                dispatchTurn({ type: 'reconciling', sessionId: retryTarget.sessionId, turnId: retryTarget.turnId });
+            }
+        } finally {
+            retryValidationRef.current = false;
+        }
+    }, [refreshTranscript, retryTarget]);
 
     const cancelTurn = useCallback(async () => {
         const signal = identityControllerRef.current?.signal;
@@ -2366,11 +2875,27 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, []);
 
     const unavailable = useMemo(() => {
+        if (confined) {
+            return { title: t('unavailable.setupTitle'), body: t('unavailable.setupBody') };
+        }
+        if (privacyInitializing) {
+            return { title: t('unavailable.lookupTitle'), body: t('privacyInitializing') };
+        }
+        if (privacyUnavailable) {
+            return { title: t('unavailable.lookupTitle'), body: t('privacyUnavailable') };
+        }
         if (permission === 'denied') {
             return { title: t('unavailable.permissionTitle'), body: t('unavailable.permissionBody') };
         }
         if (permission === 'unavailable') {
             return { title: t('unavailable.lookupTitle'), body: t('unavailable.lookupBody') };
+        }
+        if (!policyReady) {
+            return {
+                title: t(policyReadiness === 'failed' ? 'unavailable.checkFailedTitle' : 'unavailable.checkingTitle'),
+                body: t(policyReadiness === 'failed' ? 'unavailable.checkFailedBody' : 'unavailable.checkingBody'),
+                preserveComposer: availability?.identity === identity && availability.chat && !availability.failed,
+            };
         }
         if (featureUnavailable) {
             return {
@@ -2378,11 +2903,26 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 body: t('unavailable.featureBody'),
             };
         }
+        if (availability?.identity === identity && availability.checking) {
+            return {
+                title: t('unavailable.checkingTitle'),
+                body: t('unavailable.checkingBody'),
+                preserveComposer: availability.chat && !availability.failed,
+            };
+        }
+        if (availability?.identity === identity && availability.failed) {
+            return { title: t('unavailable.checkFailedTitle'), body: t('unavailable.checkFailedBody') };
+        }
+        if (!canAsk) {
+            return availability?.identity === identity
+                ? { title: t('unavailable.featureTitle'), body: t('unavailable.featureBody') }
+                : { title: t('unavailable.checkingTitle'), body: t('unavailable.checkingBody') };
+        }
         if (submissionBlocked) {
             return { title: t('unavailable.uncertainTitle'), body: t('unavailable.uncertainBody') };
         }
         return null;
-    }, [permission, submissionBlocked, t, featureUnavailable]);
+    }, [availability, canAsk, confined, identity, permission, policyReadiness, policyReady, privacyInitializing, privacyUnavailable, submissionBlocked, t, featureUnavailable]);
 
     const canRetryTurn = retryPrompt !== null
         && unavailable === null
@@ -2409,9 +2949,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      *
      * A stopped answer leaves no assistant message behind, so nothing about it reaches the next
      * request on its own: continuing is an ordinary question, composed from the one that produced
-     * the partial and handed to the member to read, edit, and send. Available only while a retry
-     * would also be — the same question has to still be readable and the surface has to be able to
-     * send it.
+     * the partial and handed to the member to read, edit, and send. The exact question must still
+     * be identifiable and the surface able to send. Committed or uncertain writes can withhold
+     * Retry while leaving this composer-only route available.
      */
     const continuePrompt = useMemo(() => {
         if (retryPrompt === null || !canRetryTurn) return null;
@@ -2498,8 +3038,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return tReports.has(`${value}.name`) ? tReports(`${value}.name`)
                 : t('toolCards.templateDefaults.unavailable');
         }
-        if (field === 'start') return formatUtcDateTime(value, locale, value);
-        if (field === 'dueDate') return formatDate(value, locale);
+        if (field === 'start') return formatUtcDateTime(value, locale, value, timeZone);
+        if (field === 'dueDate') return formatDate(value, locale, timeZone);
         if (field === 'visibility') {
             return ASK_CONNEX_NOTE_VISIBILITIES.includes(value)
                 ? t(`toolCards.outcomeValues.visibility.${value}`)
@@ -2511,7 +3051,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 : value;
         }
         return value;
-    }, [locale, t, tReports]);
+    }, [locale, t, tReports, timeZone]);
     /** States one value a pending proposal reviews; see `askConnexChangeValueText`. */
     const changeValueText = useCallback((
         field: AiAssistantToolCallChangeField,
@@ -2565,8 +3105,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             locale,
             (hours) => t('toolCards.change.responseDueInHours', { hours }),
             { open: t('toolCards.change.taskOpen'), done: t('toolCards.change.taskDone') },
+            timeZone,
         );
-    }, [locale, t, tProvenance, tReports]);
+    }, [locale, t, tProvenance, tReports, timeZone]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -2577,7 +3118,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         imageDisclosure: tDisclosure('imageProvider'),
         citationKind,
         citationFreshness: (label: string, instant: string) =>
-            t('citationFreshness', { label, time: formatAnswerInstant(instant, locale) }),
+            t('citationFreshness', { label, time: formatAnswerInstant(instant, locale, timeZone) }),
         citationFreshnessUnknown: (label: string) => t('citationFreshnessUnknown', { label }),
         close: t('close'),
         closeWorkspace: t('closeWorkspace'),
@@ -2671,6 +3212,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnAccepted: t('turnAccepted'),
         turnCancelled: t('turnCancelled'),
         turnResolved: t('turnResolved'),
+        turnWritesSaved: t('turnWritesSaved'),
+        turnWritesUncertain: t('turnWritesUncertain'),
         turnStreaming: t('turnStreaming'),
         turnWorking: t('turnWorking'),
         thinkingToggle: t('thinkingToggle'),
@@ -2699,7 +3242,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionActivity: (time: string) => t('sessionActivity', { time }),
         sessionRail: t('sessionRail'),
         sessionGroup: (key: AskConnexSessionGroupKey) => t(`sessionGroups.${key}`),
-        relativeTime: (instant: string) => formatRelativeTime(instant, locale, now),
+        relativeTime: (instant: string) => formatRelativeTime(instant, locale, now, timeZone),
         proposalReview: {
             heading: (count: number) => t('proposalReview.heading', { count }),
             applicable: (applicable: number, count: number) =>
@@ -2824,12 +3367,16 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             pendingDetail: t('toolCards.states.pendingDetail'),
             pendingStatus: t('toolCards.states.pending'),
             proposalChanged: t('toolCards.failures.proposalChanged'),
+            proposalExpired: t('toolCards.failures.proposalExpired'),
+            proposalExpiredStatus: t('toolCards.states.proposalExpired'),
             proposalPermissionLost: t('toolCards.failures.proposalPermissionLost'),
             proposalUnavailable: t('toolCards.failures.proposalUnavailable'),
             proposedChange: t('toolCards.change.proposedChange'),
             recordLink: (target: string) => t('toolCards.recordLink', { target }),
             rejectedDetail: t('toolCards.states.rejectedDetail'),
             rejectedStatus: t('toolCards.states.rejected'),
+            withdrawnStatus: t('missions.review.withdrawn'),
+            withdrawnDetail: t('missions.review.withdrawn'),
             restrictedTarget: t('toolCards.restrictedTarget'),
             undo: t('toolCards.actions.undo'),
             undoAria: (target: string) => t('toolCards.actions.undoAria', { target }),
@@ -2890,10 +3437,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [changeValueText, citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, terminalMessages, tDisclosure, tWarmth]);
+    }), [changeValueText, citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, timeZone, terminalMessages, tDisclosure, tWarmth]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({
+            canAsk,
+            canWatch,
             open,
             instantOpen,
             instantWidth,
@@ -2905,7 +3454,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             openWorkspace,
             openWithPrompt,
         }),
-        [closeDrawer, instantOpen, instantWidth, open, openDrawer, openWithPrompt, openWorkspace, width, working, workspaceMode],
+        [canAsk, canWatch, closeDrawer, instantOpen, instantWidth, open, openDrawer, openWithPrompt, openWorkspace, width, working, workspaceMode],
     );
 
     const scopeSurface = useMemo<AskConnexScopeSurface>(
@@ -2930,16 +3479,53 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [scopeBlocked, scopeChips, scopeDraft, scopeEditorOpen, scopePreviewState, scopeProblem, settleScopeRouting, skills, t],
     );
 
+    const missionChanged = useCallback((sessionId: number) => {
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
+        setMissionRefreshVersion((version) => version + 1);
+        enqueueRealtimeRefresh(sessionId, signal);
+    }, [enqueueRealtimeRefresh]);
+    const missions = useAskConnexMissions({
+        identity,
+        workspaceId: activeWorkspaceId,
+        sessionId: scoped ? activeSession?.id ?? null : null,
+        enabled: scoped && assistantEnabled,
+        visible: surfaceVisible,
+        refreshVersion: missionRefreshVersion,
+        contentVersion: missionContentVersion,
+        onChanged: missionChanged,
+        onContentInvalidated: invalidateSessionContent,
+    });
+    useEffect(() => {
+        if (!workspaceMode || missionOutputId === null) {
+            openedMissionRef.current = null;
+            return;
+        }
+        if (missions.pendingId !== null || missions.loading) return;
+        const targetKey = `${identity}:${activeSession?.id}:${missionOutputId}`;
+        if (openedMissionRef.current === targetKey) return;
+        const run = missions.runs.find((item) => item.id === missionOutputId);
+        if (!run || !run.outputAvailable || run.contentWithheld) return;
+        openedMissionRef.current = targetKey;
+        void missions.viewOutput(run);
+    }, [activeSession?.id, identity, missionOutputId, missions, workspaceMode]);
+    const missionRecord = contextResult.pageContext.length === 1 ? contextResult.pageContext[0] : undefined;
+    const missionRecordLabel = missionRecord
+        ? contextResult.attachments.find((item) => item.kind === missionRecord.kind && item.id === missionRecord.id)?.label
+            ?? implicitContext?.label ?? t('missions.selectedRecord')
+        : null;
+
     return (
         <AskConnexContext.Provider value={value}>
             <AskConnexMountContext.Provider value={mountValue}>
                 {children}
             </AskConnexMountContext.Provider>
             <AskConnexDrawer
+                key={`${activeWorkspaceId}:${missionContentVersion}`}
                 open={open}
                 instantOpen={instantOpen}
                 isMobile={isMobile}
-                showTab={scoped}
+                showTab={scoped && assistantEnabled}
                 workspace={workspaceMode}
                 desktopRoot={desktopRoot}
                 workspaceRoot={workspaceRoot}
@@ -2955,6 +3541,39 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 loadState={scoped ? loadState : 'loading'}
                 loadError={scoped ? loadError : null}
                 composer={scoped ? composer : ''}
+                missionProgress={scoped ? (
+                    <AskConnexMissionProgress runs={missions.runs} loading={missions.loading}
+                        problem={missions.problem} pendingId={missions.pendingId} output={missions.output}
+                        hasMore={missions.hasMore} onControl={(run, action) => void missions.control(run, action)}
+                        onOutput={(run) => void missions.viewOutput(run)} onCloseOutput={missions.closeOutput}
+                        onRetry={missions.retry} onMore={() => void missions.loadMore()}
+                        proposalGroup={missions.proposalGroup} decisionResult={missions.decisionResult}
+                        reviewLabels={labels.proposalReview} cardLabels={labels.toolCard}
+                        onToggleInclusion={missions.toggleInclusion}
+                        onProposalAction={(id, action) => { if (action !== 'undo') void missions.decide([id], action === 'approve' ? 'approve' : 'discard'); }}
+                        onApplySelected={(ids) => missions.decide(ids, 'approve')} />
+                ) : null}
+                missionComposerAction={scoped && missionRecord && missionRecordLabel !== null
+                    && fileAttachments.length === 0 && selectionContext === null ? (
+                    <AskConnexMissionCreate key={`${identity}:${missionRecord.kind}:${missionRecord.id}`}
+                        recordLabel={missionRecordLabel} initialGoal={askConnexMessageContent(composer)}
+                        disabled={working || loadState !== 'ready' || unavailable !== null || missions.pendingId !== null}
+                        problem={missions.problem} onCreate={async (goal, missionType) => {
+                            const signal = identityControllerRef.current?.signal;
+                            if (!signal || signal.aborted) return false;
+                            const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal });
+                            try {
+                                const session = await ensureSession(signal, origin);
+                                if (signal.aborted) return false;
+                                return await missions.create(session.id, goal, {
+                                    kind: 'record', recordKind: missionRecord.kind, recordId: missionRecord.id,
+                                }, signal, missionType);
+                            } catch (error) {
+                                if (!signal.aborted) showApiError(error, 'missions.problems.failed');
+                                return false;
+                            }
+                        }} />
+                ) : null}
                 implicitContext={implicitContext}
                 selectionContext={selectionContext}
                 unsupportedPageContext={unsupportedPageContext}
@@ -2971,6 +3590,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 contentTooLong={scoped && contentTooLong}
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
+                turnWriteState={scoped ? turnWriteState : 'uncertain'}
                 thinking={scoped ? thinkingEntries : EMPTY_TURN_SEGMENTS}
                 narration={scoped ? narrationEntries : EMPTY_TURN_SEGMENTS}
                 todos={scoped ? todoItems : EMPTY_TODOS}
@@ -3007,7 +3627,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onInvite={inviteParticipant}
                 onLeave={() => void leaveSession()}
                 onRemoveParticipant={(participantUserId) => void removeParticipant(participantUserId)}
-                onRetry={() => setReloadVersion((version) => version + 1)}
+                onRetry={() => setReloadRequest((current) => ({ identity, version: (current?.version ?? 0) + 1 }))}
                 onComposerChange={setComposer}
                 onRemoveAttachment={removeAttachment}
                 onTogglePagePin={togglePagePin}

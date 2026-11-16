@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.WorkspaceMapper">
 
   <select id="getWorkspacesForUser" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.default_currency,
            w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN workspace_member wm ON wm.workspace_id = w.id
@@ -15,7 +15,7 @@
   </select>
 
   <select id="getMembershipsForUser" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
-    SELECT w.id, w.name, w.slug, w.timezone,
+    SELECT w.id, w.name, w.slug, w.timezone, w.default_currency,
            w.identity_version AS identityVersion, wm.role,
            w.org_id AS orgId, o.name AS orgName,
            o.identity_version AS orgIdentityVersion, om.org_role AS orgRole
@@ -29,7 +29,7 @@
   </select>
 
   <select id="getMembershipForUserForShare" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
-    SELECT w.id, w.name, w.slug, w.timezone,
+    SELECT w.id, w.name, w.slug, w.timezone, w.default_currency,
            w.identity_version AS identityVersion, wm.role,
            w.org_id AS orgId, o.name AS orgName,
            o.identity_version AS orgIdentityVersion, om.org_role AS orgRole
@@ -43,14 +43,14 @@
   </select>
 
   <select id="getActiveById" resultType="Workspace">
-    SELECT id, org_id, name, slug, timezone,
+    SELECT id, org_id, name, slug, timezone, default_currency,
            identity_version AS identityVersion, created_at, updated_at
     FROM workspace
     WHERE id = #{workspaceId} AND lifecycle_state = 'active'
   </select>
 
   <select id="lockActiveIdentity" resultType="Workspace">
-    SELECT id, org_id, name, slug, timezone,
+    SELECT id, org_id, name, slug, timezone, default_currency,
            identity_version AS identityVersion, created_at, updated_at
     FROM workspace
     WHERE id = #{workspaceId} AND lifecycle_state = 'active'
@@ -58,7 +58,7 @@
   </select>
 
   <select id="getDefaultWorkspace" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.default_currency,
            w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN organization o ON o.id = w.org_id
@@ -117,6 +117,13 @@
     FOR UPDATE
   </select>
 
+  <select id="lockAuthorizationMembershipWithoutWaiting" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    FOR UPDATE NOWAIT
+  </select>
+
   <select id="lockAuthorizationMembershipForShare" resultType="WorkspaceMember">
     SELECT workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member
@@ -146,6 +153,18 @@
       WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
         AND status IN ('active', 'pending')
     )
+  </select>
+
+  <select id="getActiveMemberIdsIn" resultType="int">
+    SELECT user_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'active'
+      AND user_id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">
+        #{userId}
+      </foreach>
+    ORDER BY user_id
   </select>
 
   <select id="getMemberIdsIncludingPending" resultType="int">
@@ -180,6 +199,20 @@
     ORDER BY u.display_name, u.id
   </select>
 
+  <select id="findPendingInvitationReferenceByEmail" resultType="String">
+    SELECT SHA2(CONCAT('pending-membership:', wm.membership_id), 256)
+    FROM workspace_member wm
+    JOIN app_user u ON u.id = wm.user_id
+    WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'pending' AND u.email = #{email}
+  </select>
+
+  <select id="findPendingInvitationUserId" resultType="java.lang.Integer" flushCache="true" useCache="false">
+    SELECT user_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND status = 'pending'
+      AND SHA2(CONCAT('pending-membership:', membership_id), 256) = #{reference}
+  </select>
+
   <select id="getMembersWithRoles" resultType="ooo.klae.connex.backend.dto.MemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl,
@@ -188,7 +221,7 @@
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
     LEFT JOIN workspace_role wr ON wr.id = wm.role_id
-    WHERE wm.workspace_id = #{workspaceId}
+    WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'active'
     ORDER BY FIELD(wm.role, 'owner', 'admin', 'member'), u.display_name, u.id
   </select>
 
@@ -228,6 +261,24 @@
     FROM workspace_member FORCE INDEX (fk_workspace_member_role)
     WHERE role_id = #{roleId} AND workspace_id = #{workspaceId}
     ORDER BY user_id
+    FOR UPDATE NOWAIT
+  </select>
+
+  <select id="discoverAccountMembershipWorkspaceIds" resultType="int" flushCache="true" useCache="false">
+    SELECT workspace_id FROM workspace_member WHERE user_id = #{userId}
+  </select>
+
+  <select id="lockAccountMembershipForUpdate" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
+    WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
+  <select id="lockAccountMembershipWithoutWaiting" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
+    WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
     FOR UPDATE NOWAIT
   </select>
 
@@ -274,6 +325,12 @@
     WHERE id = #{workspaceId} AND lifecycle_state = 'active'
   </update>
 
+  <update id="updateDefaultCurrency">
+    UPDATE workspace
+    SET default_currency = #{defaultCurrency}, identity_version = identity_version + 1
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+  </update>
+
   <select id="getOrgId" resultType="int">
     SELECT w.org_id
     FROM workspace w
@@ -309,6 +366,17 @@
     LIMIT #{limit}
   </select>
 
+  <select id="findLastWorkspaceId" resultType="java.lang.Integer">
+    SELECT MAX(id) FROM workspace
+  </select>
+
+  <select id="findWorkspaceIdsThroughPage" resultType="int">
+    SELECT w.id FROM workspace w JOIN organization o ON o.id = w.org_id
+    WHERE w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
+      AND w.id &gt; #{afterId} AND w.id &lt;= #{throughId}
+    ORDER BY w.id LIMIT #{limit}
+  </select>
+
   <!-- Share hydration snapshot (#811). This replaces the control-plane `workspace` joins the
        tenant-scoped ShareMapper used to carry, so it must reproduce them exactly: those joins had
        no lifecycle predicate, and adding one here would silently stop listing (and stop granting
@@ -318,14 +386,24 @@
        ceilings and for tenant diagnostics, and it admits only workspaces whose own and whose
        organization's lifecycle_state is 'active'. The two therefore return different sets for a
        winding-down organization, so the allowlist ShareMapper enforces can be wider than the one
-       IdentityMapper/PersonEdgeMapper/AiAssistantIdentifierMapper enforce. Neither statement may
-       be swapped for the other; see ShareWorkspaceControlAccess for the full argument. -->
-  <select id="findOrganizationWorkspacesForShare" resultType="Workspace">
+       IdentityMapper/PersonEdgeMapper/AiAssistantIdentifierMapper enforce.
+       RecordVisibilityScopeControlAccess also delegates to the unfiltered snapshot to preserve
+       legacy record-visibility ceilings (#485). Neither statement may be swapped for the other;
+       see ShareWorkspaceControlAccess for the full argument. -->
+  <sql id="unfilteredOrganizationWorkspaces">
     SELECT peer.id, peer.org_id, peer.name
     FROM workspace anchor
     JOIN workspace peer ON peer.org_id = anchor.org_id
     WHERE anchor.id = #{workspaceId}
     ORDER BY peer.name, peer.id
+  </sql>
+
+  <select id="findOrganizationWorkspacesForShare" resultType="Workspace">
+    <include refid="unfilteredOrganizationWorkspaces"/>
+  </select>
+
+  <select id="findOrganizationWorkspacesForCachePurge" resultType="Workspace" flushCache="true" useCache="false">
+    <include refid="unfilteredOrganizationWorkspaces"/>
   </select>
 
   <!-- Read-path organization scope. OrganizationWorkspaceScopeControlAccess turns this into the
@@ -333,9 +411,10 @@
        purpose: a torn-down or winding-down workspace must stop contributing read visibility.
        DIVERGENCE, deliberate: `findOrganizationWorkspacesForShare` above applies no lifecycle
        filter, because the share joins it replaced applied none. The same bound parameter name
-       therefore carries a different set on the share path than on the read path. -->
+       therefore carries the unfiltered set on sharing and legacy record-visibility paths, and the
+       active-only set on Identity/PersonEdge/assistant paths. -->
   <select id="findByOrgId" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.default_currency,
            w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN organization o ON o.id = w.org_id
@@ -345,7 +424,7 @@
   </select>
 
   <select id="findActiveByOrgIdPage" resultType="Workspace">
-    SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
+    SELECT w.id, w.org_id, w.name, w.slug, w.timezone, w.default_currency,
            w.identity_version AS identityVersion, w.created_at, w.updated_at
     FROM workspace w
     JOIN organization o ON o.id = w.org_id
@@ -382,7 +461,7 @@
         </foreach>
         AND w.lifecycle_state = 'active'
         AND o.lifecycle_state = 'active'
-        AND wm.status IN ('active', 'pending')
+        AND wm.status = 'active'
         AND EXISTS (
           SELECT 1
           FROM workspace_member actor_membership
@@ -421,21 +500,48 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 
+  <!-- installed_on is TIMESTAMP: convert to UTC independently of the connection time zone.
+       Missing successful cutover history produces NULL, so invitation authorization fails closed. -->
+  <sql id="pendingInvitationCutoverDeadline">
+    (SELECT CAST(installed_on AT TIME ZONE '+00:00' AS DATETIME) + INTERVAL 30 DAY
+     FROM flyway_schema_history WHERE version = '247' AND success = 1 AND type = 'SQL')
+  </sql>
+
+  <select id="findPendingInvitationCutoverDeadline" resultType="String">
+    SELECT <include refid="pendingInvitationCutoverDeadline"/>
+  </select>
+
+  <select id="findPendingDeadlineWindow" resultType="ooo.klae.connex.backend.mappers.WorkspaceMapper$PendingDeadlineRow">
+    SELECT user_id, membership_id, (status = 'pending' AND expires_at IS NULL) AS needs_backfill
+    FROM workspace_member FORCE INDEX (PRIMARY)
+    WHERE workspace_id = #{workspaceId} AND user_id &gt; #{afterUserId}
+    ORDER BY user_id LIMIT #{limit}
+  </select>
+
+  <update id="backfillPendingDeadline">
+    UPDATE workspace_member FORCE INDEX (PRIMARY)
+    SET expires_at = <include refid="pendingInvitationCutoverDeadline"/>
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND membership_id = #{membershipId}
+      AND status = 'pending' AND expires_at IS NULL
+      AND <include refid="pendingInvitationCutoverDeadline"/> IS NOT NULL
+  </update>
+
   <insert id="addPendingMember">
     INSERT INTO workspace_member (
-      workspace_id, user_id, role, status, grant_authorization_version
+      workspace_id, user_id, role, status, grant_authorization_version, expires_at
     )
-    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1)
+    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1, UTC_TIMESTAMP() + INTERVAL 14 DAY)
   </insert>
 
   <update id="activateMember">
     UPDATE workspace_member SET status = 'active'
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
       AND grant_authorization_version &gt;= 1
+      AND COALESCE(expires_at, <include refid="pendingInvitationCutoverDeadline"/>) &gt; UTC_TIMESTAMP()
   </update>
 
   <select id="getPendingMemberships" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
-    SELECT w.id, w.name, w.slug, w.timezone,
+    SELECT w.id, w.name, w.slug, w.timezone, w.default_currency,
            w.identity_version AS identityVersion, wm.role,
            w.org_id AS orgId, o.name AS orgName,
            o.identity_version AS orgIdentityVersion, om.org_role AS orgRole
@@ -444,6 +550,7 @@
     JOIN organization o ON o.id = w.org_id
     LEFT JOIN org_member om ON om.org_id = w.org_id AND om.user_id = wm.user_id
     WHERE wm.user_id = #{userId} AND wm.status = 'pending'
+      AND COALESCE(wm.expires_at, <include refid="pendingInvitationCutoverDeadline"/>) &gt; UTC_TIMESTAMP()
       AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
     ORDER BY w.name, w.id
   </select>
@@ -463,4 +570,28 @@
     DELETE FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
   </delete>
+  <select id="getExportPermissions" resultType="ooo.klae.connex.backend.dto.ExportPermissions" flushCache="true" useCache="false">
+    SELECT export_data_owner AS `owner`, export_data_admin AS `admin`, export_data_member AS `member`
+    FROM workspace
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+  </select>
+
+  <select id="getExportPermissionsForShare" resultType="ooo.klae.connex.backend.dto.ExportPermissions" flushCache="true" useCache="false">
+    SELECT export_data_owner AS `owner`, export_data_admin AS `admin`, export_data_member AS `member`
+    FROM workspace
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+    FOR SHARE
+  </select>
+
+  <update id="updateExportPermission">
+    UPDATE workspace
+    SET
+    <choose>
+      <when test="role == 'owner'">export_data_owner = #{enabled}</when>
+      <when test="role == 'admin'">export_data_admin = #{enabled}</when>
+      <when test="role == 'member'">export_data_member = #{enabled}</when>
+      <otherwise>id = id</otherwise>
+    </choose>
+    WHERE id = #{workspaceId} AND lifecycle_state = 'active'
+  </update>
 </mapper>

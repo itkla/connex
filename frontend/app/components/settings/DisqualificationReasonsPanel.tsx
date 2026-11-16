@@ -88,12 +88,12 @@ function WorkspaceDisqualificationReasonsPanel({ workspaceId }: { workspaceId: n
 
     const visible = useMemo(
         () => reasonsWorkspaceId === workspaceId
-            ? reasons.filter((reason) => showArchived || reason.archivedAt === null)
+            ? reasons.filter((reason) => showArchived || reason.archivedAt == null)
             : [],
         [reasons, reasonsWorkspaceId, showArchived, workspaceId],
     );
     const archivedCount = reasonsWorkspaceId === workspaceId
-        ? reasons.filter((reason) => reason.archivedAt !== null).length
+        ? reasons.filter((reason) => reason.archivedAt != null).length
         : 0;
     const draftCodeValid = draft !== null
         && isCanonicalDisqualificationReasonCode(draft.code);

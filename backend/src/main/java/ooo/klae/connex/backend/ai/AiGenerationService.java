@@ -29,6 +29,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -385,6 +386,9 @@ public class AiGenerationService {
             fail(state, "cancelled");
         } catch (RuntimeException exception) {
             fail(state, Thread.currentThread().isInterrupted() ? "cancelled" : "generation_failed");
+            if (exception instanceof TenantScopeSnapshotException refusal) {
+                throw refusal;
+            }
         }
     }
 

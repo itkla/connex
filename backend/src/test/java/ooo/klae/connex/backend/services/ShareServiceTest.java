@@ -71,16 +71,16 @@ class ShareServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee WS");
         Company company = companyIn(a.getId());
 
-        assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
-        assertFalse(companyMapper.exists(b.getId(), company.getId()));
+        assertNull(companyMapper.getCompanyById(b.getId(), orgWorkspaceIdsJson(workspaceMapper, b.getId()), company.getId()));
+        assertFalse(companyMapper.exists(b.getId(), orgWorkspaceIdsJson(workspaceMapper, b.getId()), company.getId()));
 
         authenticateAs(currentUser, a.getId());
         shareService.share("company", company.getId(), b.getId(), false);
         authenticateAs(currentUser, b.getId());
 
-        Company seenByB = companyMapper.getCompanyById(b.getId(), company.getId());
+        Company seenByB = companyMapper.getCompanyById(b.getId(), orgWorkspaceIdsJson(workspaceMapper, b.getId()), company.getId());
         assertNotNull(seenByB);
-        assertTrue(companyMapper.exists(b.getId(), company.getId()));
+        assertTrue(companyMapper.exists(b.getId(), orgWorkspaceIdsJson(workspaceMapper, b.getId()), company.getId()));
         assertEquals(a.getId(), seenByB.getWorkspaceId());
     }
 
@@ -92,12 +92,12 @@ class ShareServiceTest extends AbstractServiceTest {
 
         authenticateAs(currentUser, a.getId());
         shareService.share("company", company.getId(), b.getId(), false);
-        assertNotNull(companyMapper.getCompanyById(b.getId(), company.getId()));
+        assertNotNull(companyMapper.getCompanyById(b.getId(), orgWorkspaceIdsJson(workspaceMapper, b.getId()), company.getId()));
 
         shareService.unshare("company", company.getId(), b.getId());
         authenticateAs(currentUser, b.getId());
 
-        assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
+        assertNull(companyMapper.getCompanyById(b.getId(), orgWorkspaceIdsJson(workspaceMapper, b.getId()), company.getId()));
     }
 
     /**

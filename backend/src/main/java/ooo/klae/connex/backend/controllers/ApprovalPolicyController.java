@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
+import org.springframework.validation.annotation.Validated;
+import ooo.klae.connex.backend.validation.ValidCurrency;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.ApprovalPolicyDto;
@@ -31,7 +33,7 @@ public class ApprovalPolicyController {
     }
 
     @PostMapping
-    public ApprovalPolicyDto create(@Valid @RequestBody ApprovalPolicyDto dto) {
+    public ApprovalPolicyDto create(@Validated(ValidCurrency.OnCreate.class) @RequestBody ApprovalPolicyDto dto) {
         return ApprovalPolicyDto.from(policyService.create(dto.toBean()));
     }
 

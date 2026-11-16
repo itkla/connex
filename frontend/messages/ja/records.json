@@ -1,4 +1,29 @@
 {
+  "DealCurrencyScope": {
+    "title": "表示通貨",
+    "dashboardBasis": "金額の集計・グラフは{currency}の案件のみが対象です",
+    "dealsBasis": "{currency}の案件と集計値を表示しています",
+    "widgetBasis": "{currency}の案件のみ",
+    "recordCountsBasis": "案件数の表示には、すべての通貨の案件が含まれます。",
+    "dashboardExcluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は金額の集計・グラフの対象外です。通貨を切り替えると確認できます。}}",
+    "excluded": "{count, plural, =0 {他の通貨の案件はありません。} other {他の通貨の案件#件は表示・集計の対象外です。通貨を切り替えると確認できます。}}",
+    "viewDeals": "{currency}の案件を表示"
+  },
+  "RecordListState": {
+    "editChoicesUnavailable": "履歴を編集するには、読み込めなかった連絡先または案件を再読み込みしてください。",
+    "sectionRecovered": "{section}を読み込みました。",
+    "sectionTitle": "{section}を読み込めませんでした",
+    "sectionDeniedTitle": "{section}を表示する権限がありません",
+
+    "title": "一覧を読み込めませんでした",
+    "body": "保存済みのデータは変更されていません。もう一度お試しください。",
+    "refreshBody": "前回読み込んだ内容を表示しています。最新の内容を読み込むには、もう一度お試しください。",
+    "deniedTitle": "この一覧を表示する権限がありません",
+    "deniedBody": "ワークスペースの管理者にアクセス権を依頼してから、もう一度お試しください。",
+    "retry": "再試行",
+    "retrying": "再試行中…",
+    "reference": "参照番号: {id}"
+  },
   "EngineEvaluation": {
     "title": "インサイト",
     "contactRiskLabel": "リスク・関係低下シグナル",
@@ -35,7 +60,7 @@
       "tag": "タグ",
       "title": "役職",
       "email": "メール",
-      "company": "会社",
+      "company": "関連会社",
       "value": "案件額",
       "stage": "ステージ",
       "owner": "担当者",
@@ -50,6 +75,8 @@
     "op": {
       "is": "である",
       "isNot": "ではない",
+      "in": "のいずれかである",
+      "notIn": "のいずれでもない",
       "contains": "を含む",
       "notContains": "を含まない",
       "has": "を持つ",
@@ -201,7 +228,31 @@
       "label": "関係者なし",
       "labelNot": "関係者あり",
       "description": "案件に紐づく連絡先がありません。"
-    }
+    },
+    "recordName": {
+      "company": "会社名",
+      "person": "連絡先名",
+      "deal": "案件名"
+    },
+    "recordDescription": {
+      "company": "関係性や項目の条件を組み合わせて、会社を絞り込みます。",
+      "person": "関係性や項目の条件を組み合わせて、連絡先を絞り込みます。",
+      "deal": "関係性や項目の条件を組み合わせて、案件を絞り込みます。"
+    },
+    "setCondition": "条件を設定",
+    "conditionTitle": "ワークフローの条件",
+    "conditionDescription": {
+      "company": "会社が次の条件に一致した場合、「はい」に進みます。",
+      "person": "連絡先が次の条件に一致した場合、「はい」に進みます。",
+      "deal": "案件が次の条件に一致した場合、「はい」に進みます。"
+    },
+    "linkedCompanyHint": "「関連会社」は連絡先に紐づく会社を、「連絡先名」は連絡先自身の名前を確認します。会社が未設定の連絡先は、連絡先一覧の会社フィルターで絞り込めます。",
+    "summaryOr": " または ",
+    "summaryAnd": " かつ ",
+    "summaryNot": "次の条件に一致しない（{conditions}）",
+    "valueSeparator": "、",
+    "unavailableValue": "参照できないレコード",
+    "durationDays": "{days}日"
   },
   "SavedViews": {
     "all": "すべて",
@@ -414,8 +465,7 @@
     "omitted": "ほか{count}件の対象ソースもスコアに含まれています。",
     "limited": "根拠が限定的です。信頼度の高い評価には{minimum}件以上の対象ソースが必要です。",
     "privateNotesExcluded": "あなたの非公開メモ{count}件はこのスコアから除外されています。",
-    "asOf": "{date}時点、モデル{version}で計算。",
-    "unknownModel": "不明",
+    "asOf": "{date}時点で計算。",
     "actionsTitle": "次にできること",
     "actionLogInteraction": "やり取りを記録",
     "actionScheduleFollowUp": "フォローアップを設定",
@@ -429,6 +479,7 @@
     "evaluationHeading": "レーダーの監視設定"
   },
   "RecordPeek": {
+    "closedAt": "決着日",
     "type_company": "会社",
     "type_person": "連絡先",
     "type_deal": "案件",

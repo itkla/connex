@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
  * @param reasonCode bounded failure reason safe for a product surface, or null
  * @param createdAt when the delivery was materialized
  * @param updatedAt when the delivery last changed
+ * @param messageName the send's message name, or null when unavailable
+ * @param sendNumber the one-based creation order of the send within this campaign
  */
 public record CampaignRecipientRow(
         int deliveryId,
@@ -28,5 +30,7 @@ public record CampaignRecipientRow(
         LocalDateTime reconciliationRequiredAt,
         String reasonCode,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt) {
+        LocalDateTime updatedAt,
+        String messageName,
+        int sendNumber) {
 }

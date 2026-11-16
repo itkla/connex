@@ -12,7 +12,7 @@ import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, C
 import { type Company, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import { cn } from '@/lib/utils';
-import { toMysqlDateTime, toDatetimeLocalValue } from '@/app/lib/utils';
+import { toMysqlDateTime } from '@/app/lib/utils';
 import {
     EASE_OUT,
     QuickEditField,
@@ -22,12 +22,15 @@ import {
 import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { toastError } from '@/app/lib/toast';
+import { dealClosedAtInput, dealClosedAtFromInput } from './dealDates';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 
 export type DealDraft = {
+    expectedVersion?: number;
     name: string;
     value: number;
     actualValue: number;
+    actualValueEdited?: boolean;
     currency: string;
     pipeline: number;
     stage: number;
@@ -39,6 +42,7 @@ export type DealDraft = {
 };
 
 type Props = {
+    timezone: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     selectedIds: Set<SelectionId>;
@@ -65,6 +69,7 @@ const OUTCOME_SELECTED: Record<OutcomeOption['key'], string> = {
 };
 
 export default function QuickEditDealSheet({
+    timezone,
     open,
     onOpenChange,
     selectedDeals,
@@ -78,6 +83,7 @@ export default function QuickEditDealSheet({
     customFieldsDirty,
     customFieldsSlot,
 }: Props) {
+    const closeTimeZone = timezone || 'UTC';
     const t = useTranslations('DealsQuickEditSheet');
     const reduce = useReducedMotion() ?? false;
     const total = selectedDeals.length;
@@ -111,6 +117,7 @@ export default function QuickEditDealSheet({
             description={t('subtitle')}
             count={total}
             isSaving={isSaving}
+            interactionPending={isSaving}
             onSave={saveEdits}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
@@ -124,8 +131,9 @@ export default function QuickEditDealSheet({
                 const stages = draft.pipeline ? stagesByPipeline[draft.pipeline] ?? [] : [];
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
-                const closedAt = toDatetimeLocalValue(draft.closedAt);
-                const actualValue = actualValueForOutcome(draft.won, draft.actualValue ?? 0);
+                const closedAt = dealClosedAtInput(draft.closedAt, closeTimeZone);
+                const actualValue = actualValueForOutcome(draft.won,
+                    draft.actualValueEdited === false && d.won !== true ? draft.value : draft.actualValue);
                 const isLost = draft.won === false;
 
                 return (
@@ -200,13 +208,13 @@ export default function QuickEditDealSheet({
                                 >
                                     <ComboboxInput id={`deal-pipeline-${d.id}`} placeholder={t('selectPipeline')} />
                                     <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxEmpty>{t('noPipelines')}</ComboboxEmpty>
                                         <ComboboxList onWheel={handleListWheel}>
-                                            <ComboboxEmpty>{t('noPipelines')}</ComboboxEmpty>
-                                            {pipelines.map((p) => (
+                                            {(p: (typeof pipelines)[number]) => (
                                                 <ComboboxItem key={p.id} value={p}>
                                                     {p.name}
                                                 </ComboboxItem>
-                                            ))}
+                                            )}
                                         </ComboboxList>
                                     </ComboboxContent>
                                 </Combobox>
@@ -238,13 +246,13 @@ export default function QuickEditDealSheet({
                                         disabled={!draft.pipeline}
                                     />
                                     <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
                                         <ComboboxList onWheel={handleListWheel}>
-                                            <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
-                                            {stages.map((s) => (
+                                            {(s: (typeof stages)[number]) => (
                                                 <ComboboxItem key={s.id} value={s}>
                                                     {s.name}
                                                 </ComboboxItem>
-                                            ))}
+                                            )}
                                         </ComboboxList>
                                     </ComboboxContent>
                                 </Combobox>
@@ -253,8 +261,9 @@ export default function QuickEditDealSheet({
 
                         <QuickEditField label={t('company')} htmlFor={`deal-company-${d.id}`}>
                             <Combobox
-                                items={companySearch.companies}
-                                filter={null}
+                                items={companySearch.options}
+                                serverSearch={companySearch.serverSearch}
+                                autoHighlight
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selectedCompany}
                                 onInputValueChange={companySearch.onInputValueChange}
@@ -262,13 +271,13 @@ export default function QuickEditDealSheet({
                             >
                                 <ComboboxInput id={`deal-company-${d.id}`} placeholder={t('selectCompany')} showClear />
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompanies')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noCompanies')}</ComboboxEmpty>
-                                        {companySearch.companies.map((c) => (
+                                        {(c: (typeof companySearch.companies)[number]) => (
                                             <ComboboxItem key={c.id} value={c}>
                                                 {c.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -330,12 +339,18 @@ export default function QuickEditDealSheet({
                                                 id={`deal-closed-at-${d.id}`}
                                                 type="datetime-local"
                                                 value={closedAt}
-                                                onChange={(e) =>
-                                                    updateDraft(d.id, {
-                                                        closedAt: e.target.value ? toMysqlDateTime(e.target.value) : null,
-                                                    })
-                                                }
+                                                aria-describedby={`deal-closed-at-zone-${d.id}`}
+                                                onChange={(e) => {
+                                                    const value = e.target.value;
+                                                    const parsed = value ? dealClosedAtFromInput(value, closeTimeZone, draft.closedAt) : null;
+                                                    if (value && parsed === null) {
+                                                        toastError(t('closedAtInvalid'));
+                                                        return;
+                                                    }
+                                                    updateDraft(d.id, { closedAt: parsed });
+                                                }}
                                             />
+                                            <p id={`deal-closed-at-zone-${d.id}`} className="text-xs text-muted-foreground">{closeTimeZone}</p>
                                         </QuickEditField>
                                         <QuickEditField label={t('actualValue')} htmlFor={`deal-actual-value-${d.id}`}>
                                             <Input
@@ -346,7 +361,10 @@ export default function QuickEditDealSheet({
                                                 value={actualValue}
                                                 disabled={isLost}
                                                 aria-describedby={isLost ? `deal-actual-value-hint-${d.id}` : undefined}
-                                                onChange={(e) => updateDraft(d.id, { actualValue: Number(e.target.value) })}
+                                                onChange={(e) => updateDraft(d.id, {
+                                                    actualValue: Number(e.target.value),
+                                                    actualValueEdited: true,
+                                                })}
                                             />
                                             {isLost ? (
                                                 <p

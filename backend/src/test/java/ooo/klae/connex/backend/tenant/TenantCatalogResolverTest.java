@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.tenant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +35,13 @@ class TenantCatalogResolverTest {
     void sharedPlacementResolvesToDefaultCatalog() {
         when(placementRegistry.effectivePlacementFor(7)).thenReturn(OrgPlacement.sharedDefault(7));
         assertNull(resolver.resolveCatalog(7));
+    }
+
+    @Test
+    void routingModeComesFromTheExistingPlacementConfiguration() {
+        assertFalse(resolver.isCatalogPerPlacement());
+        properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
+        assertTrue(resolver.isCatalogPerPlacement());
     }
 
     @Test

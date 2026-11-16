@@ -60,6 +60,7 @@ public class WarmPathService {
     private final AuthService authService;
     private final TaskService taskService;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /** A dormant relationship must be untouched at least this long to surface as a re-warm target. */
     private static final int MIN_DORMANT_DAYS = 30;
@@ -135,7 +136,10 @@ public class WarmPathService {
         if (limit <= 0) {
             return List.of();
         }
-        List<IntroCandidatePerson> candidates = introductionMapper.findWarmPathCandidates(workspaceId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
+        List<IntroCandidatePerson> candidates =
+            introductionMapper.findWarmPathCandidates(workspaceId, orgWorkspaceIdsJson);
         if (candidates.size() < 2) {
             return List.of();
         }
@@ -678,7 +682,8 @@ public class WarmPathService {
         User actor = authService.getCurrentUser();
 
         Task task = new Task();
-        task.setDescription(resolveTaskDescription(workspaceId, targetPersonId, bridgePersonId, taskDescription));
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        task.setDescription(resolveTaskDescription(workspaceId, targetPersonId, bridgePersonId, taskDescription, personWorkspaceIdsJson));
         task.setAssignedTo(actor);
         Person target = new Person();
         target.setId(targetPersonId);
@@ -701,12 +706,12 @@ public class WarmPathService {
      * the web app's cookie-selected locale.
      */
     private String resolveTaskDescription(
-            int workspaceId, int targetPersonId, int bridgePersonId, String taskDescription) {
+            int workspaceId, int targetPersonId, int bridgePersonId, String taskDescription, String personWorkspaceIdsJson) {
         if (taskDescription != null && !taskDescription.isBlank()) {
             return taskDescription.trim();
         }
-        Person bridge = personMapper.getPersonById(workspaceId, bridgePersonId);
-        Person target = personMapper.getPersonById(workspaceId, targetPersonId);
+        Person bridge = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, bridgePersonId);
+        Person target = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, targetPersonId);
         String bridgeToken = mentionToken(bridge, bridgePersonId);
         String targetToken = mentionToken(target, targetPersonId);
         if ("ja".equals(LocaleContextHolder.getLocale().getLanguage())) {

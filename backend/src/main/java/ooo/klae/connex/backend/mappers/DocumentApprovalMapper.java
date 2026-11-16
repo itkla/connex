@@ -14,7 +14,11 @@ import ooo.klae.connex.backend.dto.ApprovalInboxRow;
 import ooo.klae.connex.backend.dto.ApprovalInboxCursor;
 import ooo.klae.connex.backend.dto.ApprovalReminderRow;
 
-/** Mapper for {@code document_approval} and its frozen chain; every statement is workspace-scoped. */
+/**
+ * Mapper for {@code document_approval} and its frozen chain;
+ * workspace operations bind the workspace, while account-departure reads
+ * and exact-key cleanup span the currently pinned tenant catalog.
+ */
 public interface DocumentApprovalMapper {
     List<DocumentApproval> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<DocumentApproval> getByDocumentId(@Param("workspaceId") int workspaceId, @Param("documentId") int documentId);
@@ -74,4 +78,26 @@ public interface DocumentApprovalMapper {
     List<ApprovalInboxRow> findActionableSteps(@Param("workspaceId") int workspaceId,
         @Param("userId") int userId, @Param("asOf") String asOf,
         @Param("after") ApprovalInboxCursor after, @Param("limit") int limit);
+
+    /** Fresh, non-locking complete routing facts only for steps mentioning the departing user. */
+    List<DocumentApprovalStep> findOpenStepsForDeparture(@Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    /** Fresh, non-locking complete routing facts for this user throughout the current tenant catalog. */
+    List<DocumentApprovalStep> findOpenStepsForDepartureAnywhere(@Param("userId") int userId);
+
+    /** Discovers every frozen or template approver reference, including terminal and inactive ones. */
+    List<ApprovalStepApprover> findDepartureReferences(@Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+
+    /** Discovers every approver reference in this catalog. */
+    List<ApprovalStepApprover> findDepartureReferencesAnywhere(@Param("userId") int userId);
+
+    /** Deletes the exact discovered row only if it still references the departing member. */
+    int deleteDepartingApprover(@Param("workspaceId") int workspaceId, @Param("id") int id,
+        @Param("userId") int userId);
+
+    /** Identity-scoped catalog-erasure twin; retains the exact workspace, row, and user predicate. */
+    int deleteDepartingApproverAnywhere(@Param("workspaceId") int workspaceId, @Param("id") int id,
+        @Param("userId") int userId);
 }

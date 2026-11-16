@@ -121,6 +121,24 @@ class ReportComposerServiceTest {
     }
 
     @Test
+    void preview_warnedOutputIsNeitherServedNorCached() {
+        Admission admission = readyAdmission();
+        AiReportComposerContent content = validContent();
+        when(invocationService.completeStructured(
+                any(AiInvocation.class),
+                eq(AiReportComposerContent.class),
+                any(AiRawOutputGuard.class),
+                eq(admission))).thenReturn(new AiStructuredOutcome.Parsed<>(content, 1, 100, 50, "end_turn"));
+        ReportComposerPreviewDto result = service.preview(new ReportComposerRequest("Pipeline health"));
+
+        assertFalse(result.available());
+        assertEquals("provider_error", result.reason());
+        verify(cacheStore, never()).save(anyInt(), anyString(), anyInt(), anyInt(), anyString(), any(),
+                anyInt(), anyString(), anyLong());
+        verify(admission, never()).completeLeader(LeaderOutcome.CACHE_READY);
+    }
+
+    @Test
     void preview_rejectsUnclosedAssumptionVocabularyBeforePersistence() {
         Admission admission = readyAdmission();
         AiReportComposerContent content = new AiReportComposerContent(
@@ -185,6 +203,32 @@ class ReportComposerServiceTest {
         assertFalse(result.available());
         assertEquals("invalid_definition", result.reason());
         verify(reportService, never()).validateProposal(any());
+    }
+
+    @Test
+    void preview_rechecksAConcurrentPublicationBeforeGeneratingAgain() {
+        Admission admission = readyAdmission();
+        var row = new ooo.klae.connex.backend.beans.AiOutputCache();
+        row.setContentHash("hash");
+        row.setPayload("fresh-output");
+        row.setGeneratedAt("2026-08-05T06:00:00Z");
+        when(cacheStore.find(anyInt(), anyString(), anyInt(), anyInt()))
+                .thenReturn(Optional.of(oldVersionRow()), Optional.of(row));
+        when(cacheStore.read("fresh-output", AiReportComposerContent.class))
+                .thenReturn(Optional.of(validContent()));
+
+        var result = service.preview(new ReportComposerRequest("Pipeline health"));
+
+        assertTrue(result.available());
+        verifyNoInteractions(invocationService);
+        verify(admission).completeLeader(LeaderOutcome.CACHE_READY);
+    }
+
+    private static ooo.klae.connex.backend.beans.AiOutputCache oldVersionRow() {
+        var row = new ooo.klae.connex.backend.beans.AiOutputCache();
+        row.setContentHash("v3-output-hash");
+        row.setPayload("stale-output");
+        return row;
     }
 
     private Admission readyAdmission() {

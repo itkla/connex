@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -16,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.dto.UserProfileHydrationRow;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -69,13 +69,13 @@ public class DealCollaboratorControlAccess {
         return rows.stream().map(UserProfileHydrationRow::getProfile).toList();
     }
 
-    private <T> T execute(Supplier<T> work) {
+    private <T> T execute(ControlPlaneRead<T> read) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || tenantContext.getCatalog() == null) {
-            return tenantWorkScope.unrouted(work);
+            return tenantWorkScope.unroutedRead(read);
         }
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
-        return transaction.execute(status -> tenantWorkScope.unrouted(work));
+        return transaction.execute(status -> tenantWorkScope.unroutedRead(read));
     }
 }

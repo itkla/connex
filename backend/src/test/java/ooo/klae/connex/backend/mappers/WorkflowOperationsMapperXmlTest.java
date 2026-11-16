@@ -64,6 +64,28 @@ class WorkflowOperationsMapperXmlTest {
     }
 
     @Test
+    void healthUsesLatestCompletedOutcomesWhileOnlyFailureMetricsExpire() throws Exception {
+        Configuration configuration = configuration();
+        String summary = sql(configuration, "getSummary", Map.of("workspaceId", 7, "runtimeEnabled", false));
+        String health = summary.substring(0, summary.indexOf("AS intervention_required_count"));
+
+        assertFalse(health.contains("INTERVAL 24 HOUR"));
+        assertTrue(summary.contains("LEFT JOIN LATERAL"));
+        assertTrue(summary.contains("wr.workspace_id = w.workspace_id"));
+        assertTrue(summary.contains("re.workspace_id = w.workspace_id"));
+        assertTrue(summary.contains("re.status != 'running'"));
+        assertTrue(summary.contains("ORDER BY wr.started_at DESC, wr.id DESC LIMIT 1"));
+        assertTrue(summary.contains("ORDER BY re.executed_at DESC, re.id DESC LIMIT 1"));
+        assertTrue(summary.contains("INTERVAL 24 HOUR"));
+
+        String backlog = sql(configuration, "getBacklog", Map.of("workspaceId", 7, "workflowId", 11));
+        assertTrue(backlog.contains("AS latest_outcome_failed"));
+        assertTrue(backlog.contains("canonical_outcome.started_at >= legacy_outcome.executed_at"));
+        assertTrue(backlog.contains("w.workspace_id = ? AND w.id = ?"));
+        assertTrue(backlog.contains("INTERVAL 24 HOUR"));
+    }
+
+    @Test
     void globalUserReferenceCleanupChangesOnlyColumnsMatchingTheRequestedUser() throws Exception {
         String cleanup = sql(
             configuration(),

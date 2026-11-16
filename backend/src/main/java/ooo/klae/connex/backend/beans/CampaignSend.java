@@ -20,6 +20,7 @@ public class CampaignSend {
     private String purpose;
     private String providerId;
     private String status;
+    private boolean contentRefused;
     private LocalDateTime scheduledAt;
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;

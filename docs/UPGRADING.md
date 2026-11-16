@@ -7,6 +7,195 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+The active rollback floor for this release is control V250, including with AI and missions disabled.
+Earlier floors in version-specific sections below describe historical component contracts and do not
+permit rollback after V250. Apply control V236 → tenant V237 → tenant V238 → tenant V239 →
+tenant V240 → tenant V241 → tenant V242 → tenant V243 → tenant V244 → tenant V245 → control V246
+→ control V247 → control V248 → tenant V249 → control V250 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
+[the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
+[the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
+[the deal-value cutover](#deal-line-value-takeover-tenant-v243), and
+[the consent-version cutover](#contact-channel-consent-versions-tenant-v245), and
+[the workspace-currency cutover](#workspace-default-deal-currency-control-v246), and
+[the invitation-expiry cutover](#historical-pending-invitation-expiry-control-v247), and
+[the export-permission cutover](#export-data-permission-control-v248), and
+[legacy notification trigger retirement](#legacy-notification-invalidation-triggers-tenant-v249-control-v250).
+
+## Campaign engagement response compatibility (#2257)
+
+The campaign and send engagement responses add `preparedRecipients` for prepared message entries,
+including drafts and repeated contacts across sends. Older frontends used `totalRecipients` as a
+reach figure, and channel `deliveries` as delivered volume. Both keys remain numeric, documented
+deprecated aliases so those clients can still read the response:
+
+| Response | Deprecated key | Current value |
+| --- | --- | --- |
+| Campaign and send engagement | `totalRecipients` | Confirmed-delivered message count, equal to `delivered` |
+| Channel summary | `deliveries` | Confirmed-delivered message count, equal to `delivered` |
+
+Neither alias includes drafts or submissions without confirmed delivery. Zero is a count of observed
+confirmations, not proof that delivery was measured; clients must use `deliveryReceiptsAvailable`
+to distinguish unavailable outcomes. Updated frontends use the explicit preparation, submission,
+and delivery fields and count message entries, not unique contacts.
+
+Retain the aliases throughout the supported rollback window and while any supported frontend still
+reads them. Remove them only through a reviewed client cutover in a later release. This correction
+adds response fields without a schema change and does not raise or waive the existing release-wide
+rollback floor. The version-locked deployment and recovery rules still apply.
+
+## Dormant assistant proposal-set storage (tenant V233)
+
+V233 adds the chat-owned proposal-set parent, nullable membership/preparation columns on tool
+calls, and tenant-local ancestry constraints. Existing calls retain their trust, statuses and
+timestamps; no proposal sets are backfilled or produced by the running application. The new
+storage participates in chat deletion, account-erasure attribution cleanup, tenant export and
+residual verification.
+
+Following the V220/V222/V230 nullable-column precedent, the tool-call columns are added separately
+with `ALGORITHM=INSTANT, LOCK=DEFAULT` (MySQL permits only the default lock clause with INSTANT).
+Ancestry indexes, the membership unique index and the FK-supporting index require
+`ALGORITHM=INPLACE, LOCK=NONE`. The child metadata/trust invariant uses BEFORE INSERT and BEFORE
+UPDATE triggers: adding an enforced CHECK to this retained table would require COPY on MySQL 8.4.
+The new parent table retains its CHECK constraints. These explicit algorithm/lock guards fail
+instead of silently rebuilding the retained chat tables or blocking writers for a table copy.
+
+The child FK is installed separately with `ALGORITHM=INPLACE, LOCK=NONE`, temporarily disabling
+`foreign_key_checks` **only on the migration connection**, then restoring its saved value. That
+connection performs no DML while checks are disabled. This is safe because every existing child
+has a null proposal key and concurrent legacy writers continue to omit the new columns; no
+production proposal-set writer may be enabled during this migration. Re-enabling FK checks does
+not validate old rows, so this procedure must not be reused after set production is activated.
+
+Online DDL still needs brief exclusive metadata locks, and index creation consumes I/O and index
+build space. Deploy outside long-running chat transactions and monitor metadata-lock waits and
+disk capacity. If a guarded ALTER fails, stop the migration, close its connection (especially if
+FK checks were suspended), and inspect the partially committed DDL before recovery. Keep proposal
+writers disabled; reconcile the applied statements and Flyway failure record through the normal
+migration recovery procedure before retrying. Do not remove algorithm/lock guards to force an
+upgrade through. The V233 migration test checks those guards, unchanged InnoDB tool-call table
+identity, FK-check restoration on the migration connection, and both trigger write paths; its
+MySQL account needs `PROCESS` to read `information_schema.INNODB_TABLES`.
+
+MySQL documents the [online FK/index operations](https://dev.mysql.com/doc/refman/8.4/en/innodb-online-ddl-operations.html)
+and [INSTANT lock restriction](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html#alter-table-concurrency).
+
+The historical V233 component floor stays `tenant/V232__ai_agent_runs.sql`: V233 is additive and dormant, and
+V232-compatible binaries continue writing null-set calls. The existing
+[V232 privacy and message-sequence cutover](#v232-mission-privacy-and-message-sequence-cutover)
+still applies, including when missions are disabled. Production set activation and set-specific
+privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
+[storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
+
+## Conditional contact edits (tenant V242)
+
+V242 adds the non-null person version counter with `ALGORITHM=INSTANT, LOCK=DEFAULT`. It must fail
+instead of rebuilding the core person table, including with `old_alter_table=ON`. No data backfill
+or new index is required. The person BEFORE UPDATE trigger owns the version and includes legacy,
+targeted, import, maintenance and ownership-cleanup writers.
+
+INSTANT and both CREATE TRIGGER statements acquire metadata locks. The new company BEFORE DELETE
+trigger references person and follows the existing V241 company→deal trigger; it explicitly detaches
+contacts before FK SET NULL, which otherwise bypasses UPDATE triggers. Deploy in a bounded window
+outside long-running company/person transactions and monitor metadata-lock waits. Resolve blockers
+before retrying; retain the algorithm and lock guards.
+
+MySQL DDL commits independently. On interruption, inspect the column, both V242 trigger definitions
+and Flyway history. Keep the serving release requiring conditional contact versions stopped until
+both triggers exist. Reconcile a partially applied prefix to the exact reviewed definitions using
+the deployment's Flyway recovery procedure, then validate before serving. Do not blindly rerun the
+prefix, reset versions, edit an applied migration, or recreate active triggers under traffic.
+Earlier binaries remain schema-compatible: omitted expected tokens retain legacy write behavior,
+and every person UPDATE still advances the database counter.
+
+## Conditional deal edits (tenant V241)
+
+V241 adds the non-null deal version counter with `ALGORITHM=INSTANT, LOCK=DEFAULT`. This must fail
+instead of rebuilding the core deal table, including when `old_alter_table=ON`. Do not remove the
+algorithm/lock guards or permit COPY fallback. No data backfill or new index is required.
+
+INSTANT still acquires metadata locks. Both CREATE TRIGGER statements also need metadata locks on
+their target tables; the company deletion trigger references deal. Deploy during a bounded maintenance window outside long-running
+transactions on company/deal and monitor metadata-lock waits. Resolve blocking transactions before retrying rather than weakening the DDL guards.
+
+MySQL DDL commits independently. If migration execution stops, inspect the column and both trigger
+definitions plus Flyway's history before recovery. Keep the serving release that uses conditional
+versions stopped until both counter and company-detach triggers exist. An earlier serving binary
+remains schema-compatible. A partially applied column/trigger prefix must not be blindly rerun:
+reconcile the catalog to the exact reviewed V241 definitions and the deployment's Flyway recovery
+procedure, then rerun validation before enabling the new release. Do not reset versions, alter an
+applied migration, or drop/recreate active triggers under traffic to conceal a failed migration.
+
+## AI identifier lookup keys (tenant V230)
+
+V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly
+requires `ALGORITHM=INSTANT` and fails instead of falling back to a core-table rebuild. No index,
+generated-column or trigger DDL is added. Canonical key format 3 caps each alias at 512 Unicode code
+points and detects malformed UTF-16 before canonicalization. Oversized or malformed source names
+store an explicit unkeyed marker and retain legacy lookup. The version bump invalidates earlier
+bundles, including keys that could differ from the UTF-8-persisted name after surrogate replacement.
+DDL still needs metadata locks; deploy outside long-running transactions.
+
+Flyway only adds columns. `AiIdentifierKeyBackfillRunner` is a scheduled background worker on every
+ordinary `dev`, `test`, SaaS, silo and on-prem backend, regardless of the AI feature switch. It never
+blocks startup or readiness. Its fixed delay defaults to 30 seconds with a 30-second initial delay
+(`connex.ai.identifier-backfill.delay-ms` / `initial-delay-ms`). Each invocation processes at most
+four sorted 100-row owned-id windows. The owning-workspace/id index bounds each window before
+freshness and processing checks, and every examined row advances the cursor. It keyset-pages
+workspace discovery through the control plane and pins each placement on its dedicated
+single-thread scheduler before starting a transaction. Each transaction has a ten-second deadline
+and each CAS a five-second query timeout; contention rolls back the page for a later traversal
+without blocking unrelated scheduled maintenance or changing pooled connection session settings.
+Maintenance modes other than `off` (including `seeder`) do not instantiate it. In single-database
+mode its null catalog is the default database; catalog-per-placement mode reconciles each active placement. Tests keep the bean
+and delay automatic ticks for one hour so explicit sweeps do not race other fixtures.
+
+The sweep is restartable and safe with multiple replicas: byte-exact compare-and-set skips changed,
+deleted, restricted or already-current rows, and preserves `updated_at`. Workspace data failures
+leave that workspace on compatibility lookup and log its id and exception class; unservable or
+changed placements fail closed and retry on a later traversal. Per-page logs report
+scanned/written/skipped and observed pending rows; workspace completion totals accumulate those
+bounded observations. No page runs a full pending count. These totals are not point-in-time counts
+under concurrent writes; the optional exact `pendingCount` diagnostic is a separate full scan.
+In-memory cursors resume between invocations and wrap after traversal; a restart safely begins
+from zero. During a rolling deployment, old binaries can create pending rows or rename current ones. After draining them, wait for reconciliation
+and confirm pending=0 in each servable workspace. Archived/restricted rows and processed unkeyed
+rows are excluded from that count. Restored rows retain fallback until reconciled. Unkeyed names
+keep fallback; subsequent name changes can supply a keyed bundle.
+
+CSV name-writing inserts and volume-seeder name flushes use ordered chunks of at most 100 rows and
+a conservative 1 MiB estimated payload. Chunking keeps the enclosing transaction and bean/id order;
+it does not split import atomicity. Bound lookup/CAS text is converted to UTF-8 before binary
+comparison, including on a Cp1252 JDBC connection. No connection-encoding setting is weakened.
+
+Current bundles use the Java canonical prefilter; stale/missing bundles retain legacy lookup with
+its possible corpus-sized pagination. No coverage or admission cap changes. The existing rollback
+floor remains `tenant/V228`: older binaries ignore the nullable additions and safely retain their
+own identifier lookup. Changing canonical forms or eligibility requires bumping the key format
+version, keeping fallback and rerunning reconciliation. See [AI_SECURITY.md](backend/AI_SECURITY.md#ask-connex-record-identifier-prefilter-tenant-v230)
+and [LOCKING.md](backend/LOCKING.md#ai-identifier-key-reconciliation).
+
+## AI exposure-gated output upgrade (#2056)
+
+The all-kind demasking change bumps generated-output cache hashes to `v4-dispatched-exposure`.
+Older deal briefs, risk/introduction rationales, report narratives and composer outputs are invalid
+and regenerate lazily when requested. There is no stale fallback and no eager regeneration or data
+backfill. Normal admission and quotas still apply, so these panels can temporarily be unavailable
+or rate limited until fresh generation succeeds. Deterministic CRM/report data remains available.
+
+Plan for a temporary rise in provider demand and context-assembly load after deployment. Existing
+rows bypass the deal brief's early admission precheck: even when quota is exhausted, requests with
+old rows load CRM context, mask and hash it before the generation admission refuses. Concurrent
+requests for the same identity and hash join the existing single flight within one JVM, and
+non-refresh leaders recheck for a newly published output before generating. Multiple replicas retain
+the existing replica-local coordination limitation. Monitor ordinary quota/admission and database
+capacity rather than bypassing those gates to warm caches.
+
+Persisted transcript answers and summaries are already demasked and remain displayable. Replay
+remasks them into fresh tokens; persisted provenance never grants exposure. Legacy masked artifacts
+that need demasking without dispatch evidence from the current run fail closed and disposable
+artifacts must regenerate. There is no persisted token map or exposure backfill. The detailed
+contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-across-callers-and-upgrades).
+
 ## Versioning
 
 - **SemVer**, one product version per release, stamped as a **version-locked backend + frontend +
@@ -47,6 +236,40 @@ migration-discipline part of #87 §9 / #102).
   upgrade-drill measurements.
 - The control/tenant **plane split** (`db/migration/{control,tenant}`) and version monotonicity are
   additionally enforced by the migration arch tests.
+- **Declare the staging rollback floor.** Raise
+  [`deploy/staging/rollback-floor`](../deploy/staging/rollback-floor) in the **same PR** as any
+  migration that earlier binaries cannot survive. Keep the highest such migration as one path
+  relative to `backend/src/main/resources/db/migration/`, such as
+  `tenant/V232__ai_agent_runs.sql`; blank lines and `#` comment lines
+  are allowed. Staging records `backend_starting` before copying the target JAR into the live path.
+  The floor has one exception: a matching transaction still in `prepared` or `frontend_stopped`,
+  with **both** the live JAR and serving backend identified as the prior release, proves the target
+  backend never started, so restoring the prior pair is safe. Otherwise, before restoring artifacts,
+  staging reads the pinned target commit's floor and requires that migration in both the target and
+  previous backend JARs. An unreadable or invalid declaration, or a missing migration in either JAR,
+  refuses rollback and durably records `forward_only` before attempting recovery. That state never
+  retries the previous release: the same run and later timer runs activate and health-gate the target
+  backend, then activate its frontend, run smoke, and commit. Until commit, failures retain
+  `forward_only` and emit an `ALERT` with `gate=rollback_floor` and `rollback_state=refused_floor`.
+  An unhealthy target leaves its frontend stopped for operator forward recovery; the previous
+  frontend is never started alongside it. Recovery stops the frontend before credential checks,
+  and reboot startup validates the transaction: once the target backend may have run, only its
+  frontend can start, while malformed or unreadable transactions block all startup.
+  Without a frontend marker, legacy startup requires no transaction or a valid `prepared` or
+  `frontend_stopped` phase; even `rollback_live` requires the verified prior release's marker.
+  Authorized rollback records `rollback_starting` to block startup until the previous backend is
+  healthy, then `rollback_live` to allow its frontend, retaining the transaction until both are
+  restored. Older target commits with no floor file retain the
+  previous rollback behavior. This guard does not reverse migrations or replace the coordinated
+  restart requirements below.
+
+### V232 mission privacy and message-sequence cutover
+
+V232 requires a coordinated drain of every old backend, scheduled worker, and message writer before migration. Keep message writes stopped through backfill and deploy only binaries that use the session's durable `message_seq_high_water` allocator for every message insertion. Deleting messages never resets that counter or the immutable first-mission taint boundary.
+
+The historical V232 component floor is `tenant/V232__ai_agent_runs.sql`. Once this backend may have run, a pre-V232 binary cannot safely read or write enrolled chat holdings, even with missions disabled. Use forward recovery. Returning below this floor requires an explicit drain, terminal settlement, privacy purge and residual verification; disabling the flag alone is insufficient.
+
+Keep missions disabled until routed initialization has verified every workspace barrier, recovered legacy null-token turns and unowned mission attempts, and confirmed incomplete privacy work remains blocked. Missing barriers with mission evidence require repair, never generation-1 recreation. Complete the [mission acceptance gate](backend/AI_MISSIONS.md) and record synthetic staging evidence on #2101 before enabling exact provider declarations. Slice 1 requires a drained single serving JVM; mixed-version or multi-JVM operation is not supported by the local dispatch fence.
 
 ### Malware-scanning cutover — start the sidecar before the backend
 
@@ -87,6 +310,147 @@ replica, then start the new backend so Flyway can apply V170 with no old binary 
 not run old and new backend versions concurrently across this migration. The standard Compose
 runbook below already quiesces all writers and starts one backend with ingress closed; custom
 multi-replica deployments must enforce the same all-replicas-down boundary before migration.
+
+### V231 assistant proposal review expiry
+
+`tenant/V231__ai_proposal_review_expiry_cutover.sql` is an executable compatibility marker (`DO 0`).
+It changes no application table, stored timestamp, trust marker, or durable status. Ship it together
+with the seventy-two-hour guards on legacy approval, discard and AUTO execution, all delegate
+admission checkpoints, read projections, pending discovery and frontend disarming. A marker-only
+intermediate binary is not a compatible release.
+
+Drain every incompatible backend before serving the cutover; close ingress during the coordinated
+restart. Existing trusted pending proposals whose original `created_at` is at least seventy-two
+hours old immediately become non-actionable. Their history remains readable under existing
+authorization and retention rules. Completed outcomes and the independent ten-minute undo window
+are unchanged. Expiry is not deletion, archival, or a retained-chat privacy repair.
+
+**Rollback floor:** only a release carrying V231 and the complete expiry contract may serve after
+this cutover. Older binaries can execute known expired proposal IDs despite the unchanged schema.
+Staging automatic rollback and interrupted-deployment recovery therefore refuse a prior JAR lacking
+V231 and use the existing forward-recovery procedure. Do not remove the marker or relabel timestamps
+to permit rollback. A compatible V231 release is eligible for ordinary paired rollback only when
+it also meets every later cutover's rollback floor.
+
+The later [V232 mission privacy cutover](#v232-mission-privacy-and-message-sequence-cutover)
+raises the floor to V232. V231 introduces no proposal-set storage or producer.
+
+### V227/V228 campaign unsubscribe cutover
+
+The 2026-10-12 owner decision authorizes build and merge when green; staging's next deployment is
+the coordinated restart. This supersedes the earlier merge hold and needs no additional restart
+window approval. V227 creates the tenant-plane `campaign_delivery_unsubscribe_token` digest history
+and backfills **every delivery, irrespective of status**. On one automatic boot, Flyway applies V227
+and V228 together with all writers stopped; there is no manual checkpoint between them. V228 first
+reasserts completeness with an `INSERT ... SELECT ... WHERE NOT EXISTS` for each missing digest,
+then uses the still-present bearer to replace historical copies case-insensitively. Free-text delivery
+errors and event details use `[redacted]`; provider message and event ids use the lowercase digest,
+joining events on both workspace and delivery ids. V228 rekeys event ids with `UPDATE IGNORE`,
+which skips any row whose digest correlation form would violate the workspace/provider event key.
+This covers collisions with existing canonical keys and between multiple legacy rows being rekeyed,
+including rows belonging to different deliveries. A second update sets every event key still
+containing its delivery's bearer to NULL. One canonical key survives each collision; multiple NULL
+keys are permitted, and webhook redeliveries still deduplicate against the surviving canonical key.
+V228 also clears any provider message id still containing its owning delivery's bearer after the
+single replacement pass, including self-overlap recreated by that replacement.
+These updates can run again after a failed history row.
+
+V228 rewrites each delivery's **own** bearer. A different delivery's bearer embedded in a historical
+identifier can exist only if a provider echoed foreign bearers before the upgrade; those copies are outside
+V228's guarantee. Matching every workspace token against every historical identifier would require
+a quadratic scan. Runtime dispatch and webhooks instead use workspace-scoped digest matching.
+Runtime correlation rescans replacements for at most four passes and fails closed if a recorded
+bearer remains: NULL message/event id storage, or no match on webhook message lookup.
+After the upgrade, incoming raw provider ids use the same correlation form before lookup and dedupe,
+so historical message ids still correlate. Only 64-hex windows whose lowercased SHA-256 digest is
+recorded in the resolved workspace match; unrelated identifiers stay byte-identical. Digest probes
+are plain primary-key consistent reads and acquire no row locks.
+V228 then drops both token indexes, the generated hash column, and the raw bearer column in one ALTER.
+Existing fragment links keep working for their delivery's lifetime, without expiry, through the preserved digests. Historical backups
+and previously generated export ZIPs are outside this remediation.
+
+1. Close ingress and stop **every old backend replica and writer**, including scheduler workers.
+   Drain bounded provider calls where possible. Do not run old and new replicas concurrently; the
+   previous binary reads and writes the removed columns. The coordinated Compose restart boundary
+   used for V170 applies here too.
+2. Inventory every tenant catalog (pooled and dedicated) and take the normal pre-cutover backup.
+   With writers stopped, record each catalog's delivery count, maximum delivery id, and a protected
+   inventory of `(workspace_id, id, unsubscribe_token_hash)` for post-cutover comparison. Preserve
+   that inventory with the backup; it contains digests, never raw bearers.
+3. With writers stopped, run the tenant lineage through V228 for every inventoried catalog other
+   than the configured default, using the normal catalog migration tooling. Each run applies V227
+   and V228 together. Activate only the new release: its automatic startup applies both migrations
+   together in the configured default catalog; it does not enumerate dedicated catalogs. V228
+   enforces the backfill before removing its source. Keep ingress closed until verification finishes,
+   and keep every old writer stopped. In **each catalog**, verify both token
+   columns and indexes are absent and the composite cascading FK is present. Substitute the recorded
+   maximum id in the post-cutover query below and require zero missing deliveries. Confirm the
+   surviving delivery count within that boundary equals the recorded count, and compare every
+   legacy digest and its workspace/delivery ownership with the protected inventory. New deliveries
+   legitimately have no digest until dispatch, and later attempts can add digests, so an unbounded
+   delivery count or exact total child count is not a completeness check after activation.
+
+   ```sql
+   SELECT COUNT(*) AS missing_legacy_deliveries
+   FROM campaign_delivery d
+   WHERE d.id <= <recorded_max_delivery_id>
+     AND NOT EXISTS (
+       SELECT 1 FROM campaign_delivery_unsubscribe_token t
+       WHERE t.workspace_id = d.workspace_id AND t.delivery_id = d.id
+     );
+   SELECT COUNT(*) AS surviving_legacy_deliveries
+   FROM campaign_delivery
+   WHERE id <= <recorded_max_delivery_id>;
+   ```
+
+   Verify unsubscribe exchange/preview/confirmation, then reopen writers and ingress. Do not touch
+   suppression, consent, or recovery evidence during migration.
+
+**No previous-binary rollback is supported after V228.** Recovery must move forward with the new
+binary. Once its backend may have run, staging enforces the declared rollback floor above: after
+an activation failure it persists forward-only recovery and retries the target instead of restoring
+a backend whose JAR lacks V228. Such a backend cannot run campaign materialization, dispatch, or
+unsubscribe lookups against V228's schema.
+Operators must not keep a pre-V228 backend serving; close ingress and stop it, then restore service
+with a release containing V228 using forward recovery.
+
+A migrated claim in flight has no reconstructable bearer: an explicitly opted-in idempotent
+replay keeps its submission key but renders a fresh link. A body-comparing provider rejects it and
+the delivery becomes ambiguous, requiring the existing provider/suppression reconciliation check;
+a body-insensitive provider returns the original receipt. No automatic replay is enabled for SMTP
+or connectors without the explicit deduplication guarantee. Previously emailed links still resolve.
+
+**Partially committed DDL:** keep all writers and ingress stopped, inspect physical schema and Flyway
+history independently, and preserve the digest table. MySQL DDL commits independently of Flyway's
+history bookkeeping; `repair` alone never undoes it. If V227 created the child but backfill/history
+failed while both legacy columns remain, the raw-derived source still exists: drop only that new
+child table, repair the failed V227 entry using the normal migration tooling, then rerun the
+automatic migration boot. V228 reasserts the backfill and repeats the idempotent diagnostic and event-key cleanup
+before its ALTER; require the post-cutover
+catalog-wide checks above before reopening service. Do not drop the child once legacy columns
+are gone.
+
+If V228's ALTER committed but history recording failed, first verify the preserved child against the
+recorded inventory and verify that V227 is recorded successful. Recreate **empty removable columns
+and indexes only**, while every writer remains stopped, then repair the failed V228 entry and rerun
+V228 with the new binary:
+
+```sql
+ALTER TABLE campaign_delivery
+  ADD COLUMN unsubscribe_token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  ADD COLUMN unsubscribe_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
+    GENERATED ALWAYS AS (LOWER(SHA2(unsubscribe_token, 256))) STORED,
+  ADD UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token),
+  ADD UNIQUE KEY uq_campaign_delivery_token_hash (unsubscribe_token_hash);
+```
+
+These temporary NULL columns reconstruct no bearer and cannot serve an old binary; all lookup
+continues from the preserved child. V228 ignores these NULL source hashes while preserving all
+existing child rows. Its `NOT EXISTS` backfill also makes a retry safe if the INSERT committed but
+the ALTER or history recording failed. If the ALTER did not commit, leave its original columns alone
+and repair/rerun the failed V228 entry. If schema/history or the recorded digest inventory do not
+match either state, keep the deployment closed and recover from the pre-cutover backup in an isolated
+catalog through the new lineage; never guess at missing digests or start the previous binary.
 
 ### V185 workspace-invite authorization cutover
 
@@ -245,6 +609,399 @@ of 100, up to 10,000 reservations per run. Settled tombstones are purged in sepa
 of a purged id remains a no-op. Provider deadlines are capped at one hour and leases include a one-minute settlement margin.
 The daily usage breakdown labels ledger consumption absent from successful-call audits as
 `Conservative / unattributed charges`; this can also include successful settlements awaiting audit.
+
+### V224/V225 privileged-MFA cutover
+
+`V224__privileged_coverage_grandfathered_source.sql` admits per-organization
+`GRANDFATHERED` coverage. `V225__privileged_mfa_cutover.sql` implements owner decision 1 (2026-09-27, trust the passkeys of
+accounts privileged at cutover) as scoped by decision 2 (2026-10-08, per active organization where
+they are privileged). In one transaction it recomputes every `org_member.founder` flag to
+`org_role = 'owner'`, deletes coverage outside that population regardless of source, inserts
+missing population pairs as `GRANDFATHERED` without replacing provenance or grant references,
+and revokes every open approval code without an account revoker. Pending workspace memberships,
+inert role overlays, and workspaces or organizations undergoing teardown confer no coverage.
+Account-wide `BREAK_GLASS` assurance is untouched. The durable cutover marker is the coverage's
+source/time plus Flyway history; startup posture records `grandfatheredCoverageCount`. A SQL
+migration cannot append the Java-computed audit integrity chain.
+
+Treat this release as a **coordinated restart**, as for V185: close ingress, stop every old backend
+replica and other writers, then start the new backend and let Flyway finish before reopening.
+Do not serve an old binary while founder flags and coverage are reset. Grantor vouching applies
+with `attestation-enforced` either false or true in the V225 release, which shipped enforcement
+with a `false` default. The [switch-on release](#privileged-mfa-attestation-switch-on-1534) changes
+that default. No second approval-code revocation is needed at switch-on. Before enabling enforcement,
+drain `attestationRequiredCount` for accounts promoted or enrolled after the cutover.
+
+**Rollback floor:** after V225, no backend older than this release may serve. Roll back only to a
+release that carries V225 and its switch-independent grantor checks. Coverage is readable by older
+code, but its dark-period issuance/redemption can manufacture trust and its role writes can leave
+stale founder flags. Application compatibility alone is insufficient. Restoring the database as
+well uses the full backup/restore policy below.
+
+**Failure recovery:** V224's drop/re-add CHECK and comment change are one atomic, re-runnable DDL.
+If a process dies before its Flyway history write, the next start can execute it again without
+repair. V225 contains only DML: process death rolls its transaction back; if no history row was
+written, restart to retry. A caught SQL failure on MySQL leaves a failed Flyway row: keep ingress
+closed, inspect the failed statement and confirm rollback, fix the cause, run `flyway repair`
+using the shipped locations and database configuration, then restart. Do not remove successful
+history or reverse either migration. If death happened after commit, inspect history and rows;
+a completed version is not re-applied, and repeating V225 after a rolled-back attempt is safe.
+
+**Read-only preflight.** Run against the control catalog before sizing the window. These are exact
+counts, including all redeemed/revoked grant history, rather than estimated `TABLE_ROWS`. Run on a
+representative snapshot if the scans would disrupt a serving database. The population predicate
+is V225's pinned three branches; retain it when interpreting this release's workload.
+
+```sql
+WITH privileged AS (
+    SELECT om.user_id, o.id AS org_id
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    WHERE wm.status = 'active'
+      AND wm.role_id IS NULL
+      AND wm.role IN ('admin', 'owner')
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
+    WHERE wm.status = 'active'
+      AND wrp.permission IN (
+        'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+        'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+        'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+        'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS'
+      )
+), population_passkeys AS (
+    SELECT DISTINCT c.id AS credential_row_id, p.org_id
+    FROM webauthn_credential c
+    JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id
+    JOIN privileged p ON p.user_id = e.user_id
+)
+SELECT 'organization' AS input_table, (SELECT COUNT(*) FROM organization) AS total_rows,
+       'scan' AS step, NULL AS rows_to_change
+UNION ALL SELECT 'workspace', COUNT(*), 'scan', NULL FROM workspace
+UNION ALL SELECT 'org_member', COUNT(*), 'recompute founders',
+    COALESCE(SUM(founder <> (org_role = 'owner')), 0) FROM org_member
+UNION ALL SELECT 'workspace_member', COUNT(*), 'scan', NULL FROM workspace_member
+UNION ALL SELECT 'workspace_role_permission', COUNT(*), 'scan', NULL FROM workspace_role_permission
+UNION ALL SELECT 'webauthn_user_entity', COUNT(*), 'scan', NULL FROM webauthn_user_entity
+UNION ALL SELECT 'webauthn_credential', COUNT(*), 'population passkey pairs',
+    (SELECT COUNT(*) FROM population_passkeys) FROM webauthn_credential
+UNION ALL SELECT 'privileged_credential_attestation', COUNT(*), 'delete outside population',
+    (SELECT COUNT(*) FROM privileged_credential_attestation a
+     WHERE NOT EXISTS (SELECT 1 FROM population_passkeys p
+                       WHERE p.credential_row_id = a.credential_row_id AND p.org_id = a.org_id))
+    FROM privileged_credential_attestation
+UNION ALL SELECT 'privileged_credential_attestation',
+    (SELECT COUNT(*) FROM privileged_credential_attestation), 'insert missing coverage', COUNT(*)
+    FROM population_passkeys p
+    WHERE NOT EXISTS (SELECT 1 FROM privileged_credential_attestation a
+                      WHERE a.credential_row_id = p.credential_row_id AND a.org_id = p.org_id)
+UNION ALL SELECT 'privileged_mfa_attestation_grant', COUNT(*), 'revoke open codes',
+    COALESCE(SUM(redeemed_at IS NULL AND revoked_at IS NULL), 0) FROM privileged_mfa_attestation_grant;
+```
+
+List active workspace-only owners with no passkey, per organization. Owners whose custom overlay
+removes privileged permissions are excluded. Without a vouching co-owner, their approval path is
+**operator break-glass recovery**: the recovery session enrolls a replacement passkey carrying
+`BREAK_GLASS`, satisfying standing everywhere. V225 grants them no organization founder flag.
+
+```sql
+SELECT DISTINCT wm.user_id, w.org_id, wm.workspace_id
+FROM workspace_member wm
+JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+WHERE wm.status = 'active' AND wm.role = 'owner'
+  AND (wm.role_id IS NULL OR EXISTS (
+      SELECT 1 FROM workspace_role_permission wrp WHERE wrp.workspace_role_id = wm.role_id
+        AND wrp.permission IN (
+          'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+          'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+          'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+          'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS')))
+  AND NOT EXISTS (SELECT 1 FROM org_member om WHERE om.user_id = wm.user_id AND om.org_id = w.org_id)
+  AND NOT EXISTS (
+      SELECT 1 FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id WHERE e.user_id = wm.user_id)
+ORDER BY wm.user_id, w.org_id, wm.workspace_id;
+```
+
+**Rehearsal threshold and startup deadlines.** When any preflight input-table count or changed-row
+count exceeds the corresponding rehearsed 10% population below, rehearse at that scale on
+production-class storage before closing ingress. Include all grant history, even when almost
+every grant is already redeemed or revoked.
+Do not extrapolate only from the changed rows: V225 also scans membership, credential and history
+inputs. The supplemental empty-coverage run measures the insertion step separately.
+
+**Measured 10% rehearsal (2026-10-13 UTC).** These measurements used a development host whose disk
+was saturated by other work, MySQL 8.4.10, Flyway 12.4.0, a 128 MiB InnoDB buffer pool, and enabled
+ROW binary logging. The full amended population could not be generated on this host: its earlier
+million-row membership and historical-grant loads took 18,568.883 and 19,399.063 seconds,
+respectively, about 54 and 52 rows/s. The orchestrator stopped that run during its next load;
+it produced no full-scale migration measurements.
+
+The 10% rehearsal uses real `SHOW CREATE TABLE` definitions, retaining CHECK constraints, indexes,
+and foreign keys between its copied tables. Its synthetic population spans the organization,
+built-in workspace and custom-role privilege branches; custom roles each hold two privileged
+permissions. The additional ordinary workspace memberships and closed grant history remain
+present during every timed cutover pass.
+Generation was set-based, with 50,000-row committed batches for the large tables and one
+whole-table batch for smaller tables. Loading 390,100 application rows took 342.273 seconds,
+or **1,139.733 rows/s**, including numbers-table setup and statistics refresh. The two ordinary
+membership batches achieved 4,377.592 and 3,988.166 rows/s; the four historical-grant batches
+achieved 2,429.539, 1,744.275, 2,672.754 and 1,112.570 rows/s. Generation time is separate from
+the migration outage. The scratch catalog was dropped after all ten count assertions passed.
+
+| Input or changed population | Rows |
+| --- | ---: |
+| Organizations / workspaces | 1,000 each |
+| Users / workspace roles | 10,100 / 1,000 |
+| Organization memberships | 4,000 |
+| Privileged workspace memberships | 6,000 |
+| Ordinary workspace memberships | 100,000 |
+| Total workspace memberships | 106,000 |
+| Workspace-role permissions | 2,000 |
+| WebAuthn user entities / credentials | 10,000 / 20,000 |
+| Existing coverage / outside the population | 30,000 / 10,000 |
+| Approval grants / open grants | 205,000 / 5,000 |
+| Redeemed or revoked grant history | 200,000 |
+| Founder flags recomputed | 2,000 |
+| Eligible passkey/organization pairs | 20,000 |
+| Missing coverage inserted in the main / supplemental pass | 0 / 20,000 |
+
+| Timed operation | Measured at 10% | Full amended population: linear estimate (10×) |
+| --- | ---: | ---: |
+| V224 ALTER, Flyway execution time | 22.968 s | 229.680 s |
+| V225 transaction, Flyway execution time | 9.932 s | 99.320 s |
+| V224 / V225 Flyway wall time | 31.565 / 10.247 s | 315.650 / 102.470 s |
+| Same four V225 statements before rollback | 8.565 s | 85.650 s |
+| ROLLBACK of those writes | 0.258 s | 2.580 s |
+| Supplemental empty-coverage transaction, including commit | 5.722 s | 57.220 s |
+| V224 ALTER repeated over grandfathered coverage | 25.036 s | 250.360 s |
+
+The rollback pass's four statements took 0.011, 7.987, 0.346 and 0.220 seconds, respectively;
+its active transaction reported 17,000 modified rows. Existing coverage remained unchanged by
+the insert: JDBC's matched-row count includes its 20,000 no-op duplicates. The supplemental pass
+inserted 20,000 genuinely missing `GRANDFATHERED` rows.
+
+**The full-scale numbers are estimates, not measurements or an outage bound.** Simple linear
+extrapolation does not account for changing working sets, index sizes, row widths, fixed Flyway
+overhead, or competing I/O. The full population still requires a rehearsal on production-class
+storage under the threshold rule above.
+
+The following storage snapshots exclude numbers-table helpers and include Flyway history once
+created. Data/index lengths are `information_schema.TABLES` sums across the copied input tables;
+file lengths are the catalog's `INNODB_TABLESPACES.FILE_SIZE` sum. All values are bytes.
+
+| Snapshot | Data length | Index length | Tablespace file length |
+| --- | ---: | ---: | ---: |
+| Populated, before V224 | 49,037,312 | 82,542,592 | 180,649,984 |
+| After V224 | 48,005,120 | 82,542,592 | 178,683,904 |
+| After V225 commit | 47,742,976 | 82,149,376 | 178,683,904 |
+| Restored workload, before / after ROLLBACK | 48,791,552 | 82,165,760 | 180,781,056 |
+| Before supplemental empty-coverage pass | 46,432,256 | 79,413,248 | 180,781,056 |
+| After supplemental empty-coverage pass | 48,005,120 | 81,444,864 | 180,781,056 |
+
+V224's observed catalog file-length delta was −1,966,080 bytes; V225, the rollback pass and the
+supplemental pass each added zero file bytes. The supplemental pass reused existing allocation
+while data/index lengths grew by 1,572,864 / 2,031,616 bytes. Allocated file-size snapshots tracked
+the file lengths above plus 45,056 bytes. Deletion and rollback do not imply files will shrink.
+
+Undo files stayed allocated at 33,554,432 and 50,331,648 bytes (80 MiB total; zero growth).
+History-list-length snapshots were 22 → 11 → 14 across V224/V225; the rollback pass was
+16 → 18 → 16. The active-undo-size metric returned zero throughout and did not measure generated
+undo bytes. Observed binary-log size deltas were +5,422 bytes for V224, +1,464,492 for V225,
++2,255 across the rollback pass, and +1,805,071 for the supplemental pass. Undo and binary-log
+counters are server-wide, include concurrent work and bookkeeping/statistics refresh, and cannot
+isolate the cutover's undo or binlog volume on this host.
+
+Budget readiness/startup gates for V224 plus V225, normal startup/backfills, and an operational
+margin above the measured duration. The linear full-scale migration-only estimate is 329.000
+seconds of Flyway execution, or 418.120 seconds using observed wall time, before normal startup
+and margin. Both exceed the nominal 300-second window provided by the standard Compose runbook's
+`--wait-timeout 300` and the backend healthcheck's 60 retries at 5-second intervals. Raise those
+budgets (for example with a backend `start_period` override) using the production-scale
+rehearsal and normal startup timings before the window.
+The checked-in Flyway configuration sets no statement-duration deadline for this migration; any operator-set JDBC
+socket timeout, database/proxy query limit or Flyway process deadline must cover the entire single
+transaction. Connection retries and schema-history lock retries do not extend a statement deadline.
+Keep ingress closed until `/api/health/ready` succeeds; TCP availability is insufficient.
+
+**Reconciliation if the rollback floor was broken.** Keep approval issuance and redemption closed
+on every replica (closing ingress and stopping backends is sufficient). Find the earliest moment
+any older binary served, widened for clock uncertainty and millisecond coverage timestamps; that is
+`@violation_start`. Reconciliation has no end bound. Coverage written after the older binary stopped
+can still descend from window coverage, through inheritance or a grantor's vouch, so everything
+attested since the start is re-approved. With all writers stopped, run the following in the control
+catalog. Preserve the first query's output for re-approval and incident evidence.
+
+Reconciliation only narrows trust:
+- It deletes every `GRANTOR`, `INHERITED` and `FOUNDER` row attested since the start.
+- It clears every founder flag. An older binary's role writes can leave a stale flag that no query
+  can tell apart, so no founder is re-derived. Owners' new passkeys then need an approval, or
+  inherit coverage through a step-up from a covered passkey.
+- It keeps `GRANDFATHERED` rows, which only V225 writes, before any violation, and account-wide
+  `BREAK_GLASS` assurance.
+- Never re-run V225's population statements: they would grandfather accounts privileged now but
+  not at the cutover. Never edit or re-run a successful Flyway version either.
+
+```sql
+SET @violation_start = '2026-10-01 00:00:00.000';
+SELECT DISTINCT e.user_id, a.org_id, a.source, a.attested_at
+FROM privileged_credential_attestation a
+JOIN webauthn_credential c ON c.id = a.credential_row_id
+JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id
+WHERE a.source IN ('GRANTOR', 'INHERITED', 'FOUNDER')
+  AND a.attested_at >= @violation_start
+ORDER BY e.user_id, a.org_id;
+
+-- BEGIN RECONCILIATION
+START TRANSACTION;
+UPDATE privileged_mfa_attestation_grant
+SET revoked_at = UTC_TIMESTAMP(6)
+WHERE redeemed_at IS NULL AND revoked_at IS NULL;
+DELETE FROM privileged_credential_attestation
+WHERE source IN ('GRANTOR', 'INHERITED', 'FOUNDER')
+  AND attested_at >= @violation_start;
+UPDATE org_member
+SET founder = FALSE
+WHERE founder = TRUE;
+COMMIT;
+-- END RECONCILIATION
+```
+
+Restart only a release at or above the rollback floor. Have affected accounts re-approve through a
+vouching grantor, or use operator break-glass recovery where that route is unavailable, before
+reopening the affected approval flows. No earlier binary may serve during reconciliation or afterwards.
+
+### Privileged-MFA attestation switch-on (#1534)
+
+This release makes `CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED=true` the default. Privileged accounts
+with passkeys but no single passkey approved in every privileged organization are now confined;
+privileged operations also require a step-up bound to a sufficient passkey. There is **no schema
+change**, no new grandfathering and no second approval-code revocation.
+
+**Fresh read-only preflight:** immediately before enabling, check **every upgraded control catalog**
+(SaaS, silo and on-prem), with membership and passkey changes quiesced until the switch takes effect.
+Run the query below against that catalog; it lists the affected account ids, so zero rows means
+`attestationRequiredCount = 0`. Its predicate is the expansion of
+[`UserMapper.countAttestationRequiredAccounts`](../backend/src/main/resources/mappers/UserMapper.xml),
+including `privilegedOrgBranches` and `sufficientPasskey`, used by
+`PrivilegedAccountService.attestationRequiredAccountCount`. Keep this query in step with that SQL.
+It reads no credential material and makes no changes.
+
+```sql
+WITH privileged AS (
+    SELECT om.user_id, o.id AS org_id
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    WHERE wm.status = 'active'
+      AND wm.role_id IS NULL
+      AND wm.role IN ('admin', 'owner')
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
+    WHERE wm.status = 'active'
+      AND wrp.permission IN (
+        'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+        'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+        'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+        'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS'
+      )
+)
+SELECT u.id AS account_id
+FROM app_user u
+WHERE u.username != '__connex_system__'
+  AND EXISTS (SELECT 1 FROM privileged p WHERE p.user_id = u.id)
+  AND EXISTS (
+    SELECT 1
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id = u.id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id = u.id
+      AND (c.privileged_assurance = 'BREAK_GLASS'
+        OR NOT EXISTS (
+          SELECT 1
+          FROM privileged p
+          WHERE p.user_id = u.id
+            AND NOT EXISTS (
+              SELECT 1
+              FROM privileged_credential_attestation pca
+              WHERE pca.credential_row_id = c.id AND pca.org_id = p.org_id
+            )
+        ))
+  )
+ORDER BY u.id;
+```
+
+Alternatively, start **this release** with the attributed staging opt-out below immediately before
+switching on, and read its `auth.mfa.policy.configured` system event for that catalog. Require a
+successful inventory with `attestationRequiredCount = 0`; record `unenrolledPrivilegedCount` as the
+separate enrollment workload, already subject to `CONNEX_PRIVILEGED_MFA_ENFORCED`. Inventory is
+sampled only at startup: an old event or silence in the WARN log is not a current preflight.
+A missing, `"unavailable"` or nonzero attestation count, or a failed query, means **keep the attributed
+opt-out until the population is drained and freshly rechecked**. Recheck if memberships or passkeys
+change between the inventory and enabling.
+
+**Drain:** have a covered grantor issue an approval code in each organization where the account is
+privileged, and redeem every code using the **same passkey**. Coverage split across different
+passkeys does not satisfy standing. The workspace route serves workspace-only owners when a covered
+co-owner is eligible. Where no eligible grantor exists, use
+[operator break-glass recovery](PRIVILEGED_MFA.md#break-glass-recovery); its replacement passkey carries
+account-wide assurance. Removing every source of privilege is the other exit. Re-promotion after
+enrolling still requires approval before administrative access resumes.
+
+**Staging opt-out:** before starting an upgrade whose population is unresolved, set:
+
+```dotenv
+CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED=false
+CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR=security-change-1534
+```
+
+Replace the actor with the accountable operator or approved change identifier. Startup refuses the
+opt-out with an absent, blank or `configuration-default` actor. Grantor vouching remains required
+during the exception. After draining and the fresh preflight, set attestation enforcement to `true`
+and restart all backend replicas with the attributed change.
+
+**Rollback:** policy rollback uses the same `false` plus accountable actor and a backend restart.
+It needs no schema rollback. The **V225 component minimum is unchanged**: no binary older than the
+release carrying V225 and its switch-independent grantor checks may serve. The current release-wide
+rollback floor is control V250. See [the export-permission cutover](#export-data-permission-control-v248).
+
+**What confined users see:** Security and onboarding show the passkey-approval confinement card,
+with approval-code entry and the organizations still needing approval. A covered grantor can issue
+the code; users can also leave the listed privileged workspaces or organizations, or sign out.
+They remain confined until the same passkey covers every privileged organization or no privilege
+remains. The browser API answers `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED`; public credentials answer
+`401 privileged_mfa_attestation_required` under the default policy.
+
+### Ask Connex member masking (#1822): rollback compatibility
+
+This release has no schema change and is rollback-safe. Raw member provenance is stored in the
+separate `memberIdentifiers` metadata field on answers, user messages and summaries. Older
+releases ignore that field and continue replaying without member-name masking, exactly as they
+behaved before #1822. Existing `identifiers` arrays retain only their previously supported kinds.
+No writer flag, reader-first rollout or MEMBER-specific rollback floor is required.
 
 ## Triggered-send rollback quiescence
 
@@ -408,7 +1165,8 @@ contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#trig
    prefix in the no-logging rules until that resend is complete — see the V203/V204 cutover section
    above.
 11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
-   containers. Remove the target deployment directory, re-verify and extract the exact prior signed
+   containers. **Exception: after the V227/V228 campaign unsubscribe cutover, use its forward-recovery
+   procedure above; do not start the previous binary.** For other upgrades, Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
    Use that restored Compose bundle when you **restore the complete database, object, and legacy-media
    backup** and start the previous version. Changing only image digest variables is not a rollback
@@ -424,3 +1182,284 @@ request and `main` push. `FlywayUpgradeIntegrationTest` migrates representative 
 quota, deletion-queue, and import state through the current lineage. A full
 **restore-a-previous-release image → migrate → smoke** gate remains a follow-up once stable released
 version baselines exist.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Mission continuation and durable plans — tenant V235
+
+V235 adds bounded versioned mission plans, checkpoints, and memory. New missions use runtime contract 2. Existing runtime-1 missions retain their original single-segment behavior, limits, accounting, and deadlines; migration performs no content backfill or runtime promotion.
+
+Drain older serving binaries and mission workers before deploying this cutover. Keep missions disabled until the compatible context builder, version guards, accounting, recovery, privacy cleanup, and export validation are installed. The existing single-serving-JVM requirement remains.
+
+Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT`. Removing the old single-segment CHECK requires `ALGORITHM=INPLACE, LOCK=NONE`; triggers enforce bounded immutable attempt numbering for future writes. Explicit guards refuse unsupported operations rather than falling back to table copying. Deploy outside long-running transactions and monitor metadata-lock waits.
+
+DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
+
+V235 established the continuation compatibility minimum; V250 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors. See [the export-permission cutover](#export-data-permission-control-v248).
+
+## V236/V237: retained Ask Connex privacy cutover
+
+This release invalidates every retained Ask Connex chat created before the privacy cutover,
+including archived chats and chats retained after their author left. Their messages, summaries,
+proposals, titles, and chat-owned files become unavailable immediately and are erased by resumable
+background cleanup. Saved CRM changes and ordinary domain audit history remain.
+
+Drain every incompatible serving backend, scheduled worker, and in-flight chat writer before
+applying `control/V236__ai_assistant_privacy_coordination.sql` and
+`tenant/V237__ai_assistant_privacy_cutover.sql`. Start only the compatible release, with one
+serving JVM. Proposal-set production remains disabled.
+
+V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
+republish invalidated content despite accepting the additive schema. V250 is the active rollback
+floor for this release, including when AI and missions are disabled. Recovery below the active
+floor requires a separately reviewed procedure; normal recovery is a forward fix. See [the export-permission cutover](#export-data-permission-control-v248).
+
+Inaccessible placements and incomplete managed-object deletion keep cleanup pending. Restore
+procedures must reconcile privacy authority and old-generation holdings before enabling service.
+Restart and restore never relabel old holdings as current.
+
+Startup and scheduled privacy reconciliation include an organization-level control-plane pass.
+It completes V236 bootstrap operations for organizations with no workspaces and retries operations
+after their last workspace is removed. V236 is repaired by this runtime follow-up; no migration
+checksum changes are required. Historical pending workspace receipts remain blockers.
+
+V2 DSR recovery can finish after an already-verified non-subject workspace is deleted: recovery,
+progress and final C2 accept its durable verified control receipt only while its root is absent.
+Active/restored workspaces retain routed residual verification. Missing verification evidence continues
+to refuse completion. Ask Connex refreshes session metadata and transcript on the first successful
+socket subscription as well as reconnects, covering cutoffs missed during connection establishment.
+Notification reads scope authority hydration to candidate workspaces. Brief notifications carry
+content-free pointers only; a cutoff racing a read can expose only that a brief existed, while
+opening the session still requires current organization authority.
+
+Reconciliation preserves an exact verified receipt while its workspace is terminally
+`tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
+operation's tenant batch and still run full local lifecycle cleanup and residual verification.
+V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
+completion. Active workspace restoration still reopens stale local evidence.
+
+## Mission singleton proposals (tenant V238)
+
+V238 adds mission-owned singleton action slots, immutable preparation/source provenance,
+canonical proposal-origin linkage, and frozen review metadata. `record_preparation_v1`
+explicitly creates runtime-contract-3 runs. Existing runtime-1/2 runs and the runtime-2
+database default remain unchanged. There is no content backfill; V233 proposal-set storage
+stays dormant. Apply control V236 organization coordination, then tenant V237 all-chat cutover,
+then tenant V238; no migration is renumbered.
+
+Drain serving binaries and mission workers before the cutover. Keep missions disabled until
+compatible publication, decisions, expiry, privacy cleanup, export and runtime guards are
+deployed. V238 actions, frozen membership, mission-origin tool calls and proposal outputs retain
+the original session organization generation and participate in the V236/V237 all-chat engine,
+including bootstrap, acknowledged v2 DSR, restriction and lifecycle cleanup. The single-serving-JVM activation requirement remains.
+
+Hot column additions use `ALGORITHM=INSTANT, LOCK=DEFAULT`; hot indexes and the nullable
+source FK use `ALGORITHM=INPLACE, LOCK=NONE`. Triggers preserve source and frozen-review
+invariants without retained-table CHECK rebuilds. New action binding predicates that involve
+FK columns also use triggers. FK validation is suspended only on the migration connection
+while adding the previously unused nullable link, then restored. Do not remove algorithm
+guards or permit COPY fallback. Online algorithms still require metadata-lock acquisition.
+
+DDL auto-commits. If migration fails, retain the drain, inspect applied statements and Flyway
+history, and recover forward. V238 established the singleton-proposal compatibility minimum;
+the higher release-wide rollback floor is now `control/V250__drop_legacy_notification_membership_state_triggers.sql`, including
+when missions are disabled. Pre-V238 binaries still cannot safely purge/export source-linked
+proposals or preserve frozen-review invariants. Returning below that V238 component minimum
+requires a separately reviewed drain, settlement, complete enrolled privacy purge and unconditional
+residual verification. Those procedures do not waive the V240 task-writer component minimum or the higher V250 release-wide floor. See [the export-permission cutover](#export-data-permission-control-v248).
+
+Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
+fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
+review is independent of the execution deadline.
+
+## Task completion and relationship warmth (tenant V240)
+
+V240 adds nullable `task.completed_at` and versioned warmth notification state. Completed tasks
+contribute to warmth only when they have a recorded completion instant. Existing completions stay
+undated: there is no `updated_at` backfill, and scores based on those tasks can fall. Notes retain
+their existing weight.
+
+Drain pre-V240 serving binaries and task writers before this cutover. Once the V240 backend may
+have run, the task-writer component minimum is `tenant/V240__task_completion_warmth.sql`;
+the current overall release floor is V250. Older task update,
+board-move and completion writers do not maintain `completed_at`: a task completed at T1, reopened
+and completed at T2 under an older binary can retain T1. A later compatible binary would then score
+that stale instant. Rollback candidates must retain completion stamping and clearing on reopen;
+copying only the migration resource into an older binary does not make it compatible. The existing
+proven-not-started exception in the staging rollback procedure is unchanged. See [the export-permission cutover](#export-data-permission-control-v248).
+
+This historical component cutover raised the previous V238 floor and keeps the V236/V237 privacy and V238 singleton-proposal
+constraints in force. Binaries that contain V238 or V239 but lack V240 are refused, even if they
+satisfy the older component floors. Recover forward with a compatible binary. A scoring-policy
+change remains possible in a forward release that preserves the V240 task-writer component
+minimum and the current V250 release-wide floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change. See [the export-permission cutover](#export-data-permission-control-v248).
+
+## Deal line value takeover (tenant V243)
+
+Deploy after #2276's `V241__deal_edit_version.sql` and #2290's
+`V242__person_edit_version.sql`; those migrations own V241 and V242 respectively.
+
+V243 adds nullable `deal.prior_manual_value` with explicit INSTANT DDL and no historical backfill.
+Existing overwritten amounts remain unknown. New confirmed takeovers store the manual amount,
+and removing the final line automatically restores it. Old clients receive HTTP 409 when they
+omit confirmation for a nonzero manual amount. The line preview mode does not write any data.
+
+The V243 component minimum preserves takeover confirmation and restoration; the release-wide floor is now V250.
+Rollback must use a compatible serving binary; retain the additive column and roll forward.
+INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
+inspect the column and Flyway history before following the deployment recovery procedure.
+Do not edit an applied migration or blindly rerun a partially committed ALTER. See [the export-permission cutover](#export-data-permission-control-v248).
+
+## Record search projections (tenant V244)
+
+V244 adds search-only name/phone columns, phone indexes and legacy-write invalidation triggers.
+It contains DDL only. Recurring tenant-routed reconciliation fills and repairs projections in
+independently committed pages after migration success; a repair interruption does not rerun DDL
+on startup. A compatible partial DDL prefix replays through schema-verified column/index operations
+and trigger creation without an invalidation gap. Supported equivalent search forms remain
+available through NULL-key fallback before reconciliation; startup prioritizes missing keys.
+V244 is additive, and earlier compatible binaries can still serve safely. For V244 alone,
+the component rollback floor remains V243. V245 then establishes the consent-writer component
+minimum because older binaries can overwrite a newer revocation from a stale confirmation.
+Control V250 is the current release-wide floor. Follow the
+[consent-version cutover](#contact-channel-consent-versions-tenant-v245), then the
+[workspace-currency cutover](#workspace-default-deal-currency-control-v246), then the
+[invitation-expiry cutover](#historical-pending-invitation-expiry-control-v247), and the
+[export-permission cutover](#export-data-permission-control-v248) for the serving drain
+and forward-recovery requirements. See
+[record-search operation and recovery](backend/RECORD_SEARCH.md) for page bounds, cursor wrap,
+legacy-write repair, scheduling controls and partial-DDL recovery.
+
+## Contact-channel consent versions (tenant V245)
+
+V245 adds a non-null consent counter at one with `ALGORITHM=INSTANT, LOCK=DEFAULT`, then creates
+`trg_contact_consent_version`. Every UPDATE, including trusted unsubscribe/provider revocation,
+advances it. There is no historical consent rewrite or new index. Reserve version zero in the API
+for explicit absence. Apply `tenant/V244__record_search_keys.sql` before
+`tenant/V245__contact_consent_version.sql`; the global lineage remains consecutive. Deploy the
+backend before the frontend that sends required expected consent versions.
+
+The ALTER and CREATE TRIGGER take metadata locks. Deploy outside long consent transactions and
+resolve blockers without relaxing the algorithm/lock guards. DDL commits independently: after an
+interruption, inspect the column, trigger definition and Flyway history, reconcile the exact reviewed
+prefix through the existing Flyway recovery procedure, and validate before serving conditional
+consent writes. Do not reset counters or recreate active triggers under traffic. Earlier binaries
+remain schema-compatible and their writes advance the trigger, but do not enforce the new HTTP
+consent precondition. V245 establishes the consent-writer component minimum: older binaries can
+overwrite a newer revocation from a stale manual confirmation. The current release-wide rollback
+floor is control V250. Drain older serving backends before admitting these conditional writes;
+recover forward with a compatible binary and retain the additive schema. See [the export-permission cutover](#export-data-permission-control-v248).
+
+## Workspace default deal currency (control V246)
+
+Apply tenant V245 (contact consent versions, #2298) before control V246.
+V246 adds a nullable `workspace.default_currency` with `ALGORITHM=INSTANT, LOCK=DEFAULT`;
+it must fail rather than rebuild the control-plane workspace table. Existing workspaces stay
+unset. Their effective default remains USD and the UI explains that this is the original fallback
+until an administrator explicitly saves a choice. No stored deal or amount is backfilled or converted.
+
+Workspace owners, administrators, and custom roles granted `WORKSPACE_SETTINGS` may save a supported
+currency. The save reuses recent-authentication and locked workspace-settings authorization, checks
+`expectedIdentityVersion`, increments that version, and appends a workspace-scoped audit entry.
+Deal dialogs, quick create, calendar creation, built-in guided templates, and new CSV rows without a
+currency use the saved default. An explicit deal or custom-template currency remains authoritative;
+CSV updates without a currency preserve the stored value.
+
+V246 is the currency-writer component minimum: earlier binaries still start against the additive column
+but ignore an explicitly chosen currency when creating deals. Drain those writers before enabling
+the setting and deploy matching frontend/backend versions. On a DDL failure, inspect the column and
+Flyway history, reconcile any committed prefix through the normal migration recovery procedure,
+and retain the online-DDL guards before retrying. The column needs a brief metadata lock; deploy
+outside long-running workspace-settings transactions. The current release-wide rollback floor is
+control V250; see the [export-permission cutover](#export-data-permission-control-v248).
+
+## Historical pending invitation expiry (control V247)
+
+Apply control V247 after V246. The historical non-expiring invitations exposed by #2300 are
+`workspace_member` rows with `status = 'pending'`. They are not email-token invitations:
+`workspace_invite.expires_at` has always been required, and new email invitations expire after
+fourteen days. #2300 added address-only projections, not an inviter-label column. Shareable
+`workspace_invite_link` grants were unchanged by that change and are outside this backfill.
+
+V247 adds nullable `workspace_member.expires_at` with `ALGORITHM=INSTANT, LOCK=DEFAULT` and
+verifies the column definition on replay. It performs no catalog-wide data update. The fixed legacy
+deadline is the successful control V247 `flyway_schema_history.installed_on` plus thirty days,
+converted from TIMESTAMP to UTC independently of the connection time zone. Pending NULL deadlines
+use that deadline immediately in administrator projections, recipient pending lists, invitation
+inbox listing/counts/direct lookup, and the atomic activation claim. Missing successful cutover
+history fails closed. Correctness never depends on the backfill finishing, and restart/retry never
+extends the notice window.
+
+`PendingInvitationExpiryBackfillRunner` persists the same deadline in at most four pages per sweep.
+Each independent ten-second READ COMMITTED transaction reads at most 100 memberships in one
+workspace's primary-key order, including active rows, without row locks. It updates only exact
+workspace/user/generation point keys still pending with NULL expiry. Active memberships are
+already-consumed grants and remain unchanged; revoked pending grants were deleted and are not
+recreated. Existing future or expired deadlines are never extended. Each page commits before the
+cursor advances; a failed page retries from its last committed cursor, and process restarts safely
+begin another sweep. No locking DML scans unrelated active membership rows. Maintenance mode
+suppresses scheduling; the fixed-deadline read fallback remains authoritative while it is paused.
+
+Recipient pending lists, invitation inbox access and the atomic activation update require a future
+effective deadline. The retained internal pending-membership writer assigns fourteen days;
+public email and compatibility member-add routes continue issuing fourteen-day email-token
+invitations. Administrators see the deadline on pending invitations, including expired ones,
+and can replace an invitation directly from its row. Replacement revokes the exact historical
+membership generation and returns a new email-bound link using the existing authorization flow.
+The historical inviter label stays absent; no recipient profile or inviter is invented.
+
+V247 is the invitation-expiry serving minimum; the current release-wide rollback floor is
+control V250 (see [the export-permission cutover](#export-data-permission-control-v248)). Earlier
+backends ignore the membership deadline and can activate expired grants, even though they can read the additive schema. Drain older serving
+backends before reopening invitation acceptance. The thirty-day notice starts at successful migration
+installation; schedule application deployment with the migration so administrators receive that window.
+
+## Export data permission (control V248)
+
+`control/V248__export_data_permission.sql` follows V247. Deploy frontend and backend together.
+Drain all older serving backends and role-creation writers before migration, then start only the
+compatible release. The one-time backfill grants `EXPORT_DATA` to every existing custom role in
+every workspace. Existing owner/admin/member workspace bundles retain it through per-role flags
+on `workspace`, and organization owner/admin roles retain it through flags on `organization`.
+All flags default to true. New custom roles receive no automatic export grant; an administrator
+must select it explicitly. Replaying a committed DDL prefix preserves configured built-in flags.
+Do not manually replay the backfill after administrators have started withdrawing custom grants.
+
+The export-permission component minimum is **control V248**, including when AI/missions are disabled.
+Older binaries can start against these additive columns but ignore export revocations, so they
+cannot safely serve after this cutover. Recover forward using a binary that enforces V248.
+
+Un-overlaid built-in workspace administrators and owners can change only the export flag on
+built-in roles, with `MEMBER_MANAGE` and recent authentication. Custom-role edits retain
+`ROLE_MANAGE`, current locked authority, owner-recovery checks, and the permission grant ceiling.
+Organization administrators and owners configure organization export flags under organization
+locks and recent authentication. Withdrawing one's own export access leaves these narrow policy
+administration paths available for recovery; it does not restore export access by itself.
+Organization policy never derives authority from the active workspace.
+
+Before re-enabling owner exports, at least one active, unreserved owner must be able to restore
+the proposed owner bundle, including `EXPORT_DATA`. If every owner's overlay lacks it, restore
+an owner's built-in Owner role while owner exports are still disabled, then retry the policy
+change. An unsafe enable is refused; it does not silently widen any custom role's grants.
+
+## Legacy notification invalidation triggers (tenant V249, control V250)
+
+Apply tenant V249 and control V250 after V248. They remove the three pre-baseline
+`trg_notification_state_*` triggers and three `trg_notification_membership_state_*` triggers
+found on long-lived catalogs. Fresh catalogs without them are unchanged. No notification,
+membership or recipient-version rows are rewritten by the migrations; application writers own inbox
+invalidation. Unchanged reminder delivery stops advancing the recipient version through a
+database trigger. Each drop is safe to replay after an interrupted migration.
+
+The release-wide rollback floor is control V250, including with AI and missions disabled.
+Earlier binaries cover ordinary notification and membership changes, but their registry-driven
+workspace teardown and privacy cleanup delete notification rows without a Java version bump. On
+long-lived catalogs the legacy DELETE trigger supplied that bump. This release locks bounded notification batches,
+deletes their exact keys and advances each affected recipient once in the same transaction;
+failed version writes roll back deletion. Drain older teardown and privacy-cleanup writers before retiring the triggers
+and recover forward with a V250-compatible binary.
+
+Invitation and snooze deadline filtering retains its existing behavior; passive clock transitions
+do not fire database triggers or write recipient versions. Family-watermark write cadence is unchanged.

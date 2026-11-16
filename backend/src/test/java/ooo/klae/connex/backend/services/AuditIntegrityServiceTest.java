@@ -56,6 +56,7 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
             return;
         }
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         if (committedRoleId != null) {
             roleMapper.clearPermissions(workspace.getId(), committedRoleId);
             roleMapper.deleteRole(workspace.getId(), committedRoleId);
@@ -76,7 +77,7 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
                 List.of("AUDIT_READ")).getId();
         var target = newUser();
         committedUserIds.add(target.getId());
-        workspaceService.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "admin");
+        workspaceService.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "admin", true);
         assertTrue(meterRegistry.get("connex.security.permission.change.timestamp")
                 .tag("scope", "workspace:" + workspace.getId()).gauge().value() > 0);
         var rows = auditLogMapper.findRecent(workspace.getId(), 20, 0);

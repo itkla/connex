@@ -1,11 +1,13 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -14,6 +16,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 /**
@@ -24,10 +27,14 @@ import org.w3c.dom.NodeList;
  * (read path). The two paths express it differently and this test knows which is
  * which: every write grant now receives a trusted control-derived workspace
  * allowlist instead of joining the control table (#811), while on the read path
- * only {@code AiAssistantIdentifierMapper}, {@code IdentityMapper} and
- * {@code PersonEdgeMapper} bind that allowlist — the remaining five mappers in
+ * {@code AiAssistantIdentifierMapper}, {@code IdentityMapper}, {@code PersonEdgeMapper},
+ * {@code IntroductionMapper}, {@code DuplicateReviewMapper}, {@code SegmentMapper} and
+ * {@code PipelineMapper} bind that allowlist — the remaining three mappers in
  * {@code SHARE_READERS} still join the control-plane {@code workspace} table and
  * match {@code ows.org_id = vws.org_id}.
+ * Note fragments are checked separately because their legacy unfiltered record ceilings and
+ * active-only assistant ceiling deliberately consume different scope types.
+ * Report statements are checked separately to pin each aggregate owner and historical share cutoff.
  * The workspace-predicate scan cannot see either model (it only checks
  * {@code #{workspaceId}} is bound). These tests assert both paths carry their
  * reviewed ceiling, so a future shareable entity type copied without it fails
@@ -56,13 +63,15 @@ class OrgShareCeilingArchTest {
      */
     private static final java.util.Map<String, Pattern> SHARE_READERS = java.util.Map.of(
         "mappers/AiAssistantIdentifierMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
-        "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
+        "mappers/CompanyMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
         "mappers/DuplicateReviewMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
+        "mappers/IntroductionMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/PersonEdgeMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
-        "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share")
+        "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share"),
+        "mappers/SegmentMapper.xml", Pattern.compile("FROM (?:person|company)_share")
     );
 
     @Test
@@ -74,6 +83,13 @@ class OrgShareCeilingArchTest {
             Pattern ceiling = entry.getKey().equals("mappers/AiAssistantIdentifierMapper.xml")
                     || entry.getKey().equals("mappers/PersonEdgeMapper.xml")
                     || entry.getKey().equals("mappers/IdentityMapper.xml")
+                    || entry.getKey().equals("mappers/IntroductionMapper.xml")
+                    || entry.getKey().equals("mappers/DuplicateReviewMapper.xml")
+                    || entry.getKey().equals("mappers/SegmentMapper.xml")
+                    || entry.getKey().equals("mappers/DealMapper.xml")
+                    || entry.getKey().equals("mappers/PipelineMapper.xml")
+                    || entry.getKey().equals("mappers/CompanyMapper.xml")
+                    || entry.getKey().equals("mappers/PersonMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
@@ -86,6 +102,253 @@ class OrgShareCeilingArchTest {
         }
         assertTrue(violations.isEmpty(),
             "Read-path share visibility is missing the same-organization ceiling: " + violations);
+    }
+
+    @Test
+    void personVisibilityEmployerAndExistenceCeilingsKeepTheirExactOwners() throws Exception {
+        Document document = loadMapper("mappers/PersonMapper.xml");
+        for (var fragment : Map.of("visibleAny", "p", "companyJoin", "c", "exists", "person").entrySet()) {
+            NodeList nodes = document.getElementsByTagName(fragment.getKey().equals("exists") ? "select" : "sql");
+            Element found = null;
+            for (int index = 0; index < nodes.getLength(); index++) {
+                Element node = (Element) nodes.item(index);
+                if (fragment.getKey().equals(node.getAttribute("id"))) found = node;
+            }
+            assertNotNull(found, fragment.getKey());
+            String sql = found.getTextContent().replaceAll("\\s+", " ").trim();
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), fragment.getKey());
+            assertTrue(sql.contains("ON org_workspace.id = " + fragment.getValue() + ".workspace_id"));
+            assertTrue(sql.contains("workspace_id = #{workspaceId}"));
+            assertEquals(0, count(Pattern.compile("lifecycle_state|provision_ceased_at"), sql));
+        }
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/PersonMapper.xml")));
+    }
+
+    @Test
+    void companyAndPersonEvidenceCeilingsBindTheirOwnOwnerWithoutLifecycleTightening() throws Exception {
+        Document document = loadMapper("mappers/CompanyMapper.xml");
+        for (var fragment : Map.of("visibleAny", "c", "visiblePerson", "p").entrySet()) {
+            NodeList nodes = document.getElementsByTagName("sql");
+            Element found = null;
+            for (int index = 0; index < nodes.getLength(); index++) {
+                Element node = (Element) nodes.item(index);
+                if (fragment.getKey().equals(node.getAttribute("id"))) {
+                    found = node;
+                }
+            }
+            assertNotNull(found, fragment.getKey());
+            String sql = found.getTextContent().replaceAll("\\s+", " ").trim();
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql));
+            assertTrue(sql.contains("ON org_workspace.id = " + fragment.getValue() + ".workspace_id"));
+            assertTrue(sql.contains("workspace_id = #{workspaceId}"));
+            assertEquals(0, count(Pattern.compile("lifecycle_state|provision_ceased_at"), sql));
+        }
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/CompanyMapper.xml")));
+    }
+
+    @Test
+    void everyDealShareFragmentBindsItsExactOwnerAndRetainsItsUnfilteredCeiling() throws Exception {
+        Document document = loadMapper("mappers/DealMapper.xml");
+        Map<String, String> owners = Map.of(
+            "visibleCompanyJoin", "c", "visiblePersonJoin", "p",
+            "visibleFilteredPersonJoin", "filtered_person", "visiblePipelineJoin", "p", "visibleStageJoin", "sp");
+        NodeList fragments = document.getElementsByTagName("sql");
+        int checked = 0;
+        for (int index = 0; index < fragments.getLength(); index++) {
+            Element fragment = (Element) fragments.item(index);
+            String id = fragment.getAttribute("id");
+            if (!owners.containsKey(id)) {
+                continue;
+            }
+            String sql = fragment.getTextContent().replaceAll("\\s+", " ");
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            assertEquals(1, count(Pattern.compile("org_workspace\\.id\\s*=\\s*"
+                + owners.get(id) + "\\.workspace_id"), sql), id);
+            assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, sql), id);
+            assertEquals(0, count(Pattern.compile("lifecycle_state"), sql), id);
+            checked++;
+        }
+        assertEquals(5, checked);
+    }
+
+    @Test
+    void every_note_share_fragment_carries_its_reviewed_scope_ceiling() throws Exception {
+        Document document = loadMapper("mappers/NoteMapper.xml");
+        Pattern shareRead = Pattern.compile("(?:FROM|JOIN)\\s+\\w+_share\\b",
+            Pattern.CASE_INSENSITIVE);
+        Map<String, String> recordFragments = Map.of("visiblePerson", "p", "visibleCompany", "c");
+        int shareReads = 0;
+        int recordCeilings = 0;
+        int assistantCeilings = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (!(child instanceof Element element)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            int reads = count(shareRead, sql);
+            if (reads == 0) {
+                continue;
+            }
+            shareReads += reads;
+            String id = element.getAttribute("id");
+            assertEquals("sql", element.getTagName(), id);
+            assertEquals(1, reads, id);
+            if (recordFragments.containsKey(id)) {
+                assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+                assertTrue(sql.contains("ON org_workspace.id = " + recordFragments.get(id) + ".workspace_id"), id);
+                recordCeilings++;
+            } else {
+                assertEquals("assistantProcessablePerson", id, "Unreviewed Note share fragment");
+                NodeList allowlists = element.getElementsByTagName("foreach");
+                assertEquals(1, allowlists.getLength(), id);
+                Element allowlist = (Element) allowlists.item(0);
+                assertEquals("organizationWorkspaceIds", allowlist.getAttribute("collection"));
+                assertEquals("organizationWorkspaceId", allowlist.getAttribute("item"));
+                assertEquals("(", allowlist.getAttribute("open"));
+                assertEquals(")", allowlist.getAttribute("close"));
+                assertEquals(",", allowlist.getAttribute("separator"));
+                assertEquals("#{organizationWorkspaceId}", allowlist.getTextContent().trim());
+                for (String column : List.of("archived_at", "suspended_at", "provision_ceased_at")) {
+                    assertTrue(sql.contains("p." + column + " IS NULL"), id);
+                }
+                assertTrue(sql.contains("OR (p.workspace_id IN #{organizationWorkspaceId} AND EXISTS"), id);
+                assertTrue(sql.contains("ps.person_id = p.id AND ps.workspace_id = #{workspaceId}"), id);
+                assertEquals(0, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+                assistantCeilings++;
+            }
+        }
+        assertEquals(3, shareReads);
+        assertEquals(2, recordCeilings);
+        assertEquals(1, assistantCeilings);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/NoteMapper.xml")));
+    }
+
+    @Test
+    void every_report_share_branch_carries_its_reviewed_scope_and_cutoff() throws Exception {
+        Document document = loadMapper("mappers/ReportMapper.xml");
+        Map<String, List<String>> owners = Map.of(
+            "aggregateCoverageGaps", List.of("gap_person", "c"),
+            "aggregateSingleThreadedDeals", List.of("single_company"),
+            "getNetworkAccountValues", List.of("network_company"),
+            "getVisiblePersonIdsAt", List.of("p"),
+            "getVisibleCompanyIdsAt", List.of("c"));
+        Pattern branch = Pattern.compile("FROM\\s+(person|company)_share\\s+(\\w+)\\s+"
+            + "JOIN\\s+JSON_TABLE\\(#\\{orgWorkspaceIdsJson}, '\\$\\[\\*]' COLUMNS\\(id INT PATH '\\$'\\)\\)"
+            + "\\s+org_workspace\\s+ON org_workspace.id = (\\w+).workspace_id\\s+"
+            + "WHERE \\2\\.(person|company)_id = \\3.id\\s+AND \\2.workspace_id = #\\{(query\\.)?workspaceId}"
+            + "(?:\\s+AND \\2.created_at (<=|<) #\\{(asOf|query.endUtc)})?\\s*\\)");
+        int statements = 0;
+        int shares = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (!(children.item(i) instanceof Element element)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            int reads = count(Pattern.compile("FROM (?:person|company)_share\\b"), sql);
+            if (reads == 0) {
+                continue;
+            }
+            String id = element.getAttribute("id");
+            assertEquals("select", element.getTagName(), id);
+            assertTrue(owners.containsKey(id), "Unreviewed Report share reader: " + id);
+            assertEquals(owners.get(id).size(), reads, id);
+            assertEquals(reads, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            var matcher = branch.matcher(sql);
+            List<String> actualOwners = new ArrayList<>();
+            while (matcher.find()) {
+                actualOwners.add(matcher.group(3));
+                assertEquals(matcher.group(1), matcher.group(4), id);
+                if (id.equals("aggregateCoverageGaps")) {
+                    assertEquals("<", matcher.group(6), id);
+                    assertEquals("query.endUtc", matcher.group(7), id);
+                } else if (id.startsWith("getVisible")) {
+                    assertEquals("<=", matcher.group(6), id);
+                    assertEquals("asOf", matcher.group(7), id);
+                    assertTrue(sql.contains(matcher.group(3) + ".created_at <= #{asOf}"), id);
+                } else {
+                    assertEquals(null, matcher.group(6), id);
+                }
+            }
+            assertEquals(owners.get(id), actualOwners, id);
+            shares += reads;
+            statements++;
+        }
+        assertEquals(5, statements);
+        assertEquals(6, shares);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/ReportMapper.xml")));
+    }
+
+    @Test
+    void every_segment_share_read_binds_the_owning_workspace_to_the_unfiltered_scope() throws Exception {
+        Document document = loadMapper("mappers/SegmentMapper.xml");
+        Pattern shareRead = Pattern.compile("(?:FROM|JOIN)\\s+\\w+_share\\b", Pattern.CASE_INSENSITIVE);
+        Map<String, List<String>> owners = Map.of(
+            "companyIdsNoActivitySince", List.of("processable"),
+            "companyIdsForPersonsWithoutUserActivity", List.of("processable"),
+            "companyIdsWithWarmIntro", List.of("engaged", "processable"),
+            "personCompanyOp", List.of("visible_company"));
+        int shareReads = 0;
+        int fragments = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (!(children.item(i) instanceof Element element)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            int reads = count(shareRead, sql);
+            if (reads == 0) {
+                continue;
+            }
+            String id = element.getAttribute("id");
+            assertTrue(owners.containsKey(id), "Unreviewed Segment share read: " + id);
+            assertEquals(owners.get(id).size(), reads, id);
+            assertEquals(reads, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            for (String owner : owners.get(id)) {
+                Pattern ownerCeiling = Pattern.compile(
+                    "JOIN JSON_TABLE\\( #\\{orgWorkspaceIdsJson}, '\\$\\[\\*]' COLUMNS\\(id INT PATH '\\$'\\) "
+                        + "\\) org_workspace ON org_workspace\\.id = " + owner + "\\.workspace_id");
+                assertEquals(1, count(ownerCeiling, sql), id + ": " + owner);
+            }
+            shareReads += reads;
+            fragments++;
+        }
+        assertEquals(5, shareReads);
+        assertEquals(owners.size(), fragments);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/SegmentMapper.xml")));
+    }
+
+    @Test
+    void every_pipeline_share_ceiling_binds_its_legacy_owning_workspace() throws Exception {
+        Document document = loadMapper("mappers/PipelineMapper.xml");
+        Map<String, String> owners = Map.of(
+            "visible", "pipeline",
+            "getVisibleStageById", "pipeline",
+            "getVisibleStageByIdForUpdate", "pipeline",
+            "getAllStages", "stage",
+            "getStagesByPipelineId", "pipeline");
+        int checked = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (!(children.item(i) instanceof Element element)) {
+                continue;
+            }
+            String id = element.getAttribute("id");
+            if (!owners.containsKey(id)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            assertEquals(1, count(Pattern.compile("FROM pipeline_share"), sql), id);
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            assertTrue(sql.contains("ON org_workspace.id = " + owners.get(id) + ".workspace_id"), id);
+            assertTrue(sql.contains("ps.workspace_id = #{workspaceId}"), id);
+            assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, sql), id);
+            checked++;
+        }
+        assertEquals(5, checked);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/PipelineMapper.xml")));
     }
 
     private int count(Pattern pattern, String text) {
@@ -159,15 +422,49 @@ class OrgShareCeilingArchTest {
                 + "looks misconfigured and the ceiling guard above would pass vacuously");
     }
 
+    @Test
+    void cacheRestrictionPurgeCeilingCoversEveryFeatureOnTheCacheWorkspace() throws Exception {
+        Document document = loadMapper("mappers/AiOutputCacheMapper.xml");
+        NodeList deletes = document.getElementsByTagName("delete");
+        int purges = 0;
+        for (int index = 0; index < deletes.getLength(); index++) {
+            Element statement = (Element) deletes.item(index);
+            if (!statement.getAttribute("id").equals("deleteForPerson")) {
+                continue;
+            }
+            purges++;
+            String sql = statement.getTextContent().replaceAll("\\s+", " ").trim();
+            String ceiling = "DELETE c FROM ai_output_cache c "
+                + "JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) owner_workspace "
+                + "ON owner_workspace.id = #{workspaceId} "
+                + "JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace "
+                + "ON org_workspace.id = c.workspace_id WHERE ( ";
+            assertTrue(sql.startsWith(ceiling), sql);
+            assertTrue(sql.endsWith(")"));
+            assertEquals(4, count(Pattern.compile("c\\.feature LIKE"), sql));
+            for (String feature : List.of("report.narrative:%", "intro.rationale:%",
+                    "deal.risk_rationale:%", "deal.brief:%")) {
+                assertEquals(1, count(Pattern.compile(Pattern.quote("c.feature LIKE '" + feature + "'")), sql));
+            }
+            assertEquals(2, count(CONTROL_DERIVED_READ_CEILING, sql));
+        }
+        assertEquals(1, purges);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/AiOutputCacheMapper.xml")));
+    }
+
     private Document loadShareMapper() throws Exception {
+        return loadMapper("mappers/ShareMapper.xml");
+    }
+
+    private Document loadMapper(String resource) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setValidating(false);
         factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
         factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
         factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
         DocumentBuilder builder = factory.newDocumentBuilder();
-        try (InputStream in = getClass().getClassLoader().getResourceAsStream("mappers/ShareMapper.xml")) {
-            assertNotNull(in, "ShareMapper.xml not found on the classpath");
+        try (InputStream in = getClass().getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(in, resource + " not found on the classpath");
             return builder.parse(in);
         }
     }

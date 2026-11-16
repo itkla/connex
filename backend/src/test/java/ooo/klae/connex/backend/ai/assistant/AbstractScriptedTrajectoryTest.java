@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
@@ -31,6 +32,9 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyInitializer;
+import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProviderProfile;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiRequestJournal;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiStepInterceptor;
@@ -50,6 +54,9 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.integration.ScriptedTrajectoryDatabaseConfiguration;
+import ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -59,12 +66,15 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.SystemActor;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * The one scripted-provider Spring context, and the fixtures every trajectory golden runs against.
+ * Shared scripted-provider Spring configuration and the fixtures every trajectory golden runs against.
  *
  * <p>Nothing below the agent loop is mocked. A turn starts through {@link AiAssistantTurnService},
  * runs on the real {@code AiGenerationService} worker pool, reaches the real
@@ -75,7 +85,9 @@ import tools.jackson.databind.ObjectMapper;
  * <p><b>Why this context is not transactional.</b> The loop runs on a worker thread that reloads
  * the initiating identity from committed rows, so a test-managed transaction would hide the
  * workspace, the member and the provider row from the very thread under test. Every fixture is
- * therefore committed and deleted explicitly, in one fresh organization per method.
+ * therefore committed and deleted explicitly, in one fresh organization per method. Each context
+ * owns an isolated catalog because readiness reconciles every active workspace, including any
+ * unrelated fixtures left by the preceding database shard in its shared catalog.
  *
  * <p><b>Why the provider row is inserted directly.</b> Readiness is shape-only, so an
  * {@code https://scripted.invalid/v1} endpoint satisfies it without any DNS lookup. The controller
@@ -90,9 +102,10 @@ import tools.jackson.databind.ObjectMapper;
                 "connex.ai.scripted-provider.enabled=true"
         })
 @ActiveProfiles({"test", ScriptedAiProviderProfile.NAME})
-@Import(AbstractScriptedTrajectoryTest.ScriptedStepInterceptorConfiguration.class)
+@Import({AbstractScriptedTrajectoryTest.ScriptedStepInterceptorConfiguration.class,
+        ScriptedTrajectoryDatabaseConfiguration.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-abstract class AbstractScriptedTrajectoryTest {
+public abstract class AbstractScriptedTrajectoryTest {
 
     /**
      * Contributes the single loop-thread step interceptor the scripted provider will find.
@@ -170,6 +183,12 @@ abstract class AbstractScriptedTrajectoryTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private AiRestrictionEpoch restrictionEpoch;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private WorkspaceService workspaceService;
+    @Autowired private AiAgentPrivacyInitializer privacyInitializer;
+    @Autowired private AiAgentPrivacyService privacyService;
+    @Autowired private AiAssistantPrivacyControlMapper privacyControl;
+    @Autowired private AutomationExecutor automationExecutor;
+    @Autowired private SystemActor systemActor;
 
     private Organization organization;
     private Workspace workspace;
@@ -188,7 +207,7 @@ abstract class AbstractScriptedTrajectoryTest {
     static void scriptedFixtureDirectory(DynamicPropertyRegistry registry) {
         registry.add(
                 ScriptedAiProviderProfile.FIXTURE_DIR_PROPERTY,
-                AbstractScriptedTrajectoryTest::fixtureDirectory);
+                () -> fixtureDirectory() + "/${connex.test.scripted-fixture-subdirectory:}");
     }
 
     private static String fixtureDirectory() {
@@ -206,17 +225,6 @@ abstract class AbstractScriptedTrajectoryTest {
     void prepareTenant() {
         STEP_HOOK.set(null);
         String unique = UUID.randomUUID().toString().substring(0, 8);
-        organization = new Organization();
-        organization.setName("Scripted trajectory " + unique);
-        organization.setSlug("scripted-trajectory-" + unique);
-        organizationMapper.insert(organization);
-
-        workspace = new Workspace();
-        workspace.setOrgId(organization.getId());
-        workspace.setName("Scripted trajectory " + unique);
-        workspace.setSlug("scripted-trajectory-" + unique);
-        workspaceMapper.insert(workspace);
-
         member = new User();
         member.setUsername("scripted-trajectory-" + unique);
         member.setDisplayName("Scripted Member " + unique);
@@ -224,7 +232,10 @@ abstract class AbstractScriptedTrajectoryTest {
         member.setPasswordHash("hash-" + unique);
         member.setTimezone("UTC");
         userMapper.insert(member);
-        workspaceMapper.addMember(workspace.getId(), member.getId(), "owner");
+        var created = provisionWorkspace(workspaceService, "Scripted trajectory " + unique, member);
+        workspace = workspaceMapper.getActiveById(created.getId());
+        organization = organizationMapper.getById(created.getOrgId());
+        establishPrivacyReadiness();
 
         jdbcTemplate.update("""
                 INSERT INTO ai_provider_config (
@@ -236,6 +247,38 @@ abstract class AbstractScriptedTrajectoryTest {
         journal.clear();
     }
 
+    /** Provisions committed control and privacy state through the production service. */
+    protected WorkspaceMembershipDto provisionWorkspace(
+            WorkspaceService service, String name, User owner) {
+        return service.createWorkspace(name, owner.getId());
+    }
+
+    /**
+     * Completes committed provisioning with bounded bootstrap work and production reconciliation.
+     * Timers are deferred in tests, so completion must not depend on a background maintenance tick.
+     */
+    private void establishPrivacyReadiness() {
+        automationExecutor.runAs(workspaceId(), systemActor.user(), "system", () -> {
+            var fence = privacyControl.getFence(organizationId());
+            assertNotNull(fence, "workspace provisioning must create organization privacy authority");
+            assertNotNull(chatMapper.getPrivacyBarrier(workspaceId()),
+                    "workspace provisioning must initialize privacy after commit");
+            boolean completed = false;
+            for (int batch = 0; batch < 10; batch++) {
+                if (privacyService.batch(workspaceId(), fence.getBootstrapOperationId())) {
+                    completed = true;
+                    break;
+                }
+            }
+            assertTrue(completed, "new-organization privacy bootstrap must complete within ten batches");
+            assertNotNull(privacyControl.getFence(organizationId()).getBootstrapCompletedAt(),
+                    "bootstrap completion must include verified placement coverage");
+            return null;
+        });
+        privacyInitializer.reconcile();
+        assertTrue(privacyInitializer.isReady(), "mission readiness must be established, not mocked");
+    }
+
     @AfterEach
     void cleanUpTenant() {
         STEP_HOOK.set(null);
@@ -243,9 +286,16 @@ abstract class AbstractScriptedTrajectoryTest {
         journal.clear();
         if (workspace != null) {
             jdbcTemplate.update("DELETE FROM ai_run_lease WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("UPDATE ai_agent_run SET status = 'cancelled', active_segment_id = NULL, report_message_id = NULL WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM ai_agent_action WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("UPDATE ai_agent_segment SET status = 'cancelled', settled_at = CURRENT_TIMESTAMP(6), turn_id = NULL WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("UPDATE ai_chat_turn SET mission_run_id = NULL, mission_segment_id = NULL WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM ai_agent_segment WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_chat_tool_call WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_chat_turn WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_chat_message WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM ai_agent_run WHERE workspace_id = ?", workspace.getId());
+            ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_chat_session_participant WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_chat_session WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_workspace_governance WHERE workspace_id = ?", workspace.getId());
@@ -265,29 +315,33 @@ abstract class AbstractScriptedTrajectoryTest {
             jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", member.getId());
         }
         if (organization != null) {
+            jdbcTemplate.update("DELETE FROM organization_ai_budget_reservation WHERE org_id = ?", organization.getId());
+            jdbcTemplate.update("DELETE FROM organization_ai_budget_usage WHERE org_id = ?", organization.getId());
+            jdbcTemplate.update("DELETE FROM organization_ai_budget WHERE org_id = ?", organization.getId());
             jdbcTemplate.update(
                     "DELETE FROM ai_provider_config WHERE org_id = ?", organization.getId());
+            ooo.klae.connex.backend.support.TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organization.getId());
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
     }
 
     /** @return the fresh workspace this method owns */
-    final int workspaceId() {
+    protected final int workspaceId() {
         return workspace.getId();
     }
 
     /** @return the fresh organization this method owns */
-    final int organizationId() {
+    protected final int organizationId() {
         return organization.getId();
     }
 
     /** @return the single active member of the fresh workspace */
-    final User member() {
+    protected final User member() {
         return member;
     }
 
     /** @return the bounded in-JVM record of what the provider was handed */
-    final ScriptedAiRequestJournal journal() {
+    protected final ScriptedAiRequestJournal journal() {
         return journal;
     }
 
@@ -306,7 +360,7 @@ abstract class AbstractScriptedTrajectoryTest {
      *
      * @param modelId a declared scripted capability class model id
      */
-    final void useCapabilityClass(String modelId) {
+    protected final void useCapabilityClass(String modelId) {
         jdbcTemplate.update(
                 "UPDATE ai_provider_config SET model_id = ? WHERE org_id = ?",
                 modelId, organization.getId());
@@ -321,7 +375,7 @@ abstract class AbstractScriptedTrajectoryTest {
      *
      * @param hook receives the resolved script id and the tool calls completed so far
      */
-    final void onScriptedStep(ObjIntConsumer<String> hook) {
+    protected final void onScriptedStep(ObjIntConsumer<String> hook) {
         STEP_HOOK.set(hook);
     }
 
@@ -350,7 +404,7 @@ abstract class AbstractScriptedTrajectoryTest {
      */
     final AiChatTurn turnRow(Trajectory trajectory) {
         return chatMapper.getTurnById(
-                workspace.getId(), trajectory.sessionId(), trajectory.turnId());
+                workspace.getId(), trajectory.sessionId(), trajectory.turnId(), 1L);
     }
 
     /**
@@ -399,8 +453,8 @@ abstract class AbstractScriptedTrajectoryTest {
                     accepted.turnId(),
                     settled.getStatus(),
                     settled.getTerminalReason(),
-                    chatMapper.listToolCallsBySession(workspace.getId(), sessionId, false, 50),
-                    chatMapper.listMessages(workspace.getId(), sessionId, 50, 0).stream()
+                    chatMapper.listToolCallsBySession(workspace.getId(), sessionId, false, 50, null, 1L),
+                    chatMapper.listMessages(workspace.getId(), sessionId, 50, 0, 1L).stream()
                             .filter(message -> "assistant".equals(message.getAuthorKind()))
                             .toList());
         } finally {
@@ -414,7 +468,7 @@ abstract class AbstractScriptedTrajectoryTest {
      * @param action stable audit action key
      * @return how many rows the action wrote for this workspace
      */
-    final int auditRows(String action) {
+    protected final int auditRows(String action) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = ?",
                 Integer.class, workspace.getId(), action);
@@ -596,7 +650,7 @@ abstract class AbstractScriptedTrajectoryTest {
      */
     private AiChatQueuedTurn runningTurn() {
         Map<String, Object> turn = jdbcTemplate.queryForMap(
-                "SELECT id, session_id FROM ai_chat_turn"
+                "SELECT id, session_id, privacy_generation, privacy_taint_seq, organization_privacy_generation FROM ai_chat_turn"
                         + " WHERE workspace_id = ? AND status = 'running'",
                 workspace.getId());
         int messageId = Objects.requireNonNull(jdbcTemplate.queryForObject(
@@ -609,18 +663,29 @@ abstract class AbstractScriptedTrajectoryTest {
         return new AiChatQueuedTurn(
                 workspace.getId(),
                 member.getId(),
-                ((Number) turn.get("session_id")).intValue(),
-                ((Number) turn.get("id")).intValue(),
+                number(turn, "session_id").intValue(),
+                number(turn, "id").intValue(),
                 messageId,
                 messageSeq,
                 restrictionEpoch.current(workspace.getId()),
                 false,
                 List.of(),
-                List.of());
+                List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+                new AiChatPrivacyToken(workspace.getId(), number(turn, "session_id").intValue(),
+                        number(turn, "privacy_generation").longValue(),
+                        turn.get("privacy_taint_seq") == null ? null : number(turn, "privacy_taint_seq").intValue(),
+                        organizationId(), number(turn, "organization_privacy_generation").longValue()));
+    }
+
+    private static Number number(Map<String, Object> row, String field) {
+        if (row.get(field) instanceof Number number) {
+            return number;
+        }
+        throw new IllegalStateException("Missing numeric trajectory field: " + field);
     }
 
     /** Installs the member's identity and tenant placement on the calling thread. */
-    final void authenticate() {
+    protected final void authenticate() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(member, null, member.getAuthorities()));
         tenantContext.set(
@@ -628,7 +693,7 @@ abstract class AbstractScriptedTrajectoryTest {
     }
 
     /** Clears the member's identity and tenant placement from the calling thread. */
-    final void clearAuthentication() {
+    protected final void clearAuthentication() {
         SecurityContextHolder.clearContext();
         tenantContext.clear();
     }
@@ -641,7 +706,7 @@ abstract class AbstractScriptedTrajectoryTest {
      * @param phone structured contact field, never part of a record tool result
      * @return the committed person
      */
-    final Person person(String name, String email, String phone) {
+    protected final Person person(String name, String email, String phone) {
         Person person = new Person();
         person.setWorkspaceId(workspace.getId());
         person.setName(name);
@@ -660,7 +725,7 @@ abstract class AbstractScriptedTrajectoryTest {
      * @param content note body, which reaches the prompt as untrusted CRM data
      * @return the committed note
      */
-    final Note note(Person person, String title, String content) {
+    protected final Note note(Person person, String title, String content) {
         Note note = new Note();
         note.setWorkspaceId(workspace.getId());
         note.setContent(content);
@@ -776,9 +841,10 @@ abstract class AbstractScriptedTrajectoryTest {
      *
      * @return the new session's identifier
      */
-    private int session() {
+    protected final int session() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(member.getId());
         session.setTitle(UNTITLED_SESSION);
         session.setTitleUserSet(false);
@@ -788,7 +854,8 @@ abstract class AbstractScriptedTrajectoryTest {
         return session.getId();
     }
 
-    private AiChatTurn awaitTerminal(int sessionId, int turnId) {
+    /** Waits for the durable terminal result, cancelling a runaway worker before cleanup. */
+    protected final AiChatTurn awaitTerminal(int sessionId, int turnId) {
         AiChatTurn settled = poll(sessionId, turnId, TERMINAL_DEADLINE, TERMINAL_STATUSES);
         if (settled != null) {
             return settled;
@@ -844,7 +911,7 @@ abstract class AbstractScriptedTrajectoryTest {
     private AiChatTurn poll(int sessionId, int turnId, Duration bound, List<String> statuses) {
         Instant deadline = Instant.now().plus(bound);
         while (true) {
-            AiChatTurn turn = chatMapper.getTurnById(workspace.getId(), sessionId, turnId);
+            AiChatTurn turn = chatMapper.getTurnById(workspace.getId(), sessionId, turnId, 1L);
             assertNotNull(turn, "the durable turn row disappeared while the trajectory ran");
             if (statuses.contains(turn.getStatus())) {
                 return turn;

@@ -454,4 +454,84 @@
              work.approvalId, work.stepId
     LIMIT #{limit}
   </select>
+
+  <select id="findDepartureReferences" resultType="ApprovalStepApprover" flushCache="true">
+    SELECT id, workspace_id, step_id, approver_kind, user_id FROM document_approval_step_approver
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    ORDER BY id
+  </select>
+
+  <select id="findDepartureReferencesAnywhere" resultType="ApprovalStepApprover" flushCache="true">
+    SELECT id, workspace_id, step_id, approver_kind, user_id FROM document_approval_step_approver
+    WHERE user_id = #{userId}
+    ORDER BY workspace_id, id
+  </select>
+
+  <delete id="deleteDepartingApprover">
+    DELETE FROM document_approval_step_approver
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND user_id = #{userId}
+  </delete>
+
+
+  <resultMap id="DepartureStepResult" type="DocumentApprovalStep" extends="DocumentApprovalStepResult">
+    <collection property="assignments" ofType="DocumentApprovalStepAssignment" notNullColumn="assignment_id">
+      <id property="id" column="assignment_id"/>
+      <result property="assignmentKind" column="assignment_kind"/>
+      <result property="assignmentRound" column="assignment_round"/>
+      <result property="approverKind" column="assignment_approver_kind"/>
+      <result property="userId" column="assignment_user_id"/>
+      <result property="delegatedByUserId" column="delegated_by_user_id"/>
+    </collection>
+  </resultMap>
+
+  <sql id="departureSteps">
+    SELECT s.id, s.workspace_id, s.approval_id, s.step_order, s.name, s.required_count, s.status,
+           a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
+           a.approver_kind, a.user_id AS approver_user_id,
+           h.id AS assignment_id, h.assignment_kind, h.assignment_round,
+           h.approver_kind AS assignment_approver_kind, h.user_id AS assignment_user_id,
+           h.delegated_by_user_id
+    FROM (
+      SELECT workspace_id, step_id
+      FROM document_approval_step_approver
+      WHERE user_id = #{userId} ${departureWorkspacePredicate}
+      UNION
+      SELECT workspace_id, step_id
+      FROM document_approval_step_assignment
+      WHERE user_id = #{userId} ${departureWorkspacePredicate}
+      UNION
+      SELECT workspace_id, step_id
+      FROM document_approval_step_assignment
+      WHERE delegated_by_user_id = #{userId} ${departureWorkspacePredicate}
+    ) candidate
+    JOIN document_approval_step s ON s.workspace_id = candidate.workspace_id AND s.id = candidate.step_id
+    JOIN document_approval r ON r.workspace_id = s.workspace_id AND r.id = s.approval_id
+    LEFT JOIN document_approval_step_approver a
+      ON a.workspace_id = s.workspace_id AND a.step_id = s.id
+    LEFT JOIN document_approval_step_assignment h
+      ON h.workspace_id = s.workspace_id AND h.step_id = s.id AND h.approval_id = s.approval_id
+    WHERE r.status = 'pending' AND s.status IN ('pending', 'active')
+  </sql>
+
+  <select id="findOpenStepsForDeparture" resultMap="DepartureStepResult" flushCache="true">
+    <include refid="departureSteps">
+      <property name="departureWorkspacePredicate" value="AND workspace_id = #{workspaceId}"/>
+    </include>
+      AND s.workspace_id = #{workspaceId}
+    ORDER BY s.id, a.id, h.id
+  </select>
+
+  <select id="findOpenStepsForDepartureAnywhere" resultMap="DepartureStepResult" flushCache="true">
+    <include refid="departureSteps">
+      <property name="departureWorkspacePredicate" value=""/>
+    </include>
+    ORDER BY s.workspace_id, s.id, a.id, h.id
+  </select>
+
+
+  <delete id="deleteDepartingApproverAnywhere">
+    DELETE FROM document_approval_step_approver
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND user_id = #{userId}
+  </delete>
+
 </mapper>

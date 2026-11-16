@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +17,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -23,8 +25,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.servlet.Filter;
 
@@ -36,8 +42,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -47,10 +55,12 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
@@ -62,12 +72,13 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.AuditIntegrityService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.UserDeletionTransaction;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.dto.WorkflowManualPreparationDto;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
@@ -95,7 +106,7 @@ class RoleRecoveryIntegrationTest {
     @Autowired private TenantContext tenantContext;
     @Autowired private UserDeletionTransaction userDeletionTransaction;
     @MockitoSpyBean private WorkspaceMapper workspaceMapper;
-    @MockitoBean private AuditService auditService;
+    @Autowired private AuditIntegrityService auditIntegrityService;
     @MockitoBean private ProviderAccountOffboardingService providerAccountOffboardingService;
 
     private final List<User> members = new ArrayList<>();
@@ -291,6 +302,147 @@ class RoleRecoveryIntegrationTest {
         assertEquals(400, result);
         assertNotNull(roleMapper.findRole(workspace.getId(), custom.getId()));
         assertEquals(custom.getId(), workspaceMapper.getMemberRoleId(workspace.getId(), member.getId()));
+    }
+
+    @Test
+    void lowestOwnerLeavingSerializesBeforeHighestOwnerRemovesMiddleOwner() throws Exception {
+        User middleOwner = newMember("owner");
+        User highestOwner = newMember("owner");
+        assertTrue(owner.getId() < middleOwner.getId());
+        assertTrue(middleOwner.getId() < highestOwner.getId());
+        CountDownLatch leavingAtOwnerScan = new CountDownLatch(1);
+        CountDownLatch releaseLeave = new CountDownLatch(1);
+        CountDownLatch removalAtWorkspace = new CountDownLatch(1);
+        AtomicLong leavingConnection = new AtomicLong();
+        AtomicLong removalConnection = new AtomicLong();
+        WorkspaceMapper realMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("lowest-owner-leave")) {
+                leavingConnection.set(connectionId());
+                leavingAtOwnerScan.countDown();
+                assertTrue(releaseLeave.await(30, TimeUnit.SECONDS));
+            }
+            return realMapper.lockActiveOwnerMembers(workspace.getId());
+        }).when(workspaceMapper).lockActiveOwnerMembers(workspace.getId());
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("highest-owner-remove")) {
+                removalConnection.set(connectionId());
+                removalAtWorkspace.countDown();
+            }
+            return realMapper.lockWorkspace(workspace.getId());
+        }).when(workspaceMapper).lockWorkspace(workspace.getId());
+
+        try (var leaver = Executors.newSingleThreadExecutor(task -> new Thread(task, "lowest-owner-leave"));
+                var remover = Executors.newSingleThreadExecutor(task -> new Thread(task, "highest-owner-remove"))) {
+            Future<Integer> leave = leaver.submit(() -> {
+                try {
+                    return request(owner, post("/api/workspaces/" + workspace.getId() + "/leave"))
+                        .andReturn().getResponse().getStatus();
+                } finally {
+                    clearContext();
+                }
+            });
+            try {
+                assertTrue(leavingAtOwnerScan.await(30, TimeUnit.SECONDS));
+                Future<Integer> remove = remover.submit(() -> {
+                    try {
+                        return request(highestOwner, delete(memberPath(middleOwner)))
+                            .andReturn().getResponse().getStatus();
+                    } finally {
+                        clearContext();
+                    }
+                });
+                assertTrue(removalAtWorkspace.await(30, TimeUnit.SECONDS));
+                assertNotEquals(leavingConnection.get(), removalConnection.get());
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, removalConnection.get(),
+                    "workspace", Integer.toString(workspace.getId()));
+                for (User member : List.of(owner, middleOwner, highestOwner)) {
+                    assertBuiltInOwner(member);
+                }
+                assertTrue(committedWorkspaceAudits().isEmpty());
+                releaseLeave.countDown();
+                assertEquals(200, completedWithoutLockFailure(leave, 30));
+                assertEquals(204, completedWithoutLockFailure(remove, 30));
+            } finally {
+                releaseLeave.countDown();
+                leaver.shutdownNow();
+                remover.shutdownNow();
+                assertTrue(leaver.awaitTermination(30, TimeUnit.SECONDS));
+                assertTrue(remover.awaitTermination(30, TimeUnit.SECONDS));
+            }
+        }
+
+        assertNull(workspaceMapper.getMember(workspace.getId(), owner.getId()));
+        assertNull(workspaceMapper.getMember(workspace.getId(), middleOwner.getId()));
+        assertBuiltInOwner(highestOwner);
+        List<AuditLog> audits = committedWorkspaceAudits();
+        assertEquals(List.of("workspace.member.leave", "workspace.member.remove"),
+            audits.stream().map(AuditLog::getAction).toList());
+        assertEquals(List.of(owner.getId(), highestOwner.getId()),
+            audits.stream().map(AuditLog::getIntegrityActorId).toList());
+        assertTrue(audits.stream().allMatch(auditIntegrityService::hasValidIntegrity));
+        assertEquals(audits.getFirst().getRowHash(), audits.getLast().getPrevHash());
+        assertEquals(audits.getFirst().getChainIndex() + 1, audits.getLast().getChainIndex());
+    }
+
+    @Test
+    void removalRefusesAnExactNonActorOwnerScanWithoutMutation() throws Exception {
+        User target = newMember("owner");
+        User heldOwner = newMember("owner");
+        Person person = newPersonOwnedBy(target);
+        CountDownLatch beforeScan = new CountDownLatch(1);
+        CountDownLatch releaseScan = new CountDownLatch(1);
+        AtomicLong scannerConnection = new AtomicLong();
+        AtomicInteger scans = new AtomicInteger();
+        WorkspaceMapper realMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
+        doAnswer(invocation -> {
+            scans.incrementAndGet();
+            scannerConnection.set(connectionId());
+            beforeScan.countDown();
+            assertTrue(releaseScan.await(30, TimeUnit.SECONDS));
+            return realMapper.lockActiveOwnerMembers(workspace.getId());
+        }).when(workspaceMapper).lockActiveOwnerMembers(workspace.getId());
+
+        assertPromptConflictWhileMembershipIsHeld(heldOwner, beforeScan, releaseScan, scannerConnection,
+            () -> request(owner, delete(memberPath(target))).andReturn().getResponse().getStatus());
+
+        assertEquals(1, scans.get(), "NOWAIT conflicts must not retry inside the transaction");
+        for (User member : List.of(owner, target, heldOwner)) {
+            assertBuiltInOwner(member);
+        }
+        assertEquals(target.getId(), jdbcTemplate.queryForObject(
+            "SELECT owner_id FROM person WHERE workspace_id = ? AND id = ?", Integer.class,
+            workspace.getId(), person.getId()));
+        assertTrue(committedWorkspaceAudits().isEmpty());
+    }
+
+    @Test
+    void roleEditRefusesAnExactNonActorAssigneeScanWithoutMutation() throws Exception {
+        User assignee = newMember("member");
+        WorkspaceRole custom = role("Contended assignee", "PERSON_CREATE");
+        workspaceMapper.setMemberCustomRole(workspace.getId(), assignee.getId(), custom.getId());
+        CountDownLatch beforeScan = new CountDownLatch(1);
+        CountDownLatch releaseScan = new CountDownLatch(1);
+        AtomicLong scannerConnection = new AtomicLong();
+        AtomicInteger scans = new AtomicInteger();
+        WorkspaceMapper realMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
+        doAnswer(invocation -> {
+            scans.incrementAndGet();
+            scannerConnection.set(connectionId());
+            beforeScan.countDown();
+            assertTrue(releaseScan.await(30, TimeUnit.SECONDS));
+            return realMapper.lockRoleAssignees(workspace.getId(), custom.getId());
+        }).when(workspaceMapper).lockRoleAssignees(workspace.getId(), custom.getId());
+
+        assertPromptConflictWhileMembershipIsHeld(assignee, beforeScan, releaseScan, scannerConnection,
+            () -> update(owner, custom).andReturn().getResponse().getStatus());
+
+        assertEquals(1, scans.get(), "NOWAIT conflicts must not retry inside the transaction");
+        assertEquals("Contended assignee", roleMapper.findRole(workspace.getId(), custom.getId()).getName());
+        assertEquals(List.of("PERSON_CREATE"), roleMapper.findPermissions(workspace.getId(), custom.getId()));
+        assertEquals(custom.getId(), workspaceMapper.getMemberRoleId(workspace.getId(), assignee.getId()));
+        assertBuiltInOwner(owner);
+        assertTrue(committedWorkspaceAudits().isEmpty());
     }
 
     @Test
@@ -746,8 +898,25 @@ class RoleRecoveryIntegrationTest {
     }
 
     private void restoreOwner(User actor, User target) throws Exception {
-        request(actor, patch(memberPath(target)).content("{\"role\":\"owner\"}"))
-            .andExpect(status().isOk());
+        String previousRole = workspaceMapper.getRole(workspace.getId(), target.getId());
+        Integer previousRoleId = workspaceMapper.getMemberRoleId(workspace.getId(), target.getId());
+        if ("owner".equals(previousRole)) {
+            request(actor, patch(memberPath(target)).content("{\"role\":\"owner\"}"))
+                .andExpect(status().isOk());
+        } else {
+            var offered = objectMapper.readTree(
+                request(actor, patch(memberPath(target)).content("{\"role\":\"owner\"}"))
+                    .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString());
+            assertEquals("ownership_offer", offered.path("outcome").asString());
+            assertEquals(previousRole, workspaceMapper.getRole(workspace.getId(), target.getId()));
+            assertEquals(previousRoleId, workspaceMapper.getMemberRoleId(workspace.getId(), target.getId()));
+            String offerId = offered.path("offer").path("id").asString();
+            var accepted = objectMapper.readTree(
+                request(target, post("/api/ownership-offers/" + offerId + "/accept").content("{}"))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+            assertEquals("ACCEPTED", accepted.path("offer").path("state").asString());
+            assertEquals("owner", accepted.path("membership").path("builtInRole").asString());
+        }
         assertBuiltInOwner(target);
     }
 
@@ -755,6 +924,83 @@ class RoleRecoveryIntegrationTest {
         assertEquals("owner", workspaceMapper.getRole(workspace.getId(), member.getId()));
         assertNull(workspaceMapper.getMemberRoleId(workspace.getId(), member.getId()));
         assertEquals(Permission.grantableSet(), workspaceService.permissionsFor(workspace.getId(), member.getId()));
+    }
+
+    private Person newPersonOwnedBy(User member) {
+        Person person = new Person();
+        person.setWorkspaceId(workspace.getId());
+        person.setOwnerId(member.getId());
+        person.setName("Departure contention " + UUID.randomUUID());
+        personMapper.insert(person);
+        return person;
+    }
+
+    private List<AuditLog> committedWorkspaceAudits() {
+        return jdbcTemplate.query("""
+            SELECT audit_log.*,
+                   untrusted_client_asserted_correlation_id AS untrusted_client_asserted_correlation_hmac
+            FROM audit_log WHERE integrity_workspace_id = ? ORDER BY chain_index
+            """, BeanPropertyRowMapper.newInstance(AuditLog.class), workspace.getId());
+    }
+
+    private long connectionId() {
+        return Objects.requireNonNull(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class),
+            "transaction connection id");
+    }
+
+    private void assertPromptConflictWhileMembershipIsHeld(
+            User holder, CountDownLatch beforeScan, CountDownLatch releaseScan,
+            AtomicLong scannerConnection, Callable<Integer> mutation) throws Exception {
+        SecurityContextHolder.getContext().setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(holder, null, holder.getAuthorities()));
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+            transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            transaction.executeWithoutResult(status -> {
+                assertNotNull(workspaceMapper.lockAuthorizationMembership(workspace.getId(), holder.getId()));
+                long holderConnection = connectionId();
+                Future<Integer> pending = executor.submit(() -> {
+                    try {
+                        return mutation.call();
+                    } finally {
+                        clearContext();
+                    }
+                });
+                try {
+                    assertTrue(beforeScan.await(30, TimeUnit.SECONDS),
+                        "The mutation must reach the exact scan containing the held membership");
+                    assertNotEquals(holderConnection, scannerConnection.get());
+                    releaseScan.countDown();
+                    assertEquals(409, completedWithoutLockFailure(pending));
+                    assertNotNull(workspaceMapper.getMember(workspace.getId(), holder.getId()));
+                } catch (Exception exception) {
+                    throw new IllegalStateException(exception);
+                } finally {
+                    releaseScan.countDown();
+                    executor.shutdownNow();
+                }
+            });
+        } finally {
+            clearContext();
+        }
+    }
+
+    private static int completedWithoutLockFailure(Future<Integer> pending) throws Exception {
+        return completedWithoutLockFailure(pending, 5);
+    }
+
+    private static int completedWithoutLockFailure(Future<Integer> pending, int timeoutSeconds) throws Exception {
+        try {
+            return pending.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (ExecutionException failure) {
+            for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+                if (cause instanceof SQLException sqlFailure) {
+                    assertNotEquals(1213, sqlFailure.getErrorCode());
+                    assertNotEquals(1205, sqlFailure.getErrorCode());
+                }
+            }
+            throw failure;
+        }
     }
 
     private int contendAtWorkspaceLock(Callable<Integer> contender, Callable<?> winner) throws Exception {
@@ -767,7 +1013,9 @@ class RoleRecoveryIntegrationTest {
             return realMapper.lockWorkspace(workspace.getId());
         }).when(workspaceMapper).lockWorkspace(workspace.getId());
         try (var executor = Executors.newSingleThreadExecutor(task -> new Thread(task, "role-recovery-contender"))) {
-            var future = new TransactionTemplate(transactionManager).execute(transaction -> {
+            TransactionTemplate template = new TransactionTemplate(transactionManager);
+            template.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            var future = template.execute(transaction -> {
                 userMapper.lockById(owner.getId());
                 workspaceMapper.lockWorkspace(workspace.getId());
                 var pending = executor.submit(() -> {
@@ -810,6 +1058,13 @@ class RoleRecoveryIntegrationTest {
         session.setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR, System.currentTimeMillis());
         session.setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, actor.getId());
         PublicApiTestSecuritySupport.stepUp(session, actor.getId());
+        Integer credentialRowId = Objects.requireNonNull(jdbcTemplate.queryForObject(
+            "SELECT c.id FROM webauthn_credential c"
+                + " JOIN webauthn_user_entity u ON u.id = c.user_entity_user_id WHERE u.user_id = ?",
+            Integer.class, actor.getId()), "test passkey");
+        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR,
+            actor.getId() + ":" + session.getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR)
+                + ":" + credentialRowId);
         return mockMvc.perform(builder.header("X-Workspace-Id", workspace.getId())
             .contentType(MediaType.APPLICATION_JSON).session(session).with(user(actor)).with(csrf().asHeader()));
     }
@@ -844,7 +1099,7 @@ class RoleRecoveryIntegrationTest {
         userMapper.insert(member);
         members.add(member);
         workspaceMapper.addMember(workspace.getId(), member.getId(), builtInRole);
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, member);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, member);
         return member;
     }
 }

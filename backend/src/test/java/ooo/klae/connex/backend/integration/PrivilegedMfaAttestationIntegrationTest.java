@@ -1,0 +1,838 @@
+package ooo.klae.connex.backend.integration;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
+import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.MfaAttestationRefusedException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.integration.SoftwarePasskeys.SoftwarePasskey;
+import ooo.klae.connex.backend.mappers.OrgMemberMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.OrgMemberService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
+import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
+import ooo.klae.connex.backend.webauthn.WebAuthnService;
+
+/**
+ * Proves grantor-issued privileged MFA attestation codes against the real schema, real authority
+ * locks and real passkey ceremonies (#1534, slice 2): who can issue, that a code only ever works
+ * for its grantee and its organization, how refusals are counted, and that a redemption re-checks
+ * the authority, the session and the passkey under its locks.
+ */
+@SpringBootTest
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
+class PrivilegedMfaAttestationIntegrationTest {
+    private static final EnrollmentEvidence NO_EVIDENCE = new EnrollmentEvidence(null, null);
+    private static final String WRONG_CODE = "ZZZZ-ZZZZ-ZZZZ-ZZZZ";
+
+    @Autowired private PrivilegedMfaAttestationService attestationService;
+    @Autowired private PrivilegedAccountService privilegedAccountService;
+    @Autowired private OrgMemberService orgMemberService;
+    @Autowired private ooo.klae.connex.backend.services.OwnershipOfferService ownershipOfferService;
+    @Autowired private PrivilegedMfaAttestationRedemption redemption;
+    @Autowired private WebAuthnService webAuthnService;
+    @Autowired private SessionSecurityService sessionSecurityService;
+    @Autowired private UserMapper userMapper;
+    @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private OrgMemberMapper orgMemberMapper;
+    @Autowired private WorkspaceMapper workspaceMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
+
+    private final List<Integer> workspaceIds = new ArrayList<>();
+    private final List<Integer> organizationIds = new ArrayList<>();
+    private final List<Integer> userIds = new ArrayList<>();
+
+    private Organization organization;
+    private Workspace workspace;
+    private User owner;
+    private User member;
+    private SoftwarePasskey ownerPasskey;
+    private String configuredAttestationEnforced;
+
+    @BeforeEach
+    void setUp() {
+        configuredAttestationEnforced = privilegedMfaProperties.getAttestationEnforced();
+        privilegedMfaProperties.setAttestationEnforced("false");
+        organization = newOrganization();
+        workspace = newWorkspace(organization);
+        owner = newUser();
+        member = newUser();
+        workspaceMapper.addMember(workspace.getId(), owner.getId(), "owner");
+        workspaceMapper.addMember(workspace.getId(), member.getId(), "member");
+        ownerPasskey = register(owner);
+        cover(ownerPasskey, organization);
+    }
+
+    @AfterEach
+    void tearDown() {
+        privilegedMfaProperties.setAttestationEnforced(configuredAttestationEnforced);
+        SecurityContextHolder.clearContext();
+        RequestContextHolder.resetRequestAttributes();
+        for (int workspaceId : workspaceIds) {
+            jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
+        }
+        for (int organizationId : organizationIds) {
+            jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organizationId);
+        }
+        for (int userId : userIds) {
+            jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", userId);
+        }
+    }
+
+    @Test
+    void aWorkspaceOwnersCodeAttestsTheMembersSigningPasskeyInTheOrganization() {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+
+        MockHttpServletRequest session = sessionOf(member);
+        int orgId = redeem(member, passkey, session, issued.code());
+
+        assertEquals(organization.getId(), orgId);
+        assertEquals(List.of(new Coverage(organization.getId(), "GRANTOR", grantIdFor(member))),
+            coverage(passkey.rowId()));
+        assertEquals(passkey.rowId(), jdbcTemplate.queryForObject(
+            "SELECT redeemed_credential_row_id FROM privileged_mfa_attestation_grant WHERE grantee_user_id = ?",
+            Integer.class, member.getId()));
+        assertNotNull(sessionSecurityService.recentStepUpProof(session.getSession(false), member.getId()));
+        assertEquals(passkey.rowId(), sessionSecurityService
+            .recentStepUpProof(session.getSession(false), member.getId()).credentialRowId());
+    }
+
+    /**
+     * With attestation enforced, a grantor vouches in an organization with any passkey covered
+     * there, even one that is not sufficient everywhere, while its privileged operations still need
+     * a sufficient passkey (#1534). Here the owner is privileged in two organizations, and one of
+     * its passkeys is covered in only one of them.
+     */
+    @Test
+    void anEnforcedGrantorVouchesWithAPasskeyCoveredInTheGrantsOrganizationAlone() {
+        Organization elsewhere = newOrganization();
+        Workspace elsewhereWorkspace = newWorkspace(elsewhere);
+        workspaceMapper.addMember(elsewhereWorkspace.getId(), owner.getId(), "owner");
+        workspaceMapper.addMember(elsewhereWorkspace.getId(), member.getId(), "member");
+        SoftwarePasskey everywhere = register(owner);
+        SoftwarePasskey hereOnly = register(owner);
+        cover(everywhere, organization);
+        cover(everywhere, elsewhere);
+        cover(hereOnly, organization);
+        privilegedMfaProperties.setAttestationEnforced("true");
+
+        steppedUpWith(owner, hereOnly);
+
+        assertThrows(RecentAuthenticationRequiredException.class,
+            () -> sessionSecurityService.requireRecentAuthentication(owner.getId()));
+        assertNotNull(attestationService.issueForWorkspace(workspace.getId(), owner.getId(), member.getId()));
+        assertThrows(RecentAuthenticationRequiredException.class,
+            () -> attestationService.issueForWorkspace(elsewhereWorkspace.getId(), owner.getId(), member.getId()));
+
+        steppedUpWith(owner, everywhere);
+
+        sessionSecurityService.requireRecentAuthentication(owner.getId());
+        assertNotNull(attestationService.issueForWorkspace(
+            elsewhereWorkspace.getId(), owner.getId(), member.getId()));
+    }
+
+    /**
+     * With attestation enforced, a code stops working once its grantor no longer holds a passkey
+     * covered in the code's organization (#1534), and nothing is covered by the refused redemption.
+     */
+    @Test
+    void anEnforcedGrantorWhoLostCoverageCanNoLongerPassItOn() {
+        SoftwarePasskey grantorPasskey = ownerPasskey;
+        SoftwarePasskey memberPasskey = register(member);
+        privilegedMfaProperties.setAttestationEnforced("true");
+        steppedUpWith(owner, grantorPasskey);
+        MfaAttestationCodeDto issued =
+            attestationService.issueForWorkspace(workspace.getId(), owner.getId(), member.getId());
+        jdbcTemplate.update(
+            "DELETE FROM privileged_credential_attestation WHERE credential_row_id = ?", grantorPasskey.rowId());
+
+        assertEquals("grantor_unattested", refusalOf(member, memberPasskey, issued.code()));
+        assertEquals(List.of(), coverage(memberPasskey.rowId()));
+    }
+
+    /**
+     * Issuing joins a caller's transaction rather than starting its own, and an isolation annotation
+     * cannot change that transaction, so issuing inside one is refused before anything is read or
+     * written (#1534).
+     */
+    @Test
+    void issuingInsideACallersTransactionIsRefused() {
+        steppedUpWith(owner, ownerPasskey);
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+
+        assertThrows(IllegalStateException.class, () -> outer.executeWithoutResult(status ->
+            attestationService.issueForWorkspace(workspace.getId(), owner.getId(), member.getId())));
+        assertEquals(0, openGrants(member));
+    }
+
+    /**
+     * With attestation enforced, a privileged account adds a passkey only when the step-up behind
+     * the ceremony was signed by a passkey that is sufficient, re-checked under the account locks
+     * (#1534). An account awaiting approval therefore cannot add passkeys.
+     */
+    @Test
+    void anEnforcedPrivilegedAccountAddsAPasskeyOnlyWithASufficientSigner() {
+        SoftwarePasskey first = ownerPasskey;
+        jdbcTemplate.update("DELETE FROM privileged_credential_attestation WHERE credential_row_id = ?", first.rowId());
+        privilegedMfaProperties.setAttestationEnforced("true");
+
+        EnrollmentEvidence signedWhileUnapproved = evidenceSignedBy(owner, first);
+        assertThrows(RecentAuthenticationRequiredException.class, () -> SoftwarePasskeys.register(
+            webAuthnService, userMapper, owner, signedWhileUnapproved, "Second"));
+        assertEquals(1, passkeyCount(owner));
+
+        cover(first, organization);
+        SoftwarePasskeys.register(webAuthnService, userMapper, owner, evidenceSignedBy(owner, first), "Second");
+
+        assertEquals(2, passkeyCount(owner));
+    }
+
+    @Test
+    void aCodeOnlyEverWorksForItsGranteeAndAnotherAccountsRefusalCountsAgainstItsOwnCodesOnly() {
+        User other = newUser();
+        workspaceMapper.addMember(workspace.getId(), other.getId(), "member");
+        SoftwarePasskey otherPasskey = register(other);
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(other, otherPasskey, sessionOf(other), issued.code()));
+
+        assertEquals(List.of(), coverage(otherPasskey.rowId()));
+        assertEquals(0, failedAttempts(member));
+        redeem(member, passkey, sessionOf(member), issued.code());
+        assertEquals("GRANTOR", coverage(passkey.rowId()).getFirst().source());
+    }
+
+    @Test
+    void fiveRefusedRedemptionsExhaustTheGrantAndTheCountSurvivesEachRollback() {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            assertThrows(MfaAttestationRefusedException.class,
+                () -> redeem(member, passkey, sessionOf(member), WRONG_CODE));
+            assertEquals(attempt, failedAttempts(member));
+        }
+
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), issued.code()));
+        assertEquals(5, failedAttempts(member));
+        assertEquals(List.of(), coverage(passkey.rowId()));
+    }
+
+    @Test
+    void revokingAnOpenCodeRecordsTheRevokerAndNoRedemptionCanUseItAfterwards() {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+        steppedUpWith(owner, ownerPasskey);
+        attestationService.revokeForWorkspace(workspace.getId(), owner.getId(), member.getId());
+
+        assertEquals(owner.getId(), jdbcTemplate.queryForObject(
+            "SELECT revoked_by_user_id FROM privileged_mfa_attestation_grant"
+                + " WHERE grantee_user_id = ? AND revoked_at IS NOT NULL",
+            Integer.class, member.getId()));
+        assertEquals("grant_unusable", refusalOf(member, passkey, issued.code()));
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), issued.code()));
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(List.of(0), attemptsOnEveryGrant(member));
+    }
+
+    @Test
+    void anExpiredCodeIsRefusedWithoutCoverageAndItsRefusalsAreNeverCounted() {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+        jdbcTemplate.update(
+            "UPDATE privileged_mfa_attestation_grant SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)"
+                + " WHERE grantee_user_id = ?", member.getId());
+
+        assertEquals("grant_unusable", refusalOf(member, passkey, issued.code()));
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), issued.code()));
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(List.of(0), attemptsOnEveryGrant(member));
+        assertEquals(1, openGrants(member));
+    }
+
+    @Test
+    void aNewCodeSupersedesTheOpenOneAndRevokingNeverRemovesRedeemedCoverage() {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto first = issueThroughWorkspace(member);
+        MfaAttestationCodeDto second = issueThroughWorkspace(member);
+
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), first.code()));
+        redeem(member, passkey, sessionOf(member), second.code());
+        steppedUpWith(owner, ownerPasskey);
+        attestationService.revokeForWorkspace(workspace.getId(), owner.getId(), member.getId());
+
+        assertEquals("GRANTOR", coverage(passkey.rowId()).getFirst().source());
+        assertEquals(0, openGrants(member));
+    }
+
+    @Test
+    void aGrantorWhoLostTheAuthorityCannotStandBehindARedemption() {
+        User admin = newUser();
+        workspaceMapper.addMember(workspace.getId(), admin.getId(), "admin");
+        SoftwarePasskey passkey = register(member);
+        SoftwarePasskey adminPasskey = register(admin);
+        cover(adminPasskey, organization);
+        steppedUpWith(admin, adminPasskey);
+        MfaAttestationCodeDto issued =
+            attestationService.issueForWorkspace(workspace.getId(), admin.getId(), member.getId());
+        workspaceMapper.updateMemberRole(workspace.getId(), admin.getId(), "member");
+
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), issued.code()));
+
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(1, failedAttempts(member));
+    }
+
+    @Test
+    void aMemberCannotIssueACodeForAnyoneAndNobodyCanIssueOneForThemselves() {
+        User peer = newUser();
+        workspaceMapper.addMember(workspace.getId(), peer.getId(), "member");
+
+        steppedUpWith(member, register(member));
+        ForbiddenException notAuthorized = assertThrows(ForbiddenException.class,
+            () -> attestationService.issueForWorkspace(workspace.getId(), member.getId(), peer.getId()));
+        steppedUpWith(owner, ownerPasskey);
+        ForbiddenException self = assertThrows(ForbiddenException.class,
+            () -> attestationService.issueForWorkspace(workspace.getId(), owner.getId(), owner.getId()));
+
+        assertEquals("Requires the MEMBER_MANAGE permission in this workspace", notAuthorized.getMessage());
+        assertEquals("An attestation code cannot be issued to yourself", self.getMessage());
+
+        assertEquals(0, openGrants(peer));
+        assertEquals(0, openGrants(owner));
+    }
+
+    @Test
+    void anOrganizationOwnersCodeAttestsAnOrgAdminWithNoWorkspace() {
+        User orgAdmin = newUser();
+        orgMemberMapper.addMember(organization.getId(), owner.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), orgAdmin.getId(), "admin");
+        SoftwarePasskey passkey = register(orgAdmin);
+        steppedUpWith(owner, ownerPasskey);
+        MfaAttestationCodeDto issued =
+            attestationService.issueForOrganization(organization.getId(), owner.getId(), orgAdmin.getId());
+
+        redeem(orgAdmin, passkey, sessionOf(orgAdmin), issued.code());
+
+        assertEquals(List.of(new Coverage(organization.getId(), "GRANTOR", grantIdFor(orgAdmin))),
+            coverage(passkey.rowId()));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT workspace_id FROM privileged_mfa_attestation_grant WHERE grantee_user_id = ?",
+            Integer.class, orgAdmin.getId()));
+    }
+
+    @Test
+    void aRedemptionReplacesInheritedCoverageButLeavesADirectRowExactlyAsItWas() {
+        SoftwarePasskey inherited = register(member);
+        jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source)"
+                + " VALUES (?, ?, 'INHERITED')", inherited.rowId(), organization.getId());
+        redeem(member, inherited, sessionOf(member), issueThroughWorkspace(member).code());
+
+        User founder = newUser();
+        workspaceMapper.addMember(workspace.getId(), founder.getId(), "member");
+        SoftwarePasskey direct = register(founder);
+        jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source)"
+                + " VALUES (?, ?, 'FOUNDER')", direct.rowId(), organization.getId());
+        redeem(founder, direct, sessionOf(founder), issueThroughWorkspace(founder).code());
+
+        assertEquals(List.of(new Coverage(organization.getId(), "GRANTOR", grantIdFor(member))),
+            coverage(inherited.rowId()));
+        assertEquals(List.of(new Coverage(organization.getId(), "FOUNDER", null)), coverage(direct.rowId()));
+    }
+
+    @Test
+    void aDeletionReservationCommittedWhileIssuanceWaitsOnTheAccountRefusesTheCode() throws Exception {
+        List<String> outcomes = commitWhileBlocked(
+            () -> userMapper.reserveAccountDeletion(member.getId(), UUID.randomUUID().toString()),
+            "app_user", member.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(issuanceAs(owner, ownerPasskey, () -> attestationService.issueForWorkspace(
+                workspace.getId(), owner.getId(), member.getId()))));
+
+        assertEquals(List.of("User is not a member of this workspace"), outcomes);
+        assertEquals(0, openGrants(member));
+    }
+
+    @Test
+    void aTeardownFenceCommittedWhileAnOrganizationIssuanceWaitsRefusesTheCode() throws Exception {
+        User orgAdmin = newUser();
+        orgMemberMapper.addMember(organization.getId(), owner.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), orgAdmin.getId(), "admin");
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> jdbcTemplate.update(
+                "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", organization.getId()),
+            "organization", organization.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(issuanceAs(owner, ownerPasskey, () -> attestationService.issueForOrganization(
+                organization.getId(), owner.getId(), orgAdmin.getId()))));
+
+        assertEquals(List.of("Requires the organization owner role"), outcomes);
+        assertEquals(0, openGrants(orgAdmin));
+    }
+
+    @Test
+    void twoRedemptionsBlockedOnTheSameAuthorityLocksClaimTheCodeExactlyOnce() throws Exception {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+        int epoch = userMapper.currentSessionEpoch(member.getId());
+        int firstAccount = Math.min(owner.getId(), member.getId());
+        Supplier<String> attempt = redemptionAs(member, epoch, passkey, issued.code());
+
+        List<String> outcomes = new ArrayList<>(commitWhileBlocked(
+            () -> userMapper.lockById(firstAccount),
+            "app_user", firstAccount, TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(attempt, attempt)));
+        outcomes.sort(String::compareTo);
+
+        assertEquals(List.of("claimed", "grant_unusable"), outcomes);
+        assertEquals(1, coverage(passkey.rowId()).size());
+    }
+
+    @Test
+    void aSessionRevokedWhileARedemptionWaitsOnTheAccountIsRefusedUnderTheLocks() throws Exception {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+        int epoch = userMapper.currentSessionEpoch(member.getId());
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> userMapper.bumpSessionEpoch(member.getId()),
+            "app_user", member.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(redemptionAs(member, epoch, passkey, issued.code())));
+
+        assertEquals(List.of("session_not_current"), outcomes);
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(1, openGrants(member));
+    }
+
+    @Test
+    void aPasskeyRemovedWhileARedemptionWaitsOnTheAccountIsNeverAttested() throws Exception {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+        int epoch = userMapper.currentSessionEpoch(member.getId());
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> {
+                userMapper.lockById(member.getId());
+                jdbcTemplate.update("DELETE FROM webauthn_credential WHERE id = ?", passkey.rowId());
+            },
+            "app_user", member.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(redemptionAs(member, epoch, passkey, issued.code())));
+
+        assertEquals(List.of("credential_not_owned"), outcomes);
+        assertEquals(1, openGrants(member));
+    }
+
+    /** A promotion after the cutover cannot bootstrap permanent trust during the dark period. */
+    @Test
+    void aPostCutoverOwnerCannotIssueOrPropagateCoverageAndIsConfinedAtSwitchOn() {
+        SoftwarePasskey promotedPasskey = register(member);
+        User grantee = newUser();
+        workspaceMapper.addMember(workspace.getId(), grantee.getId(), "member");
+        SoftwarePasskey granteePasskey = register(grantee);
+        orgMemberMapper.addMember(organization.getId(), owner.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), grantee.getId(), "admin");
+        steppedUpWithOwnershipProof(owner, ownerPasskey);
+        var offered = orgMemberService.setMember(organization.getId(), owner.getId(), member.getId(), "owner");
+        assertNull(orgMemberMapper.getRole(organization.getId(), member.getId()));
+        steppedUpWithOwnershipProof(member, promotedPasskey);
+        ownershipOfferService.accept(Long.parseLong(offered.offer().id()), member.getId(), false);
+        assertFalse(jdbcTemplate.queryForObject(
+            "SELECT founder FROM org_member WHERE org_id = ? AND user_id = ?",
+            Boolean.class, organization.getId(), member.getId()));
+        assertEquals(PrivilegedMfaStanding.SATISFIED, privilegedAccountService.enforcedStanding(member.getId()));
+        steppedUpWith(member, promotedPasskey);
+
+        RecentAuthenticationRequiredException refused = assertThrows(RecentAuthenticationRequiredException.class,
+            () -> attestationService.issueForOrganization(organization.getId(), member.getId(), grantee.getId()));
+        assertEquals("RECENT_AUTHENTICATION_REQUIRED", refused.getCode());
+        assertThrows(RecentAuthenticationRequiredException.class,
+            () -> attestationService.revokeForOrganization(organization.getId(), member.getId(), grantee.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM privileged_mfa_attestation_grant WHERE grantor_user_id = ?",
+            Integer.class, member.getId()));
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(grantee, granteePasskey, sessionOf(grantee), WRONG_CODE));
+        assertEquals(List.of(), coverage(granteePasskey.rowId()));
+        SoftwarePasskey descendant = SoftwarePasskeys.register(
+            webAuthnService, userMapper, grantee, evidenceSignedBy(grantee, granteePasskey), "Descendant");
+        assertEquals(List.of(), coverage(descendant.rowId()));
+        assertEquals(List.of(), coverage(promotedPasskey.rowId()));
+
+        privilegedMfaProperties.setAttestationEnforced("true");
+
+        assertEquals(PrivilegedMfaStanding.ATTESTATION_REQUIRED,
+            privilegedAccountService.enforcedStanding(member.getId()));
+    }
+
+    /** The grantor's account lock makes a committed loss of coverage visible at redemption. */
+    @Test
+    void whileAttestationIsOffCoverageLostDuringARedemptionWaitRefusesTheCode() throws Exception {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(member);
+        int epoch = userMapper.currentSessionEpoch(member.getId());
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> {
+                userMapper.lockById(owner.getId());
+                jdbcTemplate.update("DELETE FROM privileged_credential_attestation WHERE credential_row_id = ?",
+                    ownerPasskey.rowId());
+            },
+            "app_user", owner.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(redemptionAs(member, epoch, passkey, issued.code())));
+
+        assertEquals(List.of("grantor_unattested"), outcomes);
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(1, openGrants(member));
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), issued.code()));
+        assertEquals(1, failedAttempts(member));
+        assertEquals(List.of("grantor_unattested"), jdbcTemplate.queryForList(
+            "SELECT JSON_UNQUOTE(JSON_EXTRACT(context, '$.error')) FROM audit_log"
+                + " WHERE action = 'auth.mfa.attestation.denied' AND entity_id = ?",
+            String.class, member.getId()));
+    }
+
+    @Test
+    void aGrandfatheredOwnerCanIssueWhileAttestationIsOff() {
+        jdbcTemplate.update(
+            "UPDATE privileged_credential_attestation SET source = 'GRANDFATHERED' WHERE credential_row_id = ?",
+            ownerPasskey.rowId());
+
+        assertNotNull(issueThroughWorkspace(member));
+        assertEquals(List.of(new Coverage(organization.getId(), "GRANDFATHERED", null)),
+            coverage(ownerPasskey.rowId()));
+    }
+
+    @Test
+    void aNewOrganizationsFounderCanIssueWhileAttestationIsOff() {
+        User founder = newUser();
+        Organization founded = newOrganization();
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            userMapper.lockByIdForShare(founder.getId());
+            orgMemberService.addFoundingOwner(founded.getId(), founder.getId());
+        });
+        orgMemberMapper.addMember(founded.getId(), member.getId(), "admin");
+        SoftwarePasskey founderPasskey = register(founder);
+        steppedUpWith(founder, founderPasskey);
+
+        assertNotNull(attestationService.issueForOrganization(founded.getId(), founder.getId(), member.getId()));
+        assertEquals(List.of(new Coverage(founded.getId(), "FOUNDER", null)), coverage(founderPasskey.rowId()));
+    }
+
+    /** The cutover inventory counts coverage pairs, including several organizations for one passkey. */
+    @Test
+    void grandfatheredCoverageInventoryCountsRowsAndExcludesOtherSources() {
+        long before = privilegedAccountService.grandfatheredCoverageCount();
+        Organization elsewhere = newOrganization();
+        SoftwarePasskey passkey = register(member);
+        jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source)"
+                + " VALUES (?, ?, 'GRANDFATHERED'), (?, ?, 'GRANDFATHERED')",
+            passkey.rowId(), organization.getId(), passkey.rowId(), elsewhere.getId());
+
+        assertEquals(before + 2, privilegedAccountService.grandfatheredCoverageCount());
+        cover(register(member), organization);
+        assertEquals(before + 2, privilegedAccountService.grandfatheredCoverageCount());
+    }
+
+    private record Coverage(int orgId, String source, Long grantId) {
+    }
+
+    /**
+     * Holds {@code change} uncommitted in a transaction of its own, then starts each contender in
+     * its own transaction of {@code isolation} and waits until MySQL reports it blocked on the held
+     * {@code table} row. Only then does the change commit. Returns each contender's outcome in
+     * order: what it returned, or the reason or message it was refused with.
+     */
+    private List<String> commitWhileBlocked(
+            Runnable change,
+            String table,
+            int heldRowId,
+            int isolation,
+            List<Supplier<String>> contenders) throws Exception {
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(contenders.size() + 1);
+        try {
+            Future<?> holder = executor.submit(() -> new TransactionTemplate(transactionManager)
+                .executeWithoutResult(status -> {
+                    change.run();
+                    held.countDown();
+                    await(release);
+                }));
+            assertTrue(held.await(30, TimeUnit.SECONDS), "the change was never held");
+            List<Future<String>> pending = new ArrayList<>();
+            for (Supplier<String> contender : contenders) {
+                AtomicLong connection = new AtomicLong();
+                CountDownLatch started = new CountDownLatch(1);
+                pending.add(executor.submit(() -> contend(isolation, connection, started, contender)));
+                assertTrue(started.await(30, TimeUnit.SECONDS), "a contender never started");
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(
+                    jdbcTemplate, connection.get(), table, Integer.toString(heldRowId));
+            }
+            release.countDown();
+            holder.get(30, TimeUnit.SECONDS);
+            List<String> outcomes = new ArrayList<>();
+            for (Future<String> outcome : pending) {
+                outcomes.add(outcome.get(30, TimeUnit.SECONDS));
+            }
+            return outcomes;
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        }
+    }
+
+    private String contend(
+            int isolation, AtomicLong connection, CountDownLatch started, Supplier<String> contender) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(isolation);
+        try {
+            return transaction.execute(status -> {
+                connection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                started.countDown();
+                return contender.get();
+            });
+        } catch (PrivilegedMfaAttestationService.AttestationRefusal refusal) {
+            return refusal.reason();
+        } catch (ResourceNotFoundException | ForbiddenException refused) {
+            return refused.getMessage();
+        }
+    }
+
+    private Supplier<String> issuanceAs(
+            User grantor, SoftwarePasskey passkey, Supplier<MfaAttestationCodeDto> issue) {
+        return () -> {
+            steppedUpWith(grantor, passkey);
+            try {
+                issue.get();
+                return "issued";
+            } finally {
+                SecurityContextHolder.clearContext();
+                RequestContextHolder.resetRequestAttributes();
+            }
+        };
+    }
+
+    private Supplier<String> redemptionAs(User grantee, int epoch, SoftwarePasskey passkey, String code) {
+        return () -> {
+            SoftwarePasskeys.authenticate(grantee);
+            try {
+                attestationService.redeem(grantee.getId(), epoch, passkey.rowId(), code);
+                return "claimed";
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        };
+    }
+
+    private String refusalOf(User grantee, SoftwarePasskey passkey, String code) {
+        SoftwarePasskeys.authenticate(grantee);
+        int epoch = userMapper.currentSessionEpoch(grantee.getId());
+        return assertThrows(PrivilegedMfaAttestationService.AttestationRefusal.class,
+            () -> attestationService.redeem(grantee.getId(), epoch, passkey.rowId(), code)).reason();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(30, TimeUnit.SECONDS)) {
+                throw new AssertionError("the held change was never released");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while holding the change", interrupted);
+        }
+    }
+
+    private MfaAttestationCodeDto issueThroughWorkspace(User grantee) {
+        steppedUpWith(owner, ownerPasskey);
+        return attestationService.issueForWorkspace(workspace.getId(), owner.getId(), grantee.getId());
+    }
+
+    private int redeem(User grantee, SoftwarePasskey passkey, MockHttpServletRequest session, String code) {
+        Authentication auth = SoftwarePasskeys.authenticate(grantee);
+        PublicKeyCredentialRequestOptions options = webAuthnService.createAttestationOptions(auth);
+        return redemption.redeem(
+            session, auth, grantee, options, SoftwarePasskeys.sign(passkey, options), code).orgId();
+    }
+
+    private MockHttpServletRequest sessionOf(User user) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        sessionSecurityService.stampSessionEpoch(request, userMapper.currentSessionEpoch(user.getId()));
+        return request;
+    }
+
+    private void steppedUpWithOwnershipProof(User user, SoftwarePasskey passkey) {
+        steppedUpWith(user, passkey);
+        var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+        sessionSecurityService.stampSessionEpoch(request, userMapper.currentSessionEpoch(user.getId()));
+    }
+
+    private void steppedUpWith(User user, SoftwarePasskey passkey) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        sessionSecurityService.markStepUp(request, user.getId(), passkey.rowId());
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        SoftwarePasskeys.authenticate(user);
+    }
+
+    private EnrollmentEvidence evidenceSignedBy(User user, SoftwarePasskey passkey) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        sessionSecurityService.markStepUp(request, user.getId(), passkey.rowId());
+        return new EnrollmentEvidence(
+            null, sessionSecurityService.recentStepUpProof(request.getSession(false), user.getId()));
+    }
+
+    private void cover(SoftwarePasskey passkey, Organization coveredIn) {
+        jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source) VALUES (?, ?, 'FOUNDER')",
+            passkey.rowId(), coveredIn.getId());
+    }
+
+    private int passkeyCount(User user) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM webauthn_credential c JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id"
+                + " WHERE e.user_id = ?",
+            Integer.class, user.getId());
+        assertNotNull(count);
+        return count;
+    }
+
+    private SoftwarePasskey register(User user) {
+        SoftwarePasskey passkey = SoftwarePasskeys.register(webAuthnService, userMapper, user, NO_EVIDENCE, "Attest");
+        SecurityContextHolder.clearContext();
+        return passkey;
+    }
+
+    private List<Coverage> coverage(int credentialRowId) {
+        return jdbcTemplate.query(
+            "SELECT org_id, source, grant_id FROM privileged_credential_attestation"
+                + " WHERE credential_row_id = ? ORDER BY org_id",
+            (resultSet, rowNumber) -> new Coverage(
+                resultSet.getInt("org_id"),
+                resultSet.getString("source"),
+                resultSet.getObject("grant_id", Long.class)),
+            credentialRowId);
+    }
+
+    private Long grantIdFor(User grantee) {
+        return jdbcTemplate.queryForObject(
+            "SELECT id FROM privileged_mfa_attestation_grant WHERE grantee_user_id = ? AND redeemed_at IS NOT NULL",
+            Long.class, grantee.getId());
+    }
+
+    private int failedAttempts(User grantee) {
+        Integer attempts = jdbcTemplate.queryForObject(
+            "SELECT COALESCE(MAX(failed_attempts), 0) FROM privileged_mfa_attestation_grant"
+                + " WHERE grantee_user_id = ? AND revoked_at IS NULL",
+            Integer.class, grantee.getId());
+        return attempts == null ? 0 : attempts;
+    }
+
+    private List<Integer> attemptsOnEveryGrant(User grantee) {
+        return jdbcTemplate.queryForList(
+            "SELECT failed_attempts FROM privileged_mfa_attestation_grant WHERE grantee_user_id = ? ORDER BY id",
+            Integer.class, grantee.getId());
+    }
+
+    private int openGrants(User grantee) {
+        Integer open = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM privileged_mfa_attestation_grant"
+                + " WHERE grantee_user_id = ? AND redeemed_at IS NULL AND revoked_at IS NULL",
+            Integer.class, grantee.getId());
+        return open == null ? 0 : open;
+    }
+
+    private Organization newOrganization() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Organization created = new Organization();
+        created.setName("Attestation Org " + suffix);
+        created.setSlug("attestation-org-" + suffix);
+        organizationMapper.insert(created);
+        organizationIds.add(created.getId());
+        return created;
+    }
+
+    private Workspace newWorkspace(Organization parent) {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Workspace created = new Workspace();
+        created.setOrgId(parent.getId());
+        created.setName("Attestation Workspace " + suffix);
+        created.setSlug("attestation-ws-" + suffix);
+        created.setTimezone("UTC");
+        workspaceMapper.insert(created);
+        workspaceIds.add(created.getId());
+        return created;
+    }
+
+    private User newUser() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        User created = new User();
+        created.setUsername("attest_" + suffix);
+        created.setDisplayName("Attest " + suffix);
+        created.setEmail("attest-" + suffix + "@example.com");
+        created.setPasswordHash("unused");
+        created.setTimezone("UTC");
+        userMapper.insert(created);
+        userIds.add(created.getId());
+        return userMapper.getUserById(created.getId());
+    }
+}

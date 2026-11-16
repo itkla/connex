@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 
 import NewContactDialog, { NewContactForm } from '@/app/components/records/contacts/NewContactDialog';
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import type { BusinessCardImportDraft, CreateContactPayload } from '@/app/lib/types';
@@ -108,7 +109,9 @@ export default function ContactCreateContainer({
     const createNewContact = async (
         businessCard?: BusinessCardImportDraft,
         duplicateReviewToken: string | null = null,
+        init?: RequestInit,
     ) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         invalidatePendingClose();
         const operationGeneration = closeGenerationRef.current;
         const isCurrent = () => closeGenerationRef.current === operationGeneration && !requestInit?.signal?.aborted;
@@ -117,18 +120,18 @@ export default function ContactCreateContainer({
         setCreating(true);
         emitDismissLock();
         try {
-            const imported = businessCard ? await importBusinessCard(businessCard, requestInit) : null;
+            const imported = businessCard ? await importBusinessCard(businessCard, origin) : null;
             if (!isCurrent()) return;
             const newContact = imported?.contact ?? await createContact({
                 ...payload,
                 duplicateReviewToken: duplicateReviewToken ?? undefined,
-            }, requestInit);
+            }, origin);
             if (!isCurrent()) return;
             const reusedContact = imported?.disposition === 'reused';
             let avatarUploadFailed = false;
             if (imageFile && !reusedContact) {
                 try {
-                    await uploadContactPicture(newContact.id, imageFile, requestInit);
+                    await uploadContactPicture(newContact.id, imageFile, origin);
                 } catch {
                     avatarUploadFailed = true;
                 }

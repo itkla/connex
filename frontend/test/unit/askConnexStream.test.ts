@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     ASK_CONNEX_STREAM_HYDRATION_LIMIT,
     absorbAskConnexStreamPartial,
+    adoptSettledAskConnexStreamPartial,
+    adoptsSettledAskConnexPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -44,7 +46,7 @@ describe('settled answer retention', () => {
     });
 
     it('drops a partial the member is no longer entitled to, as the server already has', () => {
-        for (const reason of ['access_revoked', 'restrictions_changed']) {
+        for (const reason of ['access_revoked', 'restrictions_changed', 'privacy_invalidated']) {
             expect(shouldDropAskConnexStream('failed', reason)).toBe(true);
             expect(shouldDropAskConnexStream('timed_out', reason)).toBe(true);
         }
@@ -61,7 +63,7 @@ describe('settled answer reconciliation', () => {
         return { store, drop: () => store.publish(null) };
     }
 
-    for (const reason of ['access_revoked', 'restrictions_changed']) {
+    for (const reason of ['access_revoked', 'restrictions_changed', 'privacy_invalidated']) {
         it(`clears a ${reason} tail before the transcript request, not after it`, async () => {
             const { store, drop } = withdrawnStore();
             let duringRefresh: unknown = 'unobserved';
@@ -363,5 +365,60 @@ describe('Ask Connex turn cancellation', () => {
         await expect(requestAskConnexTurnCancel(
             activeTurn, false, () => Promise.reject(new Error('offline')), statusOf,
         )).resolves.toBe('failed');
+    });
+});
+
+describe('a settled turn\'s durable partial is authoritative', () => {
+    it('clears an answer the server withdrew when the reset frame never arrived', () => {
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'Taro approved the '), delta(18, 'quote')]);
+        expect(streamed.text).toBe('Taro approved the quote');
+
+        const settled = adoptSettledAskConnexStreamPartial(streamed, '');
+
+        expect(settled.text).toBe('');
+        expect(settled.pending).toEqual([]);
+        expect(settled.settled).toBe(true);
+    });
+
+    it('takes a shorter settled partial exactly, as after a timeout that followed a refusal and a fresh attempt', () => {
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'The withdrawn first attempt')]);
+
+        const settled = adoptSettledAskConnexStreamPartial(streamed, 'Fresh');
+
+        expect(settled.text).toBe('Fresh');
+    });
+
+    it('lets neither a late frame nor a stale hydration grow a settled answer again', () => {
+        const settled = adoptSettledAskConnexStreamPartial(
+            applyAll(createAskConnexStream(9), [delta(0, 'withdrawn text')]), '');
+
+        expect(applyAskConnexStreamDelta(settled, delta(0, 'withdrawn text')).state.text).toBe('');
+        expect(settleAskConnexStreamHydration(settled, 'withdrawn text').state.text).toBe('');
+        expect(absorbAskConnexStreamPartial(settled, 'withdrawn text').state.text).toBe('');
+    });
+
+    it('still keeps live text ahead of a lagging partial while the turn is active', () => {
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'live text ahead')]);
+
+        expect(absorbAskConnexStreamPartial(streamed, 'live').state.text).toBe('live text ahead');
+    });
+});
+
+describe('which settled turns adopt their durable partial exactly', () => {
+    it('leaves a resolved answer to transcript reconciliation, since its durable partial is withheld', () => {
+        expect(adoptsSettledAskConnexPartial('resolved', null, false)).toBe(false);
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'The finished answer')]);
+        expect(settleAskConnexStreamHydration(streamed, '').state.text).toBe('The finished answer');
+    });
+
+    it('leaves an authorization withdrawal to the reconciliation that drops it', () => {
+        expect(adoptsSettledAskConnexPartial('failed', 'access_revoked', false)).toBe(false);
+        expect(adoptsSettledAskConnexPartial('failed', 'restrictions_changed', false)).toBe(false);
+    });
+
+    it('adopts every other settled turn exactly, and never an active one', () => {
+        expect(adoptsSettledAskConnexPartial('failed', 'malformed_output', false)).toBe(true);
+        expect(adoptsSettledAskConnexPartial('timed_out', null, false)).toBe(true);
+        expect(adoptsSettledAskConnexPartial('running', null, true)).toBe(false);
     });
 });

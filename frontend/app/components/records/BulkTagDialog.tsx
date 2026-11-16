@@ -124,9 +124,9 @@ export default function BulkTagDialog({ open, onOpenChange, mode, count, tags, m
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t('noTagsFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noTagsFound')}</ComboboxEmpty>
-                                        {tags.map((tag) => (
+                                        {(tag: (typeof tags)[number]) => (
                                             <ComboboxItem key={tag.id} value={tag}>
                                                 <span
                                                     className="size-2.5 shrink-0 rounded-full"
@@ -135,7 +135,7 @@ export default function BulkTagDialog({ open, onOpenChange, mode, count, tags, m
                                                 />
                                                 {tag.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

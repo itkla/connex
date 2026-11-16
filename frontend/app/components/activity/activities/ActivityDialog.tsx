@@ -1,8 +1,11 @@
 'use client';
 
+import { publishRecordMutation } from '@/app/lib/record-mutation-events';
+
+import { useContactTargetSearch, useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
@@ -41,9 +44,10 @@ import {
 import { cn } from '@/lib/utils';
 
 import { createActivity, createTask, isFieldError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-import { toMysqlDateTime } from '@/app/lib/utils';
+import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { addDays, startOfDay } from '@/app/lib/calendar';
 import {
@@ -51,7 +55,7 @@ import {
     ActivityTypePicker,
     type ActivityType,
 } from '@/app/components/activity/activities/activityTypes';
-import type { Contact, CreateActivityPayload, Deal } from '@/app/lib/types';
+import type { ContactPickerOption, CreateActivityPayload, Deal } from '@/app/lib/types';
 
 /** The serializable slice of the activity composer persisted as a draft and re-injected on resume. */
 export type ActivityDraftData = {
@@ -65,11 +69,13 @@ export type ActivityDraftData = {
 type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     currentUserId: number;
-    defaultPerson?: Contact | null;
+    defaultPerson?: ContactPickerOption | null;
     defaultDeal?: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     /** Prefills the timestamp (a `datetime-local` value); defaults to now when omitted. */
     defaultTimestamp?: string;
     /** Prefills the activity type, e.g. carried over from the Quick Create panel. */
@@ -91,11 +97,6 @@ type Props = {
     createRequest?: (payload: CreateActivityPayload, init?: RequestInit) => Promise<unknown>;
 };
 
-function nowLocalValue(): string {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 /** Formats a Date as the `YYYY-MM-DD` local calendar value an `<input type="date">` expects. */
 function toDateInputValue(d: Date): string {
@@ -119,6 +120,7 @@ export default function ActivityDialog({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    recordScope,
     defaultTimestamp,
     defaultType,
     defaultSubject = '',
@@ -177,6 +179,7 @@ export default function ActivityDialog({
                         currentUserId={currentUserId}
                         defaultPerson={defaultPerson}
                         defaultDeal={defaultDeal}
+                        recordScope={recordScope}
                         defaultTimestamp={defaultTimestamp}
                         defaultType={defaultType}
                         defaultSubject={defaultSubject}
@@ -197,25 +200,27 @@ export default function ActivityDialog({
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={() => {
+                        draft.clear();
+                        guard.confirm.onDiscard();
+                    }}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={() => {
-                    draft.clear();
-                    guard.confirm.onDiscard();
-                }}
-            />
         </>
     );
 }
 
 type ActivityDialogFormProps = {
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     currentUserId: number;
-    defaultPerson?: Contact | null;
+    defaultPerson?: ContactPickerOption | null;
     defaultDeal?: Deal | null;
+    /** Uses the caller's bounded company choices and keeps the originating record fixed. */
+    recordScope?: 'person' | 'deal';
     defaultTimestamp?: string;
     defaultType?: ActivityType;
     defaultSubject?: string;
@@ -250,6 +255,7 @@ export function ActivityDialogForm({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    recordScope,
     defaultTimestamp,
     defaultType,
     defaultSubject = '',
@@ -269,14 +275,17 @@ export function ActivityDialogForm({
 }: ActivityDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
+    const timeZone = useTimeZone();
     const showApiError = useApiErrorToast('ActivityCreateDialog');
 
     const [type, setType] = useState<ActivityType>(() => defaultType ?? ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState(() => defaultSubject);
     const [notes, setNotes] = useState(() => defaultNotes);
-    const [when, setWhen] = useState(() => defaultTimestamp ?? nowLocalValue());
-    const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
+    const [when, setWhen] = useState(() => defaultTimestamp ?? toDatetimeLocalValue(new Date().toISOString(), timeZone));
+    const [selectedPerson, setSelectedPerson] = useState<ContactPickerOption | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
+    const personSearch = useContactTargetSearch(recordScope === undefined, [selectedPerson?.id], persons);
+    const dealSearch = useDealTargetSearch(recordScope === undefined, [selectedDeal?.id], deals);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const [followUpEnabled, setFollowUpEnabled] = useState(false);
@@ -345,6 +354,7 @@ export function ActivityDialogForm({
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         resetFieldErrors();
         if (requireRelationshipTarget && selectedPerson === null && selectedDeal === null) {
             setRelationshipTargetMissing(true);
@@ -360,14 +370,15 @@ export function ActivityDialogForm({
                         subject: subject.trim(),
                         notes: notes.trim() || undefined,
                         createdById: currentUserId,
-                        timestamp: when ? toMysqlDateTime(when) : undefined,
+                        timestamp: when ? toMysqlDateTime(when, timeZone) : undefined,
                         personId: selectedPerson?.id ?? undefined,
                         dealId: selectedDeal?.id ?? undefined,
                     },
-                    requestInit,
+                    origin,
                 );
                 if (requestInit?.signal?.aborted) return;
                 activityCreatedRef.current = true;
+                publishRecordMutation('activity');
                 onClearDraft?.();
             }
             if (followUpEnabled) {
@@ -380,9 +391,10 @@ export function ActivityDialogForm({
                             personId: selectedPerson?.id ?? undefined,
                             dealId: selectedDeal?.id ?? undefined,
                         },
-                        requestInit,
+                        origin,
                     );
                     if (requestInit?.signal?.aborted) return;
+                    publishRecordMutation('task');
                 } catch (taskErr) {
                     if (requestInit?.signal?.aborted) return;
                     setFollowUpFailed(true);
@@ -426,7 +438,7 @@ export function ActivityDialogForm({
             <div className="px-6 pb-6">
                 <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                             <ChatBubbleLeftRightIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
@@ -519,18 +531,22 @@ export function ActivityDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-person">{t('personLabel')}</Label>
                             <Combobox
-                                items={persons}
-                                itemToStringLabel={(p: Contact) => p.name}
+                                items={recordScope ? persons : personSearch.contacts}
+                                disabled={recordScope === 'person'}
+                                serverSearch={recordScope ? undefined : personSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : personSearch.onInputValueChange}
+                                itemToStringLabel={(p: ContactPickerOption) => p.name}
                                 value={selectedPerson}
                                 onValueChange={(p) => {
-                                    setSelectedPerson(p as Contact | null);
+                                    if (recordScope === 'person') return;
+                                    setSelectedPerson(p);
                                     setRelationshipTargetMissing(false);
                                 }}
                             >
                                 <ComboboxInput
                                     id="activity-person"
                                     placeholder={t('personPlaceholder')}
-                                    disabled={followUpFailed}
+                                    disabled={followUpFailed || recordScope === 'person'}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">
@@ -538,13 +554,13 @@ export function ActivityDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
-                                        {persons.map((p) => (
+                                        {(p: (typeof persons)[number]) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -553,10 +569,14 @@ export function ActivityDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-deal">{t('dealLabel')}</Label>
                             <Combobox
-                                items={deals}
+                                items={recordScope ? deals : dealSearch.deals}
+                                disabled={recordScope === 'deal'}
+                                serverSearch={recordScope ? undefined : dealSearch.serverSearch}
+                                onInputValueChange={recordScope ? undefined : dealSearch.onInputValueChange}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
                                 onValueChange={(d) => {
+                                    if (recordScope === 'deal') return;
                                     setSelectedDeal(d as Deal | null);
                                     setRelationshipTargetMissing(false);
                                 }}
@@ -564,7 +584,7 @@ export function ActivityDialogForm({
                                 <ComboboxInput
                                     id="activity-deal"
                                     placeholder={t('dealPlaceholder')}
-                                    disabled={followUpFailed}
+                                    disabled={followUpFailed || recordScope === 'deal'}
                                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                                 >
                                     <InputGroupAddon align="inline-start">
@@ -572,13 +592,13 @@ export function ActivityDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
-                                        {deals.map((d) => (
+                                        {(d: (typeof deals)[number]) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -595,7 +615,7 @@ export function ActivityDialogForm({
                             <button
                                 type="button"
                                 onClick={enableFollowUp}
-                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                             >
                                 <CheckCircleIcon className="size-4" />
                                 {t('followUpAdd')}
@@ -643,7 +663,7 @@ export function ActivityDialogForm({
                                                     aria-pressed={active}
                                                     className={cn(
                                                         'rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
-                                                        active ? 'bg-brand-light text-brand-dark ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
+                                                        active ? 'bg-brand-light text-brand-text ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
                                                     )}
                                                 >
                                                     {t(`followUp_${preset.key}` as 'followUp_today')}

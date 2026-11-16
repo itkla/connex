@@ -18,6 +18,8 @@ import {
     UsersIcon,
 } from "@heroicons/react/24/outline";
 
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
+import { requestGuardedNavigation } from "@/app/hooks/useUnsavedChangesGuard";
 import {
     Dialog,
     DialogClose,
@@ -243,20 +245,22 @@ export default function SavedViewsBar({
         if (modified) writeSavedViewToUrl(pathname, null);
     }, [modified, pathname]);
 
-    const confirmSwitchWorkspace = async () => {
+    const confirmSwitchWorkspace = () => {
         if (!switchPrompt || switching) return;
         const target = switchPrompt.workspaceId;
         const targetSv = switchPrompt.sv;
-        try {
-            const switched = await runInWorkspace(target, async () => {
-                writeWorkspaceSavedViewToUrl(pathname, targetSv);
-            });
-            if (!switched) return;
-            setSwitchPrompt(null);
-            window.location.reload();
-        } catch (err) {
-            showApiError(err, "actionFailed");
-        }
+        requestGuardedNavigation(async () => {
+            try {
+                const switched = await runInWorkspace(target, async () => {
+                    navigateAfterWorkspaceSelection(() => writeWorkspaceSavedViewToUrl(pathname, targetSv));
+                });
+                if (!switched) return;
+                setSwitchPrompt(null);
+                navigateAfterWorkspaceSelection(() => window.location.reload());
+            } catch (err) {
+                showApiError(err, "actionFailed");
+            }
+        }, { onCancel: () => setSwitchPrompt(null) });
     };
     const declineSwitchWorkspace = () => {
         setSwitchPrompt(null);
@@ -407,7 +411,7 @@ export default function SavedViewsBar({
             {explicitView && modified ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="inline" variant="ghost" menu className="ml-1 text-brand hover:text-brand-hover">
+                        <Button size="inline" variant="ghost" menu className="ml-1 text-brand-text hover:text-brand-text">
                             {t("save")}
                         </Button>
                     </DropdownMenuTrigger>
@@ -423,7 +427,7 @@ export default function SavedViewsBar({
                     <Button
                         size="inline"
                         variant="ghost"
-                        className="ml-1 gap-1 text-brand hover:text-brand-hover"
+                        className="ml-1 gap-1 text-brand-text hover:text-brand-text"
                         onClick={() => setDialog({ mode: "create" })}
                     >
                         <PlusIcon className="size-3.5" />

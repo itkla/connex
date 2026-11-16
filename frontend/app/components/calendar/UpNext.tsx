@@ -1,12 +1,15 @@
 'use client';
 
+import { getDateTimeFormatter, getRelativeTimeFormatter } from '@/app/lib/intlFormatters';
+import { parseCalendarDate, parseCalendarDateUtc } from '@/app/lib/utils';
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { useEffect, useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import Rise from '@/app/components/motion/Rise';
-import { addDays, dayKeyOf, type CalendarEvent } from '@/app/lib/calendar';
+import { addDays, dayKeyOf, nextCalendarEvent, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_CHIP_CLASS, KIND_ICON } from './constants';
 
 /**
@@ -24,6 +27,7 @@ export default function UpNext({
     onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
 }) {
     const t = useTranslations('Calendar');
+    const timeZone = useTimeZone() ?? 'UTC';
     const [now, setNow] = useState<number | null>(null);
 
     useEffect(() => {
@@ -35,27 +39,17 @@ export default function UpNext({
         };
     }, []);
 
-    const rtf = useMemo(() => new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }), [locale]);
+    const rtf = useMemo(() => getRelativeTimeFormatter(locale, { numeric: 'auto' }), [locale]);
     const dayTimeFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { weekday: 'short', hour: 'numeric', minute: '2-digit' }),
-        [locale],
+        () => getDateTimeFormatter(locale, { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone }),
+        [locale, timeZone],
     );
-    const dayFmt = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric' }), [locale]);
+    const dayFmt = useMemo(() => getDateTimeFormatter(locale, { weekday: 'long', day: 'numeric', timeZone: 'UTC' }), [locale]);
 
-    const next = useMemo(() => {
-        if (now == null) return null;
-        let best: CalendarEvent | null = null;
-        let bestEff = Infinity;
-        for (const e of events) {
-            const eff = e.allDay ? e.startMs + 86_399_999 : e.startMs;
-            if (eff < now) continue;
-            if (eff < bestEff) {
-                best = e;
-                bestEff = eff;
-            }
-        }
-        return best;
-    }, [events, now]);
+    const next = useMemo(
+        () => now == null ? null : nextCalendarEvent(events, now, timeZone),
+        [events, now, timeZone],
+    );
 
     if (now == null || !next) return null;
 
@@ -66,13 +60,13 @@ export default function UpNext({
             if (diffMin < 60) return rtf.format(diffMin, 'minute');
             return rtf.format(Math.round(diffMin / 60), 'hour');
         }
-        const key = dayKeyOf(new Date(next.startMs));
-        const nowDate = new Date(now);
+        const key = next.dayKey;
+        const nowDate = new Date(parseCalendarDate(calendarDayInTimeZone(now, timeZone)));
         const todayKey = dayKeyOf(nowDate);
         const tomorrowKey = dayKeyOf(addDays(nowDate, 1));
         const day = key === todayKey ? t('today') : key === tomorrowKey ? t('tomorrow') : null;
-        if (next.allDay) return day ?? dayFmt.format(next.startMs);
-        const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(next.startMs);
+        if (next.allDay) return day ?? dayFmt.format(parseCalendarDateUtc(next.dayKey));
+        const time = getDateTimeFormatter(locale, { hour: 'numeric', minute: '2-digit', timeZone }).format(next.startMs);
         return day ? `${day}, ${time}` : dayTimeFmt.format(next.startMs);
     })();
 

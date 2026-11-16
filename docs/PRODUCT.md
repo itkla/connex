@@ -26,7 +26,7 @@ A feature that shows a signal but offers no action breaks the loop. A feature th
 - **Not a generic database.** Screens are opinionated about relationships and next actions, not neutral tables of rows. If a surface could belong to any record-keeping tool, it is underdesigned for Connex.
 - **Not a compliance console.** Connex is rigorously compliant under the hood (APPI, tenant isolation, auditability), but compliance is plumbing the everyday user should feel as safety, not read as statute. Legal machinery surfaces only on the pages built for it (see principle 3).
 - **Not a dense admin shell.** Configuration exists to serve selling and relationship work, not the other way around. Admin surfaces are visited occasionally by a minority of users; they never set the tone of the product.
-- **Not an autonomous actor. AI proposes; the user applies.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. When the assistant offers to change an existing record, it prepares a validated proposal and shows exactly what would change; nothing is changed until the user explicitly applies it. The one deliberate exception: while answering a request, the assistant may immediately add something small — log an activity, create a task or note, add a tag — and always says so; activities, tasks, and notes offer a short undo window, and a tag is removed the same way any tag is. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. We never claim "AI never touches records" — the truthful promise is that every AI write is announced, and either confirmed by the user first or plainly reversible on the record.
+- **Not an autonomous actor. AI proposes; the user applies — or pre-authorizes, within a standing approval they built, reviewed, and can revoke.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. Unless covered by a standing approval, when the assistant offers to change an existing record, it prepares a validated proposal and shows exactly what would change; nothing is changed until the user explicitly applies it. Small additions are another exception: while answering a request, the assistant may immediately add something small — log an activity, create a task or note, add a tag — and always says so; activities, tasks, and notes offer a short undo window, and a tag is removed the same way any tag is. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. A standing approval follows the same promise. It lets a member pre-authorize specific Ask Connex actions for a selected set of records, a saved view, or the records they own, within daily and per-run limits and until an expiry date, and they can revoke it at any time. They create it only by applying a preview that shows exactly those choices; a chat message never creates one or widens it. Every change under it is checked against the member's permissions at the moment it is made, so it can never do more than they are currently allowed to do, and losing the needed permission stops it. Organization administrators choose which actions can be pre-authorized, set the highest limits, and can switch standing approvals off for everyone. Sending anything outside Connex, deleting or otherwise destroying data, merging records, changing permissions, and turning on workflows can never be pre-authorized. We never claim "AI never touches records" — the truthful promise is that every AI write is announced, and either confirmed by the user first, made under a standing approval that names whose approval it was, or plainly reversible on the record.
 
 ## 2. Who it's for
 
@@ -64,6 +64,27 @@ Numbered and testable. Cite them by number in reviews.
 
 9. **Customize the business, not the software.** Configuration models the customer's world — their pipeline stages, fields, lifecycle, workflows — never the mechanics of Connex itself. Users tune what they sell and how, not runtimes, engines, or internals. *Test: does this setting map to a business decision the customer already makes?*
 
+### New-deal currency
+
+Workspace General offers an explicit default deal currency. Workspace owners, administrators and
+custom roles granted workspace settings may change it. New-deal dialogs, quick create, calendar
+creation, built-in guided templates, Ask Connex creation and CSV creation without a currency use that setting.
+Ask Connex shows the effective currency for review and retains that currency through approval, even
+if an administrator changes the workspace default in the meantime. People
+may choose a different currency for a deal or in a custom template. Existing workspaces without a
+saved setting show USD as the effective default and explain that it is the original fallback until
+an administrator chooses one. Never infer a currency from locale, timezone or historical deals;
+changing the default never rewrites existing deals or converts amounts. Currency choices on Deals
+and Dashboard remain independent view filters.
+
+### Deal amount comparisons
+
+Dashboard Projections totals all open deals in its currency, including undated deals and dates outside the visible chart. Its chart groups dated open deals by expected close month. Analytics and Deals revenue comparisons retain the value of all deals, including won and lost deals, by expected close date; label that comparison **All deal value** / **全案件の金額**, rather than a forecast of open deals. Forecast accuracy compares actual value with projected value on won deals only; lost deals affect neither amount. The Win rate card remains count-based; its Won amount is realized revenue and its Lost amount is the value of lost deals.
+
+Deals and Dashboard show the selected currency before their monetary totals and charts, count deals in other currencies excluded from that view, and offer a currency picker. Dashboard record counts and individual-deal lists still cover all currencies; each record retains its own currency. Its currency-scoped link opens that currency's Deals list. Currency selections survive reloads through the URL; this is a view choice, not a workspace default. Monetary widgets identify their currency and never combine or convert currencies.
+
+Currency links resolve against existing workspace currency buckets before any monetary query. Blank or unrecognized selections fall back to a known currency; known currencies stay selected even when the current filters match no deals. Dashboard explains that its deal count includes all currencies.
+
 ## 4. Vocabulary
 
 **This section is the canonical glossary — the single source of truth for product terms.** There is no other glossary file. The CI banned-terms lint over the product's message catalogs (EN and JA patterns) is **generated from this section**: edit here, and the gate follows. (The generator is `frontend/lint/vocabulary.mjs`, which writes the checked-in pattern set; the gate is the `frontend/test/unit/vocabularyLint.test.ts` suite, which scans both message catalogs against it in error mode over a baseline that only shrinks. Editing this section without regenerating fails the generator test.) Labels, columns, titles, and buttons use these terms verbatim; prose may vary naturally around them. "Never say" applies to product surfaces — code, schema, logs, and engineering docs keep their own names.
@@ -72,6 +93,8 @@ Numbered and testable. Cite them by number in reviews.
 |---|---|---|---|
 | The relationship metric (the differentiator) | **Warmth**; bands: **warmth band** (hot / warm / cool / cold); trend: "warmth is cooling" | **温度感**; bands: **温度帯**（ホット／ウォーム／クール／コールド） | relationship temperature, temperature band, relationship score; 温度バンド, 関係の温度, 関係性の温度, 関係スコア, 温度 alone as the metric name |
 | The signals triage surface | **Radar** ("Relationship Radar" only as an occasional full name in onboarding/marketing prose) | **レーダー** | Relationship Radar as the everyday label |
+| Read-only Ask Connex review of one selected record | **Record review** | **レコードの確認** | — |
+| Ask Connex preparation of changes to one selected record for explicit review | **Record preparation** | **レコードの変更案作成** | — |
 | The personal work page | **My Work** — your tasks, your relationships, your follow-ups | **マイワーク** | Profile (for this page); マイページ |
 | Company record | **Company** | **会社** | account (for the record); アカウント, 取引先 (legal pages: allowed) |
 | Person record | **Contact** (labels, columns, counts, search groups); "person/people" only inside explanatory prose | **連絡先**; 文中の「人」は可 | People (as a label for contact lists) |
@@ -83,6 +106,7 @@ Numbered and testable. Cite them by number in reviews.
 | A person in a workspace | **member** | **メンバー** | user (except auth/sign-in/session contexts), teammate (as a label; fine in informal prose) |
 | Org-level admin | **organization administrator** | **組織管理者** | — |
 | The automation object | **workflow**; **automation** only as the category noun; **recipe** for a pre-built template | **ワークフロー**／**自動化**（総称）／**レシピ** | rule (except as "legacy automations" inside the one migration screen while it exists), canonical, runtime, legacy runtime |
+| A member's pre-authorization for Ask Connex to apply bounded changes | **standing approval** | **事前承認** | mandate, autopilot |
 | The act/record of introducing | **introduction** ("intro" in tight buttons) | **紹介** | — |
 | The route through the network | **intro path** | **紹介ルート** | warm path (as a label); ウォームパス, 温かい経路 |
 | Standalone linked note record | **Note** | **メモ** | ノート |
@@ -146,7 +170,7 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Editing and inspecting.** Editing opens a right-hand drawer so the context stays visible. Inspecting/peeking opens a right drawer or an anchored popover, always with a path that expands into the full page. A calendar event click opens an anchored popover — time, attendees, linked record, one action — and "open" expands it into the right drawer. On mobile, these surfaces become bottom sheets. Per-surface adaptations are allowed when content demands them, but they are documented decisions, not drift.
 
-**Abandoning work.** Any dialog or drawer that has accumulated input asks before discarding it — an outside click or Escape never silently destroys work.
+**Abandoning work.** Any dialog, drawer, or full-page editor that has accumulated input asks before discarding it. Outside click, Escape, editor back/Cancel, and navigation never silently destroy work. Keep editing retains the content and returns focus to the control that requested departure. Refresh and tab close use the browser's leave warning.
 
 **Confirming destructive actions.** A small centered dialog, one grammar: title "Delete \<object\>?", body names the specific object and ends "This can't be undone." (JA 「この操作は取り消せません。」), confirm button "Delete" in the destructive style. "Archive" needs no undo warning — it is recoverable and says so. "Delete permanently" is reserved for organization-level permanent deletion, which additionally requires typed confirmation.
 
@@ -160,9 +184,53 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Buttons.** Pill-shaped, one consistent height per context (page header, toolbar, inline, dialog footer). A button that opens a menu always shows a chevron — an action-looking button never surprises with a menu. A split button is one capsule: primary verb plus a chevron menu behind a divider. Icon-only buttons are circular and always tooltipped. Mode and view switching uses a segmented control, never a row of toggle buttons. Each view region has exactly one primary action.
 
-**Permission denied.** Page-level: a calm explanation with a way back and, where useful, who to ask. Inline/toast: "You don't have permission to do that here. Ask a workspace admin." Never a permission constant, never a bare 403. If a whole surface is unavailable to a role, prefer not rendering the entry point over showing a locked door.
+**Member removal and invitations.** Removing a member keeps their account and shared records, clears ownership of their contacts, companies, deals, campaigns and sequences, unassigns their tasks, and leaves outstanding invitations unchanged. Explain these effects before confirmation and in the result. Offer the existing invitation controls; revoking a shared link is an explicit action affecting every future invitee who holds it. A valid link can still admit a removed member under the current joining policy. Registration from an invitation returns to its acceptance page without provisioning an optional personal workspace. Password, passkey, SSO and social sign-in preserve the same validated local destination, including account-link confirmation. Malformed or absolute return addresses are discarded. Invitation feedback distinguishes creation, clipboard success and email submission; SMTP acceptance does not confirm inbox delivery. When copying fails, keep a selectable link and Retry inline so the email outcome stays accessible and another invitation can be created. After a reload, replacing an email invitation supplies a new link and invalidates the previous invitation.
 
-**AI moments.** AI proposes; the user applies: assistant-prepared changes to existing records are validated proposals that show exactly what would change and wait for explicit confirmation; small additions made while answering (an activity, task, note, or tag) apply immediately and are announced — activities, tasks, and notes with a short undo window, a tag removed the same way it was added. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens and what is kept — "Cards are read on Connex's own servers when possible; otherwise the image is sent to your organization's AI provider. A copy of the card is saved with the contact — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
+**Permission denied.** Page-level: a calm explanation with a way back and, where useful, who to ask. Inline/toast: "You don't have permission to do that here. Ask a workspace admin." Never a permission constant, never a bare 403. If a whole surface is unavailable to a role, prefer not rendering the entry point over showing a locked door. Role administration names built-in roles and every permission in the selected language, explains the scope and limits of each action, and lets owners inspect allowed and unavailable actions for each role. Membership-based reading and organization authority remain separate from workspace action permissions.
+
+**AI moments.** AI proposes; the user applies — or pre-authorizes within a standing approval: assistant-prepared changes to existing records outside a standing approval are validated proposals that show exactly what would change and wait for explicit confirmation; small additions made while answering (an activity, task, note, or tag) apply immediately and are announced — activities, tasks, and notes with a short undo window, a tag removed the same way it was added. Every change made under a standing approval is announced in the chat or background work where it happens and credited in record history and the audit log — "Ask Connex, on behalf of {member}, under {standing approval name}" — so the exact approval is always identifiable. Each change can be undone the same way when the change allows it, and appears in that approval's own history. Everything still waiting on a person — proposals, questions, and approvals from chats and background work — collects in one place. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens and what is kept — "Cards are read on Connex's own servers when possible; otherwise the image is sent to your organization's AI provider. A copy of the card is saved with the contact — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
+
+Assistant proposals awaiting a decision have a seventy-two-hour review window from their original
+creation. At the deadline, Apply and Discard become unavailable and the card explains that a new
+proposal is needed. Reopening or refreshing never extends the window. Completed, discarded,
+failed and undone outcomes retain their meaning; an executed action's ten-minute undo window is
+independent. Expired proposal history remains readable under the existing access rules.
+
+When an assistant answer fails, Retry is offered only after Connex confirms that the answer made no
+changes and can identify that answer's own question unambiguously. A newer request in the chat
+removes Retry from the older answer. If changes were saved, their action cards remain visible; if
+Connex cannot confirm what was saved, it says so and asks the member to check their records.
+Continue from here puts a follow-up in the composer for the member to read and edit, without sending it.
+
+The requester's per-call execution evidence lets an answer that only read records, tasks, or
+activities retain Retry. Every call must be a read or a proposal in a server-guaranteed terminal,
+non-executable state (rejected or expired). A still-proposed or pending change keeps Retry hidden:
+another tab or an older action card could apply it after any check. A card's review deadline alone
+does not establish a terminal outcome; an action admitted before expiry may still finish afterward.
+Unknown tools or execution states, and older servers without this evidence, keep the conservative
+check-records guidance.
+Reconciliation re-checks the failed answer's own execution evidence, including after a proposal is
+approved. Once this client has seen a saved change for that answer, later refreshes cannot restore
+Retry by omitting its action card. An unreadable or missing proposal outcome keeps Retry hidden.
+Each Retry click revalidates that answer's execution evidence and action cards with the server
+before sending and proceeds only when that fresh evidence still rules out executable or saved
+changes. A failed check keeps Retry hidden and shows the existing guidance to check records.
+
+### Commercial-document rounding
+
+Generated documents preserve their canonical line amounts, numeric totals, and resolved merge fields.
+For currencies without minor units, readers round each displayed amount using the document currency
+and locale. If displayed item amounts do not sum to the displayed grand total, show a signed
+**Rounding adjustment** / **端数調整** immediately before that total. Screen, recipient, and print/PDF
+readers use the same rule; currencies with minor units retain their existing presentation.
+
+Item amounts include tax. When rounding creates a discrepancy in any displayed path, show separately
+labelled groups for subtotal plus tax, one-time plus recurring amounts when present, and displayed item
+amounts. Preserve each canonical breakdown amount, and reconcile each group independently to the grand
+total with its own adjustment immediately before the total. Never add an item's reconciliation to the
+tax or billing breakdown. For two tax-free JPY items of 100.50, the item group reads 202, −1, 201;
+the subtotal/tax group reads 201, 0, 201. All reconciliation is presentation-only and never changes a
+stored snapshot or the canonical total merge field.
 
 ## 7. Where things live
 
@@ -171,7 +239,7 @@ The top-level IA contract. **This section is normative target state** — the st
 **The sidebar:**
 
 1. **Dashboard** — "your workspace today", the one home. No second surface claims "at a glance".
-2. **My Work** — your tasks, your relationships, your follow-ups: the personal page beside the workspace home. The user menu offers "My Work" and "Account settings" as distinct entries — neither is called "Profile".
+2. **My Work** — your tasks, your relationships, your follow-ups: the personal page beside the workspace home. The user menu offers "My Work" and "Account settings" as distinct entries — neither is called "Profile". Personal deal KPIs at `/me` use Analytics' currency selection and 90-day calendar window in the workspace reporting timezone. Money tiles name their currency; mixed-currency owners can switch between their currencies. Totals, comparisons, and trends always stay within the selected currency.
 3. **Intelligence** — Radar, Introductions, Map: the differentiator, grouped and celebrated, never buried in a grab-bag. Radar is the signature surface — visual-first exploration that answers what no other page can (portfolio-wide warmth, where attention is bleeding, clusters at risk, unknown paths), with every signal offering one action; the rest of the app quotes its visual vocabulary in miniature, so Radar reads as the source of the intelligence.
 4. **Records** — the nouns: Companies, Contacts, Deals, Pipelines, Products. Every Records noun has a working destination: full detail pages for Companies, Contacts, and Deals; Pipelines and Products are managed in place through their edit sheet/dialog and have no detail route. Nothing anywhere links to a route that doesn't exist.
 5. **Activity** — the verbs: Activities, Tasks, Notes, Calendar.
@@ -197,3 +265,7 @@ The "Overview" section is dissolved; "Overview" survives nowhere as a page name.
 - Email and Delivery merge into one Workspace → Communications destination with clear sections — sending setup, sender identity, test delivery, deliverability and health — with instance-managed state visible rather than a disappearing tab.
 
 **One name per destination**, verbatim across sidebar, command palette, page title, browser tab, breadcrumb, and docs — and every cross-surface link (notification, calendar entry, stat tile, signal reference) lands on an existing route with the referenced item in view.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.

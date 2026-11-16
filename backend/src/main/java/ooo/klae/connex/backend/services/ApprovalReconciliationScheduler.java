@@ -90,7 +90,7 @@ public class ApprovalReconciliationScheduler {
         catalogs.forEach(catalog -> grouped.put(catalog, new ArrayList<>()));
         for (int workspaceId : tenantWorkScope.unrouted(workspaceMapper::findWorkspaceIds)) {
             try {
-                tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, catalog) -> {
+                tenantWorkScope.readWorkspacePlacement(workspaceId, (orgId, catalog) -> {
                     List<Integer> workspaces = grouped.get(catalog);
                     if (workspaces == null) {
                         throw new IllegalStateException(
@@ -123,7 +123,9 @@ public class ApprovalReconciliationScheduler {
         JobRunDetail detail = JobRunDetail.startedUtc();
         try {
             BatchResult result = automationExecutor.runAs(
-                workspaceId, systemActor.user(), "system", () -> reconcileBatch(workspaceId));
+                workspaceId, systemActor.user(), "system",
+                AutomationScope.Origin.task(AutomationScope.Source.APPROVAL_RECONCILIATION, "system"),
+                () -> reconcileBatch(workspaceId));
             JobRunStatus status = result.failedCount() == 0
                 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED;
             record(workspaceId, status, new JobRunDetail(detail.startedAt(), Map.of(

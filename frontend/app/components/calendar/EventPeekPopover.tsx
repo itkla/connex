@@ -1,8 +1,10 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
+import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { ArrowUpRightIcon, BriefcaseIcon, CheckCircleIcon, UserIcon } from '@heroicons/react/24/outline';
 
 import { Badge } from '@/components/ui/badge';
@@ -48,14 +50,15 @@ export default function EventPeekPopover({
     currentUserId: number;
 }) {
     const t = useTranslations('Calendar');
+    const timeZone = useTimeZone() ?? 'UTC';
 
     const whenLabel = useMemo(() => {
         if (!event) return '';
-        return new Intl.DateTimeFormat(
+        return getDateTimeFormatter(
             locale,
-            event.allDay ? { dateStyle: 'full' } : { dateStyle: 'full', timeStyle: 'short' },
-        ).format(event.startMs);
-    }, [event, locale]);
+            event.allDay ? { dateStyle: 'full', timeZone: 'UTC' } : { dateStyle: 'full', timeStyle: 'short', timeZone },
+        ).format(event.allDay ? parseCalendarDateUtc(event.dayKey) : event.startMs);
+    }, [event, locale, timeZone]);
 
     if (!event) return null;
 

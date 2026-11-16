@@ -1,11 +1,14 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -14,11 +17,14 @@ import static org.mockito.Mockito.when;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -28,10 +34,12 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.OwnershipOfferDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaConfinementAcknowledgementRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -60,10 +68,85 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
+    @Mock private PrivilegedAccountService privilegedAccountService;
     @Mock private AccountDeletionReservationRead accountDeletionReservationRead;
     @Mock private RegistrationVerificationService registrationVerificationService;
 
+    @org.junit.jupiter.api.BeforeEach
+    void ownershipTransactionContext() {
+        org.mockito.Mockito.lenient().when(workspaceMapper.getExportPermissions(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(new ooo.klae.connex.backend.dto.ExportPermissions(true, true, true));
+        org.mockito.Mockito.lenient().when(workspaceMapper.getExportPermissionsForShare(org.mockito.ArgumentMatchers.anyInt()))
+            .thenReturn(new ooo.klae.connex.backend.dto.ExportPermissions(true, true, true));
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+            java.sql.Connection.TRANSACTION_READ_COMMITTED);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearOwnershipTransactionContext() {
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+    }
+
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService service;
+
+    @Test
+    void finalErasureRetainsEveryExactMembershipBeforePreservingOwnerSnapshotAndOverlayOrder() {
+        when(workspaceMapper.lockActiveOwnerMembers(7)).thenReturn(List.of(
+            membership(9, "owner", 5, "active"), membership(12, "owner", null, "active")));
+        when(workspaceMapper.lockActiveOwnerMembers(11)).thenReturn(List.of(
+            membership(9, "owner", 13, "active"), membership(12, "owner", null, "active")));
+        when(notificationMapper.lockRecipientMemberships(9)).thenReturn(List.of(3, 7, 11));
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockRole(11, 13)).thenReturn(13);
+
+        service.assertAccountDeletionWorkspaceRecovery(9, List.of(7, 11), List.of(11, 3, 7));
+
+        InOrder order = inOrder(workspaceMapper, notificationMapper, roleMapper);
+        order.verify(workspaceMapper).lockAccountMembershipForUpdate(3, 9);
+        order.verify(workspaceMapper).lockAccountMembershipWithoutWaiting(7, 9);
+        order.verify(workspaceMapper).lockAccountMembershipWithoutWaiting(11, 9);
+        order.verify(notificationMapper).lockRecipientMemberships(9);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(7);
+        order.verify(roleMapper).lockRole(7, 5);
+        order.verify(roleMapper).lockPermissions(7, 5);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(11);
+        order.verify(roleMapper).lockRole(11, 13);
+        verify(workspaceMapper, never()).lockAccountMembershipForUpdate(7, 9);
+        verify(workspaceMapper, never()).lockAccountMembershipForUpdate(11, 9);
+    }
+
+    @Test
+    void finalErasureRefusesAnUnplannedCurrentMembershipBeforeAnyOverlay() {
+        when(notificationMapper.lockRecipientMemberships(9)).thenReturn(List.of(3, 11));
+
+        assertThrows(ConflictException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(), List.of(3)));
+
+        verify(workspaceMapper).lockAccountMembershipForUpdate(3, 9);
+        verifyNoInteractions(roleMapper, auditService);
+    }
+
+    @Test
+    void finalErasureOwnerPrelockPreservesExactNowaitTranslationWithoutRetry() {
+        RuntimeException timeout = new IllegalStateException(new SQLException("busy", "HY000", 1205));
+        RuntimeException wrongState = new IllegalStateException(new SQLException("busy", "42000", 3572));
+        when(workspaceMapper.lockAccountMembershipWithoutWaiting(7, 9))
+            .thenThrow(new IllegalStateException(new SQLException("busy", "HY000", 3572)))
+            .thenThrow(timeout)
+            .thenThrow(wrongState);
+
+        assertThrows(ConflictException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(7), List.of(7)));
+        assertSame(timeout, assertThrows(IllegalStateException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(7), List.of(7))));
+        assertSame(wrongState, assertThrows(IllegalStateException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(7), List.of(7))));
+        verifyNoInteractions(notificationMapper, roleMapper, auditService);
+    }
 
     private void runMembershipRemovalWork() {
         doAnswer(invocation -> {
@@ -93,6 +176,24 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(userOffboardingService).detachMemberContent(7, 9);
         order.verify(workspaceMapper).removeMember(7, 9);
         order.verify(stateVersionService).markChanged(9);
+    }
+
+    @Test
+    void nonOwnerLeaveRetainsAccountBeforeDepartureAcquiresRecipientMemberships() {
+        runMembershipRemovalWork();
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.getRole(7, 9)).thenReturn("member");
+
+        service.leaveWorkspace(7, 9);
+
+        InOrder order = inOrder(userMapper, userOffboardingService, workspaceMapper, stateVersionService);
+        order.verify(userMapper).lockById(9);
+        order.verify(userOffboardingService).captureDepartureReferences(7, 9);
+        order.verify(userOffboardingService).assertCanDepart(7, 9);
+        order.verify(userOffboardingService).detachMemberContent(7, 9);
+        order.verify(workspaceMapper).removeMember(7, 9);
+        order.verify(stateVersionService).markChanged(9);
+        verify(workspaceMapper, never()).lockActiveOwnerMembers(7);
     }
 
     @Test
@@ -221,7 +322,13 @@ class WorkspaceNotificationLockOrderTest {
         stubOwnerActor();
         stubRoleMutationTarget("member");
 
-        service.changeMemberRole(7, 1, 9, "owner");
+        when(workspaceMapper.getActiveById(7)).thenReturn(workspace(7, 3));
+        when(organizationMapper.lockActiveByIdForShare(3)).thenReturn(3);
+        when(ownershipOfferWriter.createLocked(3, 7, 1, 9)).thenReturn(
+            new OwnershipOfferDto("101", "WORKSPACE", 3, 7, 1, 9, "OPEN",
+                "2026-10-13T00:00:00Z", "2026-10-20T00:00:00Z", null, null, null, null, null, null, null));
+        var result = service.changeMemberRole(7, 1, 9, "owner");
+        assertEquals("101", result.offer().id());
 
         InOrder order = inOrder(workspaceMapper, userMapper, sessionSecurityService);
         order.verify(workspaceMapper).getMemberRoleId(7, 1);
@@ -232,7 +339,8 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(workspaceMapper).lockWorkspace(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
-        order.verify(workspaceMapper).updateMemberRole(7, 9, "owner");
+        verify(ownershipOfferWriter).createLocked(3, 7, 1, 9);
+        verify(workspaceMapper, never()).updateMemberRole(7, 9, "owner");
     }
 
     @Test
@@ -292,6 +400,71 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(roleMapper).lockPermissions(7, 11);
         order.verify(workspaceMapper).getMember(7, 1);
         order.verify(workspaceMapper).setMemberCustomRole(7, 1, 5);
+    }
+
+    /**
+     * A member-role change reads the confinement baseline over its target after every lock and
+     * before the write, and checks it after the write and before the success audit (#1534).
+     */
+    @Test
+    void memberRoleChangeChecksConfinementBetweenTheWriteAndTheSuccessAudit() {
+        stubOwnerActor();
+        stubRoleMutationTarget("member");
+        when(workspaceMapper.getOrgId(7)).thenReturn(3);
+        ConfinementBaseline baseline = new ConfinementBaseline(3, List.of(9), Set.of());
+        when(privilegedAccountService.confinementBaseline(any(), eq(List.of(9)))).thenReturn(baseline);
+
+        service.changeMemberRole(7, 1, 9, "admin", true);
+
+        ArgumentCaptor<IntSupplier> organization = ArgumentCaptor.forClass(IntSupplier.class);
+        InOrder order = inOrder(workspaceMapper, privilegedAccountService, auditService);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceMapper).getMember(7, 9);
+        order.verify(privilegedAccountService).confinementBaseline(organization.capture(), eq(List.of(9)));
+        order.verify(workspaceMapper).updateMemberRole(7, 9, "admin");
+        order.verify(privilegedAccountService).requireConfinementAcknowledged(baseline, true);
+        order.verify(auditService).record(
+            "workspace.member.role", "workspace", 7, "Target", "Changed Target to admin", null);
+        assertEquals(3, organization.getValue().getAsInt());
+    }
+
+    /**
+     * A custom-role assignment reads the confinement baseline over its target after every lock and
+     * before the write; a refusal leaves no success audit (#1534).
+     */
+    @Test
+    void customRoleAssignmentChecksConfinementBeforeTheSuccessAudit() {
+        WorkspaceMember targetMembership = membership(1, "member", null, "active");
+        WorkspaceMember actorMembership = membership(9, "member", 11, "active");
+        when(workspaceMapper.getMemberRoleId(7, 9)).thenReturn(11);
+        when(roleMapper.findPermissions(7, 11))
+            .thenReturn(List.of(Permission.PERSON_CREATE.name(), Permission.ROLE_MANAGE.name()));
+        when(userMapper.lockById(1)).thenReturn(1);
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 1)).thenReturn(targetMembership);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(actorMembership);
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockRole(7, 11)).thenReturn(11);
+        when(roleMapper.lockPermissions(7, 5)).thenReturn(List.of(Permission.PERSON_CREATE.name()));
+        when(roleMapper.lockPermissions(7, 11))
+            .thenReturn(List.of(Permission.PERSON_CREATE.name(), Permission.ROLE_MANAGE.name()));
+        when(workspaceMapper.getMember(7, 1)).thenReturn(member("Target", "member", "active"));
+        ConfinementBaseline baseline = new ConfinementBaseline(3, List.of(1), Set.of());
+        when(privilegedAccountService.confinementBaseline(any(), eq(List.of(1)))).thenReturn(baseline);
+        doThrow(new PrivilegedMfaConfinementAcknowledgementRequiredException(1))
+            .when(privilegedAccountService).requireConfinementAcknowledged(baseline, false);
+
+        assertThrows(PrivilegedMfaConfinementAcknowledgementRequiredException.class,
+            () -> service.assignCustomRole(7, 9, 1, 5));
+
+        InOrder order = inOrder(roleMapper, workspaceMapper, privilegedAccountService);
+        order.verify(roleMapper).lockPermissions(7, 11);
+        order.verify(workspaceMapper).getMember(7, 1);
+        order.verify(privilegedAccountService).confinementBaseline(any(), eq(List.of(1)));
+        order.verify(workspaceMapper).setMemberCustomRole(7, 1, 5);
+        order.verify(privilegedAccountService).requireConfinementAcknowledged(baseline, false);
+        verifyNoInteractions(auditService);
     }
 
     @Test

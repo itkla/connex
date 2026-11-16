@@ -25,6 +25,7 @@ import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureNotes;
 
 /** Verifies disclosure SQL stays parameter-bound and tenant-plane pure. */
 class DataSubjectDisclosureMapperXmlTest {
@@ -37,6 +38,7 @@ class DataSubjectDisclosureMapperXmlTest {
         Set<String> sections = Arrays.stream(DataSubjectDisclosureDto.class.getDeclaredFields())
             .filter(field -> field.getType().equals(List.class)
                 || field.isAnnotationPresent(JsonRawValue.class)
+                || field.getType().equals(DataSubjectDisclosureNotes.class)
                 || field.getName().equals("person"))
             .map(java.lang.reflect.Field::getName)
             .collect(Collectors.toSet());
@@ -69,6 +71,7 @@ class DataSubjectDisclosureMapperXmlTest {
         parameters.put("personId", 5);
         parameters.put("workspaceIds", List.of(4, 6));
         parameters.put("noteIds", List.of(7, 8));
+        parameters.put("afterId", 6);
         Set<String> expectedStatements = Set.of(
             "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findIdentities", "findTags",
             "findCustomFields", "findActivities", "findNoteIds", "findNotePage", "findTasks", "findAttachments",
@@ -100,6 +103,13 @@ class DataSubjectDisclosureMapperXmlTest {
                 assertTrue(sql.contains("ORDER BY n.id"), statementName);
                 assertTrue(statement.isFlushCacheRequired(), "Previous pages must leave the session cache");
                 assertFalse(statement.isUseCache(), "Body pages must not enter a second-level cache");
+            }
+            if ("findNoteIds".equals(statementName)) {
+                assertTrue(sql.contains("n.id > ?"), statementName);
+                assertTrue(sql.contains("ORDER BY n.id"), statementName);
+                assertTrue(sql.contains("LIMIT 100"), statementName);
+                assertTrue(statement.isFlushCacheRequired(), "ID pages must evict prior bodies");
+                assertFalse(statement.isUseCache(), "ID pages must not accumulate in a cache");
             }
             if (Set.of("findNoteIds", "findNotePage").contains(statementName)) {
                 assertFalse(VISIBILITY_FILTER.matcher(sql).find(),

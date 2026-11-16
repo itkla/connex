@@ -83,6 +83,25 @@ public class AiAssistantStepSchema {
         return closingResponseSchema;
     }
 
+    /** Allows only a final report or the sole terminal mission checkpoint decision. */
+    public AiResponseSchema missionClosingResponseSchema() {
+        ObjectNode root = objectMapper.createObjectNode().put("type", "object")
+                .put("additionalProperties", false);
+        ObjectNode properties = root.putObject("properties");
+        ObjectNode tool = properties.putObject("tool");
+        var alternatives = tool.putArray("anyOf");
+        alternatives.addObject().put("type", "null");
+        ObjectNode checkpoint = alternatives.addObject().put("type", "object")
+                .put("additionalProperties", false);
+        ObjectNode fields = checkpoint.putObject("properties");
+        fields.putObject("name").put("type", "string").putArray("enum").add("checkpoint_segment");
+        fields.set("args", AiAgentToolSchema.arguments(objectMapper, "checkpoint_segment"));
+        checkpoint.putArray("required").add("name").add("args");
+        properties.set("final", finalSchema(objectMapper));
+        root.putArray("required").add("tool").add("final");
+        return new AiResponseSchema("ask_connex_mission_closing_step", root);
+    }
+
     private static ObjectNode toolSchema(
             ObjectMapper objectMapper,
             AiAssistantToolCatalog toolCatalog,
@@ -117,6 +136,9 @@ public class AiAssistantStepSchema {
     private static ObjectNode argumentsSchema(
             ObjectMapper objectMapper,
             ToolSpec tool) {
+        if (AiAgentToolSchema.enabled() && AiAgentToolSchema.bookkeeping(tool.name())) {
+            return AiAgentToolSchema.arguments(objectMapper, tool.name());
+        }
         ObjectNode args = objectMapper.createObjectNode();
         args.put("type", "object");
         ObjectNode properties = args.putObject("properties");

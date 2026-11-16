@@ -22,9 +22,12 @@ import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowCanvas;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 
 /** Converts the legacy rule projection to and from its deterministic schema-v1 workflow graph. */
 @Component
@@ -147,9 +150,10 @@ public class LegacyWorkflowGraphConverter {
             consumedNodes.add(conditionNode.id());
             String noTarget = target(
                 edges, conditionNode.id(), WorkflowEdge.Outcome.NO, consumedEdges);
-            if (!inventory.endId().equals(noTarget)) {
-                throw new BadRequestException("Legacy workflow condition no branch must end");
+            if (!(nodes.get(noTarget) instanceof WorkflowNode.End)) {
+                throw unsupported("no_branch_actions", conditionNode.id());
             }
+            consumedNodes.add(noTarget);
             nextId = target(
                 edges, conditionNode.id(), WorkflowEdge.Outcome.YES, consumedEdges);
             next = nodes.get(nextId);
@@ -162,13 +166,14 @@ public class LegacyWorkflowGraphConverter {
             }
             actions.add(action.config());
             if (actions.size() > MAX_ACTIONS) {
-                throw new BadRequestException("Legacy workflow exceeds 16 actions");
+                throw unsupported("action_limit", action.id());
             }
             nextId = target(edges, action.id(), WorkflowEdge.Outcome.NEXT, consumedEdges);
             next = nodes.get(nextId);
         }
-        if (!(next instanceof WorkflowNode.End end) || !inventory.endId().equals(end.id())) {
-            throw new BadRequestException("Legacy workflow action chain must end");
+        if (!(next instanceof WorkflowNode.End end)) {
+            throw unsupported(next instanceof WorkflowNode.Condition
+                ? "condition_position" : "unsupported_structure", nextId);
         }
         consumedNodes.add(end.id());
         if (consumedNodes.size() != nodes.size() || consumedEdges.size() != edges.size()) {
@@ -238,23 +243,39 @@ public class LegacyWorkflowGraphConverter {
     private static NodeInventory inventory(Iterable<WorkflowNode> nodes) {
         String triggerId = null;
         String conditionId = null;
-        String endId = null;
+        boolean hasEnd = false;
         int actionCount = 0;
         for (WorkflowNode node : nodes) {
             if (node instanceof WorkflowNode.Trigger) {
                 triggerId = uniqueNodeId(triggerId, node.id(), "trigger");
             } else if (node instanceof WorkflowNode.Condition) {
-                conditionId = uniqueNodeId(conditionId, node.id(), "condition");
+                if (conditionId != null) {
+                    throw unsupported("multiple_conditions", node.id());
+                }
+                conditionId = node.id();
             } else if (node instanceof WorkflowNode.Action) {
                 actionCount++;
+            } else if (node instanceof WorkflowNode.Delay) {
+                throw unsupported("delay", node.id());
             } else if (node instanceof WorkflowNode.End) {
-                endId = uniqueNodeId(endId, node.id(), "end");
+                hasEnd = true;
             }
         }
-        if (triggerId == null || endId == null || actionCount > MAX_ACTIONS) {
+        if (actionCount > MAX_ACTIONS) {
+            throw unsupported("action_limit", null);
+        }
+        if (triggerId == null || !hasEnd) {
             throw new BadRequestException("Legacy workflow node inventory is unsupported");
         }
-        return new NodeInventory(triggerId, endId);
+        return new NodeInventory(triggerId);
+    }
+
+    private static WorkflowDefinitionValidationException unsupported(String reason, String nodeId) {
+        return new WorkflowDefinitionValidationException(
+            "Workflow cannot be represented by the active automation engine",
+            new WorkflowDiagnosticDto(
+                WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
+                nodeId, null, null, Map.of("reason", reason)));
     }
 
     private static String uniqueNodeId(String existing, String candidate, String type) {
@@ -313,7 +334,7 @@ public class LegacyWorkflowGraphConverter {
         return "action-" + (zeroBasedIndex + 1);
     }
 
-    private record NodeInventory(String triggerId, String endId) { }
+    private record NodeInventory(String triggerId) { }
 
     record ConvertedWorkflow(
         int legacyRuleId,

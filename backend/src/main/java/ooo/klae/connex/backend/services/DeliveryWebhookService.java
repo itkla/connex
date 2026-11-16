@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignSend;
+import ooo.klae.connex.backend.delivery.CampaignDeliveryDiagnostics;
 import ooo.klae.connex.backend.delivery.DeliveryEvent;
 import ooo.klae.connex.backend.delivery.DeliveryEventType;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
@@ -35,11 +36,20 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
  * signature-verified by the provider's own adapter, translated into normalized events, and each event
  * is recorded idempotently against the {@code campaign_delivery} it concerns. A hard bounce or a
  * complaint additionally records a suppression entry and revokes consent.
+ * Provider message and event identifiers use the same digest correlation form as dispatch before
+ * lookup or deduplication. Only recorded digests in the resolved workspace match; their primary-key
+ * batch reads are plain consistent reads without row locks. Each pass resolves uncached digests in
+ * one query, with at most five queries per identifier. Unrelated opaque identifiers are preserved,
+ * and free-text details redact every 64-hex run before persistence.
+ * Message identifiers exceeding the 255-code-point column limit cannot correlate and are ignored
+ * without digest probes. Event identifier persistence retains the column limit's rejection behavior.
+ * Correlation rescans replacement output for at most four passes. Unusable message identifiers find
+ * no delivery; unusable event identifiers are stored as null without provider-key deduplication.
  *
  * <p>Provider callers carry no session, so {@code TenantResolutionInterceptor} leaves the request
  * thread unresolved and every workspace-scoped statement would otherwise be refused by the
  * {@code TenantScopeInterceptor} backstop (#994). Token resolution, signature verification and
- * translation touch no tenant data and run first; everything that does runs inside
+ * translation run before event application. The signing-secret read and tenant data access run inside
  * {@link AutomationExecutor#runAs} for the workspace the token identified, mirroring the public
  * unsubscribe path.
  *
@@ -83,7 +93,10 @@ public class DeliveryWebhookService {
      * @return the number of events newly applied
      */
     public int ingest(String provider, String rawToken, byte[] rawBody, Map<String, String> headers) {
-        ResolvedDeliveryProvider target = deliveryProviderConfigService.resolveByWebhookToken(rawToken);
+        ResolvedDeliveryProvider target = deliveryProviderConfigService.resolveByWebhookToken(rawToken,
+                (workspaceId, read) -> automationExecutor.runAs(
+                        workspaceId, systemActor.user(), "system",
+                        AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system"), read));
         if (!target.providerId().equals(normalize(provider))) {
             throw new DeliveryProviderException("Webhook provider does not match the token");
         }
@@ -91,6 +104,7 @@ public class DeliveryWebhookService {
         eventSource.verifySignature(target, rawBody, headers);
         List<DeliveryEvent> events = eventSource.translate(rawBody);
         Integer applied = automationExecutor.runAs(target.workspaceId(), systemActor.user(), "system",
+                AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system"),
                 () -> transactionTemplate.execute(status -> applyEvents(target, events)));
         return Objects.requireNonNull(applied, "webhook ingestion result");
     }
@@ -107,11 +121,16 @@ public class DeliveryWebhookService {
 
     private boolean applyEvent(ResolvedDeliveryProvider target, DeliveryEvent event) {
         int workspaceId = target.workspaceId();
-        if (event.providerMessageId() == null || event.providerMessageId().isBlank()) {
+        if (event.providerMessageId() == null || event.providerMessageId().isBlank()
+                || !CampaignDeliveryDiagnostics.fitsIdentifierColumn(event.providerMessageId())) {
+            return false;
+        }
+        String providerMessageId = correlationForm(workspaceId, event.providerMessageId());
+        if (providerMessageId == null) {
             return false;
         }
         CampaignDelivery delivery = campaignDeliveryMapper.findByProviderMessage(
-                workspaceId, target.providerId(), event.providerMessageId());
+                workspaceId, target.providerId(), providerMessageId);
         if (delivery == null) {
             return false;
         }
@@ -126,8 +145,8 @@ public class DeliveryWebhookService {
     }
 
     private boolean recordEvent(int workspaceId, int deliveryId, String providerId, DeliveryEvent event) {
-        String providerEventId = event.providerEventId();
-        if ((providerEventId == null || providerEventId.isBlank())
+        String providerEventId = correlationForm(workspaceId, event.providerEventId());
+        if ((event.providerEventId() == null || event.providerEventId().isBlank())
                 && campaignDeliveryMapper.hasEvent(workspaceId, deliveryId, event.type().token())) {
             return false;
         }
@@ -135,7 +154,7 @@ public class DeliveryWebhookService {
         row.setWorkspaceId(workspaceId);
         row.setDeliveryId(deliveryId);
         row.setEventType(event.type().token());
-        row.setDetail(bounded(event.detail()));
+        row.setDetail(bounded(CampaignDeliveryDiagnostics.scrub(event.detail(), null)));
         row.setProviderId(providerId);
         row.setProviderEventId(providerEventId);
         try {
@@ -152,6 +171,12 @@ public class DeliveryWebhookService {
             case BOUNCED, COMPLAINED -> List.of("dispatched", "delivered", "failed");
         };
         campaignDeliveryMapper.applyProviderStatus(workspaceId, delivery.getId(), type.token(), fromStatuses);
+    }
+
+    private String correlationForm(int workspaceId, String identifier) {
+        return CampaignDeliveryDiagnostics.correlationForm(identifier,
+                hashes -> java.util.Set.copyOf(campaignDeliveryMapper.findUnsubscribeTokenHashes(
+                        workspaceId, List.copyOf(hashes))));
     }
 
     private void suppress(int workspaceId, CampaignDelivery delivery, DeliveryEventType type) {

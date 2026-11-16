@@ -124,6 +124,7 @@ export default function ApprovalPoliciesBrowser({
     };
 
     const conditionSummary = (policy: ApprovalPolicy) => {
+        if (policy.currencyValid === false) return t('invalidCurrencyCondition');
         const parts: string[] = [];
         if (policy.minTotal != null && policy.currency) {
             parts.push(t('conditionTotal', { amount: formatCurrency(policy.minTotal, policy.currency, locale) }));
@@ -212,6 +213,11 @@ export default function ApprovalPoliciesBrowser({
                                             onClick={() => openEdit(policy)}>
                                             <td className="px-6 py-3">
                                                 <div className="font-medium text-foreground">{policy.name}</div>
+                                                {policy.currencyValid === false && (
+                                                    <p className="mt-1 text-xs text-destructive">
+                                                        {t(policy.active ? 'invalidCurrencyActive' : 'invalidCurrencyInactive')}
+                                                    </p>
+                                                )}
                                             </td>
                                             <td className="px-6 py-3 text-muted-foreground">
                                                 {policy.documentType ? t(TYPE_KEY[policy.documentType]) : t('typeAll')}

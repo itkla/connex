@@ -29,11 +29,13 @@ const api = vi.hoisted(() => ({
     withdrawLifecycle: vi.fn(),
 }));
 const workspace = vi.hoisted(() => ({ activeWorkspaceId: 7 as number | null }));
+const displayZone = vi.hoisted(() => ({ value: "UTC" }));
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
 
 vi.mock('next-intl', () => ({
-    useLocale: () => 'en',
-    useTranslations: () => (key: string) => key,
+    useTimeZone: () => displayZone.value, useLocale: () => 'en',
+    useTranslations: () => (key: string, values?: { count?: number }) =>
+        values?.count === undefined ? key : `${key} (${values.count})`,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -143,7 +145,6 @@ const ACTIVE_REASON: DisqualificationReason = {
     requiresNote: true,
     position: 10,
     builtIn: false,
-    archivedAt: null,
 };
 const ARCHIVED_REASON: DisqualificationReason = {
     id: 11,
@@ -165,7 +166,7 @@ const LIFECYCLE: ContactLifecycle = {
     stage: 'DISQUALIFIED',
     changedAt: '2026-08-01T00:00:00Z',
     disqualifiedReason: CURRENT_ARCHIVED_REASON.code,
-    reasonLabel: CURRENT_ARCHIVED_REASON.label,
+    reasonLabel: CURRENT_ARCHIVED_REASON.label ?? null,
     qualificationNotes: null,
     allowedTransitions: ['RECYCLED'],
 };
@@ -174,6 +175,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+    displayZone.value = "UTC";
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -281,6 +283,25 @@ describe('DisqualificationReasonsPanel', () => {
 
         expect(button('add').tabIndex).toBe(0);
         expect(button('add').tagName).toBe('BUTTON');
+    });
+
+    it('shows omitted built-in labels and archive timestamps as active reasons', async () => {
+        api.get.mockResolvedValue([{
+            id: -1,
+            code: 'NO_BUDGET',
+            requiresNote: false,
+            position: 0,
+            builtIn: true,
+        }, ARCHIVED_REASON]);
+        await render(<DisqualificationReasonsPanel />);
+        await settle();
+
+        expect(container.textContent).toContain('reason.NO_BUDGET');
+        expect(container.textContent).not.toContain(ARCHIVED_REASON.label);
+        expect(button('archive').disabled).toBe(false);
+        expect(button('edit').disabled).toBe(false);
+        expect(container.querySelectorAll('li')).toHaveLength(1);
+        expect(container.textContent).toContain('showArchived (1)');
     });
 
     it('drops the old catalog and draft immediately when the workspace changes', async () => {
@@ -464,7 +485,7 @@ describe('workspace-authored reason labels', () => {
             fromStage: 'WORKING',
             toStage: 'DISQUALIFIED',
             reason: ACTIVE_REASON.code,
-            reasonLabel: ACTIVE_REASON.label,
+            reasonLabel: ACTIVE_REASON.label ?? null,
             note: null,
             changedById: null,
             changedAt: '2026-08-01T00:00:00Z',
@@ -501,7 +522,8 @@ describe('first-response deadline', () => {
             firstResponseDueAt: stored,
         };
         const previous = process.env.TZ;
-        process.env.TZ = 'Asia/Tokyo';
+        process.env.TZ = 'UTC';
+        displayZone.value = 'Asia/Tokyo';
         try {
             await render(
                 <ContactLeadPanel
@@ -514,7 +536,7 @@ describe('first-response deadline', () => {
                 />,
             );
             const cardText = askConnexChangeValueText(
-                'responseDue', stored, 'current', 'en', (hours) => `${hours}`);
+                'responseDue', stored, 'current', 'en', (hours) => `${hours}`, undefined, 'Asia/Tokyo');
 
             const badge = Array.from(container.querySelectorAll('[title]'))
                 .find((element) => element.textContent === 'response.due');

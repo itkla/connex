@@ -49,6 +49,8 @@ public class DocumentSignatureWebhookService {
     private final AutomationExecutor automationExecutor;
     private final TransactionTemplate transactionTemplate;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Applies one provider-authenticated callback, returning false for unsupported webhook keys. */
     public boolean ingest(String provider, Map<String, String> headers, byte[] body) {
         requireAvailable();
@@ -62,11 +64,13 @@ public class DocumentSignatureWebhookService {
             event.workspaceId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_SIGNATURE_WEBHOOK, "system"),
             () -> transactionTemplate.execute(status -> apply(provider, event)));
         return Boolean.TRUE.equals(applied);
     }
 
     private boolean apply(String provider, ProviderEvent event) {
+        recordVisibilityScopeControlAccess.getForWorkspace(event.workspaceId());
         int workspaceId = event.workspaceId();
         DocumentDelivery discovered = deliveryMapper.findByProviderEnvelope(
             workspaceId, provider, event.providerEnvelopeId());

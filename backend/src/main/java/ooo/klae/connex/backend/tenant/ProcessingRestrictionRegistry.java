@@ -63,6 +63,10 @@ public final class ProcessingRestrictionRegistry {
             "Report person projections exclude suspended people.");
         enroll(entries, "PersonMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Ordinary person reads exclude suspended people while administrative mutations remain reachable.");
+        enroll(entries, "MyWorkReadMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Personal relationship counts and display candidates exclude suspended and provision-ceased people.");
+        enroll(entries, "RecordSearchMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Search projection repair excludes suspended and provision-ceased people on both discovery and CAS.");
         enroll(entries, "DataSubjectDisclosureMapper",
             RestrictionStrategy.INCLUDE_RESTRICTED_FOR_DISCLOSURE,
             "Lawful disclosure deliberately includes restricted people and exports both restriction timestamps.");
@@ -102,6 +106,8 @@ public final class ProcessingRestrictionRegistry {
             "Retained activity associations remain reachable for compliance and erasure operations.");
         entries.put(MAPPERS + "AttachmentMapper",
             "Retention and erasure must reach attachments owned by restricted people.");
+        entries.put(MAPPERS + "AiAgentPrivacyMapper",
+            "Erasure checks numeric CRM ownership keys, including restricted owners, before retaining independently saved files.");
         entries.put(MAPPERS + "LegacyTenantUploadMigrationMapper",
             "Offline storage reconciliation must include restricted owners so binaries are not stranded.");
         entries.put(MAPPERS + "NoteMapper",
@@ -112,6 +118,8 @@ public final class ProcessingRestrictionRegistry {
             "Retained task associations remain reachable for compliance and erasure operations.");
         entries.put(MAPPERS + "TenantLifecycleMapper",
             "Offboarding export and teardown deliberately reach restricted people and their managed images.");
+        entries.put(MAPPERS + "AssignmentSweepMapper",
+            "Catalog-pinned account erasure reads numeric keys only and must reach restricted people.");
         return Map.copyOf(entries);
     }
 

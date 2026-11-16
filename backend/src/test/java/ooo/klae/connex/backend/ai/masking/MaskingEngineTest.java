@@ -22,11 +22,14 @@ import java.util.regex.Pattern;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 import java.util.concurrent.CancellationException;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +42,38 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import tools.jackson.databind.ObjectMapper;
 
 class MaskingEngineTest {
+
+    @Test
+    void insertionOffsetsDistinguishSourceMarkersAndPreservedTokensFromNewReplacements() {
+        var context = new MaskingContext();
+        String person = context.tokenFor(EntityKind.PERSON, "Alice Former");
+        context.exposeDispatchedPayload(person);
+        context.registerMemberCandidate("Bob");
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "😀 \"[redacted]\" " + person + " Bob alice@example.test", context);
+        assertEquals("😀 \"[redacted]\" {{P1}} {{M1}} [redacted]", field.text());
+        assertEquals(List.of("{{M1}}", "[redacted]"), field.insertedSpans().stream()
+                .map(span -> field.text().substring(span.start(), span.end())).toList());
+        assertEquals(field.text().indexOf("{{M1}}"), field.insertedSpans().getFirst().start());
+        assertEquals(field.text().lastIndexOf("[redacted]"), field.insertedSpans().getLast().start());
+    }
+
+    @Test
+    void jsonEscapingAndMessageAssemblyPreserveExactMaskerInsertionPositions() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "{\"unexpected\":\"😀 \\\"quoted\\\" Bob alice@example.test\"}", context);
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var segment = OutboundSegment.jsonString(field, OutboundSegment.Origin.PROVIDER_AUTHORED, mapper);
+        assertEquals(mapper.writeValueAsString(field.text()), segment.text());
+        assertEquals(List.of("{{M1}}", "[redacted]"), segment.insertedSpans().stream()
+                .map(span -> segment.text().substring(span.start(), span.end())).toList());
+        var message = PromptAssembly.builder(context).segmentedUserTurn(List.of(segment)).build().getMessages().getFirst();
+        assertEquals(segment.text(), message.getContent());
+        assertEquals(List.of(segment), message.getSegments());
+        assertEquals(field.text(), mapper.readValue(message.getContent(), String.class));
+    }
     private static final String REDACTION = Matcher.quoteReplacement(MaskingEngine.REDACTED);
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Pattern LEGACY_EMAIL =
@@ -52,6 +87,201 @@ class MaskingEngineTest {
             Pattern.compile("(?:" + Pattern.quote(MaskingEngine.REDACTED) + ")+");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @ParameterizedTest
+    @CsvSource({
+            "Bob,Bob_team,true", "Bob,_Bob_,true", "Bob,xBob,false", "Bob,Bobx,false",
+            "Li,show the client pipeline,false", "Li,Ask Li.,true", "Bob,éBob,false",
+            "Bob,BobЖ,false", "Bob,Bob٢,false", "Bob,中Bob,false", "Bob,Bobก,false", "李,x李y,true", "Bob,२Bob,false", "Иван,Иванов,false",
+            "Иван,позови Иван.,true", "李,联系李处理,true", "あき,連絡あき確認,true",
+            "アキ,連絡アキ確認,true", "김,지금김에게,true", "ไทย,คนไทยครับ,true"})
+    void rawMemberMentionsRespectUnicodeWordBoundariesAndUnspacedScripts(
+            String member, String text, boolean expected) {
+        assertEquals(expected, MaskingEngine.containsMemberMention(MaskingEngine.mentionScanText(text), member));
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        assertEquals(expected ? List.of(member) : List.of(), context.memberCandidatesIn(text));
+        assertTrue(context.tokenBindings().isEmpty());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "Иван,Иван пришёл,{{M1}} пришёл", "Иван,Иванов,Иванов", "Иван,Иван_команда,{{M1}}_команда",
+            "Иван,ЖИван,ЖИван", "Иван,Иван٢,Иван٢", "Μαρία,Μαρία ήρθε,{{M1}} ήρθε",
+            "Μαρία,Μαρίανος,Μαρίανος", "Élodie,Élodie arrived,{{M1}} arrived", "Élodie,Élodienne,Élodienne",
+            "Alice,Malice,Malice", "a a,xa a a,xa {{M1}}", "Bob,Bob_team,{{M1}}_team", "李,联系李处理,联系{{M1}}处理",
+            "山田,请山田处理,请{{M1}}处理", "あき,連絡あき確認,連絡{{M1}}確認",
+            "アキ,連絡アキ確認,連絡{{M1}}確認", "김,지금김에게,지금{{M1}}에게", "ไทย,คนไทยครับ,คน{{M1}}ครับ"})
+    void memberReplacementAndLeakScanShareScriptAwareMentionBoundaries(String member, String text, String expected) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        boolean mentioned = !text.equals(expected);
+        assertEquals(mentioned, MaskingEngine.containsMemberMention(MaskingEngine.mentionScanText(text), member));
+        if (mentioned) {
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+        } else {
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+        }
+        String masked = MaskingEngine.maskFreeText(text, context);
+        assertEquals(expected, masked);
+        assertEquals(expected, MaskingEngine.maskConversationalFreeText(text, context));
+        assertEquals(expected.replace("{{M1}}", MaskingEngine.REDACTED),
+                MaskingEngine.screenFreeTextBeforeTruncation(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+        context.exposeDispatchedPayload(masked);
+        assertEquals(text, Demasker.demask(masked, context).text());
+        if (!mentioned) {
+            assertTrue(context.tokenBindings().isEmpty());
+        }
+    }
+
+    static Stream<Arguments> collidingMemberKinds() {
+        return Stream.of(EntityKind.values()).filter(kind -> kind != EntityKind.MEMBER)
+                .flatMap(kind -> Stream.of("generic_first", "candidate_first", "member_bound_first")
+                        .map(order -> Arguments.of(kind, order)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("collidingMemberKinds")
+    void memberCollisionsRetainEveryOtherKindsResidualProtection(EntityKind kind, String order) {
+        var context = new MaskingContext();
+        String token = registerMemberCollision(context, kind, order, "Acme");
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("AcmeCorp", context));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskConversationalFreeText("AcmeCorp", context));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.screenFreeTextBeforeTruncation("AcmeCorp", context));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict("AcmeCorp", context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                objectMapper.writeValueAsString(Map.of("content", "AcmeCorp")), context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(MaskingEngine.REDACTED, context, objectMapper));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("Acme_team", context));
+        assertEquals("é[redacted]é", context.withReplayMemberValues(List.of("Acme"),
+                () -> MaskingEngine.maskFreeText("éAcmeé", context)));
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeakStrict("éAcmeé", context, objectMapper));
+        assertEquals(token, MaskingEngine.maskFreeText("Acme", context));
+        assertEquals(List.of(Map.entry(token, "Acme")), context.tokenBindings());
+        context.exposeDispatchedPayload(token);
+        assertEquals("Acme", Demasker.demask(token, context).text());
+    }
+
+    @ParameterizedTest
+    @MethodSource("collidingMemberKinds")
+    void memberCollisionsAlsoRetainMemberBoundaryMatches(EntityKind kind, String order) {
+        var context = new MaskingContext();
+        String token = registerMemberCollision(context, kind, order, "Li");
+        assertEquals(token + "_team", MaskingEngine.maskFreeText("Li_team", context));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict("Li_team", context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(token + "_team", context, objectMapper));
+        context.exposeDispatchedPayload(token);
+        assertEquals("Li_team", Demasker.demask(token + "_team", context).text());
+    }
+
+    @Test
+    void sharedMemberRolesPreserveAnExistingWholeIdentifierPrimaryWithoutAMemberMatch() {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.COMPANY, "Acme");
+        String person = context.tokenFor(EntityKind.PERSON, "AcmeCorp");
+        assertEquals(person, MaskingEngine.maskFreeText("AcmeCorp", context));
+        context.registerMemberCandidate("Acme");
+        assertEquals(person, MaskingEngine.maskFreeText("AcmeCorp", context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(person, context, objectMapper));
+    }
+
+    @Test
+    void memberOnlyNamesKeepMentionBoundariesWithoutGenericResidualMatching() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("Acme");
+        String text = "client AcmeCorp";
+        assertEquals(text, MaskingEngine.maskFreeText(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+        assertTrue(context.tokenBindings().isEmpty());
+    }
+
+    private static String registerMemberCollision(MaskingContext context, EntityKind kind, String order, String value) {
+        if (!order.equals("generic_first")) {
+            context.registerMemberCandidate(value);
+        }
+        if (order.equals("member_bound_first")) {
+            context.tokenFor(EntityKind.MEMBER, value);
+        }
+        String token = context.tokenFor(kind, value);
+        if (order.equals("generic_first")) {
+            context.registerMemberCandidate(value);
+        }
+        return token;
+    }
+
+    @ParameterizedTest
+    @CsvSource({"abcdxxxx, {{M1}}, 0", "12345678, [redacted], 1"})
+    void memberOutcomeContactRedactionIsIndependentOfCandidateRegistrationOrder(
+            String suffix, String expected, int warnings) {
+        String first = "First Actor " + suffix;
+        String renamed = "Renamed Assignment Member";
+        String stored = "Second Actor " + suffix;
+        for (List<String> candidates : List.of(
+                List.of(first, renamed, stored), List.of(first, stored, renamed),
+                List.of(renamed, first, stored), List.of(renamed, stored, first),
+                List.of(stored, first, renamed), List.of(stored, renamed, first))) {
+            var context = new MaskingContext();
+            candidates.forEach(context::registerMemberCandidate);
+            String masked = MaskingEngine.maskTemporal(stored, context);
+            assertEquals(expected, masked);
+            assertEquals(List.of(Map.entry("{{M1}}", stored)), context.tokenBindings());
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                    objectMapper.writeValueAsString(Map.of("owner", masked)), context, objectMapper));
+            context.exposeDispatchedPayload(masked);
+            var demasked = Demasker.demask("{{M1}}", context);
+            assertEquals(warnings, demasked.warnings());
+            assertEquals(warnings == 0 ? stored : "[unknown reference]", demasked.text());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "Li, Li x\uFB02i, {{M1}} x[redacted]",
+            "Of, Of o\uFB03ce, {{M1}} [redacted]ce",
+            "F, F x\uFB02, {{M1}} x[redacted]"
+    })
+    void recordedMemberContainmentRedactsPartialSourceExpansions(String member, String text, String expected) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        context.withReplayMemberValues(List.of(member), () -> {
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+            return null;
+        });
+        assertEquals(expected, MaskingEngine.maskFreeText(text, context, Map.of(), List.of(member)));
+        String masked = MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of(member));
+        assertEquals(expected, masked);
+        context.exposeDispatchedPayload(masked);
+        assertEquals(expected.replace("{{M1}}", member), Demasker.demask(masked, context).text());
+        context.withReplayMemberValues(List.of(member), () -> {
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(masked, context));
+            return null;
+        });
+    }
+
+    @Test
+    void partialSourceExpansionCannotBecomeReversibleThroughAnOverlappingIdentifier() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        context.tokenFor(EntityKind.COMPANY, "xFli");
+        assertEquals("{{M1}} [redacted]",
+                MaskingEngine.maskConversationalFreeText("Li x\uFB02i", context, Map.of(), List.of("Li")));
+    }
+
+    @Test
+    void alignedMemberContainmentRoundTripsWithoutChangingOrdinaryShortLabelBoundaries() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        String text = "Li xLi Li_team LiLi";
+        String masked = MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of("Li"));
+        assertEquals("{{M1}} x{{M1}} {{M1}}_team {{M1}}{{M1}}", masked);
+        context.exposeDispatchedPayload(masked);
+        assertEquals(text, Demasker.demask(masked, context).text());
+        assertEquals("{{M1}} xfli Little xLi {{M1}}_team",
+                MaskingEngine.maskConversationalFreeText("Li x\uFB02i Little xLi Li_team", context));
+    }
 
     @Test
     void plainSeededNameIsMaskedBeforeAnyLinkCleanupOrTruncation() {
@@ -187,6 +417,7 @@ class MaskingEngineTest {
             for (String name : names) {
                 String masked = MaskingEngine.maskFreeText(name, context);
                 assertEquals(context.tokenFor(EntityKind.PERSON, name), masked);
+                context.exposeDispatchedPayload(masked);
                 assertEquals(name, Demasker.demask(masked, context).text());
             }
         }
@@ -226,6 +457,7 @@ class MaskingEngineTest {
                     context.tokenBindings());
             for (String name : names) {
                 String token = MaskingEngine.maskField(EntityKind.PERSON, name, context);
+                context.exposeDispatchedPayload(token);
                 assertEquals(name.equals(names.getFirst()) ? firstToken : secondToken, token);
                 assertEquals(new Demasker.DemaskResult(name, 0), Demasker.demask(token, context));
                 assertTrue(MaskingEngine.containsIdentifierMention(CanonicalText.canonical(first), name));
@@ -301,6 +533,7 @@ class MaskingEngineTest {
     void linkCleanupCannotForgeIssuedTokensOrRetainPartiallyMaskedTargets() {
         MaskingContext context = new MaskingContext();
         String token = MaskingEngine.maskField(EntityKind.PERSON, "John", context);
+        context.exposeDispatchedPayload(token);
         assertEquals("{{P1}}", token);
         for (String forged : List.of("{[](person:1){P1}[](person:1)}", "\u0000P1\u0000")) {
             String masked = MaskingEngine.maskFreeText(forged, context);
@@ -311,7 +544,7 @@ class MaskingEngineTest {
             assertEquals("{{P1}}", MaskingEngine.maskFreeText("[John](person:" + target + ")", context));
         }
         MaskingEngine.maskField(EntityKind.PERSON, "Smith", context);
-        assertEquals("{{P1}} {{P2}}", MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+        assertThrows(MaskingLeakException.class, () -> MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
                 "[{{P1}} Smith](person:41)", context));
         for (String text : List.of("[John Smith](person:41)", "[John ](person:41)")) {
             String masked = MaskingEngine.maskFreeText(text, context);
@@ -517,6 +750,7 @@ class MaskingEngineTest {
                 assertEquals(text, MaskingEngine.screenFreeTextBeforeTruncation(text, context));
             }
             String token = MaskingEngine.maskField(EntityKind.PERSON, "Li", context);
+            context.exposeDispatchedPayload(token);
             String split = "A".repeat(25_000) + token + "A".repeat(25_000) + "@example.c";
             assertEquals(split, MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(split, context));
             assertEquals(MaskingEngine.REDACTED,
@@ -643,6 +877,7 @@ class MaskingEngineTest {
         for (String name : List.of("\u0080".repeat(4), "\u0085".repeat(4), "\u0080---")) {
             MaskingContext context = new MaskingContext();
             String token = MaskingEngine.maskField(EntityKind.PERSON, name, context);
+            context.exposeDispatchedPayload(token);
 
             assertFalse(MaskingContext.isDictionaryEligible(name));
             assertTrue(context.identifierDictionary().contains(name));
@@ -708,6 +943,7 @@ class MaskingEngineTest {
     void onlyCompleteIssuedPlaceholdersSurviveIdentifierReplacement() {
         MaskingContext context = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Johnathan Smith", context);
+        context.exposeDispatchedPayload(person);
         String tokenLikeName = MaskingEngine.maskField(EntityKind.PERSON, "P1", context);
 
         assertEquals(person + " and " + tokenLikeName,
@@ -720,8 +956,8 @@ class MaskingEngineTest {
                 MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
                         "Johnathan " + person + "Smith}", context));
         MaskingEngine.maskField(EntityKind.COMPANY, "P9999", context);
-        assertFalse(MaskingEngine.maskFreeTextPreservingIssuedPlaceholders("{{P9999}}", context)
-                .contains("P9999"));
+        assertThrows(MaskingLeakException.class,
+                () -> MaskingEngine.maskFreeTextPreservingIssuedPlaceholders("{{P9999}}", context));
     }
 
     @Test
@@ -790,6 +1026,7 @@ class MaskingEngineTest {
     void adjacentSensitiveRegionsAreMergedForReplacementAndPlaceholderCrossing() {
         MaskingContext context = new MaskingContext();
         String first = MaskingEngine.maskField(EntityKind.PERSON, "\u6797", context);
+        context.exposeDispatchedPayload(first);
         MaskingEngine.maskField(EntityKind.PERSON, "\u5c71", context);
 
         assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("\u6797\u5c71", context));
@@ -803,6 +1040,7 @@ class MaskingEngineTest {
     void overlappingOccurrencesOfOneIdentifierCannotLeaveATruncatedSuffix() {
         MaskingContext context = new MaskingContext();
         String token = MaskingEngine.maskField(EntityKind.PERSON, "Johnathan Johnathan", context);
+        context.exposeDispatchedPayload(token);
         String prefix = "x".repeat(488) + " ";
         String text = prefix + "Johnathan Johnathan Johnathan";
         String screened = MaskingEngine.screenFreeTextBeforeTruncation(text, context);
@@ -857,6 +1095,7 @@ class MaskingEngineTest {
                 String text = "Ask " + spelling + " today.";
                 MaskingContext context = new MaskingContext();
                 String token = MaskingEngine.maskField(EntityKind.PERSON, name, context);
+                context.exposeDispatchedPayload(token);
 
                 MaskingContext collisionContext = new MaskingContext();
                 assertNotEquals(MaskingEngine.maskField(EntityKind.PERSON, name, collisionContext),
@@ -931,6 +1170,7 @@ class MaskingEngineTest {
                 screened.substring(0, Math.min(512, screened.length())), context, objectMapper));
         String spellingToken = MaskingEngine.maskField(EntityKind.PERSON, spelling, context);
         assertNotEquals(token, spellingToken);
+        context.exposeDispatchedPayload(token + " " + spellingToken);
         assertEquals(name, Demasker.demask(token, context).text());
         assertEquals(spelling, Demasker.demask(spellingToken, context).text());
     }
@@ -1267,6 +1507,7 @@ class MaskingEngineTest {
     void repairMaskingPreservesIssuedTokensWithoutAllowingCrossBoundarySensitiveValues() {
         MaskingContext ctx = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);
+        ctx.exposeDispatchedPayload(person);
 
         assertEquals(
                 "Ask " + person + " about the renewal",
@@ -1347,6 +1588,7 @@ class MaskingEngineTest {
         String name = "John\uFF5B\uFF5B\uFF5D\uFF5Dathan Smith";
         MaskingContext context = new MaskingContext();
         String token = MaskingEngine.maskField(EntityKind.PERSON, name, context);
+        context.exposeDispatchedPayload(token);
 
         for (String spelling : List.of(name, "John{{}}athan Smith", "Johnathan Smith")) {
             assertEquals("Ask " + token + " today.", MaskingEngine.maskFreeText("Ask " + spelling + " today.", context));
@@ -1356,6 +1598,7 @@ class MaskingEngineTest {
                     () -> OutboundLeakScan.assertNoLeakStrict("Ask " + spelling + " today.", context, objectMapper));
         }
         String plainToken = MaskingEngine.maskField(EntityKind.PERSON, "Johnathan Smith", context);
+        context.exposeDispatchedPayload(plainToken);
         assertNotEquals(token, plainToken);
         assertEquals(name, Demasker.demask(token, context).text());
         assertEquals("Johnathan Smith", Demasker.demask(plainToken, context).text());
@@ -1732,6 +1975,25 @@ class MaskingEngineTest {
         assertEquals(MaskingEngine.OMITTED_BY_POLICY,
                 MaskingEngine.maskFreeText("Medical history discussed", context));
         assertTrue(context.tokenBindings().isEmpty());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void replayLeakChecksApplyOnlyToMaskedDisclosure(boolean unmasked, boolean conversational) {
+        var context = new MaskingContext(unmasked ? AiPrivacyMode.UNMASKED : AiPrivacyMode.MASKED);
+        context.tokenFor(EntityKind.MEMBER, "Former Member");
+        String text = "Ask Former Member. Email former@example.test";
+        String masked = conversational
+                ? MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of("Former Member"))
+                : MaskingEngine.maskFreeText(text, context, Map.of(), List.of("Former Member"));
+        assertEquals(unmasked ? "Ask Former Member. Email [redacted]" : "Ask {{M1}}. Email [redacted]", masked);
+        if (!unmasked) {
+            context.withReplayMemberValues(List.of("Former Member"), () -> {
+                assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+                assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(masked, context));
+                return null;
+            });
+        }
     }
 
     private static boolean containsIgnoreCase(String value, String needle) {

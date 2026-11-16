@@ -27,6 +27,11 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class AudienceEligibilityServiceTest {
+    @org.junit.jupiter.api.BeforeEach
+    void installPersonVisibilityScopes() {
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.install(service);
+    }
+
 
     private static final int WORKSPACE = 7;
     private static final String CHANNEL = "email";
@@ -48,7 +53,7 @@ class AudienceEligibilityServiceTest {
     void classifyAppliesRestrictedThenSuppressedThenRevokedConsentPrecedence() {
         List<Integer> candidates = List.of(1, 2, 3, 4);
         when(campaignMapper.restrictedPersonIds(eq(WORKSPACE), anyList())).thenReturn(List.of(1));
-        when(personMapper.getByIds(eq(WORKSPACE), anyList()))
+        when(personMapper.getByIds(eq(WORKSPACE), org.mockito.ArgumentMatchers.anyString(), anyList()))
                 .thenReturn(List.of(person(2), person(3), person(4)));
         when(campaignMapper.suppressedAddresses(eq(WORKSPACE), eq(CHANNEL), anyList()))
                 .thenReturn(List.of("person2@example.com"));
@@ -71,7 +76,7 @@ class AudienceEligibilityServiceTest {
     @Test
     void classifyUnderOptOutIncludesPeopleWithNoConsentRecordAtAll() {
         when(campaignMapper.restrictedPersonIds(eq(WORKSPACE), anyList())).thenReturn(List.of());
-        when(personMapper.getByIds(eq(WORKSPACE), anyList())).thenReturn(List.of(person(1), person(2)));
+        when(personMapper.getByIds(eq(WORKSPACE), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(person(1), person(2)));
         when(campaignMapper.suppressedAddresses(eq(WORKSPACE), eq(CHANNEL), anyList())).thenReturn(List.of());
         when(campaignMapper.revokedConsentPersonIds(eq(WORKSPACE), anyList(), eq(CHANNEL), eq(PURPOSE)))
                 .thenReturn(List.of());
@@ -105,7 +110,7 @@ class AudienceEligibilityServiceTest {
         assertTrue(result.includedIds().isEmpty());
         assertTrue(result.suppressed().isEmpty());
         assertTrue(result.consentBlocked().isEmpty());
-        verify(personMapper, never()).getByIds(anyInt(), anyList());
+        verify(personMapper, never()).getByIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyList());
         verify(campaignMapper, never()).suppressedAddresses(anyInt(), anyString(), anyList());
     }
 
@@ -119,6 +124,6 @@ class AudienceEligibilityServiceTest {
         assertEquals(Set.of(12), result.restricted());
         assertTrue(result.noAddress().isEmpty());
         assertEquals("restricted", result.reasonFor(12));
-        verify(personMapper, never()).getByIds(anyInt(), anyList());
+        verify(personMapper, never()).getByIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyList());
     }
 }

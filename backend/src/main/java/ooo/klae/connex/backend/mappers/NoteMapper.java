@@ -30,6 +30,7 @@ public interface NoteMapper {
     Note getNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Note> getVisibleNotesPage(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("currentUserId") int currentUserId,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds,
@@ -49,11 +50,13 @@ public interface NoteMapper {
     );
     long countVisibleNotes(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("currentUserId") int currentUserId,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds
     );
     List<Note> getWorkspaceNotesPage(@Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds,
         @Param("sort") String sort,
@@ -63,6 +66,7 @@ public interface NoteMapper {
     );
     long countWorkspaceNotes(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds
     );
@@ -70,16 +74,24 @@ public interface NoteMapper {
             int currentUserId, int limit, int offset) {
         return getVisibleNotesByPersonId(workspaceId, personId, currentUserId, limit, offset, null);
     }
+    default List<Note> getVisibleNotesByPersonId(int workspaceId, int personId,
+            int currentUserId, int limit, int offset, NotePageCursor before) {
+        return getVisibleNotesByPersonId(workspaceId, personId, currentUserId, limit, offset, before, true);
+    }
     List<Note> getVisibleNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId,
         @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset,
-        @Param("before") NotePageCursor before);
+        @Param("before") NotePageCursor before, @Param("includePrivateNotes") boolean includePrivateNotes);
     default List<Note> getVisibleNotesByDealId(int workspaceId, int dealId,
             int currentUserId, int limit, int offset) {
         return getVisibleNotesByDealId(workspaceId, dealId, currentUserId, limit, offset, null);
     }
+    default List<Note> getVisibleNotesByDealId(int workspaceId, int dealId,
+            int currentUserId, int limit, int offset, NotePageCursor before) {
+        return getVisibleNotesByDealId(workspaceId, dealId, currentUserId, limit, offset, before, true);
+    }
     List<Note> getVisibleNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId,
         @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset,
-        @Param("before") NotePageCursor before);
+        @Param("before") NotePageCursor before, @Param("includePrivateNotes") boolean includePrivateNotes);
     default List<Note> getVisibleNotesByAuthorId(int workspaceId, int authorId,
             int currentUserId, int limit, int offset) {
         return getVisibleNotesByAuthorId(workspaceId, authorId, currentUserId, limit, offset, null);
@@ -96,23 +108,38 @@ public interface NoteMapper {
     List<Note> getVisibleCompanyNotes(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("currentUserId") int currentUserId,
             @Param("limit") int limit);
+    List<Note> getAiAssistantVisibleNotesByPersonId(
+            @Param("workspaceId") int workspaceId, @Param("personId") int personId,
+            @Param("currentUserId") int currentUserId,
+            @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
+    List<Note> getAiAssistantVisibleNotesByDealId(
+            @Param("workspaceId") int workspaceId, @Param("dealId") int dealId,
+            @Param("currentUserId") int currentUserId,
+            @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
+    default List<Note> getAiAssistantVisibleNotesByCompanyId(int workspaceId, int companyId,
+            int currentUserId, List<Integer> organizationWorkspaceIds, int limit) {
+        return getAiAssistantVisibleNotesByCompanyId(workspaceId, companyId, currentUserId,
+                organizationWorkspaceIds, limit, true);
+    }
     List<Note> getAiAssistantVisibleNotesByCompanyId(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId,
             @Param("currentUserId") int currentUserId,
             @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
-            @Param("limit") int limit);
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Note> getWorkspaceNotesByCompanyIds(@Param("workspaceId") int workspaceId,
-            @Param("companyIds") List<Integer> companyIds);
     int countOwnPrivateNotesForPersonEvidence(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("personId") int personId,
             @Param("currentUserId") int currentUserId,
             @Param("reference") LocalDateTime reference,
             @Param("sourceLimit") int sourceLimit);
     int countOwnPrivateNotesForCompanyEvidence(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("companyId") int companyId,
             @Param("currentUserId") int currentUserId,
             @Param("reference") LocalDateTime reference,
@@ -122,6 +149,7 @@ public interface NoteMapper {
             @Param("currentUserId") int currentUserId);
     List<Note> searchVisible(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("query") String query,
         @Param("currentUserId") int currentUserId,
         @Param("limit") int limit,

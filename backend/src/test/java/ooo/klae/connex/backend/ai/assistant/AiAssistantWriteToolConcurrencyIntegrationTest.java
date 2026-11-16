@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -41,6 +43,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -73,8 +76,10 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.RuleTriggerPublisher;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
@@ -96,6 +101,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
@@ -119,9 +125,11 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private Person person;
     private Tag tag;
 
+    /** Keeps identity replay distinct from intentional contact-data redaction of numeric UUID suffixes. */
     @BeforeEach
     void setUp() {
         String unique = UUID.randomUUID().toString().substring(0, 8);
+        String displaySuffix = unique.replaceAll("[0-9]", "x");
         organization = new Organization();
         organization.setName("Assistant write locks " + unique);
         organization.setSlug("assistant-write-locks-" + unique);
@@ -132,9 +140,10 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         workspace.setName("Assistant write locks " + unique);
         workspace.setSlug("assistant-write-locks-" + unique);
         workspaceMapper.insert(workspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
 
-        firstActor = user("assistant-lock-first-" + unique, "First Actor " + unique);
-        secondActor = user("assistant-lock-second-" + unique, "Second Actor " + unique);
+        firstActor = user("assistant-lock-first-" + unique, "First Actor " + displaySuffix);
+        secondActor = user("assistant-lock-second-" + unique, "Second Actor " + displaySuffix);
         workspaceMapper.addMember(workspace.getId(), firstActor.getId(), "owner");
         workspaceMapper.addMember(workspace.getId(), secondActor.getId(), "owner");
 
@@ -176,6 +185,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                             + " WHERE wr.workspace_id = ?",
                     workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspace.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
         if (firstActor != null) {
@@ -198,12 +208,13 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         CountDownLatch releaseRestriction = new CountDownLatch(1);
         CountDownLatch autoPersonLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(workspace.getId()).workspaceIdsJson();
         doAnswer(invocation -> {
             autoPersonLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                    workspace.getId(), person.getId());
+                    workspace.getId(), personScopeJson, person.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-                workspace.getId(), person.getId());
+                workspace.getId(), personScopeJson, person.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -226,7 +237,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             executor.awaitTermination(10, TimeUnit.SECONDS);
         }
 
-        Person restricted = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person restricted = personMapper.getPersonById(workspace.getId(), personScopeJson, person.getId());
         assertTrue(restricted.getSuspendedAt() != null);
     }
 
@@ -291,10 +302,10 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
 
         assertEquals(
                 secondActor.getId(),
-                companyMapper.getCompanyById(workspace.getId(), firstCompany.getId()).getOwnerId());
+                companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), firstCompany.getId()).getOwnerId());
         assertEquals(
                 firstActor.getId(),
-                companyMapper.getCompanyById(workspace.getId(), secondCompany.getId()).getOwnerId());
+                companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), secondCompany.getId()).getOwnerId());
     }
 
     @Test
@@ -355,9 +366,9 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 assertTrue(revoked.await(10, TimeUnit.SECONDS));
             }
             return realChatMapper.getAccessibleSessionById(
-                    workspace.getId(), firstActor.getId(), proposal.sessionId());
+                    workspace.getId(), firstActor.getId(), proposal.sessionId(), 1L);
         }).when(chatMapperSpy).getAccessibleSessionById(
-                workspace.getId(), firstActor.getId(), proposal.sessionId());
+                workspace.getId(), firstActor.getId(), proposal.sessionId(), 1L);
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
         try {
@@ -526,7 +537,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                         workspace.getId(),
                         secondActor.getId()));
         assertNull(
-                companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+                companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
         assertEquals(
                 "proposed",
                 jdbcTemplate.queryForObject(
@@ -588,6 +599,79 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         }
     }
 
+    /** A refused native call cannot reach the real AUTO transaction; a clean sibling fixture can. */
+    @Test
+    void nativeMemberAdmissionRefusesBeforeAnAutoTaskCanCommit() throws Exception {
+        authenticate(firstActor);
+        AiAssistantMaskingTestSupport support = new AiAssistantMaskingTestSupport(workspace.getId(), organization.getId());
+        try {
+            var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+            jdbcTemplate.update("UPDATE app_user SET display_name = ? WHERE id = ?", "Return", secondActor.getId());
+            AiAssistantMemberIdentifiers.seed(workspaceMapper.getMembers(workspace.getId()), context);
+            assertEquals(List.of("Return"), context.memberCandidatesIn("Return proposal"));
+            var refused = support.completeNativeCall(context, objectMapper,
+                    new ooo.klae.connex.backend.ai.provider.AiToolCall("call-refused", "create_task",
+                            "{\"handle\":\"r1\",\"description\":\"Return proposal\"}"));
+            if (refused instanceof ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool<?> admitted) {
+                ToolFixture fixture = autoProposal(firstActor, "create_task", admitted.arguments().toString(), person.getId());
+                executeAuto(firstActor, fixture);
+            }
+            assertEquals(0, taskCount(), "Native admission must precede the committed AUTO write");
+            var malformed = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                    ooo.klae.connex.backend.ai.AiNativeToolCompletion.Malformed.class, refused);
+            assertEquals("native_member_leak", malformed.repairRule());
+            var clean = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                    ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool.class,
+                    support.completeNativeCall(context, objectMapper,
+                            new ooo.klae.connex.backend.ai.provider.AiToolCall("call-clean", "create_task",
+                                    "{\"handle\":\"r1\",\"description\":\"Send proposal\"}")));
+            authenticate(firstActor);
+            ToolFixture fixture = autoProposal(firstActor, "create_task", clean.arguments().toString(), person.getId());
+            executeAuto(firstActor, fixture);
+            assertEquals(1, taskCount());
+        } finally {
+            support.releaseFixtureMocks();
+            clearAuthentication();
+        }
+    }
+
+    /** Encoded ids must be replay-safe before the real AUTO transaction can commit. */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"{\"x\":\"\\u0041lice\"}", "\"\\u0041lice\""})
+    void encodedMemberCallIdsRefuseBeforeAnAutoTaskCanCommit(String id) throws Exception {
+        authenticate(firstActor);
+        AiAssistantMaskingTestSupport support = new AiAssistantMaskingTestSupport(workspace.getId(), organization.getId());
+        try {
+            var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+            jdbcTemplate.update("UPDATE app_user SET display_name = ? WHERE id = ?", "Alice", secondActor.getId());
+            AiAssistantMemberIdentifiers.seed(workspaceMapper.getMembers(workspace.getId()), context);
+            assertEquals(List.of("Alice"), context.memberCandidatesIn("Alice"));
+            var refused = support.completeNativeCall(context, objectMapper,
+                    new ooo.klae.connex.backend.ai.provider.AiToolCall(id, "create_task",
+                            "{\"handle\":\"r1\",\"description\":\"Send proposal\"}"));
+            if (refused instanceof ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool<?> admitted) {
+                ToolFixture fixture = autoProposal(firstActor, "create_task", admitted.arguments().toString(), person.getId());
+                executeAuto(firstActor, fixture);
+            }
+            assertEquals(0, taskCount(), "Encoded member ids must be refused before the AUTO write commits");
+            var malformed = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                    ooo.klae.connex.backend.ai.AiNativeToolCompletion.Malformed.class, refused);
+            assertEquals("native_member_leak", malformed.repairRule());
+            var clean = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                    ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool.class,
+                    support.completeNativeCall(context, objectMapper,
+                            new ooo.klae.connex.backend.ai.provider.AiToolCall("call-clean", "create_task",
+                                    "{\"handle\":\"r1\",\"description\":\"Send proposal\"}")));
+            authenticate(firstActor);
+            ToolFixture fixture = autoProposal(firstActor, "create_task", clean.arguments().toString(), person.getId());
+            executeAuto(firstActor, fixture);
+            assertEquals(1, taskCount());
+        } finally {
+            support.releaseFixtureMocks();
+            clearAuthentication();
+        }
+    }
+
     private ToolFixture autoTagProposal(User actor, int personId) throws Exception {
         return autoProposal(
                 actor,
@@ -610,14 +694,18 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         AiChatMessage message = message(session, actor);
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(actor.getId());
         turn.setStatus("running");
+        turn.setPrivacyGeneration(1L);
         chatMapper.insertTurn(turn);
         AiChatToolCall toolCall = toolCall(message, write);
         AiChatQueuedTurn queued = new AiChatQueuedTurn(
                 workspace.getId(), actor.getId(), session.getId(), turn.getId(),
-                message.getId(), message.getSeq(), expectedEpoch, true, List.of(), List.of());
+                message.getId(), message.getSeq(), expectedEpoch, true, List.of(), List.of(),
+                AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+                new AiChatPrivacyToken(workspace.getId(), session.getId(), 1, null, organization.getId(), 1L));
         return new ToolFixture(session.getId(), toolCall.getId(), queued);
     }
 
@@ -769,6 +857,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private AiChatSession session(User actor) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(actor.getId());
         session.setTitle("Assistant proposal");
         session.setVisibility("private");
@@ -780,6 +869,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private AiChatMessage message(AiChatSession session, User actor) {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspace.getId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(session.getId());
         message.setSeq(1);
         message.setAuthorKind("user");
@@ -792,7 +882,9 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private AiChatToolCall toolCall(
             AiChatMessage message, AiAssistantPreparedWrite write) {
         AiChatToolCall toolCall = new AiChatToolCall();
+        toolCall.setServerProposal(true);
         toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setOrganizationPrivacyGeneration(1L);
         toolCall.setMessageId(message.getId());
         toolCall.setToolName(write.toolName());
         toolCall.setStatus("proposed");
@@ -1110,7 +1202,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 edit.get(20, TimeUnit.SECONDS);
                 assertEquals("Assistant proposal target changed", approval.get(20, TimeUnit.SECONDS).getMessage());
                 assertEquals(memberTitle, jdbcTemplate.queryForObject("SELECT title FROM person WHERE id = ?", String.class, person.getId()));
-                assertEquals("proposed", chatMapper.getToolCallBySession(workspace.getId(), fixture.sessionId(), fixture.toolCallId()).getStatus());
+                assertEquals("proposed", chatMapper.getToolCallBySession(workspace.getId(), fixture.sessionId(), fixture.toolCallId(), 1L).getStatus());
             } catch (Exception | Error failure) {
                 primaryFailure = failure;
                 throw failure;
@@ -1143,6 +1235,99 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         task.setAssignedTo(assignee);
         taskMapper.insert(task);
         return task;
+    }
+
+    @Test
+    void profileRenameWaitsForAssignmentIdentityAndStoredLabelReplayMasksAfterRename() throws Exception {
+        Company target = company("Rename owner target");
+        String originalLabel = secondActor.getDisplayName();
+        authenticate(firstActor);
+        ToolFixture fixture = ownerProposal(firstActor, target.getId(), originalLabel);
+        AiChatResourceRegistry preparationResources = new AiChatResourceRegistry();
+        preparationResources.register("company", target.getId());
+        AiAssistantPreparedWrite prepared = writeToolService.prepare("assign_owner",
+                objectMapper.valueToTree(java.util.Map.of("handle", "r1", "owner", originalLabel)), preparationResources,
+                restrictionEpoch.current(workspace.getId()));
+        clearAuthentication();
+        CountDownLatch userLocksHeld = new CountDownLatch(1);
+        CountDownLatch releaseApproval = new CountDownLatch(1);
+        AtomicBoolean intercept = new AtomicBoolean(true);
+        AtomicLong renameConnection = new AtomicLong();
+        AiChatMapper realChatMapper = sqlSessionTemplate.getMapper(AiChatMapper.class);
+        doAnswer(invocation -> {
+            if (intercept.compareAndSet(true, false)) {
+                userLocksHeld.countDown();
+                assertTrue(releaseApproval.await(30, TimeUnit.SECONDS));
+            }
+            return realChatMapper.getSessionByIdForUpdate(workspace.getId(), firstActor.getId(), fixture.sessionId());
+        }).when(chatMapperSpy).getSessionByIdForUpdate(workspace.getId(), firstActor.getId(), fixture.sessionId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> approval = executor.submit(() -> {
+                authenticate(firstActor);
+                try {
+                    assertEquals("executed", writeToolService.approve(fixture.sessionId(), fixture.toolCallId()).status());
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            assertTrue(userLocksHeld.await(10, TimeUnit.SECONDS));
+            CountDownLatch renameStarted = new CountDownLatch(1);
+            Future<?> rename = executor.submit(() -> {
+                TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+                transaction.executeWithoutResult(status -> {
+                    renameConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    renameStarted.countDown();
+                    assertEquals(1, jdbcTemplate.update("UPDATE app_user SET display_name = 'Renamed Assignment Member' WHERE id = ?", secondActor.getId()));
+                });
+            });
+            assertTrue(renameStarted.await(10, TimeUnit.SECONDS));
+            MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, renameConnection.get(), "app_user", Integer.toString(secondActor.getId()));
+            assertFalse(rename.isDone());
+            releaseApproval.countDown();
+            approval.get(20, TimeUnit.SECONDS);
+            rename.get(20, TimeUnit.SECONDS);
+            assertEquals(secondActor.getId(), companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), target.getId()).getOwnerId());
+            authenticate(firstActor);
+            AiChatToolCall stored = chatMapper.getToolCallById(workspace.getId(), jdbcTemplate.queryForObject(
+                    "SELECT message_id FROM ai_chat_tool_call WHERE id = ?", Integer.class, fixture.toolCallId()), fixture.toolCallId(), 1L);
+            assertEquals(originalLabel, objectMapper.readTree(stored.getResultJson()).path("outcome").path("owner").asString());
+            AiAssistantToolResult result = writeToolService.proposalResult(prepared, new AiAssistantToolProposal(
+                    fixture.toolCallId(), "executed", stored.getResultJson(), true));
+            assertEquals(List.of(new AiAssistantToolResult.Identifier("member", originalLabel, "/outcome/owner")), result.identifiers());
+            AiAssistantMaskingTestSupport support = new AiAssistantMaskingTestSupport(workspace.getId(), organization.getId());
+            try {
+                var assembler = new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog());
+                for (boolean nativeProtocol : List.of(false, true)) {
+                    var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+                    AiAssistantMemberIdentifiers.seed(workspaceMapper.getMembers(workspace.getId()), context);
+                    var resources = new AiChatResourceRegistry(context);
+                    var turn = AiAssistantPromptAssembler.ToolTurn.soleCall(1, "assign_owner", result);
+                    var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+                    var empty = new AiAssistantToolResult(java.util.Map.of(), List.of());
+                    var prompt = nativeProtocol ? assembler.assembleNative(List.of(), empty, List.of(turn), context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                            : assembler.assemble(List.of(), empty, List.of(turn), context, resources, AiAssistantToolCatalog.ALL);
+                    var exchanges = nativeProtocol ? assembler.nativeReplay(List.of(turn), java.util.Map.of(turn.ref(),
+                            new ooo.klae.connex.backend.ai.provider.AiToolCall("stored-owner", "assign_owner", "{}")), context, budget, null).exchanges()
+                            : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
+                    var capture = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol, exchanges,
+                            AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+                    String payload = objectMapper.writeValueAsString(capture.request().messages()) + objectMapper.writeValueAsString(capture.request().nativeTools());
+                    assertFalse(payload.contains(originalLabel));
+                    assertFalse(payload.contains("Renamed Assignment Member"));
+                    assertTrue(payload.contains("{{M1}}"));
+                    assertEquals(originalLabel, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).text());
+                }
+            } finally {
+                support.releaseFixtureMocks();
+            }
+        } finally {
+            releaseApproval.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+            org.mockito.Mockito.reset(chatMapperSpy);
+            clearAuthentication();
+        }
     }
 
 }

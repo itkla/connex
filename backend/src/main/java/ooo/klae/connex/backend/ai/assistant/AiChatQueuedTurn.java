@@ -19,7 +19,8 @@ public record AiChatQueuedTurn(
         List<Integer> attachmentIds,
         AiPrivacyMode privacyMode,
         boolean streamed,
-        AiChatQueryScope scope) {
+        AiChatQueryScope scope,
+        AiChatPrivacyToken privacyToken) {
 
     /** Creates a queued turn using the legacy masked, buffered behavior. */
     public AiChatQueuedTurn(
@@ -55,6 +56,16 @@ public record AiChatQueuedTurn(
         this(workspaceId, userId, sessionId, turnId, userMessageId, userMessageSeq,
                 restrictionEpoch, includePrivateNotes, pageContext, attachmentIds,
                 privacyMode, streamed, AiChatQueryScope.none());
+    }
+
+    /** Compatibility constructor for legacy executions; these cannot resume content writes. */
+    public AiChatQueuedTurn(int workspaceId, int userId, int sessionId, int turnId,
+            int userMessageId, int userMessageSeq, long restrictionEpoch, boolean includePrivateNotes,
+            List<AiChatPageContextDto> pageContext, List<Integer> attachmentIds,
+            AiPrivacyMode privacyMode, boolean streamed, AiChatQueryScope scope) {
+        this(workspaceId, userId, sessionId, turnId, userMessageId, userMessageSeq,
+                restrictionEpoch, includePrivateNotes, pageContext, attachmentIds, privacyMode,
+                streamed, scope, null);
     }
 
     public AiChatQueuedTurn {

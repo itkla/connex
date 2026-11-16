@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { useTranslations, useLocale } from 'next-intl';
+import { useTimeZone, useTranslations, useLocale } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import {
     ArrowDownTrayIcon,
@@ -33,6 +33,7 @@ function iconFor(contentType?: string) {
 }
 
 export default function Attachments({ entityType, entityId, initialAttachments, className }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Attachments');
     const locale = useLocale();
     const inputRef = useRef<HTMLInputElement>(null);
@@ -174,7 +175,7 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
                                             href={safeHref(attachment.url)}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="block truncate text-sm font-medium text-foreground hover:text-brand"
+                                            className="block truncate text-sm font-medium text-foreground hover:text-brand-text"
                                             title={attachment.fileName}
                                         >
                                             {attachment.fileName}
@@ -184,7 +185,7 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
                                             {' · '}
                                             {t('by', { name: attachment.uploadedByName || t('unknownUser') })}
                                             {' · '}
-                                            {formatDate(attachment.createdAt, locale)}
+                                            {formatDate(attachment.createdAt, locale, timeZone)}
                                         </p>
                                     </div>
                                     <a
@@ -228,7 +229,7 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
                             'flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm transition-colors',
                             isEmpty ? 'flex-col px-4 py-10' : 'px-4 py-3',
                             dragActive
-                                ? 'border-brand bg-brand/5 text-brand'
+                                ? 'border-brand bg-brand/5 text-brand-text'
                                 : 'border-border text-muted-foreground hover:border-muted-foreground/40 hover:bg-muted/60',
                             'disabled:pointer-events-none disabled:opacity-60',
                         )}

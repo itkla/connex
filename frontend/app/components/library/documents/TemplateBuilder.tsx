@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useLayoutEffect, useRef, useState, useTransition } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeftIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
@@ -11,11 +11,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton } from '@/components/ui/skeleton';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import DocumentBodyEditor from '@/app/components/library/documents/editor/DocumentBodyEditor';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { createDocumentTemplate, updateDocumentTemplate } from '@/app/lib/api';
+import { renderedWorkspaceId, renderedWorkspaceNavigationVersion } from '@/app/lib/renderedWorkspace';
 import { DOCUMENT_TYPES } from '@/app/lib/documentTokens';
 import type { CreateDocumentTemplatePayload, DocumentBodyNode, DocumentTemplate, DocumentType } from '@/app/lib/types';
 
@@ -72,12 +76,13 @@ function bodyHasContent(body: string | null): boolean {
 }
 
 function toDraft(template: DocumentTemplate | null, termsLabel: string): Draft {
+    const body = template?.body ?? (template ? legacyToBody(template, termsLabel) : null);
     return {
         name: template?.name ?? '',
         type: template?.type ?? 'quote',
         locale: template?.locale ?? 'en',
         title: template?.title ?? '',
-        body: template?.body ?? (template ? legacyToBody(template, termsLabel) : null),
+        body: bodyHasContent(body) ? body : null,
         active: template?.active ?? true,
     };
 }
@@ -89,11 +94,38 @@ function toDraft(template: DocumentTemplate | null, termsLabel: string): Draft {
  * chips and a line-items placeholder. The server owns generation and all money math.
  */
 export default function TemplateBuilder({ template }: { template: DocumentTemplate | null }) {
+    const router = useRouter();
+    const [revision, setRevision] = useState(0);
+    const [refreshing, startTransition] = useTransition();
+    const discardDraft = useCallback(() => {
+        startTransition(() => {
+            setRevision((value) => value + 1);
+            router.refresh();
+        });
+    }, [router]);
+    return refreshing ? <Skeleton className="h-80 w-full" /> :
+        <TemplateBuilderBody key={revision} template={template} onDiscard={discardDraft} />;
+}
+
+function TemplateBuilderBody({ template, onDiscard }: { template: DocumentTemplate | null; onDiscard: () => void }) {
     const t = useTranslations('DocumentTemplateBuilder');
     const showApiError = useApiErrorToast('DocumentTemplateBuilder');
     const router = useRouter();
-    const [draft, setDraft] = useState<Draft>(() => toDraft(template, t('slashTermsHeading')));
+    const pathname = usePathname();
+    const search = useSearchParams().toString();
+    const [initialDraft] = useState(() => toDraft(template, t('slashTermsHeading')));
+    const [draft, setDraft] = useState<Draft>(initialDraft);
+    const [savedDraft, setSavedDraft] = useState(initialDraft);
+    const draftIdentity = useRef({ id: template?.id });
+    useLayoutEffect(() => {
+        if (draftIdentity.current.id !== template?.id) draftIdentity.current = { id: template?.id };
+    }, [template?.id]);
     const [saving, setSaving] = useState(false);
+    const guard = useUnsavedChangesGuard({
+        isDirty: JSON.stringify(draft) !== JSON.stringify(savedDraft),
+        onClose: () => router.push('/library/documents'),
+        navigation: { push: router.push, replace: router.replace, renderedHref: search ? `${pathname}?${search}` : pathname, onDiscard },
+    });
 
     const patch = (next: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...next }));
 
@@ -103,6 +135,9 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
             toastError(t('nameRequired'));
             return;
         }
+        const submittedIdentity = draftIdentity.current;
+        const submittedWorkspace = renderedWorkspaceId();
+        const submittedWorkspaceVersion = renderedWorkspaceNavigationVersion();
         setSaving(true);
         try {
             const payload: CreateDocumentTemplatePayload = {
@@ -121,9 +156,14 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
             } else {
                 await createDocumentTemplate(payload);
             }
+            if (draftIdentity.current !== submittedIdentity || renderedWorkspaceId() !== submittedWorkspace) return;
+            setSavedDraft(draft);
             toastSuccess(t('saved'));
-            router.push('/library/documents');
-            router.refresh();
+            if (renderedWorkspaceNavigationVersion() !== submittedWorkspaceVersion) return;
+            guard.allowNavigation(() => {
+                router.push('/library/documents');
+                router.refresh();
+            });
         } catch (err) {
             showApiError(err, 'saveFailed');
         } finally {
@@ -133,9 +173,10 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
 
     return (
         <div className="min-h-full bg-background">
+            <ConfirmDiscardDialog {...guard.confirm} />
             <div className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
                 <div className="flex w-full items-center gap-4 px-4 py-3 sm:px-6">
-                    <Button variant="ghost" size="sm" onClick={() => router.push('/library/documents')}>
+                    <Button variant="ghost" size="sm" aria-label={t('back')} onClick={guard.requestClose} disabled={saving}>
                         <ChevronLeftIcon className="size-4" />
                         <span className="hidden sm:inline">{t('back')}</span>
                     </Button>
@@ -150,7 +191,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                 </div>
             </div>
 
-            <div className="grid w-full gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
+            <fieldset disabled={saving} className="grid min-w-0 w-full gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
                 <div className="lg:sticky lg:top-20 lg:self-start">
                     <SectionHeader title={t('groupIdentity')} />
                     <div className="flex flex-col gap-4 px-1 sm:px-6">
@@ -211,12 +252,12 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                                     <div>{t('sampleGenerated')}</div>
                                 </div>
                             </div>
-                            <DocumentBodyEditor value={draft.body} onChange={(json) => patch({ body: json })} />
+                            <DocumentBodyEditor value={draft.body} onChange={(json) => patch({ body: json })} editable={!saving} />
                         </div>
                         <p className="mt-3 text-center text-xs text-muted-foreground">{t('builderNote')}</p>
                     </div>
                 </div>
-            </div>
+            </fieldset>
         </div>
     );
 }

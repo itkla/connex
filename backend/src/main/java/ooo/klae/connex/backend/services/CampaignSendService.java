@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,6 +24,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
+import ooo.klae.connex.backend.delivery.CampaignMessageTokens;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.dto.CampaignMessageDto;
@@ -55,14 +55,14 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @Service
 @RequiredArgsConstructor
 public class CampaignSendService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     private static final String DEFAULT_CHANNEL = "email";
     private static final Set<String> DISPATCHABLE_CHANNELS = Set.of("email", "sms");
     private static final String DEFAULT_PURPOSE = "marketing";
     private static final Set<String> LOCALES = Set.of("en", "ja");
     private static final int SQL_BATCH_SIZE = 500;
-    private static final int TOKEN_BYTES = 32;
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final CampaignMapper campaignMapper;
     private final CampaignMessageMapper campaignMessageMapper;
@@ -133,6 +133,7 @@ public class CampaignSendService {
         revision.setVersion(campaignMessageMapper.nextRevisionVersion(workspaceId, messageId));
         revision.setLocale(locale);
         applyContent(DeliveryChannel.fromToken(message.getChannel()), request, revision);
+        CampaignMessageTokens.validate(revision);
         campaignMessageMapper.insertRevision(revision);
         auditService.record("campaign.message.revision", "campaign", campaignId, campaign.getName(),
                 "Added campaign message revision", Map.of("messageId", messageId, "version", revision.getVersion()));
@@ -168,6 +169,7 @@ public class CampaignSendService {
         if (request == null) {
             throw new BadRequestException("Campaign send is required");
         }
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Set<Permission> permissions = workspaceService.lockedMemberPermissionsFor(
                 workspaceId, workspaceService.getCurrentUserId());
         Campaign campaign = campaignMapper.getCampaignForUpdate(workspaceId, campaignId);
@@ -186,6 +188,7 @@ public class CampaignSendService {
             throw new ResourceNotFoundException("Campaign message revision not found for version: "
                     + request.messageVersion());
         }
+        CampaignMessageTokens.validate(revision);
         CampaignAudienceSnapshot snapshot =
                 campaignMapper.getSnapshotForShare(workspaceId, campaignId, request.snapshotVersion());
         if (snapshot == null) {
@@ -222,7 +225,7 @@ public class CampaignSendService {
         send.setStatus("draft");
         send.setScheduledAt(request.scheduledAt());
         send.setCreatedById(authService.getCurrentUser().getId());
-        List<CampaignDelivery> deliveries = materialize(workspaceId, snapshot.getId(), channel);
+        List<CampaignDelivery> deliveries = materialize(workspaceId, snapshot.getId(), channel, personWorkspaceIdsJson);
         send.setTotalRecipients(deliveries.size());
         campaignSendMapper.insertSend(send);
         for (CampaignDelivery delivery : deliveries) {
@@ -245,6 +248,13 @@ public class CampaignSendService {
         }
         CampaignSend send = requireSend(workspaceId, campaignId, sendId);
         requireAudienceSend(send);
+        CampaignMessageRevision revision = campaignMessageMapper.getRevision(
+                workspaceId, send.getMessageId(), send.getMessageVersion());
+        if (revision == null) {
+            throw new ResourceNotFoundException("Campaign message revision not found for version: "
+                    + send.getMessageVersion());
+        }
+        CampaignMessageTokens.validate(revision);
         DeliveryChannel channel = resolveDispatchableChannel(send.getChannel());
         if (!deliveryProviderConfigService.isReady(workspaceId, channel)) {
             throw new BadRequestException(
@@ -328,7 +338,7 @@ public class CampaignSendService {
         }
     }
 
-    private List<CampaignDelivery> materialize(int workspaceId, int snapshotId, DeliveryChannel channel) {
+    private List<CampaignDelivery> materialize(int workspaceId, int snapshotId, DeliveryChannel channel, String personWorkspaceIdsJson) {
         List<Integer> personIds = campaignMapper.getSnapshotMembersForShare(workspaceId, snapshotId).stream()
                 .filter(member -> "included".equals(member.getStatus()))
                 .map(CampaignAudienceMember::getRecordId)
@@ -337,7 +347,7 @@ public class CampaignSendService {
             return List.of();
         }
         Map<Integer, String> addresses = new HashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, personIds)) {
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, personIds)) {
             String address = ChannelAddressNormalizer.addressFor(channel, person);
             if (address != null) {
                 addresses.put(person.getId(), address);
@@ -354,7 +364,6 @@ public class CampaignSendService {
             delivery.setPersonId(personId);
             delivery.setAddress(address);
             delivery.setStatus("pending");
-            delivery.setUnsubscribeToken(newToken());
             deliveries.add(delivery);
         }
         return deliveries;
@@ -434,9 +443,11 @@ public class CampaignSendService {
         return new CampaignSendDto(
                 send.getId(), send.getCampaignId(), send.getSnapshotId(), send.getOrigin(), send.getMessageId(),
                 send.getMessageVersion(), send.getChannel(), send.getPurpose(), send.getProviderId(),
-                send.getStatus(), send.getScheduledAt(), send.getStartedAt(), send.getCompletedAt(),
+                send.isContentRefused() && send.getCompletedAt() != null ? "failed" : send.getStatus(),
+                send.getScheduledAt(), send.getStartedAt(), send.getCompletedAt(),
                 send.getTotalRecipients(), send.getDispatchedCount(), send.getSkippedCount(),
-                send.getFailedCount(), send.getCreatedById(), send.getCreatedAt(), send.getUpdatedAt());
+                send.getFailedCount(), send.getCreatedById(), send.getCreatedAt(), send.getUpdatedAt(),
+                send.isContentRefused());
     }
 
     private static String normalizeChannel(String value) {
@@ -479,17 +490,6 @@ public class CampaignSendService {
             throw new BadRequestException("Campaign send purpose is invalid");
         }
         return normalized;
-    }
-
-    private static String newToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        StringBuilder builder = new StringBuilder(TOKEN_BYTES * 2);
-        for (byte value : bytes) {
-            builder.append(Character.forDigit((value >> 4) & 0xF, 16));
-            builder.append(Character.forDigit(value & 0xF, 16));
-        }
-        return builder.toString();
     }
 
     private static String trimToNull(String value) {

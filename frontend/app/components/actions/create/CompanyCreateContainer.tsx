@@ -14,6 +14,7 @@ import {
     uploadCompanyLogo,
     uploadContactPicture,
 } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { Company, CreateCompanyPayload } from '@/app/lib/types';
@@ -79,7 +80,7 @@ export default function CompanyCreateContainer({
     const removePendingContact = (tempId: string) =>
         setPendingContacts((prev) => prev.filter((c) => c.tempId !== tempId));
 
-    const createPendingContact = async (c: PendingContact, companyId: number) => {
+    const createPendingContact = async (c: PendingContact, companyId: number, origin: RequestInit) => {
         const contactPayload = {
             name: c.name.trim(),
             email: c.email.trim(),
@@ -88,10 +89,10 @@ export default function CompanyCreateContainer({
             companyId,
             duplicateReviewToken: c.duplicateReviewToken ?? undefined,
         };
-        const newContact = await createContact(contactPayload, requestInit);
+        const newContact = await createContact(contactPayload, origin);
         if (requestInit?.signal?.aborted) return newContact;
         if (c.imageFile) {
-            await uploadContactPicture(newContact.id, c.imageFile, requestInit).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile, origin).catch(() => undefined);
         }
         return newContact;
     };
@@ -138,7 +139,9 @@ export default function CompanyCreateContainer({
     const createNewCompany = async (
         duplicateReviewToken: string | null,
         reviewedContacts: PendingContact[] = pendingContacts,
+        init?: RequestInit,
     ) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         setSucceeded(false);
         setCreating(true);
         try {
@@ -146,12 +149,12 @@ export default function CompanyCreateContainer({
                 ...cleanCompanyPayload(payload),
                 duplicateReviewToken: duplicateReviewToken ?? undefined,
             };
-            const created = await createCompany(companyPayload, requestInit);
+            const created = await createCompany(companyPayload, origin);
             if (requestInit?.signal?.aborted) return;
             let logoUploadFailed = false;
             if (logoFile) {
                 try {
-                    await uploadCompanyLogo(created.id, logoFile, requestInit);
+                    await uploadCompanyLogo(created.id, logoFile, origin);
                 } catch {
                     if (requestInit?.signal?.aborted) return;
                     logoUploadFailed = true;
@@ -162,7 +165,7 @@ export default function CompanyCreateContainer({
                 let failed = 0;
                 for (const contact of reviewedContacts) {
                     try {
-                        await createPendingContact(contact, created.id);
+                        await createPendingContact(contact, created.id, origin);
                     } catch {
                         failed += 1;
                     }

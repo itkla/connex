@@ -32,18 +32,22 @@ public interface AttachmentMapper {
     Attachment getMetadataByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     List<Attachment> getAssistantSessionAttachments(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
     List<Attachment> getAssistantSessionAttachmentsByIds(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("ids") List<Integer> ids);
+        @Param("ids") List<Integer> ids,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
     Attachment getAssistantSessionAttachment(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
     int countAssistantSessionAttachments(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
     int countUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
     /** Locks every same-workspace attachment reference for an exact URL. */

@@ -174,6 +174,90 @@
     WHERE <include refid="scopeActivityPredicate"/>
   </select>
 
+  <!-- Keep these predicates self-contained: MyBatis resolves nested includes in the invoking
+       namespace, and mapper guards intentionally load each namespace independently. -->
+  <sql id="listPersonVisible">
+    (p.workspace_id = #{workspaceId}
+      OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = p.workspace_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+    AND p.archived_at IS NULL
+  </sql>
+
+  <sql id="listCompanyVisible">
+    (c.workspace_id = #{workspaceId}
+      OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = c.workspace_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+    AND c.archived_at IS NULL
+  </sql>
+
+  <sql id="internalInlineReferencePattern">
+    '\\[[^]\\r\\n]*\\][[:space:]]*\\([[:space:]]*&lt;?(user|person|deal|company|note|file|task|activity)(:|&amp;colon;|&amp;#0*58;|&amp;#x0*3a;|\\\\:)[0-9]+&gt;?([[:space:]]+[^)]*)?\\)'
+  </sql>
+
+  <sql id="internalReferenceTargetPattern">
+    '(user|person|deal|company|note|file|task|activity)(:|&amp;colon;|&amp;#0*58;|&amp;#x0*3a;|\\\\:)[0-9]+'
+  </sql>
+
+  <sql id="listPredicate">
+    a.workspace_id = #{workspaceId}
+    AND (a.person_id IS NULL OR EXISTS (SELECT 1 FROM person p
+      WHERE p.id = a.person_id AND <include refid="listPersonVisible"/>))
+    <if test="filter.personId != null">AND a.person_id = #{filter.personId}</if>
+    <if test="filter.dealId != null">AND a.deal_id = #{filter.dealId}</if>
+    <if test="filter.createdById != null">AND a.created_by_id = #{filter.createdById}</if>
+    <if test="filter.persons != null and !filter.persons.isEmpty()">
+      AND a.person_id IN <foreach collection="filter.persons" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="filter.deals != null and !filter.deals.isEmpty()">
+      AND a.deal_id IN <foreach collection="filter.deals" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="filter.members != null and !filter.members.isEmpty()">
+      AND a.created_by_id IN <foreach collection="filter.members" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="filter.companyId != null or (filter.companies != null and !filter.companies.isEmpty())">
+      AND EXISTS (SELECT 1 FROM company c
+        WHERE <include refid="listCompanyVisible"/>
+        <if test="filter.companyId != null">AND c.id = #{filter.companyId}</if>
+        <if test="filter.companies != null and !filter.companies.isEmpty()">
+          AND c.id IN <foreach collection="filter.companies" item="id" open="(" separator="," close=")">#{id}</foreach>
+        </if>
+        AND (EXISTS (SELECT 1 FROM person p WHERE p.id = a.person_id AND p.company_id = c.id
+              AND <include refid="listPersonVisible"/>)
+          OR EXISTS (SELECT 1 FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = c.id)))
+    </if>
+    <if test="filter.q != null and filter.q != ''">
+      AND (a.subject LIKE #{filter.searchPattern}
+        OR (NOT REGEXP_LIKE(
+          REGEXP_REPLACE(a.notes, <include refid="internalInlineReferencePattern"/>, '', 1, 0, 'i'),
+          <include refid="internalReferenceTargetPattern"/>, 'i')
+          AND REGEXP_REPLACE(a.notes, <include refid="internalInlineReferencePattern"/>, '', 1, 0, 'i') LIKE #{filter.searchPattern})
+        OR EXISTS (SELECT 1 FROM person p WHERE p.id = a.person_id
+          AND <include refid="listPersonVisible"/>
+          AND p.name LIKE #{filter.searchPattern})
+        OR EXISTS (SELECT 1 FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id
+          AND d.name LIKE #{filter.searchPattern}))
+    </if>
+    <if test="filter.type != null and filter.type != 'all'">
+      AND CASE LOWER(TRIM(a.type)) WHEN 'call' THEN 'Call' WHEN 'email' THEN 'Email'
+        WHEN 'meeting' THEN 'Meeting' WHEN 'note' THEN 'Note' ELSE 'Other' END = #{filter.type}
+    </if>
+  </sql>
+
+  <select id="getListPage" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity a
+    WHERE <include refid="listPredicate"/>
+    ORDER BY a.timestamp DESC, a.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countList" resultType="long">
+    SELECT COUNT(*) FROM activity a WHERE <include refid="listPredicate"/>
+  </select>
+
   <select id="getAllActivities" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} ORDER BY timestamp DESC

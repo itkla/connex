@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -50,6 +52,7 @@ import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -82,12 +85,14 @@ public class AiAssistantToolCallReadService {
     private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note", "person", "company", "deal", "report");
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final TagMapper tagMapper;
     private final DocumentTemplateMapper documentTemplateMapper;
     private final DealDocumentService documentService;
@@ -100,23 +105,35 @@ public class AiAssistantToolCallReadService {
     private final ReferenceService referenceService;
     private final ReportMapper reportMapper;
 
-    /** Returns up to 100 safe write-tool cards in one authorized session. */
+    /** Returns up to 100 pending cards, or 100 history rows plus 100 newer undecided cards. */
     @Transactional
     public List<AiAssistantToolCallReadDto> list(int sessionId, boolean pendingOnly) {
-        Viewer viewer = currentViewer();
-        AiChatSession session = requireReadableSession(viewer, sessionId);
-        return list(viewer, session, pendingOnly, true);
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return listWithinVisibilityScope(sessionId, pendingOnly, resolvedVisibilityScope);
     }
 
-    /** Returns up to 100 safe write-tool cards for one retained administrative read. */
+    private List<AiAssistantToolCallReadDto> listWithinVisibilityScope(int sessionId, boolean pendingOnly, RecordVisibilityScope operationVisibilityScope) {
+        Viewer viewer = currentViewer();
+        AiChatSession session = requireReadableSession(viewer, sessionId);
+        return listWithinVisibilityScope(viewer, session, pendingOnly, true, operationVisibilityScope);
+    }
+
+    /** Applies the same bounded history and undecided discovery to an audited retained read. */
     @Transactional
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public List<AiAssistantToolCallReadDto> listRetained(
             int sessionId, boolean pendingOnly) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> listRetainedWithinVisibilityScope(sessionId, pendingOnly, resolvedVisibilityScope));
+    }
+
+    private List<AiAssistantToolCallReadDto> listRetainedWithinVisibilityScope(
+            int sessionId, boolean pendingOnly, RecordVisibilityScope operationVisibilityScope) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireRetainedSession(viewer, sessionId);
-        List<AiAssistantToolCallReadDto> projected = list(
-                viewer, session, pendingOnly, false);
+        List<AiAssistantToolCallReadDto> projected = listWithinVisibilityScope(
+                viewer, session, pendingOnly, false, operationVisibilityScope);
         sessionReadAudit.record(sessionId, "retained");
         return projected;
     }
@@ -124,49 +141,71 @@ public class AiAssistantToolCallReadService {
     /** Returns one safe write-tool card in an authorized session. */
     @Transactional
     public AiAssistantToolCallReadDto get(int sessionId, int toolCallId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return getWithinVisibilityScope(sessionId, toolCallId, resolvedVisibilityScope);
+    }
+
+    private AiAssistantToolCallReadDto getWithinVisibilityScope(int sessionId, int toolCallId, RecordVisibilityScope operationVisibilityScope) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireReadableSession(viewer, sessionId);
-        return get(viewer, session, toolCallId, true);
+        return getWithinVisibilityScope(viewer, session, toolCallId, true, operationVisibilityScope);
     }
 
     /** Returns one safe write-tool card for a retained administrative read. */
     @Transactional
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public AiAssistantToolCallReadDto getRetained(int sessionId, int toolCallId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getRetainedWithinVisibilityScope(sessionId, toolCallId, resolvedVisibilityScope));
+    }
+
+    private AiAssistantToolCallReadDto getRetainedWithinVisibilityScope(int sessionId, int toolCallId, RecordVisibilityScope operationVisibilityScope) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireRetainedSession(viewer, sessionId);
-        AiAssistantToolCallReadDto projected = get(viewer, session, toolCallId, false);
+        AiAssistantToolCallReadDto projected = getWithinVisibilityScope(viewer, session, toolCallId, false, operationVisibilityScope);
         sessionReadAudit.record(sessionId, "retained");
         return projected;
     }
 
-    private List<AiAssistantToolCallReadDto> list(
+
+    private List<AiAssistantToolCallReadDto> listWithinVisibilityScope(
             Viewer viewer,
             AiChatSession session,
             boolean pendingOnly,
-            boolean mutationsAvailable) {
-        List<StoredToolCall> stored = chatMapper.listToolCallsBySession(
-                viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS).stream()
+            boolean mutationsAvailable, RecordVisibilityScope operationVisibilityScope) {
+        Instant now = clock.instant();
+        List<AiChatToolCall> rows = new ArrayList<>(chatMapper.listToolCallsBySession(
+                viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS,
+                pendingOnly ? AiAssistantProposalExpiry.pendingCreatedAfter(now) : null, privacyGuard.currentGeneration(viewer.workspaceId())));
+        if (!pendingOnly && rows.size() == MAX_TOOL_CALLS) {
+            AiChatToolCall boundary = rows.getLast();
+            rows.addAll(chatMapper.listUndecidedToolCallsAfterHistory(
+                    viewer.workspaceId(), session.getId(), boundary.getMessageId(), boundary.getId(),
+                    MAX_TOOL_CALLS, privacyGuard.currentGeneration(viewer.workspaceId())).reversed());
+        }
+        List<StoredToolCall> stored = rows.stream()
                 .map(this::readStored)
                 .filter(Objects::nonNull)
                 .filter(call -> !pendingOnly || call.tier() == ToolTier.CONFIRM)
                 .toList();
-        return project(viewer, session, stored, mutationsAvailable);
+        return project(viewer, session, stored, mutationsAvailable, now, operationVisibilityScope);
     }
 
-    private AiAssistantToolCallReadDto get(
+
+    private AiAssistantToolCallReadDto getWithinVisibilityScope(
             Viewer viewer,
             AiChatSession session,
             int toolCallId,
-            boolean mutationsAvailable) {
+            boolean mutationsAvailable, RecordVisibilityScope operationVisibilityScope) {
         AiChatToolCall toolCall = chatMapper.getToolCallBySession(
-                viewer.workspaceId(), session.getId(), toolCallId);
+                viewer.workspaceId(), session.getId(), toolCallId, privacyGuard.currentGeneration(viewer.workspaceId()));
         StoredToolCall stored = toolCall == null ? null : readStored(toolCall);
         if (stored == null) {
             throw inaccessible();
         }
         List<AiAssistantToolCallReadDto> projected = project(
-                viewer, session, List.of(stored), mutationsAvailable);
+                viewer, session, List.of(stored), mutationsAvailable, clock.instant(), operationVisibilityScope);
         if (projected.isEmpty()) {
             throw inaccessible();
         }
@@ -177,11 +216,11 @@ public class AiAssistantToolCallReadService {
             Viewer viewer,
             AiChatSession session,
             List<StoredToolCall> stored,
-            boolean mutationsAvailable) {
+            boolean mutationsAvailable, Instant now, RecordVisibilityScope operationVisibilityScope) {
         Set<Permission> viewerPermissions = workspaceService.permissionsFor(
                 viewer.workspaceId(), viewer.userId());
         Map<RecordKey, RecordSnapshot> visibleTargets = visibleTargets(
-                viewer.workspaceId(), stored);
+                viewer.workspaceId(), stored, operationVisibilityScope);
         List<User> assignableOwners = stored.stream().anyMatch(call ->
                 readsInput(call, ReviewInput.MEMBERS)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
@@ -190,7 +229,8 @@ public class AiAssistantToolCallReadService {
         List<Stage> stages = stored.stream().anyMatch(call ->
                 readsInput(call, ReviewInput.STAGES)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
-                ? pipelineMapper.getAllStages(viewer.workspaceId())
+                ? pipelineMapper.getAllStages(viewer.workspaceId(),
+                    operationVisibilityScope.workspaceIdsJson())
                 : List.of();
         List<DocumentTemplate> templates = stored.stream().anyMatch(call ->
                 readsInput(call, ReviewInput.TEMPLATES)
@@ -211,7 +251,7 @@ public class AiAssistantToolCallReadService {
         Map<Integer, Integer> assistantMessages = assistantMessages(
                 viewer.workspaceId(), session.getId(), stored);
         Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> createdRecords = liveCreatedRecords(
-                viewer, stored, visibleTargets, viewerPermissions);
+                viewer, stored, visibleTargets, viewerPermissions, operationVisibilityScope);
         boolean undoAvailable = mutationsAvailable && ACTIVE.equals(session.getStatus());
         List<AiAssistantToolCallReadDto> projected = new ArrayList<>();
         for (StoredToolCall call : stored) {
@@ -220,7 +260,7 @@ public class AiAssistantToolCallReadService {
                 continue;
             }
             UndoProjection undo = undoProjection(
-                    call, status, viewer.userId(), viewerPermissions, undoAvailable);
+                    call, status, viewer.userId(), viewerPermissions, undoAvailable, now);
             if (undo.undone()) {
                 status = "undone";
             }
@@ -241,11 +281,25 @@ public class AiAssistantToolCallReadService {
             List<AiAssistantToolCallReadDto.Change> changes = readable
                     ? changes(call, status, visibleTarget, viewerPermissions, review)
                     : List.of();
+            Instant deadline = call.reviewDeadline() != null ? call.reviewDeadline()
+                    : call.toolCall().isServerProposal()
+                        ? AiAssistantProposalExpiry.reviewExpiresAt(call.toolCall().getCreatedAt()) : null;
+            String reviewState = switch (status) {
+                case PROPOSED -> deadline == null ? "unavailable"
+                        : AiAssistantProposalExpiry.isExpired(deadline, now) ? "expired" : "open";
+                case EXECUTED -> "applied";
+                case "undone" -> "undone";
+                case "rejected" -> "discarded";
+                case "failed" -> missionWithdrawn(call.toolCall()) ? "withdrawn" : "failed";
+                default -> "unavailable";
+            };
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
                     call.tier().name().toLowerCase(),
                     status,
+                    reviewState,
+                    deadline == null ? null : deadline.toString(),
                     target,
                     summary(
                             review, withheld, tool::requestSummary,
@@ -316,7 +370,36 @@ public class AiAssistantToolCallReadService {
     }
 
     private StoredToolCall readStored(AiChatToolCall toolCall) {
-        if (toolCall.getArgumentsJson() == null) {
+        if (!"reactive".equals(toolCall.getArtifactOrigin()) || toolCall.getMissionRunId() != null
+                || !"legacy".equals(toolCall.getProposalOrigin())) {
+            return null;
+        }
+        return readStored(toolCall, null, null, null);
+    }
+
+    /** Projects a mission-owned singleton with explicit original ancestry and review anchors. */
+    public AiAssistantToolCallReadDto projectMission(AiChatSession session, AiChatToolCall call,
+            int originatingTurnId, String preparedAt, Instant reviewDeadline) {
+        if (!"mission".equals(call.getProposalOrigin()) || call.getMissionActionId() == null) {
+            throw inaccessible();
+        }
+        StoredToolCall stored = readStored(call, originatingTurnId, preparedAt, reviewDeadline);
+        if (stored == null) {
+            throw inaccessible();
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope visibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        var result = recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, visibilityScope,
+                () -> project(currentViewer(), session, List.of(stored), true, clock.instant(), visibilityScope));
+        if (result.size() != 1) {
+            throw inaccessible();
+        }
+        return result.getFirst();
+    }
+
+    private StoredToolCall readStored(AiChatToolCall toolCall, Integer originatingTurnId,
+            String preparedAt, Instant reviewDeadline) {
+        if (toolCall.getArgumentsJson() == null || !hasTrustedEnvelope(toolCall)) {
             return null;
         }
         try {
@@ -329,7 +412,7 @@ public class AiAssistantToolCallReadService {
             JsonNode target = root.get("target");
             String targetKind = text(target, "kind");
             int targetId = positiveInteger(target, "id");
-            int turnId = turnId(toolCall.getIdempotencyKey());
+            int turnId = originatingTurnId == null ? turnId(toolCall.getIdempotencyKey()) : originatingTurnId;
             AiAssistantWriteTool tool = writeToolRegistry.find(toolName).orElse(null);
             if (!toolCall.getToolName().equals(toolName)
                     || !toolCatalog.isExecutable(toolName)
@@ -348,14 +431,25 @@ public class AiAssistantToolCallReadService {
                     AiAssistantProposalPins.read(root),
                     tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
                             ? text(root, "targetVersion") : null,
-                    AiAssistantToolProposalPin.read(root));
+                    AiAssistantToolProposalPin.read(root), preparedAt, reviewDeadline);
         } catch (JacksonException | IllegalArgumentException | AiAssistantLoopException exception) {
             return null;
         }
     }
 
+    /**
+     * Whether a row's envelope can be shown as the proposal the server wrote (#1867). A refused
+     * call stores what the model sent, and a model can shape that into a complete envelope, so a
+     * row still pending or failed is trusted only when the server proposed it. Executed and
+     * rejected rows were acted on and stay as history.
+     */
+    private static boolean hasTrustedEnvelope(AiChatToolCall toolCall) {
+        return toolCall.isServerProposal()
+                || !("proposed".equals(toolCall.getStatus()) || "failed".equals(toolCall.getStatus()));
+    }
+
     private Map<RecordKey, RecordSnapshot> visibleTargets(
-            int workspaceId, List<StoredToolCall> stored) {
+            int workspaceId, List<StoredToolCall> stored, RecordVisibilityScope operationVisibilityScope) {
         Set<RecordKey> requested = new LinkedHashSet<>();
         stored.stream()
                 .map(call -> new RecordKey(call.targetKind(), call.targetId()))
@@ -385,7 +479,7 @@ public class AiAssistantToolCallReadService {
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
         if (!personIds.isEmpty()) {
-            for (Person person : personMapper.getByIds(workspaceId, personIds)) {
+            for (Person person : personMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), personIds)) {
                 if (isProcessable(person)) {
                     putVisible(visible, "person", person.getId(), new RecordSnapshot(
                             person.getName(), null, person.getOwnerId(), null,
@@ -395,7 +489,7 @@ public class AiAssistantToolCallReadService {
             }
         }
         if (!companyIds.isEmpty()) {
-            for (Company company : companyMapper.getByIds(workspaceId, companyIds)) {
+            for (Company company : companyMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyIds)) {
                 putVisible(visible, "company", company.getId(), new RecordSnapshot(
                         company.getName(), null, company.getOwnerId(), null,
                         company.getUpdatedAt(), companyFields(company),
@@ -513,7 +607,7 @@ public class AiAssistantToolCallReadService {
         }
         Map<Integer, Integer> messages = new LinkedHashMap<>();
         for (AiChatMessage message : chatMapper.listAssistantMessagesBySessionAndTurnIds(
-                workspaceId, sessionId, turnIds, MAX_TOOL_CALLS)) {
+                workspaceId, sessionId, turnIds, MAX_TOOL_CALLS, privacyGuard.currentGeneration(workspaceId))) {
             Integer turnId = assistantTurnId(message.getStructuredJson());
             if (turnId != null) {
                 messages.putIfAbsent(turnId, message.getId());
@@ -544,8 +638,8 @@ public class AiAssistantToolCallReadService {
             String status,
             int viewerUserId,
             Set<Permission> viewerPermissions,
-            boolean mutationsAvailable) {
-        if (call.tier() != ToolTier.AUTO
+            boolean mutationsAvailable, Instant now) {
+        if ((call.tier() != ToolTier.AUTO && !"mission".equals(call.toolCall().getProposalOrigin()))
                 || !"executed".equals(status)
                 || call.toolCall().getResultJson() == null) {
             return UndoProjection.NONE;
@@ -567,11 +661,11 @@ public class AiAssistantToolCallReadService {
                 return new UndoProjection(false, canonicalInstant(undo.get("expiresAt")), false);
             }
             String expiresAt = canonicalInstant(undo.get("expiresAt"));
-            boolean available = mutationsAvailable
+            boolean available = mutationsAvailable && call.tier() == ToolTier.AUTO
                     && expiresAt != null
                     && Objects.equals(call.toolCall().getRequestedByUserId(), viewerUserId)
                     && hasUndoPermissions(call, viewerPermissions)
-                    && !clock.instant().isAfter(Instant.parse(expiresAt));
+                    && !now.isAfter(Instant.parse(expiresAt));
             return new UndoProjection(available, expiresAt, false);
         } catch (JacksonException exception) {
             return UndoProjection.NONE;
@@ -807,6 +901,17 @@ public class AiAssistantToolCallReadService {
         return call.tool().reviewInputs().contains(input);
     }
 
+    private boolean missionWithdrawn(AiChatToolCall call) {
+        if (!"mission".equals(call.getProposalOrigin()) || call.getResultJson() == null) {
+            return false;
+        }
+        try {
+            return "mission_withdrawn".equals(objectMapper.readTree(call.getResultJson()).path("reason").asString());
+        } catch (JacksonException exception) {
+            return false;
+        }
+    }
+
     private JsonNode storedOutcome(AiChatToolCall toolCall) {
         if (toolCall.getResultJson() == null) {
             return null;
@@ -855,7 +960,7 @@ public class AiAssistantToolCallReadService {
         boolean changed = call.tool().freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
                 ? call.targetVersion() == null || !call.targetVersion().equals(target.targetVersion())
                 : AiAssistantProposalFreshness.changedSince(
-                        target.updatedAt(), call.toolCall().getCreatedAt());
+                        target.updatedAt(), call.preparedAt() == null ? call.toolCall().getCreatedAt() : call.preparedAt());
         return changed
                 ? "recordChanged"
                 : "ready";
@@ -921,7 +1026,7 @@ public class AiAssistantToolCallReadService {
             Viewer viewer,
             List<StoredToolCall> stored,
             Map<RecordKey, RecordSnapshot> visibleTargets,
-            Set<Permission> viewerPermissions) {
+            Set<Permission> viewerPermissions, RecordVisibilityScope operationVisibilityScope) {
         Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> candidates = new LinkedHashMap<>();
         for (StoredToolCall call : stored) {
             if (!detailsReadable(call, viewer.userId(), visibleTargets)) {
@@ -936,7 +1041,7 @@ public class AiAssistantToolCallReadService {
         if (candidates.isEmpty()) {
             return Map.of();
         }
-        Set<RecordKey> live = liveCreatedRecordKeys(viewer, candidates.values(), viewerPermissions);
+        Set<RecordKey> live = liveCreatedRecordKeys(viewer, candidates.values(), viewerPermissions, operationVisibilityScope);
         candidates.values().removeIf(candidate ->
                 !live.contains(new RecordKey(candidate.kind(), candidate.id())));
         return Map.copyOf(candidates);
@@ -944,11 +1049,11 @@ public class AiAssistantToolCallReadService {
 
     private Set<RecordKey> liveCreatedRecordKeys(
             Viewer viewer, Collection<AiAssistantToolCallReadDto.CreatedRecord> candidates,
-            Set<Permission> viewerPermissions) {
+            Set<Permission> viewerPermissions, RecordVisibilityScope operationVisibilityScope) {
         Set<RecordKey> live = new LinkedHashSet<>();
         List<Integer> companyIds = createdIds(candidates, "company");
         if (!companyIds.isEmpty()) {
-            for (Company company : companyMapper.getByIds(viewer.workspaceId(), companyIds)) {
+            for (Company company : companyMapper.getByIds(viewer.workspaceId(), operationVisibilityScope.workspaceIdsJson(), companyIds)) {
                 live.add(new RecordKey("company", company.getId()));
             }
         }
@@ -962,7 +1067,7 @@ public class AiAssistantToolCallReadService {
         List<Integer> personIds = createdIds(candidates, "person");
         List<Integer> dealIds = createdIds(candidates, "deal");
         if (!personIds.isEmpty()) {
-            for (Person person : personMapper.getByIds(viewer.workspaceId(), personIds)) {
+            for (Person person : personMapper.getByIds(viewer.workspaceId(), operationVisibilityScope.workspaceIdsJson(), personIds)) {
                 if (isProcessable(person)) {
                     live.add(new RecordKey("person", person.getId()));
                 }
@@ -1117,10 +1222,12 @@ public class AiAssistantToolCallReadService {
         workspaceService.requirePermission(
                 viewer.workspaceId(), viewer.userId(), Permission.AI_USE);
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                viewer.workspaceId(), viewer.userId(), sessionId);
+                viewer.workspaceId(), viewer.userId(), sessionId, privacyGuard.currentGeneration(viewer.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
+        sessionReadAudit.retainTranscriptAuditParents(viewer.workspaceId(), viewer.userId());
+        privacyGuard.retain(chatMapper, privacyGuard.capture(chatMapper, session));
         sessionReadAudit.recordAccessible(
                 viewer.workspaceId(), viewer.userId(), session);
         return session;
@@ -1131,7 +1238,7 @@ public class AiAssistantToolCallReadService {
                 viewer.workspaceId(), viewer.userId(), Permission.AI_SESSION_ADMIN);
         List<Integer> activeMemberIds = activeMemberIds(viewer);
         AiChatSession session = chatMapper.getRetainedSessionById(
-                viewer.workspaceId(), viewer.userId(), sessionId, activeMemberIds);
+                viewer.workspaceId(), viewer.userId(), sessionId, activeMemberIds, privacyGuard.currentGeneration(viewer.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
@@ -1140,6 +1247,8 @@ public class AiAssistantToolCallReadService {
                 && revalidatedMemberIds.contains(session.getCreatedByUserId())) {
             throw inaccessible();
         }
+        sessionReadAudit.retainTranscriptAuditParents(viewer.workspaceId(), viewer.userId());
+        privacyGuard.retain(chatMapper, privacyGuard.capture(chatMapper, session));
         return session;
     }
 
@@ -1170,7 +1279,7 @@ public class AiAssistantToolCallReadService {
             JsonNode request,
             AiAssistantProposalPins pins,
             String targetVersion,
-            Map<String, Object> pinned) {
+            Map<String, Object> pinned, String preparedAt, Instant reviewDeadline) {
     }
 
     private record RecordKey(String kind, int id) {

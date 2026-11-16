@@ -33,12 +33,15 @@ public interface AiOutputCacheMapper {
      * stakeholder of, plus deal briefs where the person is a stakeholder, is connected to a
      * stakeholder, or is currently linked through an activity, note, or task
      * (including same-org grantee workspaces the contact was shared into). Org-anchored via the
-     * workspace join off {@code workspaceId}. Report caches carry no person provenance, so safe
-     * erasure deliberately over-purges every report narrative in the same organization. Removed-link
+     * trusted unfiltered organization workspace set, including {@code workspaceId}. Report caches
+     * carry no person provenance, so safe erasure deliberately over-purges every report narrative
+     * in the same organization. Removed-link
      * and free-text provenance remain outside this method.
-     * @param workspaceId the restricting (owning) workspace, used to resolve the organization
+     * @param workspaceId the restricting (owning) workspace, which must appear in the scope
+     * @param orgWorkspaceIdsJson trusted unfiltered organization workspace IDs from the control boundary
      * @param personId the restricted contact
      * @return the number of cache rows removed
      */
-    int deleteForPerson(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    int deleteForPerson(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("personId") int personId);
 }

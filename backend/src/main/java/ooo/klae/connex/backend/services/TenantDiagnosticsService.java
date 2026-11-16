@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -59,6 +61,9 @@ import tools.jackson.databind.ObjectMapper;
 public class TenantDiagnosticsService {
     private static final TypeReference<Map<String, Object>> DETAIL_TYPE = new TypeReference<>() {
     };
+    private static final Comparator<JobRun> JOB_RUN_ORDER = Comparator
+            .comparing((JobRun run) -> run.getStartedAt().toInstant(ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS))
+            .thenComparingInt(JobRun::getId);
     /**
      * The scheduled jobs whose last run, last success, and last failure this surface reports.
      *
@@ -79,10 +84,15 @@ public class TenantDiagnosticsService {
             JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION,
             JobRunRecorder.LEAD_RESPONSE_SLA,
             JobRunRecorder.AI_RUN_LEASE_SWEEP,
-            JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP);
+            JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP,
+            JobRunRecorder.AI_AGENT_SCHEDULER,
+            JobRunRecorder.AI_AGENT_PRIVACY_INITIALIZATION,
+            JobRunRecorder.AI_BRIEF_DELIVERY,
+            JobRunRecorder.AI_WATCH_EVALUATION);
     private static final Set<String> JOB_DETAIL_KEYS = Set.of(
             "phase",
             "purgedCount",
+            "changedCount",
             "completedCadences",
             "failedCadences",
             "deletedCount",
@@ -93,6 +103,10 @@ public class TenantDiagnosticsService {
             "snapshotId",
             "recipientCount",
             "expiredCount",
+            "startedCount",
+            "deliveredCount",
+            "evaluatedCount",
+            "firedCount",
             "visitedCount",
             "durationMs");
 
@@ -104,6 +118,7 @@ public class TenantDiagnosticsService {
     private final BusinessCardService businessCardService;
     private final ProviderCaptureMapper providerCaptureMapper;
     private final JobRunMapper jobRunMapper;
+    private final JobRunRecorder jobRunRecorder;
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final TenantDiagnosticsTenantAccess tenantAccess;
     private final SecretStoreLifecycleService secretStoreLifecycleService;
@@ -237,8 +252,27 @@ public class TenantDiagnosticsService {
                 anchorWorkspaceId, scope.workspaceIdsJson(), "succeeded");
         List<JobRun> lastFailure = jobRunMapper.findLatestVisible(
                 anchorWorkspaceId, scope.workspaceIdsJson(), "failed");
-        return new TenantSections(workspaces, jobs(last, lastSuccess, lastFailure));
+        List<JobRun> idle = jobRunRecorder.latestIdleRuns(scope.workspaceIds());
+        return new TenantSections(workspaces, jobs(
+                mergeIdleRuns(last, idle), mergeIdleRuns(lastSuccess, idle), lastFailure));
     }
+
+    private static List<JobRun> mergeIdleRuns(List<JobRun> persisted, List<JobRun> idle) {
+        Map<JobScope, JobRun> latest = new LinkedHashMap<>();
+        for (JobRun run : persisted) {
+            latest.put(new JobScope(run.getJobName(), run.getWorkspaceId()), run);
+        }
+        for (JobRun run : idle) {
+            JobScope key = new JobScope(run.getJobName(), run.getWorkspaceId());
+            JobRun previous = latest.get(key);
+            if (previous == null || JOB_RUN_ORDER.compare(run, previous) > 0) {
+                latest.put(key, run);
+            }
+        }
+        return List.copyOf(latest.values());
+    }
+
+    private record JobScope(String jobName, Integer workspaceId) {}
 
     private WorkspaceProviders workspaceProviders(int workspaceId, List<Capture> capture) {
         MailConfigResolver.WorkspaceMailReadiness mailReadiness = mailReadiness(workspaceId);
@@ -360,7 +394,7 @@ public class TenantDiagnosticsService {
         Map<String, JobRun> byName = new LinkedHashMap<>();
         for (JobRun run : runs) {
             JobRun current = byName.get(run.getJobName());
-            if (current != null && !run.getStartedAt().isAfter(current.getStartedAt())) {
+            if (current != null && JOB_RUN_ORDER.compare(run, current) <= 0) {
                 continue;
             }
             byName.put(run.getJobName(), run);

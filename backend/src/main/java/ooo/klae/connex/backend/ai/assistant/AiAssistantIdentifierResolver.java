@@ -1,8 +1,12 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -16,6 +20,7 @@ import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.ReferenceService;
 
 /** Resolves one bounded, locally authorized identifier set for an Ask Connex user turn. */
 @Service
@@ -27,16 +32,15 @@ public class AiAssistantIdentifierResolver {
     private final AiAssistantIdentifierMapper identifierMapper;
     private final WorkspaceService workspaceService;
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
+    private final ReferenceService referenceService;
 
     /**
      * Resolves visible mentions in bounded pages for the supplied turn text.
      *
-     * <p>The mapper returns a superset of the mentions this turn can have: a row whose canonical
-     * name is non-ASCII is admitted with no containment test at all, because MySQL cannot reproduce
-     * the Java canonical form for it. Candidate volume is therefore a property of the workspace,
-     * not of the turn, and must never refuse it — in a workspace whose records are named in a
-     * non-ASCII script every visible row is a candidate. Only the gated mention count, measured
-     * after the masking gate has decided, is bounded against the turn budget.
+     * <p>Current canonical keys select a binary-containment superset of real mentions. Missing
+     * or stale bundles and oversized unkeyed names retain the legacy SQL prefilter and can return every non-ASCII name.
+     * Candidate volume therefore never refuses a turn: only the Java-gated mention count is
+     * bounded against the turn budget. Java retains its original source-boundary checks.
      *
      * <p>Each page bounds materialization, not admission. A full page continues the search instead
      * of refusing or silently dropping later matches. An immutable kind/id cursor prevents a
@@ -58,6 +62,10 @@ public class AiAssistantIdentifierResolver {
     }
 
     private Resolution resolveConverged(String message) {
+        var memberReading = ReferenceService.memberReferenceReading(message);
+        if (!memberReading.complete()) {
+            throw AiAssistantLoopException.malformed("identifier_text_unsafe");
+        }
         MaskingEngine.MentionScanText scanText = MaskingEngine.mentionScanText(message);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = workspaceScopeControlAccess
@@ -68,7 +76,8 @@ public class AiAssistantIdentifierResolver {
         int afterId = 0;
         while (true) {
             List<AiAssistantIdentifierMention> candidates = identifierMapper.findMentionedRecords(
-                    workspaceId, orgWorkspaceIdsJson, scanText.lookupText(), CANDIDATE_PAGE_SIZE, afterKind, afterId);
+                    workspaceId, orgWorkspaceIdsJson, scanText.literalText(), scanText.labelText(),
+                    CANDIDATE_PAGE_SIZE, afterKind, afterId);
             for (AiAssistantIdentifierMention candidate : candidates) {
                 if (MaskingEngine.containsIdentifierMention(scanText, identifierValue(candidate))) {
                     mentions.add(candidate);
@@ -88,17 +97,55 @@ public class AiAssistantIdentifierResolver {
                 .map(mention -> new AiChatPageContextDto(
                         mention.getKind(), positiveId(mention)))
                 .toList();
-        List<Identifier> identifiers = mentions.stream()
+        List<Identifier> identifiers = new ArrayList<>(mentions.stream()
                 .map(mention -> new Identifier(
                         entityKind(mention.getKind()), identifierValue(mention)))
-                .toList();
+                .toList());
+        var memberLabels = new LinkedHashSet<String>();
+        AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId)).stream()
+                .filter(label -> MaskingEngine.containsMemberMention(scanText, label)).forEach(memberLabels::add);
+        List<ReferenceService.MemberReference> memberReferences = memberReading.references();
+        var memberBudgetLabels = new LinkedHashSet<>(memberLabels);
+        memberReferences.stream().map(ReferenceService.MemberReference::label).forEach(memberBudgetLabels::add);
+        if (identifiers.size() + memberBudgetLabels.size() > MAX_IDENTIFIERS) {
+            throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+        }
+        Set<Set<Integer>> targetGroups = Collections.newSetFromMap(new IdentityHashMap<>());
+        var memberIds = new LinkedHashSet<Integer>();
+        for (ReferenceService.MemberReference reference : memberReferences) {
+            if (targetGroups.add(reference.memberIds())) {
+                memberIds.addAll(reference.memberIds());
+            }
+        }
+        Set<Integer> visibleMembers = referenceService.memberIdsForMasking(workspaceId, memberIds);
+        var memberVisibility = new IdentityHashMap<Set<Integer>, Boolean>();
+        for (ReferenceService.MemberReference reference : memberReferences) {
+            if (memberVisibility.computeIfAbsent(reference.memberIds(),
+                    ids -> ids.stream().anyMatch(visibleMembers::contains))) {
+                memberLabels.add(reference.label());
+                if (identifiers.size() + memberLabels.size() > MAX_IDENTIFIERS) {
+                    throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+                }
+            }
+        }
+        for (String label : memberLabels) {
+            identifiers.add(new Identifier(EntityKind.MEMBER, label));
+            if (identifiers.size() > MAX_IDENTIFIERS) {
+                throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+            }
+        }
         return new Resolution(resources, identifiers);
     }
 
     /** Seeds every resolved name into the request-local masking dictionary. */
     public void seed(Resolution resolution, MaskingContext context) {
-        Objects.requireNonNull(resolution, "resolution").identifiers().forEach(identifier ->
-                MaskingEngine.maskField(identifier.kind(), identifier.value(), context));
+        Objects.requireNonNull(resolution, "resolution").identifiers().forEach(identifier -> {
+            if (identifier.kind() == EntityKind.MEMBER) {
+                context.registerMemberCandidate(identifier.value());
+            } else {
+                MaskingEngine.maskField(identifier.kind(), identifier.value(), context);
+            }
+        });
     }
 
     private static int positiveId(AiAssistantIdentifierMention mention) {

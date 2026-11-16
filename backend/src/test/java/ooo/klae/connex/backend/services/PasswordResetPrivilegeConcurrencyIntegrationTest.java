@@ -158,7 +158,7 @@ class PasswordResetPrivilegeConcurrencyIntegrationTest {
                     actor.getId(),
                     role.getId(),
                     role.getName(),
-                    List.of(Permission.MEMBER_MANAGE.name())));
+                    List.of(Permission.MEMBER_MANAGE.name()), true));
             assertTrue(promotionLocked.await(10, TimeUnit.SECONDS));
 
             Future<BreachedPasswordCheckUnavailableException> reset = executor.submit(() -> assertThrows(

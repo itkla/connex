@@ -4,9 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
@@ -182,7 +185,10 @@ class TenantWorkScopeTest {
 
         assertEquals("cnx_request", workScope.inWorkspace(7, () -> tenantContext.getCatalog()));
 
-        verifyNoInteractions(workspaceMapper, tenantCatalogResolver);
+        verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verifyNoMoreInteractions(workspaceMapper);
+        verifyNoInteractions(tenantCatalogResolver);
     }
 
     @Test
@@ -219,6 +225,42 @@ class TenantWorkScopeTest {
     }
 
     @Test
+    void unroutedReadMasksARoutedScopeAndRestoresIt() {
+        tenantContext.set(1, 1, 1, "owner", "cnx_outer");
+
+        String inner = workScope.unroutedRead(() -> tenantContext.getCatalog());
+
+        assertNull(inner);
+        assertEquals("cnx_outer", tenantContext.getCatalog());
+    }
+
+    @Test
+    void unroutedReadRestoresTheRoutedScopeWhenTheReadFails() {
+        tenantContext.set(1, 1, 1, "owner", "cnx_outer");
+
+        assertThrows(IllegalArgumentException.class, () -> workScope.unroutedRead(() -> {
+            throw new IllegalArgumentException("read failed");
+        }));
+
+        assertEquals("cnx_outer", tenantContext.getCatalog());
+    }
+
+    @Test
+    void unroutedReadRefusesToLeaveARoutedCatalogInsideATransaction() {
+        tenantContext.set(1, 1, 1, "owner", "cnx_outer");
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            IllegalStateException refused = assertThrows(IllegalStateException.class,
+                () -> workScope.unroutedRead(() -> tenantContext.getCatalog()));
+            assertTrue(refused.getMessage().startsWith(
+                "Catalog scope cannot CHANGE inside an active transaction"));
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+        assertEquals("cnx_outer", tenantContext.getCatalog());
+    }
+
+    @Test
     void unservablePlacementPropagatesAndRestores() {
         when(workspaceMapper.getOrgId(7)).thenReturn(42);
         when(tenantCatalogResolver.resolveCatalog(42))
@@ -243,7 +285,9 @@ class TenantWorkScopeTest {
         assertEquals(
             "cnx_cleanup",
             workScope.inLifecycleWorkspace(7, () -> tenantContext.getCatalog()));
-        verifyNoInteractions(workspaceMapper);
+        verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verifyNoMoreInteractions(workspaceMapper);
     }
 
     @Test
@@ -258,6 +302,81 @@ class TenantWorkScopeTest {
             () -> workScope.inLifecycleWorkspace(
                 7,
                 () -> workScope.inWorkspace(7, () -> null)));
+    }
+
+    @Test
+    void lifecycleReadNestedInSupplierWorkKeepsTheSharedRouteSnapshot() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+
+        String catalog = workScope.inLifecycleWorkspace(7, () -> {
+            assertEquals("cnx_cleanup", workScope.inLifecycleWorkspaceRead(7, tenantContext::getCatalog));
+            return tenantContext.getCatalog();
+        });
+
+        assertEquals("cnx_cleanup", catalog);
+        assertNull(tenantContext.getCatalog());
+        verify(tenantLifecycleControlMapper).findWorkspaceOrgIdForLifecycle(7);
+        verify(tenantCatalogResolver).resolveCatalog(42);
+        verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verifyNoMoreInteractions(workspaceMapper);
+    }
+
+    @Test
+    void lifecycleReadRestoresCatalogAndDiscardsFailedRouteSnapshot() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7)).thenReturn(42, 43);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+        when(tenantCatalogResolver.resolveCatalog(43)).thenReturn("cnx_next");
+
+        workScope.withCatalog("cnx_outer", () -> {
+            assertThrows(IllegalStateException.class, () -> workScope.inLifecycleWorkspaceRead(7, () -> {
+                assertEquals("cnx_cleanup", tenantContext.getCatalog());
+                throw new IllegalStateException("Read failed");
+            }));
+            assertEquals("cnx_outer", tenantContext.getCatalog());
+            return null;
+        });
+
+        assertNull(tenantContext.getCatalog());
+        assertEquals("cnx_next", workScope.inLifecycleWorkspaceRead(7, tenantContext::getCatalog));
+        assertNull(tenantContext.getCatalog());
+        verify(workspaceMapper, times(2)).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verify(workspaceMapper).findByOrgId(43);
+        verifyNoMoreInteractions(workspaceMapper);
+    }
+
+    @Test
+    void ordinaryWorkNestedInALifecycleScopeRestoresTheOuterCatalogAfterRefusal() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+        when(workspaceMapper.getOrgId(7)).thenReturn(null);
+
+        workScope.withCatalog("cnx_outer", () -> {
+            assertThrows(IllegalStateException.class, () -> workScope.inLifecycleWorkspace(
+                    7, () -> workScope.inWorkspace(7, () -> null)));
+            assertEquals("cnx_outer", tenantContext.getCatalog());
+            return null;
+        });
+        assertNull(tenantContext.getCatalog());
+    }
+
+    @Test
+    void lifecycleReadCannotChangeCatalogInsideATransaction() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertThrows(IllegalStateException.class, () -> workScope.inLifecycleWorkspaceRead(7, () -> {
+                throw new AssertionError("Read must not execute in the wrong catalog");
+            }));
+            assertNull(tenantContext.getCatalog());
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+        assertEquals("cnx_cleanup", workScope.inLifecycleWorkspaceRead(7, tenantContext::getCatalog));
+        verify(tenantLifecycleControlMapper, times(2)).findWorkspaceOrgIdForLifecycle(7);
     }
 
 }

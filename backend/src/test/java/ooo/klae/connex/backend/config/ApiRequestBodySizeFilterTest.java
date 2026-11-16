@@ -72,6 +72,28 @@ class ApiRequestBodySizeFilterTest {
         assertNull(chain.getRequest());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/ai/assistant/missions/7/proposal-decisions",
+            "/api/ai/assistant/missions/7/%70roposal-decisions"})
+    void missionDecisionLimitRejectsOversizedKnownAndStreamingBodies(String path) throws Exception {
+        var properties = new RequestBodySizeProperties();
+        assertEquals(16 * 1024, properties.getMissionDecisionMaxBodyBytes());
+        var missionFilter = new ApiRequestBodySizeFilter(properties);
+        String body = "x".repeat(16 * 1024 + 1);
+        for (var request : List.of(jsonRequest("POST", path, body), unknownLengthJsonRequest("POST", path, body))) {
+            var response = new MockHttpServletResponse();
+            var chain = new MockFilterChain();
+            missionFilter.doFilter(request, response, chain);
+            assertEquals(413, response.getStatus());
+            assertNull(chain.getRequest());
+        }
+        var response = new MockHttpServletResponse();
+        var chain = new MockFilterChain();
+        missionFilter.doFilter(jsonRequest("POST", path, "x".repeat(16 * 1024)), response, chain);
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
+    }
+
     @Test
     void rejectsKnownOversizedApiBodyBeforeChainRuns() throws Exception {
         MockHttpServletRequest request = jsonRequest("POST", "/api/tasks", "123456789");

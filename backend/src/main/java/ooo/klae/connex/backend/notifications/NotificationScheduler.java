@@ -48,10 +48,10 @@ public class NotificationScheduler {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {
                     JobRunDetail detail = JobRunDetail.startedUtc();
                     try {
-                        reconciliationService.reconcileWorkspace(workspaceId, true);
+                        int changedCount = reconciliationService.reconcileWorkspace(workspaceId, true);
                         int purgedCount = reconciliationService.purgeWorkspace(workspaceId);
                         record(workspaceId, JobRunStatus.SUCCEEDED,
-                            new JobRunDetail(detail.startedAt(), Map.of("purgedCount", purgedCount)));
+                            new JobRunDetail(detail.startedAt(), Map.of("purgedCount", purgedCount, "changedCount", changedCount)));
                     } catch (RuntimeException exception) {
                         record(workspaceId, JobRunStatus.FAILED,
                             new JobRunDetail(detail.startedAt(), Map.of("phase", "reconcile_or_purge")));

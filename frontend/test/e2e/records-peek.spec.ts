@@ -70,6 +70,7 @@ test.describe("records browse and peek", () => {
             `/activity/activities/${fixture.activities.evidence.id}`,
         );
         await expect(contactEvidence.getByText(/^Calculated /)).toBeVisible();
+        await expect(contactEvidence).not.toContainText(/warmth-v\d|with model/);
 
         await page.goto(`/records/companies/${fixture.companies.primary.id}`);
         await page.getByRole("button", {

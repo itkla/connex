@@ -210,7 +210,7 @@ export default function RecordSignalsPanel({
                 action={
                     <Link
                         href={href}
-                        className="rounded-full px-2 py-1 text-xs text-brand transition-colors hover:text-brand-hover"
+                        className="rounded-full px-2 py-1 text-xs text-brand-text transition-colors hover:text-brand-text"
                     >
                         {t('openInRadar')}
                     </Link>

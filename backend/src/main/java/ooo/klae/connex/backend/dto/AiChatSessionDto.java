@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.AiChatSession;
 public class AiChatSessionDto {
     private int id;
     private int workspaceId;
+    private String organizationPrivacyGeneration;
     private Integer createdByUserId;
     private String title;
     private String visibility;
@@ -28,6 +29,7 @@ public class AiChatSessionDto {
         AiChatSessionDto dto = new AiChatSessionDto();
         dto.setId(session.getId());
         dto.setWorkspaceId(session.getWorkspaceId());
+        dto.setOrganizationPrivacyGeneration(Long.toString(session.getOrganizationPrivacyGeneration()));
         dto.setCreatedByUserId(session.getCreatedByUserId());
         dto.setTitle(session.getTitle());
         dto.setVisibility(session.getVisibility());

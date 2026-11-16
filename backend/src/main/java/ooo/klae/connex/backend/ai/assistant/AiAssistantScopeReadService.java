@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -20,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.SavedView;
@@ -35,6 +38,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.SavedViewService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SegmentService;
@@ -77,6 +81,9 @@ public class AiAssistantScopeReadService {
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ReferenceService referenceService;
+
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /**
      * One resolved cohort and the honesty counters its resolution produced.
@@ -118,6 +125,19 @@ public class AiAssistantScopeReadService {
      * @return bounded activity rows plus the exact interpreted scope and coverage metadata
      */
     public AiAssistantToolResult scopeActivities(
+            AiChatQueryScope scope,
+            String requestedKind,
+            String contextKind,
+            List<String> requestedBands,
+            Integer requestedDays,
+            int limit,
+            int perRecordLimit,
+            AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> scopeActivitiesWithinVisibilityScope(scope, requestedKind, contextKind, requestedBands, requestedDays, limit, perRecordLimit, resources));
+    }
+
+    private AiAssistantToolResult scopeActivitiesWithinVisibilityScope(
             AiChatQueryScope scope,
             String requestedKind,
             String contextKind,
@@ -199,6 +219,19 @@ public class AiAssistantScopeReadService {
             identifiers.add(new Identifier(kind, label.name()));
         }
         identifiers.forEach(identifier -> identifier.seed(resources.maskingContext()));
+        List<Activity> storedProse = activities.stream().map(activity -> {
+            Activity prose = new Activity();
+            prose.setId(activity.id());
+            prose.setSubject(activity.subject());
+            prose.setNotes(activity.notes());
+            return prose;
+        }).toList();
+        Map<Integer, Activity> readerProse = new LinkedHashMap<>();
+        for (Activity prose : referenceService.hydrateActivitiesForMasking(workspaceId, storedProse)) {
+            AiAssistantMemberIdentifiers.seedReferences(prose.getReferences(), resources.maskingContext());
+            prose.setNotes(AiAssistantMemberIdentifiers.seedReferenceText(prose.getNotes(), resources.maskingContext()));
+            readerProse.put(prose.getId(), prose);
+        }
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
         List<Map<String, Object>> rowData = new ArrayList<>();
         for (AiAssistantScopeActivity activity : activities) {
@@ -209,8 +242,9 @@ public class AiAssistantScopeReadService {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("handle", resources.register(kind, activity.scopeRecordId()));
             putBounded(row, "type", activity.type(), budget, resources.maskingContext());
-            putBounded(row, "subject", activity.subject(), budget, resources.maskingContext());
-            putBounded(row, "notes", activity.notes(), budget, resources.maskingContext());
+            Activity prose = java.util.Objects.requireNonNull(readerProse.get(activity.id()), "readerProse");
+            putBounded(row, "subject", prose.getSubject(), budget, resources.maskingContext());
+            putBounded(row, "notes", prose.getNotes(), budget, resources.maskingContext());
             putTemporal(row, "at", activity.timestamp(), budget, resources.maskingContext());
             rowData.add(row);
         }
@@ -236,6 +270,11 @@ public class AiAssistantScopeReadService {
      * @return warmth score, band, trend, recency, and decay prediction
      */
     public AiAssistantToolResult relationshipMetrics(String kind, int recordId, String handle) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> relationshipMetricsWithinVisibilityScope(kind, recordId, handle));
+    }
+
+    private AiAssistantToolResult relationshipMetricsWithinVisibilityScope(String kind, int recordId, String handle) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<RelationshipTemperatureDto> scores = "company".equals(kind)
                 ? scoringService.scoreCompanies(workspaceId, Set.of(recordId))
@@ -282,6 +321,12 @@ public class AiAssistantScopeReadService {
      * @return risk-ordered deals with their stable factor codes and the counters behind the bound
      */
     public AiAssistantToolResult dealAttention(
+            AiChatQueryScope scope, int limit, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> dealAttentionWithinVisibilityScope(scope, limit, resources));
+    }
+
+    private AiAssistantToolResult dealAttentionWithinVisibilityScope(
             AiChatQueryScope scope, int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = clamp(limit, 1, AiChatScopeBounds.MAX_ATTENTION_DEALS,
@@ -364,6 +409,12 @@ public class AiAssistantScopeReadService {
      */
     public Cohort previewCohort(
             AiChatQueryScope scope, String contextKind, boolean dealAttentionPlan) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> previewCohortWithinVisibilityScope(scope, contextKind, dealAttentionPlan));
+    }
+
+    private Cohort previewCohortWithinVisibilityScope(
+            AiChatQueryScope scope, String contextKind, boolean dealAttentionPlan) {
         if (dealAttentionPlan) {
             return cohort("deal", attentionScope(scope), List.of());
         }
@@ -381,6 +432,11 @@ public class AiAssistantScopeReadService {
      * @return capped cohort ids plus the true match count and whether the cap was reached
      */
     public Cohort cohort(String kind, AiChatQueryScope scope, List<String> bands) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> cohortWithinVisibilityScope(kind, scope, bands));
+    }
+
+    private Cohort cohortWithinVisibilityScope(String kind, AiChatQueryScope scope, List<String> bands) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         SegmentDefinition definition = cohortDefinition(kind, scope, bands);
         List<Integer> evaluated = definition == null
@@ -477,6 +533,10 @@ public class AiAssistantScopeReadService {
      * executable segment for another leaves every check above satisfied while the cohort silently
      * becomes a different set from the one the preview counted and the persisted echo names, so the
      * admitted definition's digest is compared and a changed view is refused outright.
+     *
+     * <p>A scope carrying a view without {@code savedViewFingerprint} never passed through the
+     * authorizing path and provides no admitted digest to compare with the current definition.
+     * Refusing it prevents unverified execution of the view.
      */
     private SegmentDefinition savedViewDefinition(String kind, AiChatQueryScope scope) {
         Integer savedViewId = scope.savedViewId();
@@ -492,9 +552,6 @@ public class AiAssistantScopeReadService {
                         AiChatSavedViewScope.UNSUPPORTED));
         String admitted = scope.savedViewFingerprint();
         if (admitted == null) {
-            // A scope carrying a view but no admission digest was never resolved through the
-            // authorizing path, so there is nothing to compare the current definition against.
-            // Reading it anyway would restore exactly the unverified execution above closes.
             throw AiAssistantLoopException.malformed(AiChatSavedViewScope.UNSUPPORTED);
         }
         if (!admitted.equals(
@@ -550,8 +607,10 @@ public class AiAssistantScopeReadService {
             return Map.of();
         }
         Map<Integer, RecordLabel> labels = new LinkedHashMap<>();
+        String personWorkspaceIdsJson = "deal".equals(kind) ? null
+            : recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         switch (kind) {
-            case "person" -> personMapper.getByIds(workspaceId, ids).stream()
+            case "person" -> personMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids).stream()
                     .filter(AiAssistantScopeReadService::isProcessable)
                     .filter(person -> person.getName() != null && !person.getName().isBlank())
                     .forEach(person -> labels.put(
@@ -559,7 +618,7 @@ public class AiAssistantScopeReadService {
             case "deal" -> dealMapper.getByIds(workspaceId, ids).stream()
                     .filter(deal -> deal.getName() != null && !deal.getName().isBlank())
                     .forEach(deal -> labels.put(deal.getId(), new RecordLabel(deal.getName())));
-            default -> companyMapper.getByIds(workspaceId, ids).stream()
+            default -> companyMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids).stream()
                     .filter(company -> company.getArchivedAt() == null)
                     .filter(company -> company.getName() != null && !company.getName().isBlank())
                     .forEach(company -> labels.put(

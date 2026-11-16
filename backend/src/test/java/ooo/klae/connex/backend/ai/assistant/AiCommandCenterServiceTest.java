@@ -40,6 +40,20 @@ class AiCommandCenterServiceTest {
         when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
 
         assertTrue(service.get().briefSkillAvailable());
+        assertTrue(service.get().chatAvailable());
+    }
+
+    @Test
+    void chatAvailabilityDoesNotDependOnTheBriefSkillCatalog() {
+        AiSkillCatalog unavailableBrief = mock(AiSkillCatalog.class);
+        var withoutBrief = new AiCommandCenterService(
+                scheduleService, watchService, unavailableBrief, featureGate, workspaceService);
+        when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
+
+        var result = withoutBrief.get();
+
+        assertTrue(result.chatAvailable());
+        assertFalse(result.briefSkillAvailable());
     }
 
     /**
@@ -51,6 +65,7 @@ class AiCommandCenterServiceTest {
         when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
 
         assertFalse(service.get().briefSkillAvailable());
+        assertFalse(service.get().chatAvailable());
     }
 
     /**
@@ -65,6 +80,7 @@ class AiCommandCenterServiceTest {
         when(featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
 
         assertFalse(service.get().briefSkillAvailable());
+        assertFalse(service.get().chatAvailable());
         assertTrue(service.get().watchesAvailable());
     }
 
@@ -75,6 +91,7 @@ class AiCommandCenterServiceTest {
         when(featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
 
         assertFalse(service.get().briefSkillAvailable());
+        assertFalse(service.get().chatAvailable());
         assertFalse(service.get().watchesAvailable());
     }
 }

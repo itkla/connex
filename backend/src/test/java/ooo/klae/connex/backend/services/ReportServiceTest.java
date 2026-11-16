@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -13,9 +14,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -24,6 +28,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +43,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSchedule;
+import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
@@ -47,6 +53,11 @@ import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.dto.ReportWidgetConfig;
+import ooo.klae.connex.backend.dto.ReportDocumentDto;
+import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
+import ooo.klae.connex.backend.dto.ReportSnapshotDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
@@ -75,6 +86,7 @@ class ReportServiceTest {
     private final ScheduleMapper scheduleMapper = mock(ScheduleMapper.class);
     private final UserMapper userMapper = mock(UserMapper.class);
     private final AuthService authService = mock(AuthService.class);
+    private final RecordVisibilityScopeControlAccess scopeAccess = unfiltered();
     private ReportService service;
 
     @BeforeEach
@@ -91,6 +103,7 @@ class ReportServiceTest {
                 mock(ScoringService.class),
                 dealRiskService,
                 mock(ReportNetworkService.class),
+                scopeAccess,
                 aiReportNarrativeService,
                 mock(AiGenerationService.class),
                 aiRestrictionEpoch,
@@ -100,6 +113,8 @@ class ReportServiceTest {
                 new ObjectMapper(),
                 CLOCK,
                 mock(TransactionTemplate.class));
+        when(scopeAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
+                new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(WORKSPACE_ID)));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("UTC");
         when(reportPermissionPolicy.requiredFor(any(ReportDefinition.class)))
@@ -156,6 +171,111 @@ class ReportServiceTest {
         verifyNoInteractions(reportMapper);
     }
 
+    @Test
+    void liveCsvRecordsOneCompletionWithServerCountAndNoReportValues() {
+        definition(widget("revenue", "won_revenue", "none", "kpi"));
+        when(reportMapper.aggregateDeals(any(ReportAggregateQuery.class))).thenReturn(List.of(
+            new ReportAggregateRow("USD:total", "Private value", "USD", BigDecimal.TEN)));
+
+        String csv = service.exportCsv(REPORT_ID, null);
+
+        assertTrue(csv.startsWith("source_id,widget_id,label,current_value,prior_value,unit"));
+        verify(auditService).recordStrict("report.export", "report", REPORT_ID, null,
+            "Report CSV export prepared", Map.of("format", "csv", "scope", "workspace", "rowCount", 1,
+                "documentCount", 1, "widgetCount", 1, "snapshot", false));
+    }
+
+    @Test
+    void snapshotCsvCountsAppendixRowsRatherThanNewlinesAndPreservesFormulaEscaping() {
+        ReportDocumentDto document = new ReportDocumentDto(null, null, null, null, null, null,
+            List.of(), List.of(new ReportAppendixRowDto("source", "widget", "\n=Private value",
+                BigDecimal.TEN, null, "JPY")), List.of(), "2026-07-12T12:00:00Z");
+        ReportService spied = spy(service);
+        doReturn(new ReportSnapshotDto(3, REPORT_ID, null, null, document, "manual", ACTOR_ID, null))
+            .when(spied).getSnapshot(REPORT_ID, 3);
+
+        String csv = spied.exportSnapshotCsv(REPORT_ID, 3);
+
+        assertTrue(csv.contains("\"'\n=Private value\""));
+        verify(auditService).recordStrict("report.export", "report", REPORT_ID, null,
+            "Report CSV export prepared", Map.of("format", "csv", "scope", "workspace", "rowCount", 1,
+                "documentCount", 1, "widgetCount", 0, "snapshot", true));
+    }
+
+    @Test
+    void snapshotCsvLoadsTheFrozenDocumentAndAppendsExactlyOneCompletion() {
+        definition(widget("revenue", "won_revenue", "none", "kpi"));
+        ReportDocumentDto document = new ReportDocumentDto(null, null, null, null, null, null,
+            List.of(), List.of(new ReportAppendixRowDto("source", "widget", "Frozen value",
+                BigDecimal.TEN, null, "JPY")), List.of(), "2026-07-12T12:00:00Z");
+        ReportSnapshot snapshot = new ReportSnapshot();
+        snapshot.setId(3);
+        snapshot.setWorkspaceId(WORKSPACE_ID);
+        snapshot.setReportDefinitionId(REPORT_ID);
+        snapshot.setComputedResult(new ObjectMapper().writeValueAsString(document));
+        snapshot.setGeneratedBy(ACTOR_ID);
+        when(reportMapper.getSnapshot(WORKSPACE_ID, REPORT_ID, 3)).thenReturn(snapshot);
+
+        String csv = service.exportSnapshotCsv(REPORT_ID, 3);
+
+        assertTrue(csv.contains("Frozen value"));
+        verify(reportMapper).getSnapshot(WORKSPACE_ID, REPORT_ID, 3);
+        verify(reportMapper, never()).aggregateDeals(any());
+        verifyNoInteractions(aiReportNarrativeService);
+        verify(auditService).recordStrict("report.export", "report", REPORT_ID, null,
+            "Report CSV export prepared", Map.of("format", "csv", "scope", "workspace", "rowCount", 1,
+                "documentCount", 1, "widgetCount", 0, "snapshot", true));
+        verifyNoMoreInteractions(auditService);
+    }
+
+    @Test
+    void failedLiveGenerationDoesNotRecordACompletedCsv() {
+        assertThrows(ResourceNotFoundException.class, () -> service.exportCsv(REPORT_ID, null));
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void pngCompletionUsesSavedWidgetCountAndNeverAcceptsAClientRowCount() {
+        definition(widget("revenue", "won_revenue", "none", "kpi"));
+
+        service.completeImageExport(REPORT_ID, "png");
+
+        verify(workspaceService, org.mockito.Mockito.atLeastOnce()).requirePermission(Permission.REPORT_READ);
+        verify(sessionSecurityService).requireExportStepUp();
+        verify(auditService).recordStrict("report.export", "report", REPORT_ID, null,
+            "Client-prepared report image release attempted", Map.of("format", "png", "scope", "workspace",
+                "imageCount", 1, "documentCount", 1, "widgetCount", 1, "clientPrepared", true));
+        verify(reportMapper, never()).aggregateDeals(any());
+    }
+
+    @Test
+    void pngCompletionRejectsMissingWorkspaceReportAndInsufficientReadPermission() {
+        assertThrows(ResourceNotFoundException.class, () -> service.completeImageExport(REPORT_ID, "png"));
+        doThrow(new ForbiddenException("Requires report access")).when(workspaceService)
+            .requirePermission(Permission.REPORT_READ);
+        assertThrows(ForbiddenException.class, () -> service.completeImageExport(REPORT_ID, "png"));
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void pngCompletionRefusesStaleAuthenticationBeforeReadingTheReport() {
+        doThrow(new RecentAuthenticationRequiredException()).when(sessionSecurityService).requireExportStepUp();
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.completeImageExport(REPORT_ID, "png"));
+
+        verifyNoInteractions(reportMapper);
+        verify(auditService).recordExportStepUpRefused();
+    }
+
+    @Test
+    void pngCompletionPropagatesAuditFailureBeforeTheBrowserCanReleaseItsImage() {
+        definition(widget("revenue", "won_revenue", "none", "kpi"));
+        doThrow(new IllegalStateException("Audit unavailable")).when(auditService)
+            .recordStrict(anyString(), anyString(), anyInt(), any(), anyString(), any());
+
+        assertThrows(IllegalStateException.class, () -> service.completeImageExport(REPORT_ID, "png"));
+    }
+
     /**
      * {@code DELETE /api/reports/{id}} carries no entry in {@code PrivilegedMfaEnforcementFilter}'s
      * path list, so the filter emits nothing for it. The refusal has to be recorded at the service
@@ -197,6 +317,11 @@ class ReportServiceTest {
         when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportDefinition());
         when(scheduleMapper.getByReport(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportSchedule());
         when(privilegedAccountService.isPrivileged(ACTOR_ID)).thenReturn(false, true);
+        when(workspaceService.isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID))
+                .thenAnswer(invocation -> {
+                    userMapper.lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+                    return false;
+                });
         doThrow(new RecentAuthenticationRequiredException())
                 .when(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
 
@@ -207,7 +332,7 @@ class ReportServiceTest {
         ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
         ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
         ordered.verify(userMapper).lockByIdForShare(ACTOR_ID);
-        ordered.verify(workspaceService).isLockedBuiltInAdministrator(WORKSPACE_ID, ACTOR_ID);
+        ordered.verify(workspaceService).isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID);
         ordered.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
         ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
         ordered.verify(reportMapper).getDefinition(WORKSPACE_ID, REPORT_ID);

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -21,6 +23,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -28,6 +31,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
@@ -70,6 +74,9 @@ public class AiAssistantWorkBriefReadService {
     private final WorkspaceService workspaceService;
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final Clock clock;
+    private final ReferenceService referenceService;
+
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /**
      * Reads the actor's overdue and imminently due open commitments.
@@ -81,6 +88,12 @@ public class AiAssistantWorkBriefReadService {
      * @return bounded commitments plus the counts, caps, and exclusions behind them
      */
     public AiAssistantToolResult workCommitments(
+            int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> workCommitmentsWithinVisibilityScope(userId, periodDays, limit, resources));
+    }
+
+    private AiAssistantToolResult workCommitmentsWithinVisibilityScope(
             int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = bound(limit, AiChatScopeBounds.MAX_BRIEF_COMMITMENTS);
@@ -103,6 +116,18 @@ public class AiAssistantWorkBriefReadService {
                 new Identifier("person", name).seed(resources.maskingContext()));
         labels.deals().values().forEach(name ->
                 new Identifier("deal", name).seed(resources.maskingContext()));
+        List<Task> storedProse = bounded.stream().map(commitment -> {
+            Task task = new Task();
+            task.setId(commitment.id());
+            task.setDescription(commitment.description());
+            return task;
+        }).toList();
+        Map<Integer, String> descriptions = new LinkedHashMap<>();
+        for (Task task : referenceService.hydrateTasksForMasking(workspaceId, storedProse)) {
+            AiAssistantMemberIdentifiers.seedReferences(task.getReferences(), resources.maskingContext());
+            descriptions.put(task.getId(), AiAssistantMemberIdentifiers.seedReferenceText(
+                    task.getDescription(), resources.maskingContext()));
+        }
         List<Identifier> identifiers = new ArrayList<>();
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -110,7 +135,7 @@ public class AiAssistantWorkBriefReadService {
         for (AiAssistantWorkCommitment commitment : bounded) {
             Map<String, Object> row = new LinkedHashMap<>();
             AiAssistantScopeReadService.putBounded(
-                    row, "description", commitment.description(), budget,
+                    row, "description", descriptions.get(commitment.id()), budget,
                     resources.maskingContext());
             AiAssistantScopeReadService.putTemporal(
                     row, "dueDate", commitment.dueDate(), budget, resources.maskingContext());
@@ -155,6 +180,11 @@ public class AiAssistantWorkBriefReadService {
      * @return bounded cooling contacts and companies with their authoritative warmth figures
      */
     public AiAssistantToolResult warmthMovement(int limit, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> warmthMovementWithinVisibilityScope(limit, resources));
+    }
+
+    private AiAssistantToolResult warmthMovementWithinVisibilityScope(int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = bound(limit, AiChatScopeBounds.MAX_BRIEF_WARMTH_MOVES);
         List<RelationshipTemperatureDto> readContacts =
@@ -329,8 +359,9 @@ public class AiAssistantWorkBriefReadService {
         if (ids.isEmpty()) {
             return Map.of();
         }
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Map<Integer, String> labels = new LinkedHashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, ids)) {
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids)) {
             if (person.getSuspendedAt() != null || person.getProvisionCeasedAt() != null
                     || person.getArchivedAt() != null
                     || person.getName() == null || person.getName().isBlank()) {
@@ -346,7 +377,7 @@ public class AiAssistantWorkBriefReadService {
             return Map.of();
         }
         Map<Integer, String> labels = new LinkedHashMap<>();
-        for (Company company : companyMapper.getByIds(workspaceId, ids)) {
+        for (Company company : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), ids)) {
             if (company.getArchivedAt() != null
                     || company.getName() == null || company.getName().isBlank()) {
                 continue;

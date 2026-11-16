@@ -22,7 +22,8 @@ public interface TenantLifecycleMapper {
 
     Cursor<Map<String, Object>> streamRows(
         @Param("workspaceId") int workspaceId,
-        @Param("declaration") TableLifecycle declaration);
+        @Param("declaration") TableLifecycle declaration,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     long countRows(
         @Param("workspaceId") int workspaceId,
@@ -39,7 +40,8 @@ public interface TenantLifecycleMapper {
         @Param("limit") int limit);
 
     Cursor<ActiveObjectReference> streamActiveObjectReferences(
-        @Param("workspaceId") int workspaceId);
+        @Param("workspaceId") int workspaceId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<String> findLifecycleObjectKeysAfter(
         @Param("workspaceId") int workspaceId,

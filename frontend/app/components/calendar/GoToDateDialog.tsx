@@ -1,7 +1,9 @@
 'use client';
 
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { useRef } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -25,6 +27,8 @@ export default function GoToDateDialog({
     onPick: (date: Date) => void;
 }) {
     const t = useTranslations('Calendar');
+    const timeZone = useTimeZone() ?? 'UTC';
+    const now = useLiveNow();
     const inputRef = useRef<HTMLInputElement>(null);
 
     const jump = (key: string) => {
@@ -55,7 +59,7 @@ export default function GoToDateDialog({
                         className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
                     />
                     <div className="flex items-center justify-end gap-2">
-                        <Button type="button" variant="secondary" size="sm" onClick={() => jump(dayKeyOf(new Date()))}>
+                        <Button type="button" variant="secondary" size="sm" onClick={() => jump(calendarDayInTimeZone(now, timeZone))}>
                             {t('today')}
                         </Button>
                         <Button type="submit" size="sm">

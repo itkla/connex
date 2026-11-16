@@ -169,7 +169,9 @@ class AiAssistantWriteInverseRoundTripTest extends AbstractAiAssistantWriteToolT
             }
 
             @Override
-            public void undo(Authority authority, Inverse inverse) {
+            public void undo(Authority authority, Inverse inverse,
+                    ooo.klae.connex.backend.services.MutationAdmission admission) {
+                admission.beforeMutation();
                 undone.set(inverse);
             }
         };

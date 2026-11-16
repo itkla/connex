@@ -1,4 +1,8 @@
 {
+  "UI": {
+    "searching": "Searching…",
+    "close": "Close"
+  },
   "AppMetadata": {
     "title": "Connex",
     "description": "Connex keeps companies, contacts, deals, and follow-ups in one workspace your whole team can work from."
@@ -68,7 +72,7 @@
     "prelaunch": {
       "closingHeading": "Your next chapter starts here.",
       "metaTitle": "Connex — coming soon",
-      "metaDescription": "Connex brings companies, contacts, deals, and follow-ups into one CRM. Leave your email address and we\u2019ll write to you the day it opens.",
+      "metaDescription": "Connex brings companies, contacts, deals, and follow-ups into one CRM. Leave your email address and we’ll write to you the day it opens.",
       "formLabel": "Get notified when Connex launches",
       "emailLabel": "Email address",
       "emailPlaceholder": "Your email address",
@@ -430,6 +434,7 @@
     "navSearch": "Search"
   },
   "CommonContentShell": {
+    "skipToContent": "Skip to content",
     "hideSidebar": "Hide sidebar",
     "showSidebar": "Show sidebar",
     "collapseSidebar": "Collapse sidebar",
@@ -479,12 +484,15 @@
   },
   "DuplicateWarning": {
     "heading": "Possible duplicates",
-    "description": "Review these exact matches before creating a new record.",
+    "description": "Review these possible matches before creating a new record.",
     "checking": "Checking for duplicates...",
     "failed": "Duplicate check failed. Try again before creating this record.",
     "retry": "Retry",
     "more": "+{count} more",
     "truncated": "More visible matches were omitted. Refine the details before continuing.",
+    "nameOnlyTruncated": "Name matching was limited. No email or phone matches were found. Review the displayed matches and confirm if this is a different person.",
+    "companyNameStrength": "Company name match",
+    "companyNameEvidence": "Same name or legal-form variant",
     "shared": "Shared · review only",
     "acknowledge": "I reviewed these matches and still want to create a new record.",
     "cardResolution": "Choose how to save this business card",
@@ -566,7 +574,6 @@
     "deals": "Deals",
     "pipelines": "Pipelines",
     "products": "Products",
-    "approvalPolicies": "Approval policies",
     "campaigns": "Campaigns",
     "activities": "Activities",
     "tasks": "Tasks",
@@ -579,25 +586,13 @@
     "myWork": "My Work",
     "users": "Users",
     "workflows": "Workflows",
-    "auditLog": "Audit log",
     "peopleAccess": "People & access",
     "crmConfiguration": "CRM configuration",
     "communications": "Communications",
     "auditDiagnostics": "Audit & diagnostics",
     "identityAdministrators": "Identity & administrators",
     "aiDataGovernance": "AI & data governance",
-    "members": "Members",
-    "roles": "Roles",
-    "customFields": "Custom fields",
-    "qualification": "Qualification",
-    "email": "Email",
-    "delivery": "Delivery",
-    "diagnostics": "Diagnostics",
     "captureReviews": "Capture reviews",
-    "allowedDomains": "Allowed domains",
-    "singleSignOn": "Single sign-on",
-    "aiProvider": "AI provider",
-    "dataRequests": "Data requests",
     "newReport": "New report",
     "edit": "Edit",
     "snapshot": "Snapshot",
@@ -733,9 +728,11 @@
     "turnProviderUnavailable": "The AI provider didn't answer this request. Nothing about the question caused it — ask again.",
     "turnInternalError": "Something went wrong on our side while writing this answer. Ask again, and tell an administrator if it keeps happening.",
     "turnUnreadableAnswer": "The answer came back in a shape Connex couldn't read, so none of it was kept. Ask again, or reword the question.",
-    "turnStalled": "The assistant kept re-reading the same records without getting any further. Ask again, or reword the question.",
+    "turnStalled": "The assistant kept re-reading the same records without getting any further.",
     "turnOwnerLost": "Connex stopped writing this answer partway through. Anything it already saved is kept — check what it saved before you ask again.",
-    "turnRanOutOfTime": "This answer ran out of time before it finished. Ask again — or ask for a smaller slice if it keeps happening.",
+    "turnRanOutOfTime": "This answer ran out of time before it finished.",
+    "turnWritesSaved": "This answer already saved changes. Review the action cards before deciding what to ask next.",
+    "turnWritesUncertain": "Connex couldn't confirm whether this answer saved any changes. Check your records before deciding what to ask next.",
     "turnImageUnsupported": "This assistant model can’t read images. Remove the image from the context above, or choose an image-capable model.",
     "budgetExhausted": "Your organization's daily AI limit has been reached. Ask the same question again later.",
     "capacityExhausted": "There is no AI capacity left for this request right now. Ask the same question again later.",
@@ -781,6 +778,7 @@
         "failed": "Failed",
         "failedDetail": "This action did not complete.",
         "expired": "Undo expired",
+        "proposalExpired": "Proposal expired",
         "expiredDetail": "This action completed, but its undo window is closed."
       },
       "change": {
@@ -844,6 +842,7 @@
       },
       "failures": {
         "proposalChanged": "The target changed after this proposal was shown. Reject it and ask for a new proposal.",
+        "proposalExpired": "The 72-hour review window has closed. No change was made. Ask for a new proposal.",
         "proposalPermissionLost": "You no longer have permission to approve this proposal.",
         "proposalUnavailable": "This proposal is no longer available. Its permissions or target may have changed.",
         "undoConflict": "This record changed after the assistant created it, so it can’t be undone safely.",
@@ -975,9 +974,15 @@
       "lookupTitle": "Permission status unavailable",
       "lookupBody": "Connex could not confirm whether your role can use the assistant. Try again after permissions reload.",
       "featureTitle": "Ask Connex is unavailable",
-      "featureBody": "The assistant can't be used in this workspace right now. Ask a workspace admin if you need access.",
+      "featureBody": "AI is switched off or hasn't been set up for this workspace. Organization administrators can review AI & data governance in Settings.",
       "uncertainTitle": "We're not sure this answer went through",
-      "uncertainBody": "Connex didn't get a clear response back, so sending again is blocked to avoid a duplicate. Start a new chat or refresh this one."
+      "uncertainBody": "Connex didn't get a clear response back, so sending again is blocked to avoid a duplicate. Start a new chat or refresh this one.",
+      "checkingTitle": "Checking Ask Connex availability",
+      "checkingBody": "Please wait while Connex checks whether the assistant can be used here.",
+      "setupTitle": "Finish securing your account",
+      "setupBody": "Complete the passkey step in Settings → Security before using Ask Connex.",
+      "checkFailedTitle": "Couldn't check Ask Connex availability",
+      "checkFailedBody": "Try loading the chat again, or return to this tab in a moment."
     },
     "toast": {
       "archived": "Chat archived",
@@ -1304,7 +1309,86 @@
       "applied": "{count, plural, one {# applied} other {# applied}}",
       "discarded": "{count, plural, one {# discarded} other {# discarded}}",
       "failed": "{count, plural, one {# could not be applied} other {# could not be applied}}"
-    }
+    },
+    "missions": {
+      "title": "Record review",
+      "create": "Review record",
+      "createTitle": "Start a record review",
+      "selectedRecord": "Selected record",
+      "scope": "Review only {record} and its directly linked activities, tasks, and notes.",
+      "goal": "What should Connex look into?",
+      "defaultGoal": "Review this record and summarize the evidence and next considerations.",
+      "bounds": "Connex will prepare a read-only summary for this record. It can keep working while you are away, for up to 15 minutes. No records are changed.",
+      "start": "Start review",
+      "creating": "Starting…",
+      "close": "Cancel",
+      "retry": "Try again",
+      "more": "Earlier reviews",
+      "states": {
+        "queued": "Queued",
+        "running": "In progress",
+        "paused": "Paused",
+        "done": "Complete",
+        "failed": "Stopped",
+        "cancelled": "Cancelled",
+        "waiting_approval": "Awaiting review"
+      },
+      "phases": {
+        "queued": "Waiting to begin.",
+        "reading": "Reading the record and its evidence.",
+        "writing_report": "Writing the summary.",
+        "preparing_changes": "Preparing changes for your review.",
+        "waiting_review": "The summary and changes are ready for your review."
+      },
+      "controls": {
+        "pause": "Pause",
+        "resume": "Resume",
+        "cancel": "Cancel review"
+      },
+      "pausedHelp": "Work has paused. Resume when available to continue within the original time limit.",
+      "withheld": "This review’s content is no longer available.",
+      "viewOutput": "View summary",
+      "reportTitle": "Record review summary",
+      "reportDescription": "Prepared from the evidence available during this review.",
+      "coverage": "Reviewed: {processed} · Skipped: {skipped} · Failed: {failed} · Remaining: {unprocessed}",
+      "problems": {
+        "busy": "This conversation is still working. Wait for it to finish, then start the review.",
+        "conflict": "This review changed. Its current status has been refreshed.",
+        "expired": "This review’s time limit has ended. Start a new review to continue.",
+        "budgetInfeasible": "This review cannot start with the current request. Shorten the goal and try again.",
+        "allowance": "This review has reached its work limit. Start a new review to continue.",
+        "withheld": "This review’s content is no longer available.",
+        "unavailable": "Record reviews are unavailable right now. Try again later.",
+        "forbidden": "You don’t have permission to view or control this review.",
+        "failed": "Couldn't load the review",
+        "preparationConflict": "This change needs a new preparation. Start again to continue."
+      },
+      "mode": "Work to prepare",
+      "preparation": {
+        "title": "Record preparation",
+        "create": "Prepare changes",
+        "createTitle": "Prepare changes for this record",
+        "defaultGoal": "Review this record and prepare useful changes for me to review.",
+        "bounds": "Connex can prepare changes while you are away, for up to 15 minutes. Changes wait for you to apply them.",
+        "start": "Start preparation",
+        "outputTitle": "Summary and proposed changes",
+        "viewOutput": "Review changes"
+      },
+      "review": {
+        "pending": "{count, plural, one {# change awaiting review} other {# changes awaiting review}}",
+        "deadline": "Review these changes by {date}.",
+        "windowHelp": "The review period starts when changes are prepared. Reopening does not extend it.",
+        "independent": "Each selected change is applied separately. Some may need a fresh proposal.",
+        "complete": "Review complete",
+        "expired": "These changes have expired. Prepare new changes to continue.",
+        "withdrawn": "This change is no longer available.",
+        "empty": "No changes were proposed.",
+        "indeterminate": "Connex couldn't confirm whether this change was saved. Reload before trying again, and check your records.",
+        "reload": "Reload changes"
+      }
+    },
+    "privacyUnavailable": "This chat is no longer available following a privacy request. Start a new chat to continue.",
+    "privacyInitializing": "Chat is temporarily unavailable while we prepare a privacy update. Try again shortly."
   },
   "SearchLayout": {
     "title": "Search",

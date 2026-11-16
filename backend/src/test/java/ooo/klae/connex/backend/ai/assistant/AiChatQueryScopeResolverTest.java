@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -50,7 +51,7 @@ class AiChatQueryScopeResolverTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
         resolver = new AiChatQueryScopeResolver(
-                workspaceService, pipelineMapper, savedViewService, objectMapper,
+                workspaceService, pipelineMapper, unfiltered(), savedViewService, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -161,7 +162,7 @@ class AiChatQueryScopeResolverTest {
 
     @Test
     void stagesMustExistInTheCurrentWorkspace() {
-        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, 3)).thenReturn(null);
+        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, "[7,8,9]", 3)).thenReturn(null);
 
         assertThrows(BadRequestException.class, () -> resolver.resolve(
                 new AiChatQueryScopeRequest(
@@ -307,7 +308,7 @@ class AiChatQueryScopeResolverTest {
 
     @Test
     void stageAndStatusFiltersAreRefusedWhenTheDeclaredKindsExcludeDeals() {
-        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, 3)).thenReturn(stage(3, "Won"));
+        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, "[7,8,9]", 3)).thenReturn(stage(3, "Won"));
 
         BadRequestException failure = assertThrows(BadRequestException.class,
                 () -> resolver.resolve(new AiChatQueryScopeRequest(
@@ -329,7 +330,7 @@ class AiChatQueryScopeResolverTest {
     void storedScopeCarriesNoLabelsAndIsRelabelledUnderTheReadersAuthorization() {
         when(workspaceService.getMembers(WORKSPACE_ID))
                 .thenReturn(List.of(member(4, "Aiko")));
-        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, 3)).thenReturn(stage(3, "Won"));
+        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, "[7,8,9]", 3)).thenReturn(stage(3, "Won"));
         AiChatQueryScopeResolver.Resolution resolution = resolver.resolve(
                 new AiChatQueryScopeRequest(
                         null, null, null, "members", List.of(4), List.of(), List.of("deal"),
@@ -406,7 +407,7 @@ class AiChatQueryScopeResolverTest {
      */
     @Test
     void aStoredStageThatNoLongerResolvesKeepsItsIdentifierAndLosesOnlyItsLabel() {
-        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, 3)).thenReturn(null);
+        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, "[7,8,9]", 3)).thenReturn(null);
 
         AiChatQueryScopeDto relabelled = resolver.relabel(new AiChatQueryScopeDto(
                 true, null, null, 90, "all_team", List.of(), List.of(), List.of("deal"),

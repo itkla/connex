@@ -467,6 +467,24 @@ class DeliveryProviderConfigServiceTest {
     }
 
     @Test
+    void resolveByWebhookToken_readsTheSigningSecretOnlyInsideTheMatchedWorkspaceScope() {
+        String rawToken = "a".repeat(64);
+        DeliveryProviderConfig config = enabledEsp();
+        config.setWebhookSecretRef("secret:v1:88");
+        when(mapper.findByWebhookTokenHash(sha256Hex(rawToken))).thenReturn(config);
+        when(cipher.decryptWebhookSecret(WORKSPACE, "secret:v1:88")).thenReturn("whsec_raw");
+
+        ResolvedDeliveryProvider resolved = service().resolveByWebhookToken(rawToken, (workspaceId, read) -> {
+            assertEquals(WORKSPACE, workspaceId);
+            verify(cipher, never()).decryptWebhookSecret(anyInt(), any());
+            return read.get();
+        });
+
+        assertEquals("whsec_raw", resolved.credentials().require("webhookSecret"));
+        verify(cipher).decryptWebhookSecret(WORKSPACE, "secret:v1:88");
+    }
+
+    @Test
     void crudMethods_areGatedByWorkspaceSettingsPermission() throws Exception {
         assertPermission("list");
         assertPermission("save", DeliveryProviderConfigRequest.class);

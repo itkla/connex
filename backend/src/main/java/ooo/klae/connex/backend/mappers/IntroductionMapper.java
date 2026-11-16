@@ -34,10 +34,12 @@ public interface IntroductionMapper {
             @Param("personAId") int personAId, @Param("personBId") int personBId);
 
     /** Workspace-owned contacts with logged engagement or explicit graph evidence. */
-    List<IntroCandidatePerson> findCandidatePersons(@Param("workspaceId") int workspaceId);
+    List<IntroCandidatePerson> findCandidatePersons(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
 
     List<IntroCandidatePerson> findCandidatePersonsForReport(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("limit") int limit);
 
     /** Every employment record in the workspace, for shared-employer detection. */
@@ -73,7 +75,8 @@ public interface IntroductionMapper {
      * {@link #findCandidatePersons} but without the engagement gate, so never-contacted imports
      * can surface as reach targets.
      */
-    List<IntroCandidatePerson> findWarmPathCandidates(@Param("workspaceId") int workspaceId);
+    List<IntroCandidatePerson> findWarmPathCandidates(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
 
     /** Active, workspace-owned contacts excluded from introduction features by policy. */
     int countIntroExcludedPersons(@Param("workspaceId") int workspaceId);

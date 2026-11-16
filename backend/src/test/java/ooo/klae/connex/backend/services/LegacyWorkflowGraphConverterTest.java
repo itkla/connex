@@ -77,6 +77,29 @@ class LegacyWorkflowGraphConverterTest {
     }
 
     @Test
+    void separateTerminalNodesPreserveConditionAndOrderedActions() {
+        Rule source = rule(true, "user", action("notify", "First"));
+        var converted = converter.convert(source);
+        List<WorkflowNode> nodes = new ArrayList<>(converted.definition().nodes());
+        nodes.add(new WorkflowNode.End("no-end"));
+        List<WorkflowEdge> edges = converted.definition().edges().stream()
+            .map(edge -> edge.outcome() == WorkflowEdge.Outcome.NO
+                ? new WorkflowEdge(edge.id(), edge.sourceNodeId(), "no-end", edge.outcome()) : edge)
+            .toList();
+        var separateEnds = new LegacyWorkflowGraphConverter.ConvertedWorkflow(
+            converted.legacyRuleId(), converted.workspaceId(), converted.name(),
+            converted.description(), converted.enabled(), converted.recordType(),
+            converted.executionMode(), converted.runAsUserId(), converted.createdById(),
+            new WorkflowDefinition(1, "trigger", nodes, edges), converted.canvas());
+
+        assertProjection(source, converter.project(separateEnds));
+
+        List<WorkflowNode> disconnected = new ArrayList<>(nodes);
+        disconnected.add(new WorkflowNode.End("unused-end"));
+        assertRejected(converted, new WorkflowDefinition(1, "trigger", disconnected, edges));
+    }
+
+    @Test
     void reverseProjectionFollowsEdgesAfterCanonicalNodeSorting() {
         RuleAction[] actions = new RuleAction[12];
         for (int index = 0; index < actions.length; index++) {

@@ -35,6 +35,7 @@ import {
     storageStateFor,
 } from '../../../../playwright.matrix.config';
 import { MATRIX_ROUTES, type RouteRole } from '../routes';
+import { message } from '../../support/messages';
 
 /** Viewports the matrix renders: desktop, tablet, and the reference mobile handset. */
 export const VIEWPORTS = {
@@ -396,31 +397,82 @@ async function settleForCapture(page: Page, state: string): Promise<void> {
     if (state !== 'loading') await expectChartsSettled(content);
 }
 
-/** Waits for chart series and completed reveals, including resize work caused by capture expansion. */
-async function expectChartsSettled(content: Locator): Promise<void> {
-    await expect.poll(() => content.locator('.recharts-responsive-container').evaluateAll(async (charts) => {
-        const visible = charts.filter((chart) => {
-            const bounds = chart.getBoundingClientRect();
-            return bounds.width > 0 && bounds.height > 0;
-        });
-        const snapshot = () => visible.map((chart) => {
-            const surface = chart.querySelector('svg.recharts-surface');
-            if (surface === null) return null;
-            const bounds = surface.getBoundingClientRect();
-            if (bounds.width === 0 || bounds.height === 0) return null;
-            const marks = surface.querySelector(
-                '.recharts-area-area, .recharts-line-curve, .recharts-line-dots, .recharts-bar-rectangles, .recharts-pie',
-            );
-            if (marks === null) return null;
-            if (surface.querySelector('.recharts-area > g defs clipPath') !== null) return null;
-            return JSON.stringify([bounds.width, bounds.height, surface.innerHTML]);
-        });
-        const before = snapshot();
-        if (before.some((value) => value === null)) return false;
-        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-        const after = snapshot();
-        return before.every((value, index) => value === after[index]);
-    }), { message: 'visible charts must render stable series after their reveal animations finish' }).toBe(true);
+const CHART_EMPTY_MESSAGES = (['en', 'ja'] as const).flatMap((locale) => [
+    'AnalyticsActivity.empty',
+    'AnalyticsRevenue.empty',
+    'AnalyticsTaskStatus.empty',
+    'AnalyticsWinRate.empty',
+    'AnalyticsIntros.emptyMade',
+].map((key) => message(locale, 'analytics', key)));
+
+/**
+ * Waits for painted series and completed reveals, including resize work caused by capture expansion.
+ * Empty charts replace Recharts with a centred, localized message; each such state settles without SVG.
+ */
+export async function expectChartsSettled(content: Locator, timeout?: number): Promise<void> {
+    await expect.poll(() => content.locator('.recharts-responsive-container, div.text-muted-foreground')
+        .evaluateAll(async (charts, emptyMessages) => {
+            const visible = charts.filter((chart) => {
+                const bounds = chart.getBoundingClientRect();
+                return bounds.width > 0 && bounds.height > 0
+                    && (chart.classList.contains('recharts-responsive-container')
+                        || emptyMessages.includes(chart.textContent?.trim() ?? ''));
+            });
+            const hasVisibleColor = (paint: string): boolean => {
+                if (paint === 'none' || paint === 'transparent') return false;
+                const color = paint.match(/^([\w-]+)\(([^)]*)\)$/);
+                if (color === null || color[1] === 'url') return true;
+                const alpha = color[2].includes('/')
+                    ? color[2].split('/')[1]
+                    : color[1] === 'rgba' || color[1] === 'hsla'
+                        ? color[2].split(',')[3]
+                        : undefined;
+                return alpha === undefined || Number.parseFloat(alpha) > 0;
+            };
+            const snapshot = () => visible.map((chart) => {
+                if (!chart.classList.contains('recharts-responsive-container')) {
+                    return chart.textContent;
+                }
+                const surface = chart.querySelector('svg.recharts-surface');
+                if (surface === null) return null;
+                const bounds = surface.getBoundingClientRect();
+                if (bounds.width === 0 || bounds.height === 0) return null;
+                const marks = surface.querySelectorAll(
+                    'path.recharts-area-area, path.recharts-area-curve, path.recharts-line-curve, .recharts-line-dots circle, '
+                    + '.recharts-bar-rectangles path, .recharts-bar-rectangles rect, .recharts-pie path',
+                );
+                const painted = Array.from(marks).some((mark) => {
+                    const bounds = mark.getBoundingClientRect();
+                    const style = getComputedStyle(mark);
+                    if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) {
+                        return false;
+                    }
+                    for (let ancestor = mark.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+                        if (Number(getComputedStyle(ancestor).opacity) === 0) return false;
+                    }
+                    const hasArea = bounds.width > 0 && bounds.height > 0;
+                    const hasStrokeGeometry = hasArea
+                        || (mark.matches('.recharts-line-curve, .recharts-area-curve')
+                            && (mark.getAttribute('d')?.trim().length ?? 0) > 0
+                            && (bounds.width > 0 || bounds.height > 0));
+                    const hasFill = hasVisibleColor(style.fill) && Number(style.fillOpacity) > 0;
+                    const hasStroke = hasVisibleColor(style.stroke) && Number(style.strokeOpacity) > 0
+                        && Number.parseFloat(style.strokeWidth) > 0;
+                    return (hasArea && hasFill) || (hasStrokeGeometry && hasStroke);
+                });
+                if (!painted) return null;
+                if (surface.querySelector('.recharts-area > g defs clipPath') !== null) return null;
+                return JSON.stringify([bounds.width, bounds.height, surface.innerHTML]);
+            });
+            const before = snapshot();
+            if (before.some((value) => value === null)) return false;
+            await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            const after = snapshot();
+            return before.every((value, index) => value === after[index]);
+    }, CHART_EMPTY_MESSAGES), {
+        timeout,
+        message: 'visible charts must render stable painted series or an explicit empty state after their reveal animations finish',
+    }).toBe(true);
 }
 
 async function expandScrollContainers(page: Page): Promise<void> {

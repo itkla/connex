@@ -39,6 +39,9 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class RuleServiceTest extends AbstractServiceTest {
 
@@ -106,9 +109,11 @@ class RuleServiceTest extends AbstractServiceTest {
             "run-as must stay the original creator, not the editor");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void create_actionPermissionGate_blocksUnprivilegedManager() {
         User restricted = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, restricted);
         WorkspaceRole ruleOnly = roleService.createRole(workspace.getId(), currentUser.getId(),
             "RuleOnly " + unique(), List.of("RULE_MANAGE"));
         workspaceService.assignCustomRole(workspace.getId(), currentUser.getId(), restricted.getId(), ruleOnly.getId());
@@ -169,6 +174,7 @@ class RuleServiceTest extends AbstractServiceTest {
         workspaceMapper.insert(other);
         workspaceMapper.addMember(other.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, other.getId());
+        approveForStepUp(currentUser);
 
         assertThrows(ResourceNotFoundException.class, () -> ruleService.executions(ruleId));
     }

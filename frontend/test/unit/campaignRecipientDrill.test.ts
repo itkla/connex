@@ -59,7 +59,6 @@ function source(relativePath: string): string {
 describe('a campaign engagement count opens the contacts behind it', () => {
     it('selects each status-derived counter by delivery status', () => {
         const statusDerived: EngagementCounter[] = [
-            'dispatched',
             'delivered',
             'bounced',
             'complained',
@@ -70,6 +69,10 @@ describe('a campaign engagement count opens the contacts behind it', () => {
         for (const counter of statusDerived) {
             expect(recipientFilterFor(counter)).toEqual({ status: [counter] });
         }
+    });
+
+    it('selects confirmed submissions regardless of later delivery or failure status', () => {
+        expect(recipientFilterFor('dispatched')).toEqual({ submitted: true });
     });
 
     it('selects the unsubscribe counter by event, because an unsubscribe is never a delivery status', () => {
@@ -174,12 +177,13 @@ describe('a campaign engagement count opens the contacts behind it', () => {
         }
     });
 
-    it('counts contacts in whole words rather than "1 contacts"', () => {
+    it('counts message entries in whole words rather than unique contacts', () => {
         const catalog = messages('en');
 
         for (const counter of ENGAGEMENT_COUNTERS) {
             expect(catalog[descriptionKey(counter)], `${counter} must pluralize`)
                 .toContain('{count, plural,');
+            expect(catalog[descriptionKey(counter)]).not.toContain('# contact');
         }
     });
 

@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper">
+  <resultMap id="fence" type="ooo.klae.connex.backend.beans.AiAssistantPrivacyFence">
+    <id column="organization_id" property="organizationId" />
+    <result column="generation" property="generation" />
+    <result column="bootstrap_operation_id" property="bootstrapOperationId" />
+    <result column="bootstrap_completed_at" property="bootstrapCompletedAt" />
+  </resultMap>
+  <resultMap id="operation" type="ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation">
+    <id column="organization_id" property="organizationId" />
+    <result column="operation_key" property="operationKey" />
+    <result column="content_scope" property="contentScope" />
+    <result column="cutoff_generation" property="cutoffGeneration" />
+    <result column="invalidated_generation" property="invalidatedGeneration" />
+    <result column="reason" property="reason" />
+    <result column="operation_fingerprint" property="operationFingerprint" />
+    <result column="dsr_request_id" property="dsrRequestId" />
+    <result column="control_acceptance_audit_id" property="controlAcceptanceAuditId" />
+    <result column="completed_at" property="completedAt" />
+  </resultMap>
+  <select id="getFence" resultMap="fence" useCache="false" flushCache="true">
+    SELECT * FROM ai_assistant_privacy_fence WHERE organization_id = #{organizationId}
+  </select>
+  <select id="lockFenceForShare" resultMap="fence" useCache="false" flushCache="true">
+    SELECT * FROM ai_assistant_privacy_fence WHERE organization_id = #{organizationId} FOR SHARE
+  </select>
+  <select id="lockFence" resultMap="fence" useCache="false" flushCache="true">
+    SELECT * FROM ai_assistant_privacy_fence WHERE organization_id = #{organizationId} FOR UPDATE
+  </select>
+  <insert id="insertFence">
+    INSERT INTO ai_assistant_privacy_fence (organization_id, generation, bootstrap_operation_id)
+    VALUES (#{organizationId}, 1, #{operationKey})
+  </insert>
+  <update id="advanceFence">
+    UPDATE ai_assistant_privacy_fence SET generation = generation + 1
+    WHERE organization_id = #{organizationId} AND generation = #{generation} AND generation &lt; 9223372036854775807
+  </update>
+  <select id="getOperation" resultMap="operation" useCache="false" flushCache="true">
+    SELECT * FROM ai_assistant_privacy_operation WHERE organization_id = #{organizationId} AND operation_key = #{operationKey}
+  </select>
+  <select id="listOperations" resultMap="operation" useCache="false" flushCache="true">
+    SELECT * FROM ai_assistant_privacy_operation WHERE organization_id = #{organizationId} ORDER BY invalidated_generation
+  </select>
+  <insert id="insertOperation">
+    INSERT INTO ai_assistant_privacy_operation (organization_id, operation_key, content_scope, cutoff_generation,
+      invalidated_generation, reason, operation_fingerprint, dsr_request_id, control_acceptance_audit_id)
+    VALUES (#{operation.organizationId}, #{operation.operationKey}, #{operation.contentScope}, #{operation.cutoffGeneration},
+      #{operation.invalidatedGeneration}, #{operation.reason}, #{operation.operationFingerprint},
+      #{operation.dsrRequestId,jdbcType=BIGINT}, #{operation.controlAcceptanceAuditId,jdbcType=INTEGER})
+  </insert>
+  <update id="attachAcceptanceAudit">
+    UPDATE ai_assistant_privacy_operation SET control_acceptance_audit_id = #{auditId}, operation_fingerprint = #{fingerprint}
+    WHERE organization_id = #{organizationId} AND operation_key = #{operationKey}
+      AND reason = 'dsr' AND control_acceptance_audit_id IS NULL
+  </update>
+  <insert id="reconcileWorkspaceIntents">
+    INSERT IGNORE INTO ai_assistant_privacy_operation_workspace (organization_id, operation_key, workspace_id)
+    SELECT #{organizationId}, #{operationKey}, id FROM workspace WHERE org_id = #{organizationId}
+  </insert>
+  <update id="verifyWorkspace">
+    UPDATE ai_assistant_privacy_operation_workspace SET state = 'verified', placement_catalog = #{catalog,jdbcType=VARCHAR},
+      verified_work_revision = #{revision}, verified_at = CURRENT_TIMESTAMP(6)
+    WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} AND workspace_id = #{workspaceId}
+  </update>
+  <select id="countUnverified" resultType="long" useCache="false" flushCache="true">
+    SELECT COUNT(*) FROM ai_assistant_privacy_operation_workspace
+    WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} AND state &lt;&gt; 'verified'
+  </select>
+  <update id="completeOperation">
+    UPDATE ai_assistant_privacy_operation SET completed_at = CURRENT_TIMESTAMP(6)
+    WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} AND completed_at IS NULL
+  </update>
+  <update id="completeBootstrap">
+    UPDATE ai_assistant_privacy_fence SET bootstrap_completed_at = CURRENT_TIMESTAMP(6)
+    WHERE organization_id = #{organizationId} AND bootstrap_operation_id = #{operationKey} AND bootstrap_completed_at IS NULL
+  </update>
+  <select id="operationWorkspaceIds" resultType="int" useCache="false" flushCache="true">
+    SELECT workspace_id FROM ai_assistant_privacy_operation_workspace
+    WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} ORDER BY workspace_id
+  </select>
+  <select id="incompleteOrganizationIdsPage" resultType="int" useCache="false" flushCache="true">
+    SELECT DISTINCT o.organization_id FROM ai_assistant_privacy_operation o
+    WHERE o.organization_id &gt; #{afterId}
+      AND (o.completed_at IS NULL OR EXISTS (
+        SELECT 1 FROM ai_assistant_privacy_operation_workspace w
+        WHERE w.organization_id = o.organization_id AND w.operation_key = o.operation_key AND w.state &lt;&gt; 'verified'))
+    ORDER BY o.organization_id LIMIT #{limit}
+  </select>
+  <select id="deletedWorkspaceVerifiedAt" resultType="java.time.LocalDateTime" useCache="false" flushCache="true">
+    SELECT verified_at FROM ai_assistant_privacy_operation_workspace receipt
+    WHERE receipt.organization_id = #{organizationId} AND receipt.operation_key = #{operationKey}
+      AND receipt.workspace_id = #{workspaceId} AND receipt.state = 'verified'
+      AND receipt.verified_work_revision IS NOT NULL AND receipt.verified_at IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = receipt.workspace_id)
+  </select>
+  <select id="verifiedTeardownWorkspace" resultType="boolean" useCache="false" flushCache="true">
+    SELECT EXISTS (
+      SELECT 1 FROM ai_assistant_privacy_operation_workspace receipt
+      JOIN workspace w ON w.id = receipt.workspace_id AND w.org_id = receipt.organization_id
+      WHERE receipt.organization_id = #{organizationId} AND receipt.operation_key = #{operationKey}
+        AND receipt.workspace_id = #{workspaceId} AND receipt.state = 'verified'
+        AND receipt.verified_work_revision IS NOT NULL AND receipt.verified_at IS NOT NULL
+        AND w.lifecycle_state = 'tearing_down')
+  </select>
+  <select id="lockOperation" resultMap="operation" useCache="false" flushCache="true">
+    SELECT * FROM ai_assistant_privacy_operation WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} FOR UPDATE
+  </select>
+  <select id="lockWorkspaceIntent" resultType="int" useCache="false" flushCache="true">
+    SELECT workspace_id FROM ai_assistant_privacy_operation_workspace
+    WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} AND workspace_id = #{workspaceId} FOR UPDATE
+  </select>
+  <update id="reopenWorkspace">
+    UPDATE ai_assistant_privacy_operation_workspace SET state = 'pending', verified_at = NULL, verified_work_revision = NULL
+    WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} AND workspace_id = #{workspaceId}
+  </update>
+  <update id="reopenOperation">
+    UPDATE ai_assistant_privacy_operation SET completed_at = NULL WHERE organization_id = #{organizationId} AND operation_key = #{operationKey}
+  </update>
+  <select id="notificationWorkspaceGenerations"
+      resultType="ooo.klae.connex.backend.ai.assistant.AiAssistantWorkspacePrivacy"
+      useCache="false" flushCache="true">
+    SELECT w.id AS workspaceId, w.org_id AS organizationId, f.generation
+    FROM workspace w JOIN ai_assistant_privacy_fence f ON f.organization_id = w.org_id
+    WHERE
+    <choose>
+      <when test="recipientId != null">
+        EXISTS (SELECT 1 FROM workspace_member wm
+          WHERE wm.workspace_id = w.id AND wm.user_id = #{recipientId} AND wm.status = 'active')
+        <if test="workspaceId != null">AND w.id = #{workspaceId}</if>
+      </when>
+      <when test="workspaceId != null">w.id = #{workspaceId}</when>
+      <otherwise>FALSE</otherwise>
+    </choose>
+    ORDER BY w.id
+  </select>
+  <update id="reopenBootstrap">
+    UPDATE ai_assistant_privacy_fence SET bootstrap_completed_at = NULL
+    WHERE organization_id = #{organizationId} AND bootstrap_operation_id = #{operationKey}
+  </update>
+  <delete id="deleteWorkspaceIntents">
+    DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id = #{organizationId}
+  </delete>
+  <delete id="deleteOperations">
+    DELETE FROM ai_assistant_privacy_operation WHERE organization_id = #{organizationId}
+  </delete>
+  <delete id="deleteFence">
+    DELETE FROM ai_assistant_privacy_fence WHERE organization_id = #{organizationId}
+  </delete>
+  <select id="countIncompleteOperations" resultType="long" useCache="false" flushCache="true">
+    SELECT COUNT(*) FROM ai_assistant_privacy_operation o WHERE o.organization_id = #{organizationId}
+      AND (o.completed_at IS NULL OR EXISTS (SELECT 1 FROM ai_assistant_privacy_operation_workspace w
+        WHERE w.organization_id = o.organization_id AND w.operation_key = o.operation_key AND w.state &lt;&gt; 'verified'))
+  </select>
+  <select id="workspaceLifecycleState" resultType="string" useCache="false" flushCache="true">
+    SELECT lifecycle_state
+    FROM (
+      SELECT w.lifecycle_state, 0 AS targetOrder
+      FROM workspace w
+      WHERE w.id = #{workspaceId}
+      UNION ALL
+      SELECT 'tearing_down' AS lifecycle_state, 1 AS targetOrder
+      FROM tenant_cleanup_tombstone t
+      WHERE t.workspace_id = #{workspaceId}
+    ) lifecycle_target
+    ORDER BY targetOrder
+    LIMIT 1
+  </select>
+</mapper>

@@ -1,6 +1,6 @@
 import { type useTranslations } from "next-intl";
 
-import { ApiError } from "@/app/lib/api";
+import { ApiError, isWorkspaceUnavailableError } from "@/app/lib/api";
 import { isSessionExpired, redirectToSignIn } from "@/app/lib/sessionExpiry";
 import { toastError } from "@/app/lib/toast";
 
@@ -31,6 +31,8 @@ const OFFLINE_KEY = "ApiErrors.offline";
 const SERVER_ERROR_KEY = "ApiErrors.serverError";
 const SESSION_EXPIRED_KEY = "ApiErrors.sessionExpired";
 const REFERENCE_KEY = "ApiErrors.reference";
+const WORKSPACE_UNAVAILABLE_KEY = "ApiErrors.workspaceUnavailable";
+const WORKSPACE_UNAVAILABLE_NAMED_KEY = "ApiErrors.workspaceUnavailableNamed";
 
 /**
  * Stable backend error codes that carry a meaning no status alone conveys, mapped to their copy.
@@ -39,8 +41,23 @@ const REFERENCE_KEY = "ApiErrors.reference";
  * rules rather than surfacing anything the backend wrote (#1337).
  */
 const CODE_MESSAGE_KEYS = new Map<string, string>([
+    ["CAMPAIGN_UNSUPPORTED_TOKEN", "CampaignMessages.unsupportedTokens"],
+    ["PRIVILEGED_MFA_ENROLLMENT_REQUIRED", "AccountSecurity.enrollmentNeededDescription"],
+    ["PRIVILEGED_MFA_ATTESTATION_REQUIRED", "AccountSecurity.approvalNeededDescription"],
     ["IDENTITY_COLLISION_REPORT_TIMEOUT", "ApiErrors.identityCollisionReportTimeout"],
     ["SHARE_BLOCKED_PRIVACY_HOLD", "ApiErrors.sharePrivacyHold"],
+    ["DEAL_LINE_VALUE_CONSENT_REQUIRED", "ApiErrors.dealLineValueConsentRequired"],
+    ["DEAL_LINE_VALUE_CONSENT_STALE", "ApiErrors.dealLineValueConsentStale"],
+    ["STALE_RECORD", "ApiErrors.staleRecord"],
+    ["WORKSPACE_LAST_OWNER", "ApiErrors.workspaceLastOwner"],
+    ["ORG_LAST_OWNER", "ApiErrors.organizationLastOwner"],
+    ["WORKSPACE_RECOVERY_OWNER_REQUIRED", "ApiErrors.workspaceRecoveryOwnerRequired"],
+    ["INVITE_EMAIL_DOMAIN_NOT_ALLOWED", "ApiErrors.inviteEmailDomainNotAllowed"],
+    ["LAST_PASSKEY_REQUIRED", "ApiErrors.lastPasskeyRequired"],
+    ["LAST_SUFFICIENT_PASSKEY_REQUIRED", "ApiErrors.lastSufficientPasskeyRequired"],
+    ["ORG_MEMBER_ELIGIBILITY_REQUIRED", "ApiErrors.organizationMemberEligibilityRequired"],
+    ["DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED", "ApiErrors.disclosureIdentityVerificationRequired"],
+    ["APPROVAL_POLICY_CURRENCY_INVALID", "ApiErrors.approvalPolicyCurrencyInvalid"],
 ]);
 
 function statusMessageKey(status: number): string {
@@ -53,12 +70,29 @@ function statusMessageKey(status: number): string {
     return GENERIC_KEY;
 }
 
+/**
+ * The copy for a write refused because the workspace it belongs to is no longer available to the
+ * viewer (#1732): it names that workspace when the shell ever listed it, says nothing was saved, and
+ * tells the viewer to keep their text before reloading, since a reload leaves that workspace behind.
+ * @param error a rejected request's reason
+ * @param t a translator bound to the message root
+ * @returns the description, or null when the rejection is not that refusal
+ */
+export function workspaceUnavailableDescription(error: unknown, t: MessageTranslator): string | null {
+    if (!isWorkspaceUnavailableError(error)) return null;
+    return error.workspaceName
+        ? t(WORKSPACE_UNAVAILABLE_NAMED_KEY, { workspace: error.workspaceName })
+        : t(WORKSPACE_UNAVAILABLE_KEY);
+}
+
 function descriptionFor(error: unknown, t: MessageTranslator, fallbackDescriptionKey?: string): string {
     if (error instanceof TypeError) return t(OFFLINE_KEY);
     if (!(error instanceof ApiError)) return t(GENERIC_KEY);
 
+    const workspaceDescription = workspaceUnavailableDescription(error, t);
     const codeKey = error.code === undefined ? undefined : CODE_MESSAGE_KEYS.get(error.code);
     const requestedFallback = codeKey === undefined
+        && workspaceDescription === null
         && fallbackDescriptionKey !== undefined
         && fallbackDescriptionKey !== ''
         && t.has(fallbackDescriptionKey)
@@ -69,7 +103,7 @@ function descriptionFor(error: unknown, t: MessageTranslator, fallbackDescriptio
         && !requestedFallback.includes('{')
         ? requestedFallback
         : undefined;
-    const description = t(codeKey ?? statusMessageKey(error.status));
+    const description = workspaceDescription ?? t(codeKey ?? statusMessageKey(error.status));
     const resolvedDescription = usableFallback ?? description;
     if (!error.correlationId) return resolvedDescription;
 

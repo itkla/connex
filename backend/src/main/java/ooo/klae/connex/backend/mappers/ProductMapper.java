@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.ProductSkuResolution;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.dto.ProductSummaryDto;
 
 /**
@@ -13,7 +14,17 @@ import ooo.klae.connex.backend.dto.ProductSummaryDto;
  * Every statement is scoped to a workspace.
  */
 public interface ProductMapper {
-    List<Product> getFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    /**
+     * Products in the workspace matching the catalog search and the browser's facets, ordered by
+     * name.
+     *
+     * @param workspaceId owning workspace
+     * @param query LIKE pattern over name, SKU, and description, or null for no search
+     * @param facets Billing, Availability, and Effective dates selections, never null
+     * @return matching products
+     */
+    List<Product> getFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("facets") ProductFacetFilter facets);
 
     /**
      * Bounded global-search slice of the catalog, matched on name and SKU.

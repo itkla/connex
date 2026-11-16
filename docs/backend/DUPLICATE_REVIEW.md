@@ -11,6 +11,15 @@ Evidence classes:
 - Strong: exact canonical email, phone, domain, or external id.
 - Weak: exact normalized name after a bounded broad candidate read and Java-side recheck.
 
+Company weak-name review additionally compares boundary legal-form variants through
+`MatchingService.normalizeCompanyNameForReview`: 株式会社, 有限会社, 合同会社, their
+parenthesized abbreviations, and the suffixes Inc./Incorporated, Co., Ltd., Ltd./Limited,
+K.K., LLC/L.L.C. and GmbH. Unicode width, case and kana folding precedes this comparison. This review
+key never replaces canonical names or identity keys. A variant never authorizes automatic
+attachment or merging. CSV company dependencies require an explicit visible candidate choice,
+including canonical-exact names; a legal-form variant remains unresolved until that choice is
+reviewed and bound to the import proof.
+
 Never auto-attach an unreviewed weak, shared, ambiguous, truncated, or aggregate-overflow result.
 
 Response limits remain bounded. Direct and CSV response ceilings are product/security contracts; changing them requires explicit memory/UX review, not an arbitrary increase.
@@ -94,7 +103,39 @@ Manual person/company/deal creation, staged contacts, and OCR-reviewed contact/c
 
 Client debounce is an early warning only. Submission performs an immediate final review. Deal acknowledgement is bound to the exact request workspace and complete candidate-response token; truncated results cannot be acknowledged. The mutation consumes that same proof only after its locked final candidate recheck.
 
+Person name lookup is bounded independently of exact email/phone lookup. When its broad
+prefilter or exact-name set exceeds the existing response bound, `truncated` remains true:
+filtering a bounded prefilter cannot prove that unseen exact names do not exist. Direct
+person review may return `allowSeparateCreation=true` only when every supplied canonical
+identity lookup is complete and empty. The user can then explicitly acknowledge the displayed
+bounded name review and create a separate contact, even if no exact candidate survived the
+prefilter. This exceptional path requires a server-issued, expiring, one-use proof. The issuer
+uses the existing configured audit-integrity HMAC secret with a separate bounded-person domain,
+the actor/workspace, normalized request/result fingerprints and a cryptographic random nonce.
+Only the token hash and non-PII binding fingerprints are stored in the existing
+`deal_duplicate_review_proof` table through `DealDuplicateReviewProofService`; its historical
+name does not imply a deal foreign key. Existing expiry, actor and workspace cleanup applies.
+
+The result binds both the displayed candidates/permission and the complete visible broad-name
+prefilter's count and highest record ID. That aggregate is conservative broad evidence, not
+an exact normalized-name total, and uses the display query's visibility/restriction predicates.
+Issuance and the final recheck acquire the existing organization duplicate mutex. Creation
+rechecks identities and the current result, then atomically consumes the exact unexpired proof
+for the same actor/workspace/normalized request in its transaction. Successful creation commits
+the proof deletion; rollback preserves it. Deleting a created record cannot revive the proof,
+even if the count and highest ID return to their earlier values. New strong evidence or a
+changed displayed/aggregate result requires fresh review. Client final preflight echoes the
+acknowledged proof and preserves it only while the entire binding still matches.
+
+This is permission to create,
+never proof of completeness for reuse, imports, automatic linking or merging. Those paths
+retain their existing truncation guards. Company and deal overflow remain blocking.
+
 The frontend uses the shared duplicate-preflight hook/request scope rather than implementing feature-specific matching.
+
+Assistant person preparation uses `personCandidatesExist`, the read-only advisory matcher;
+it neither takes the duplicate mutex nor issues a proof. Truncation still refuses automatic
+assistant creation. Approval retains the canonical locked creation check.
 
 ## Locking and mutation recheck
 
@@ -105,7 +146,8 @@ While holding the locks:
 - requery the current candidate/identity state;
 - automatic targets must remain the unique owner of supplied identities;
 - creates must still have no owned match;
-- acknowledgement must still describe the complete current candidate result;
+- acknowledgement must still describe the current candidate result, or the explicitly bounded
+  name-only separate-person review described above;
 - target loss or concurrent candidate change fails/revalidates according to the owning batch contract.
 
 Do not rely on the preview snapshot as commit authorization.
@@ -117,7 +159,7 @@ Person/deal previews bind every exact referenced-company name; deal proofs also 
 During commit:
 
 - resolve company dependencies under the duplicate-decision hierarchy;
-- reuse only a unique visible dependency;
+- reuse only an explicitly selected visible dependency, with the same choice rechecked at commit;
 - ambiguous/truncated dependencies fail closed for rows that consume them;
 - lock writable matched targets ascending, then canonical identity groups deterministically;
 - create custom fields, tags, or reviewed referenced companies only after target/identity revalidation;

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -133,23 +135,23 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         Person employee = newPerson(employer);
 
         assertEquals(employer.getId(),
-            personMapper.getPersonById(workspace.getId(), employee.getId()).getCompany().getId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), employee.getId()).getCompany().getId());
 
         assertEquals(1, companyMapper.archive(workspace.getId(), employer.getId()));
 
-        Person hidden = personMapper.getPersonById(workspace.getId(), employee.getId());
+        Person hidden = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), employee.getId());
         assertNotNull(hidden);
         assertNull(hidden.getCompany());
-        assertTrue(personMapper.getAllPersons(workspace.getId()).stream()
+        assertTrue(personMapper.getAllPersons(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .filter(person -> person.getId() == employee.getId())
             .allMatch(person -> person.getCompany() == null));
-        assertTrue(personMapper.getByIds(workspace.getId(), List.of(employee.getId())).stream()
+        assertTrue(personMapper.getByIds(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), List.of(employee.getId())).stream()
             .allMatch(person -> person.getCompany() == null));
         assertTrue(personPageOf(employee).getCompany() == null);
 
         assertEquals(1, companyMapper.restore(workspace.getId(), employer.getId()));
         assertEquals(employer.getId(),
-            personMapper.getPersonById(workspace.getId(), employee.getId()).getCompany().getId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), employee.getId()).getCompany().getId());
     }
 
     /** P1-2 follow-through: the contact search must not match on an archived employer's fields. */
@@ -159,12 +161,12 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         Person employee = newPerson(employer);
         String query = "%" + employer.getName() + "%";
 
-        assertTrue(personMapper.search(workspace.getId(), query).stream()
+        assertTrue(personMapper.search(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), query).stream()
             .anyMatch(person -> person.getId() == employee.getId()));
 
         assertEquals(1, companyMapper.archive(workspace.getId(), employer.getId()));
 
-        assertFalse(personMapper.search(workspace.getId(), query).stream()
+        assertFalse(personMapper.search(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), query).stream()
             .anyMatch(person -> person.getId() == employee.getId()));
     }
 
@@ -174,17 +176,17 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         Company employer = newCompany();
         Person employee = newPerson(employer);
 
-        assertTrue(personMapper.distinctCompanies(workspace.getId()).contains(employer.getName()));
+        assertTrue(personMapper.distinctCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(employer.getName()));
 
         assertEquals(1, companyMapper.archive(workspace.getId(), employer.getId()));
 
-        assertFalse(personMapper.distinctCompanies(workspace.getId()).contains(employer.getName()));
-        assertFalse(personMapper.getPersonIdsFiltered(workspace.getId(), null,
-            List.of(employer.getName()), null, false, allTeamScope(), null, false, null, false, null, false, false, null, 100)
+        assertFalse(personMapper.distinctCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(employer.getName()));
+        assertFalse(personMapper.getPersonIdsFiltered(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null,
+            List.of(employer.getName()), null, false, allTeamScope(), null, false, null, false, null, false, false, null, 100, null)
             .contains(employee.getId()));
-        assertTrue(personMapper.hasPersonWithoutCompany(workspace.getId()));
-        assertTrue(personMapper.getPersonIdsFiltered(workspace.getId(), null, null, null,
-            true, allTeamScope(), null, false, null, false, null, false, false, null, 100).contains(employee.getId()));
+        assertTrue(personMapper.hasPersonWithoutCompany(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())));
+        assertTrue(personMapper.getPersonIdsFiltered(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null, null, null,
+            true, allTeamScope(), null, false, null, false, null, false, false, null, 100, null).contains(employee.getId()));
     }
 
     /** P1-4: the file browser labels every file with its owner's name. */
@@ -225,17 +227,17 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         Deal onAccount = newDeal(pipeline, stage, account);
         Deal unassigned = newDealWithoutCompany(pipeline, stage);
 
-        Map<String, Long> before = facetCounts(dealMapper.countsByCompany(workspace.getId()));
+        Map<String, Long> before = facetCounts(dealMapper.countsByCompany(workspace.getId(), dealScope(workspace.getId())));
         assertEquals(1L, before.get(String.valueOf(account.getId())));
         assertEquals(1L, before.get("__empty__"));
 
         assertEquals(1, companyMapper.archive(workspace.getId(), account.getId()));
 
-        Map<String, Long> after = facetCounts(dealMapper.countsByCompany(workspace.getId()));
+        Map<String, Long> after = facetCounts(dealMapper.countsByCompany(workspace.getId(), dealScope(workspace.getId())));
         assertNull(after.get(String.valueOf(account.getId())));
         assertEquals(2L, after.get("__empty__"));
         assertEquals(2L, after.values().stream().mapToLong(Long::longValue).sum());
-        List<Integer> unassignedIds = dealMapper.getFilteredDealIds(workspace.getId(), null, null,
+        List<Integer> unassignedIds = dealMapper.getFilteredDealIds(workspace.getId(), dealScope(workspace.getId()), null, null,
             null, null, null, null, null, true, null, null, allTeamScope(), 100);
         assertTrue(unassignedIds.contains(onAccount.getId()));
         assertTrue(unassignedIds.contains(unassigned.getId()));
@@ -301,11 +303,11 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         int readerId = java.util.Objects.requireNonNull(note.getAuthor()).getId();
         String query = "%" + contact.getName() + "%";
 
-        assertFalse(noteMapper.searchVisible(workspace.getId(), query, readerId, 10, 0).isEmpty());
+        assertFalse(noteMapper.searchVisible(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), query, readerId, 10, 0).isEmpty());
 
         assertEquals(1, personMapper.archive(workspace.getId(), contact.getId()));
 
-        assertTrue(noteMapper.searchVisible(workspace.getId(), query, readerId, 10, 0).isEmpty());
+        assertTrue(noteMapper.searchVisible(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), query, readerId, 10, 0).isEmpty());
     }
 
     /**
@@ -362,8 +364,8 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
     }
 
     private Person personPageOf(Person person) {
-        return personMapper.getPersonsPage(workspace.getId(), null, "name", "asc", null, null,
-                false, allTeamScope(), null, false, null, false, null, false, false, null, 500, 0)
+        return personMapper.getPersonsPage(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null, "name", "asc", null, null,
+                false, allTeamScope(), null, false, null, false, null, false, false, null, 500, 0, null)
             .stream().filter(row -> row.getId() == person.getId()).findFirst().orElseThrow();
     }
 
@@ -474,20 +476,20 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
     }
 
     private List<Integer> personPageIds(Workspace viewer, boolean archived) {
-        return personMapper.getPersonsPage(viewer.getId(), null, "name", "asc", null, null, false,
-                allTeamScope(), null, false, null, false, null, false, archived, null, 500, 0)
+        return personMapper.getPersonsPage(viewer.getId(), orgWorkspaceIdsJson(workspaceMapper, viewer.getId()), null, "name", "asc", null, null, false,
+                allTeamScope(), null, false, null, false, null, false, archived, null, 500, 0, null)
             .stream().map(Person::getId).toList();
     }
 
     private List<Integer> companyPageIds(Workspace viewer, boolean archived) {
-        return companyMapper.getCompaniesPage(viewer.getId(), null, "name", "asc", null, false, null,
+        return companyMapper.getCompaniesPage(viewer.getId(), orgWorkspaceIdsJson(workspaceMapper, viewer.getId()), null, "name", "asc", null, false, null,
                 allTeamScope(), archived, null, 500, 0)
             .stream().map(Company::getId).toList();
     }
 
     private List<RelationshipScoreAggregateDto> personScores(LocalDateTime reference) {
         return personMapper.getRelationshipScoreAggregates(
-            workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters());
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), reference, RelationshipWarmthModel.current().sqlParameters());
     }
 
     private RelationshipScoreAggregateDto personScore(int personId, LocalDateTime reference) {
@@ -499,7 +501,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
     private List<RelationshipScoreAggregateDto> companyScores(LocalDateTime reference) {
         return companyMapper.getRelationshipScoreAggregates(
-            workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters());
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), reference, RelationshipWarmthModel.current().sqlParameters());
     }
 
     private RelationshipScoreAggregateDto companyScore(int companyId, LocalDateTime reference) {

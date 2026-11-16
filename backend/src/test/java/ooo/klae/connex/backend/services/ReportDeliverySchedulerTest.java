@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -88,13 +89,14 @@ class ReportDeliverySchedulerTest {
     @Mock private JobRunRecorder jobRunRecorder;
 
     private final EmailTemplateRenderer templateRenderer = new EmailTemplateRenderer();
+    private final AutomationScope automationScope = new AutomationScope();
     private ReportDeliveryScheduler scheduler;
 
     @BeforeEach
     void setUp() {
         scheduler = new ReportDeliveryScheduler(
                 scheduleMapper, placementRegistry, tenantWorkScope, scheduleService,
-                automationExecutor, reportService, workspaceService, auditService,
+                automationExecutor, automationScope, reportService, workspaceService, auditService,
                 templateRenderer, mailProperties, mailService, jobRunRecorder, CLOCK);
     }
 
@@ -304,7 +306,7 @@ class ReportDeliverySchedulerTest {
         when(movingClock.instant()).thenAnswer(invocation -> current.get());
         scheduler = new ReportDeliveryScheduler(
                 scheduleMapper, placementRegistry, tenantWorkScope, scheduleService,
-                automationExecutor, reportService, workspaceService, auditService,
+                automationExecutor, automationScope, reportService, workspaceService, auditService,
                 templateRenderer, mailProperties, mailService, jobRunRecorder, movingClock);
         stubSweep();
         when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenAnswer(invocation -> {
@@ -357,6 +359,108 @@ class ReportDeliverySchedulerTest {
                 eq(JobRunStatus.SKIPPED),
                 detail.capture());
         assertEquals("delivery_skipped", detail.getValue().metadata().get("phase"));
+    }
+
+    @Test
+    void withdrawnExportPermissionSkipsBeforeGenerationWithVisibleReason() {
+        stubSweep();
+        stubAuditScope();
+        ReportSchedule schedule = schedule();
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenReturn(schedule);
+        when(scheduleService.deliveryAccess(schedule))
+            .thenReturn(ScheduleService.DeliveryAccess.denied(ScheduleService.EXPORT_PERMISSION_DENIED));
+        when(scheduleService.skipDue(WORKSPACE_ID, SCHEDULE_ID, USER_ID,
+            LocalDateTime.ofInstant(NOW, ZoneOffset.UTC))).thenReturn(true);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        verifyNoInteractions(reportService, mailService, automationExecutor);
+        assertExportWithdrawalRecorded();
+    }
+
+    @Test
+    void exportWithdrawalDuringGenerationSkipsBeforeMailIsQueued() {
+        stubAuditScope();
+        ReportSnapshotDto snapshot = snapshotWithContent();
+        User runAs = user();
+        ReportSchedule schedule = stubClaimedDelivery(List.of(user()), runAs);
+        when(reportService.createDeliverySnapshot(REPORT_ID, SCHEDULE_ID)).thenReturn(snapshot);
+        when(scheduleService.activeRecipientsForDocument(schedule, snapshot.computedResult()))
+            .thenReturn(List.of(user()));
+        when(scheduleService.deliveryAccess(schedule)).thenReturn(
+            ScheduleService.DeliveryAccess.allowed(runAs, "owner"),
+            ScheduleService.DeliveryAccess.allowed(runAs, "owner"),
+            ScheduleService.DeliveryAccess.denied(ScheduleService.EXPORT_PERMISSION_DENIED));
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        verify(reportService).createDeliverySnapshot(REPORT_ID, SCHEDULE_ID);
+        verifyNoInteractions(mailService);
+        assertExportWithdrawalRecorded();
+    }
+
+    private void assertExportWithdrawalRecorded() {
+        verify(auditService).recordFailureScoped("report.schedule.skip", "report_schedule", SCHEDULE_ID,
+            WORKSPACE_ID, 77, null, "Skipped scheduled report delivery", ScheduleService.EXPORT_PERMISSION_DENIED);
+        ArgumentCaptor<JobRunDetail> detail = ArgumentCaptor.forClass(JobRunDetail.class);
+        verify(jobRunRecorder).record(eq(JobRunRecorder.REPORT_DELIVERY), eq(WORKSPACE_ID),
+            eq(JobRunStatus.SKIPPED), detail.capture());
+        assertEquals("export_permission_withdrawn", detail.getValue().metadata().get("phase"));
+    }
+
+    @Test
+    void failureRecoveryAuditIsAttributedToReportDelivery() {
+        stubSweep();
+        stubAuditScope();
+        ReportSchedule schedule = schedule();
+        User runAs = user();
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenReturn(schedule);
+        when(scheduleService.deliveryAccess(schedule))
+                .thenReturn(ScheduleService.DeliveryAccess.allowed(runAs, "owner"));
+        doThrow(new IllegalStateException("mail relay down")).when(automationExecutor).runAs(
+                eq(WORKSPACE_ID), same(runAs), eq("owner"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "user")), any());
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+        AtomicReference<AutomationScope.Origin> origin = new AtomicReference<>();
+        doAnswer(invocation -> {
+            origin.set(automationScope.origin());
+            return null;
+        }).when(auditService).recordFailureScoped(eq("report.schedule.delivery"), any(), any(),
+                any(), any(), any(), any(), any());
+
+        scheduler.deliverDue();
+
+        assertEquals(AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "system"),
+                origin.get());
+        assertNull(automationScope.origin());
+    }
+
+    @Test
+    void skipAuditIsAttributedToReportDelivery() {
+        stubSweep();
+        stubAuditScope();
+        ReportSchedule schedule = schedule();
+        when(scheduleService.loadForDelivery(WORKSPACE_ID, SCHEDULE_ID)).thenReturn(schedule);
+        when(scheduleService.deliveryAccess(schedule))
+                .thenReturn(ScheduleService.DeliveryAccess.denied("run-as access revoked"));
+        when(scheduleService.skipDue(
+                WORKSPACE_ID, SCHEDULE_ID, USER_ID, LocalDateTime.ofInstant(NOW, ZoneOffset.UTC)))
+                .thenReturn(true);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+        AtomicReference<AutomationScope.Origin> origin = new AtomicReference<>();
+        doAnswer(invocation -> {
+            origin.set(automationScope.origin());
+            return null;
+        }).when(auditService).recordFailureScoped(eq("report.schedule.skip"), any(), any(),
+                any(), any(), any(), any(), any());
+
+        scheduler.deliverDue();
+
+        assertEquals(AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "system"),
+                origin.get());
+        assertNull(automationScope.origin());
     }
 
     @Test
@@ -437,9 +541,12 @@ class ReportDeliverySchedulerTest {
     }
 
     private ReportSchedule stubClaimedDelivery(List<User> beforeGeneration) {
+        return stubClaimedDelivery(beforeGeneration, user());
+    }
+
+    private ReportSchedule stubClaimedDelivery(List<User> beforeGeneration, User runAs) {
         LocalDateTime now = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         ReportScheduleRef ref = new ReportScheduleRef(WORKSPACE_ID, SCHEDULE_ID);
-        User runAs = user();
         ReportSchedule schedule = schedule();
 
         when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
@@ -459,9 +566,10 @@ class ReportDeliverySchedulerTest {
         when(scheduleService.deliveryAccess(schedule))
                 .thenReturn(ScheduleService.DeliveryAccess.allowed(runAs, "owner"));
         doAnswer(invocation -> {
-            Supplier<?> work = invocation.getArgument(3);
+            Supplier<?> work = invocation.getArgument(4);
             return work.get();
-        }).when(automationExecutor).runAs(eq(WORKSPACE_ID), same(runAs), eq("owner"), any());
+        }).when(automationExecutor).runAs(eq(WORKSPACE_ID), same(runAs), eq("owner"),
+            eq(AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "user")), any());
         org.mockito.Mockito.lenient()
                 .when(scheduleService.claimDue(SCHEDULE_ID, USER_ID, now))
                 .thenReturn(schedule);

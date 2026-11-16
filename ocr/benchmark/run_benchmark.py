@@ -29,8 +29,10 @@ def benchmark_opener() -> urllib.request.OpenerDirector:
 BENCHMARK_OPENER = benchmark_opener()
 CANONICAL_MANIFEST_SHA256 = "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e960adc07fd84d87"
 CANONICAL_FONT_SHA256 = "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
-CANONICAL_FIXTURES_SHA256 = "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5"
-CANONICAL_FIXTURE_METADATA_SHA256 = "6aa9f38d733d8f510824b6872638b20387864d239386a6eb4a26de532ac74e29"
+CANONICAL_FIXTURES_SHA256 = "effb8a94a19695298e14c8651f515a6eb1fee0f50f4e472a2456a56316130fc2"
+CANONICAL_FIXTURE_METADATA_SHA256 = "4f602ccfa83d3ebd235da26e1ab41df5f68b0e8c18819a26c967a599f7a31a7a"
+JAPANESE_SCRIPT = "\u3005-\u3007\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+JAPANESE_ADJACENT_SPACE = re.compile(f" (?=[{JAPANESE_SCRIPT}])|(?<=[{JAPANESE_SCRIPT}]) ")
 # Every container the release transaction signs must appear here. The transaction requires
 # .provenance.runtime.containers.<component>.imageReference for each of these components, so a
 # component that ships in the deployment bundle but is missing from this map makes the release
@@ -292,14 +294,15 @@ def inspect_runtime_container(component: str, container_id: str) -> dict[str, ob
             or "ALL" not in cap_drop
             or not isinstance(security_options, list)
             or "no-new-privileges:true" not in security_options
-            or devices != []
+            or devices not in (None, [])
             or device_requests not in (None, [])
             or host_config.get("Binds") not in (None, [])
             or host_config.get("Mounts") not in (None, [])
             or mounts != []
             or not isinstance(tmpfs, dict)
             or set(tmpfs) != {"/tmp"}
-            or not {"rw", "noexec", "nosuid", "nodev"}.issubset(tmp_option_set)
+            or "ro" in tmp_option_set
+            or not {"noexec", "nosuid", "nodev"}.issubset(tmp_option_set)
             or not ({"size=64m", "size=67108864"} & tmp_option_set)
             or not isinstance(network_mode, str)
             or not network_mode.endswith("_ocr_internal")
@@ -364,6 +367,8 @@ def run_case(case: dict[str, object], images: Path, configuration: dict[str, str
     except urllib.error.HTTPError as exception:
         payload = {"error": exception.read().decode("utf-8", errors="replace")[:512]}
         status = exception.code
+        print(f"BENCHMARK_HTTP_ERROR case={case['id']} status={status} code={error_code(payload['error'])}",
+              file=sys.stderr)
     latency = time.perf_counter() - started
     expected = case["fields"]
     assert isinstance(expected, dict)
@@ -382,6 +387,16 @@ def run_case(case: dict[str, object], images: Path, configuration: dict[str, str
         "actual": actual,
         "correct": scores,
     }
+
+
+def error_code(body: str) -> str:
+    """Return only the API error code from a failed response, never its free text."""
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return "unparseable"
+    code = parsed.get("code") if isinstance(parsed, dict) else None
+    return code if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", code) else "absent"
 
 
 def multipart(boundary: str, image: bytes, file_name: str) -> bytes:
@@ -415,7 +430,8 @@ def equal(field: str, expected: object, actual: object) -> bool:
 
 
 def normalize(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+    collapsed = " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+    return JAPANESE_ADJACENT_SPACE.sub("", collapsed)
 
 
 def provenance(

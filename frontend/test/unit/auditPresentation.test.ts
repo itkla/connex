@@ -27,6 +27,40 @@ function entry(overrides: Partial<AuditLogEntry>): AuditLogEntry {
 }
 
 describe('presentAuditEntry', () => {
+    it.each([
+        { action: 'report.export', changes: { format: 'png', scope: 'workspace', imageCount: 1, documentCount: 1, widgetCount: 3 }, keys: ['format', 'scope', 'imageCount', 'documentCount', 'widgetCount'] },
+        { action: 'report.export', changes: { format: 'csv', scope: 'workspace', rowCount: 0, snapshot: true }, keys: ['format', 'scope', 'rowCount', 'snapshot'] },
+        { action: 'org.workspace.export', changes: { format: 'zip', scope: 'workspace', rowCount: 27, tableCount: 14, objectCount: 2 }, keys: ['format', 'scope', 'rowCount', 'tableCount', 'objectCount'] },
+    ])('shows only safe export evidence for $action/$changes.format', ({ action, changes, keys }) => {
+        const exported = entry({ action, changes: { ...changes, name: 'private report name', rows: ['private values'] } });
+        const presentation = presentAuditEntry(exported);
+        expect(presentation.diffs).toEqual([]);
+        expect(presentation.metadata.map(({ key }) => key)).toEqual(expect.arrayContaining(keys));
+        expect(JSON.stringify(presentation)).not.toContain('private');
+        expect(auditSummary(exported)).toBeNull();
+        if (changes.format === 'png') expect(presentation.metadata.some(({ key }) => key === 'rowCount')).toBe(false);
+    });
+
+    it.each(['person.export', 'company.export', 'deal.export', 'product.export', 'audit.export', 'organization.audit.export'])(
+        'presents safe counts and scope for %s without copying filter or exported values', (action) => {
+            const exported = entry({
+                action, entityId: null, targetLabel: null, summary: 'CSV export prepared',
+                changes: { rowCount: 0, scope: 'workspace', filtered: true, segment: false,
+                    selected: true, query: 'private filter', values: ['private exported value'] },
+            });
+            const presentation = presentAuditEntry(exported);
+            expect(presentation.diffs).toEqual([]);
+            expect(presentation.metadata).toEqual(expect.arrayContaining([
+                expect.objectContaining({ key: 'rowCount', value: 0 }),
+                expect.objectContaining({ key: 'scope', value: 'workspace' }),
+                expect.objectContaining({ key: 'filtered', value: true }),
+                expect.objectContaining({ key: 'segment', value: false }),
+            ]));
+            expect(JSON.stringify(presentation)).not.toContain('private');
+            expect(auditSummary(exported)).toBeNull();
+        },
+    );
+
     it('renders allowlisted secret metadata instead of treating values as empty diffs', () => {
         const presentation = presentAuditEntry(entry({
             action: 'secret_store.secret.use',

@@ -17,6 +17,7 @@ package ooo.klae.connex.backend.dto;
  * @param createdBy        generator user id
  * @param content          parsed immutable snapshot
  * @param requiresApproval whether an active approval policy currently blocks direct finalization
+ * @param approvalConfigurationError localized refusal code for this draft, without hiding the snapshot
  * @param latestApproval   most recent approval request on this document (nullable)
  */
 public record DealDocumentDto(
@@ -33,5 +34,15 @@ public record DealDocumentDto(
     Integer createdBy,
     DocumentContent content,
     boolean requiresApproval,
-    DocumentApprovalDto latestApproval
-) {}
+    DocumentApprovalDto latestApproval,
+    String approvalConfigurationError
+) {
+    /** Retains the document snapshot construction contract for callers without a refusal. */
+    public DealDocumentDto(int id, int dealId, Integer templateId, String type, String locale,
+            String status, int version, String title, String currency, String generatedAt,
+            Integer createdBy, DocumentContent content, boolean requiresApproval,
+            DocumentApprovalDto latestApproval) {
+        this(id, dealId, templateId, type, locale, status, version, title, currency, generatedAt,
+            createdBy, content, requiresApproval, latestApproval, null);
+    }
+}

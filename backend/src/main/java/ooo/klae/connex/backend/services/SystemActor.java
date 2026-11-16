@@ -44,6 +44,15 @@ public class SystemActor {
         return user;
     }
 
+    /** Reads the provisioned system principal without populating shared state. */
+    public User readUser() {
+        User user = userMapper.getUserByUsername(USERNAME);
+        if (user == null) {
+            throw new IllegalStateException("System automation user is not provisioned");
+        }
+        return user;
+    }
+
     /** Whether the given user id is the system automation user. Safe to call before provisioning. */
     public boolean is(int userId) {
         User user = resolve();

@@ -7,6 +7,7 @@ import ooo.klae.connex.backend.beans.DataSubjectRequest;
 
 @Data
 public class DataSubjectRequestDto {
+    private String snapshotToken;
     private long id;
     private int orgId;
     private String requestType;
@@ -31,6 +32,7 @@ public class DataSubjectRequestDto {
 
     public static DataSubjectRequestDto from(DataSubjectRequest request) {
         DataSubjectRequestDto dto = new DataSubjectRequestDto();
+        dto.setSnapshotToken(ooo.klae.connex.backend.services.DataSubjectRequestSnapshot.token(request));
         dto.setId(request.getId());
         dto.setOrgId(request.getOrgId());
         dto.setRequestType(request.getRequestType());

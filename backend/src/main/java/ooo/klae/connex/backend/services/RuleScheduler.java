@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
@@ -54,6 +55,8 @@ public class RuleScheduler {
         for (String catalog : placementRegistry.activeCatalogs()) {
             try {
                 evaluateCatalog(catalog);
+            } catch (TenantScopeSnapshotException refusal) {
+                throw refusal;
             } catch (Exception e) {
                 log.warn("Schedule sweep failed for catalog {}: {}", catalog == null ? "(default)" : catalog, e.getMessage());
             }
@@ -90,6 +93,8 @@ public class RuleScheduler {
                                 ruleEngineService.runSchedule(dispatch);
                             }
                             completedCadences++;
+                        } catch (TenantScopeSnapshotException refusal) {
+                            throw refusal;
                         } catch (Exception e) {
                             failedCadences++;
                             log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
@@ -102,6 +107,8 @@ public class RuleScheduler {
                             "completedCadences", completedCadences,
                             "failedCadences", failedCadences)));
                 });
+            } catch (TenantScopeSnapshotException refusal) {
+                throw refusal;
             } catch (Exception e) {
                 log.warn("Schedule evaluation skipped for workspace {}: {}", workspaceId, e.getMessage());
             }

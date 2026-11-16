@@ -1,8 +1,10 @@
 'use client';
 
+import { useTimeZoneSearch } from '@/app/hooks/useTimeZoneSearch';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     BellAlertIcon,
     EllipsisHorizontalIcon,
@@ -123,6 +125,7 @@ function supportedTimeZones(current: string): string[] {
  * calendar, with briefs arriving at the wrong hour and no way to correct them.
  */
 export default function AskConnexCommandCenter() {
+    const timeZone = useTimeZone();
     const t = useTranslations('AskConnex.commandCenter');
     const locale = useLocale();
     const showApiError = useApiErrorToast('AskConnex.commandCenter');
@@ -134,6 +137,7 @@ export default function AskConnexCommandCenter() {
     const [pendingDeletion, setPendingDeletion] = useState<AiWatch | null>(null);
     const storedZone = state?.schedule.timeZone ?? 'UTC';
     const timeZones = useMemo(() => supportedTimeZones(storedZone), [storedZone]);
+    const timeZoneSearch = useTimeZoneSearch(timeZones);
 
     useEffect(() => {
         let live = true;
@@ -392,7 +396,7 @@ export default function AskConnexCommandCenter() {
                                 void saveSchedule({ ...scheduleBase, timeZone: value });
                             }
                         }}
-                        itemToStringLabel={(value: string) => value}
+                        {...timeZoneSearch}
                     >
                         <ComboboxInput
                             id="ask-connex-brief-zone"
@@ -400,11 +404,11 @@ export default function AskConnexCommandCenter() {
                             disabled={savingSchedule}
                         />
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('scheduleZoneEmpty')}</ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>{t('scheduleZoneEmpty')}</ComboboxEmpty>
-                                {timeZones.map((zone) => (
-                                    <ComboboxItem key={zone} value={zone}>{zone}</ComboboxItem>
-                                ))}
+                                {(zone: (typeof timeZones)[number]) => (
+                                    <ComboboxItem key={zone} value={zone}>{timeZoneSearch.itemToStringLabel(zone)}</ComboboxItem>
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -428,7 +432,7 @@ export default function AskConnexCommandCenter() {
                     <ul className="space-y-1">
                         {watches.map((watch) => {
                             const limits = askConnexWatchLimitsText(
-                                watch, t, (isoDate) => formatDate(isoDate, locale),
+                                watch, t, (isoDate) => formatDate(isoDate, locale, timeZone),
                             );
                             return (
                             <li
@@ -462,7 +466,7 @@ export default function AskConnexCommandCenter() {
                                                 ? t('neverFired')
                                                 : t('lastFired', {
                                                     date: formatUtcDateTime(
-                                                        watch.lastFiredAt, locale,
+                                                        watch.lastFiredAt, locale, undefined, timeZone,
                                                     ),
                                                 })}
                                         </span>

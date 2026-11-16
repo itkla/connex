@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The domain allowlist gates invite-LINK redemption (the broad self-serve channel): a user whose
@@ -32,15 +35,18 @@ class InviteLinkDomainGateTest extends AbstractServiceTest {
         return u;
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeem_blockedWhenDomainNotAllowlisted() {
         allowedDomainService.addDomain(workspace.getId(), currentUser.getId(), "acme.com");
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> inviteLinkService.redeemLink(link.getToken(), outsiderWithDomain("other.com")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeem_allowedWhenDomainOnAllowlist() {
         allowedDomainService.addDomain(workspace.getId(), currentUser.getId(), "acme.com");
@@ -52,6 +58,7 @@ class InviteLinkDomainGateTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(workspace.getId(), user.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeem_allowedWhenNoAllowlist() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);

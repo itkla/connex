@@ -1734,4 +1734,194 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(refused.getMessages().getLast().getContent()
                 .contains("\"error\":\"toolset_already_loaded\""));
     }
+    @Test
+    void memberAnswerAndSummaryProvenanceRehydratesAFreshContextWithoutPersistedTokens() throws Exception {
+        String metadata = assembler.finalMetadata(41, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), List.of("Former Member"));
+        assertFalse(metadata.contains("{{M"));
+        assertFalse(objectMapper.readTree(metadata).path("identifiers").toString().contains("member"));
+        assertEquals("member", objectMapper.readTree(metadata).path("memberIdentifiers").get(0).path("kind").asString());
+        assertTrue(metadata.contains("\"kind\":\"member\""));
+        AiChatMessage answer = new AiChatMessage();
+        answer.setAuthorKind("assistant");
+        answer.setContent("Former Member handled it.");
+        answer.setStructuredJson(metadata);
+        for (boolean compaction : List.of(false, true)) {
+            MaskingContext context = new MaskingContext();
+            AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
+            MaskedPrompt prompt = compaction
+                    ? assembler.assembleSummary(null, List.of(answer), context, resources)
+                    : assembler.assemble(List.of(answer), new AiAssistantToolResult(Map.of(), List.of()),
+                            List.of(), context, resources, AiAssistantToolCatalog.ALL);
+            String payload = objectMapper.writeValueAsString(prompt.getMessages());
+            assertFalse(payload.contains("Former Member"));
+            assertTrue(payload.contains("{{M1}}"));
+            assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+            context.exposeDispatchedPayload(payload);
+            assertEquals("Former Member", ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).text());
+        }
+        AiChatMessage summary = new AiChatMessage();
+        summary.setAuthorKind("system");
+        summary.setContent("Former Member handled it.");
+        summary.setStructuredJson("{\"kind\":\"history_summary\",\"resources\":[],\"identifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        MaskingContext context = new MaskingContext();
+        String payload = objectMapper.writeValueAsString(assembler.assemble(List.of(summary),
+                new AiAssistantToolResult(Map.of(), List.of()), List.of(), context,
+                new AiChatResourceRegistry(context), AiAssistantToolCatalog.ALL).getMessages());
+        assertFalse(payload.contains("Former Member"));
+        assertTrue(payload.contains("{{M1}}"));
+    }
+
+    @Test
+    void stageAndTagRemainVocabularyWithOrdinaryMemberCollisionScreening() throws Exception {
+        var result = new AiAssistantToolResult(Map.of("owner", "Assigned Member", "stage", "Qualified", "tag", "Priority"),
+                List.of(new Identifier("member", "Assigned Member")));
+        var context = new MaskingContext();
+        var prompt = assembler.assemble(List.of(), result, List.of(), context, new AiChatResourceRegistry(context), AiAssistantToolCatalog.ALL);
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertFalse(payload.contains("Assigned Member"));
+        assertTrue(payload.contains("{{M1}}"));
+        assertTrue(payload.contains("Qualified"));
+        assertTrue(payload.contains("Priority"));
+        var collision = new AiAssistantToolResult(Map.of("tag", "Assigned Member"), List.of());
+        String screened = objectMapper.writeValueAsString(assembler.assemble(List.of(), collision, List.of(), context,
+                new AiChatResourceRegistry(context), AiAssistantToolCatalog.ALL).getMessages());
+        assertFalse(screened.contains("Assigned Member"));
+        assertTrue(screened.contains("{{M1}}"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void rollbackCompatibleMemberMetadataReplaysMixedOldAndNewConversations(boolean nativeProtocol) throws Exception {
+        AiChatMessage oldUser = new AiChatMessage();
+        oldUser.setAuthorKind("user");
+        oldUser.setContent("Old Company was contacted.");
+        oldUser.setStructuredJson("{\"kind\":\"user_message\",\"resources\":[],\"identifiers\":[{\"kind\":\"company\",\"value\":\"Old Company\"}]}");
+        AiChatMessage oldAnswer = new AiChatMessage();
+        oldAnswer.setAuthorKind("assistant");
+        oldAnswer.setContent("Old Company has a followup.");
+        oldAnswer.setStructuredJson("{\"resources\":[],\"citations\":[]}");
+        AiChatMessage newUser = new AiChatMessage();
+        newUser.setAuthorKind("user");
+        newUser.setContent("Former Member contacted Old Company.");
+        newUser.setStructuredJson("{\"kind\":\"user_message\",\"resources\":[],\"identifiers\":[],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        AiChatMessage answer = new AiChatMessage();
+        answer.setAuthorKind("assistant");
+        answer.setContent("Former Member has a followup.");
+        answer.setStructuredJson(assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), List.of("Former Member")));
+        AiChatMessage oldSummary = new AiChatMessage();
+        oldSummary.setAuthorKind("system");
+        oldSummary.setContent("Old Company discussed next steps.");
+        oldSummary.setStructuredJson("{\"kind\":\"history_summary\",\"resources\":[],\"identifiers\":[{\"kind\":\"company\",\"value\":\"Old Company\"}]}");
+        AiChatMessage newSummary = new AiChatMessage();
+        newSummary.setAuthorKind("system");
+        newSummary.setContent("Former Member discussed next steps.");
+        newSummary.setStructuredJson("{\"kind\":\"history_summary\",\"resources\":[],\"identifiers\":[],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        var context = new MaskingContext();
+        var resources = new AiChatResourceRegistry(context);
+        var history = List.of(oldUser, oldAnswer, newUser, answer, oldSummary, newSummary);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(history, empty, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(history, empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertFalse(payload.contains("Former Member"));
+        assertFalse(payload.contains("Old Company"));
+        assertTrue(payload.contains("{{M1}}"));
+        assertTrue(payload.contains("{{C1}}"));
+        assertEquals(6, prompt.getMessages().size());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void memberMetadataSeedingHonorsDisclosureWithoutIssuingUnusedBindings(boolean unmasked, boolean nativeProtocol) throws Exception {
+        for (String author : List.of("user", "assistant", "system")) {
+            for (String field : List.of("identifiers", "memberIdentifiers")) {
+                for (boolean compaction : List.of(false, true)) {
+                    var context = new MaskingContext(unmasked ? ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED
+                            : ooo.klae.connex.backend.ai.AiPrivacyMode.MASKED);
+                    var resources = new AiChatResourceRegistry(context);
+                    var message = new AiChatMessage();
+                    message.setAuthorKind(author);
+                    message.setContent("Former Member handled it.");
+                    String kind = author.equals("system") ? "history_summary" : "user_message";
+                    var metadata = objectMapper.createObjectNode();
+                    if (!author.equals("assistant")) {
+                        metadata.put("kind", kind);
+                    }
+                    metadata.putArray("resources");
+                    metadata.putArray("identifiers");
+                    var identifiers = metadata.putArray(field);
+                    identifiers.addObject().put("kind", "member").put("value", "Former Member");
+                    identifiers.addObject().put("kind", "member").put("value", "Unused Member");
+                    message.setStructuredJson(metadata.toString());
+                    var empty = new AiAssistantToolResult(Map.of(), List.of());
+                    var prompt = compaction
+                            ? assembler.assembleSummary(author.equals("system") ? message : null,
+                                    author.equals("system") ? List.of() : List.of(message), context, resources)
+                            : nativeProtocol
+                                    ? assembler.assembleNative(List.of(message), empty, List.of(), context, resources, List.of(),
+                                            new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                                    : assembler.assemble(List.of(message), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+                    String payload = objectMapper.writeValueAsString(prompt.getMessages());
+                    assertEquals(unmasked, payload.contains("Former Member"));
+                    assertEquals(!unmasked, payload.contains("{{M1}}"));
+                    assertFalse(payload.contains("Unused Member"));
+                    assertEquals(unmasked ? 0 : 1, context.tokenBindings().size());
+                    assertEquals(unmasked ? 0 : 2, context.identifierDictionary().size());
+                    assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(payload, context, objectMapper));
+                    if (!unmasked) {
+                        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                                "{\"content\":\"Former Member handled it.\"}", context, objectMapper));
+                    }
+                }
+            }
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void supplementaryMemberLabelsRoundTripThroughFinalMetadataAndFreshReplay(boolean nativeProtocol) throws Exception {
+        String member = "😀".repeat(600);
+        var context = new MaskingContext();
+        String token = context.tokenFor(EntityKind.MEMBER, member);
+        context.exposeDispatchedPayload(token);
+        var answer = objectMapper.createObjectNode().put("text", token);
+        var provenance = new java.util.LinkedHashMap<String, List<String>>();
+        assertEquals(0, ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(answer, context,
+                (path, value) -> provenance.put(path, List.of(value))));
+        assertEquals(member, answer.path("text").asString());
+        String metadata = assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), provenance);
+        assertEquals(member, AiAssistantMemberIdentifiers.stored(objectMapper.readTree(metadata)).getFirst().value());
+        var message = new AiChatMessage();
+        message.setAuthorKind("assistant");
+        message.setContent(answer.path("text").asString());
+        message.setStructuredJson(metadata);
+        var fresh = new MaskingContext();
+        var resources = new AiChatResourceRegistry(fresh);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(message), empty, List.of(), fresh, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(message), empty, List.of(), fresh, resources, AiAssistantToolCatalog.ALL);
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertFalse(payload.contains(member));
+        assertTrue(payload.contains("{{M1}}"));
+        fresh.exposeDispatchedPayload(payload);
+        assertEquals(member, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", fresh).text());
+    }
+
+    @Test
+    void answerMemberProvenanceLimitCountsEntriesBeforeDeduplication() {
+        var excessive = java.util.Collections.nCopies(201, "Member");
+        assertThrows(IllegalStateException.class, () -> assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), excessive));
+        assertThrows(IllegalStateException.class, () -> assembler.finalMetadata(1, List.of(), List.of("Ask Member"), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), Map.of(
+                        "/text", excessive.subList(0, 101), "/suggestions/0", excessive.subList(0, 100))));
+    }
+
 }

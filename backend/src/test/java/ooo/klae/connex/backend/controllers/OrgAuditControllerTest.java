@@ -2,7 +2,10 @@ package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -16,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.OrgMemberService;
@@ -47,7 +51,7 @@ class OrgAuditControllerTest {
     @Test
     void exportOrgAuditRequiresOrgAdminAndForwardsLimitAndOffset() {
         when(auditService.exportRecentForOrg(3, 500, 10)).thenReturn("csv");
-        ResponseEntity<byte[]> response = controller.exportOrgAudit(3, 500, 10);
+        ResponseEntity<byte[]> response = controller.exportOrgAudit(3, 500, 10, null);
         verify(orgMemberService).requireOrgAdmin(3, 7);
         verify(auditService).exportRecentForOrg(3, 500, 10);
         assertEquals(200, response.getStatusCode().value());
@@ -56,6 +60,27 @@ class OrgAuditControllerTest {
             response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION));
         byte[] body = response.getBody();
         assertArrayEquals(UTF8_BOM, new byte[] { body[0], body[1], body[2] });
+    }
+
+    @Test
+    void selectedOrgExportRequiresOrgAdminAndUsesTheAuthorizedOrganization() {
+        when(auditService.exportSelectedForOrg(3, List.of(91, 92), 200, 0)).thenReturn("csv");
+
+        ResponseEntity<byte[]> response = controller.exportOrgAudit(3, 200, 0, List.of(91, 92));
+
+        verify(orgMemberService).requireOrgAdmin(3, 7);
+        verify(auditService).exportSelectedForOrg(3, List.of(91, 92), 200, 0);
+        assertEquals(200, response.getStatusCode().value());
+    }
+
+    @Test
+    void selectedOrgExportCannotBypassOrganizationAuthority() {
+        doThrow(new ForbiddenException("Requires organization administration")).when(orgMemberService)
+            .requireOrgAdmin(3, 7);
+
+        assertThrows(ForbiddenException.class, () -> controller.exportOrgAudit(3, 200, 0, List.of(91)));
+
+        verifyNoInteractions(auditService);
     }
 
     private static User user(int id) {

@@ -54,6 +54,7 @@ import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow;
 
@@ -270,6 +271,7 @@ class MfaRecoveryPasskeyRaceIntegrationTest extends AbstractPrivilegedMfaRecover
                 account.getId(),
                 admittedEpoch,
                 true,
+                new EnrollmentEvidence(null, null),
                 null,
                 null,
                 "replacement"));

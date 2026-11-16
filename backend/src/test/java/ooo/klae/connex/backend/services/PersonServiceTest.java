@@ -17,7 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -47,8 +49,22 @@ import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class PersonServiceTest extends AbstractServiceTest {
+    @Test
+    void independentWritersPatchOnlyTheirChosenRestrictionAndPreserveTheOtherHold() {
+        Person subject = newPerson(newCompany());
+        Person suspended = personService.updateProcessingRestrictions(subject.getId(), true, null);
+        Person both = personService.updateProcessingRestrictions(subject.getId(), null, true);
+        assertEquals(suspended.getSuspendedAt(), both.getSuspendedAt());
+        assertNotNull(both.getProvisionCeasedAt());
+        Person sharingOnly = personService.updateProcessingRestrictions(subject.getId(), false, null);
+        assertNull(sharingOnly.getSuspendedAt());
+        assertEquals(both.getProvisionCeasedAt(), sharingOnly.getProvisionCeasedAt());
+    }
 
     @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;
@@ -70,7 +86,7 @@ class PersonServiceTest extends AbstractServiceTest {
 
         assertThrows(
             ResourceNotFoundException.class,
-            () -> personService.lockProcessablePersonForUpdate(person.getId()));
+            () -> personService.lockProcessablePersonForUpdate(person.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())));
     }
 
     @Test
@@ -359,7 +375,7 @@ class PersonServiceTest extends AbstractServiceTest {
         assertEquals(businessCardReuseConflictMessage(), exception.getMessage());
         assertEquals(
             update.getEmail(),
-            personMapper.getPersonById(workspace.getId(), created.getId()).getEmail());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId()).getEmail());
     }
 
     @Test
@@ -455,8 +471,10 @@ class PersonServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         workspaceMapper.addMember(ownerWorkspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, ownerWorkspace.getId());
+        approveForStepUp(currentUser);
         Person shared = personService.create(personDraft(null));
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         shareMapper.sharePerson(
             shared.getId(),
             ownerWorkspace.getId(),
@@ -552,8 +570,8 @@ class PersonServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Deal subjectDeal = newDeal(pipeline, stage, company);
         Deal otherDeal = newDeal(pipeline, stage, company);
-        dealMapper.addPerson(workspace.getId(), subjectDeal.getId(), subject.getId(), null);
-        dealMapper.addPerson(workspace.getId(), otherDeal.getId(), other.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), subjectDeal.getId(), subject.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), otherDeal.getId(), other.getId(), null);
 
         Workspace grantee = newWorkspaceInSameOrg();
 
@@ -575,11 +593,16 @@ class PersonServiceTest extends AbstractServiceTest {
             workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0));
         assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0));
         assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
-        ArgumentCaptor<List<Integer>> bumpedWorkspaceIds = ArgumentCaptor.captor();
-        verify(aiRestrictionEpoch).bumpAll(bumpedWorkspaceIds.capture());
+        ArgumentCaptor<List<Integer>> fencedWorkspaceIds = ArgumentCaptor.captor();
+        var epochOrder = inOrder(aiRestrictionEpoch);
+        epochOrder.verify(aiRestrictionEpoch).retainWriteFencesUntilTransactionCompletion(fencedWorkspaceIds.capture());
         assertEquals(
-            Set.of(workspace.getId(), grantee.getId()),
-            Set.copyOf(bumpedWorkspaceIds.getValue()));
+            List.of(workspace.getId(), grantee.getId()).stream().sorted().toList(),
+            fencedWorkspaceIds.getValue());
+        for (int workspaceId : fencedWorkspaceIds.getValue()) {
+            epochOrder.verify(aiRestrictionEpoch).bump(workspaceId);
+        }
+        verifyNoMoreInteractions(aiRestrictionEpoch);
 
         String changes = jdbcTemplate.queryForObject(
             "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
@@ -640,6 +663,7 @@ class PersonServiceTest extends AbstractServiceTest {
         aiOutputCacheMapper.upsert(row);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void updateProcessingRestrictionsRequiresPersonUpdatePermission() {
         Person person = newPerson(newCompany());
@@ -652,7 +676,7 @@ class PersonServiceTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class,
             () -> personService.updateProcessingRestrictions(person.getId(), true, false));
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getSuspendedAt());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getSuspendedAt());
     }
 
     @Test
@@ -664,9 +688,9 @@ class PersonServiceTest extends AbstractServiceTest {
 
         assertNull(created.getImageUrl());
         assertEquals(currentUser.getId(), created.getOwnerId());
-        assertNull(personMapper.getPersonById(workspace.getId(), created.getId()).getImageUrl());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId()).getImageUrl());
         assertEquals(currentUser.getId(),
-            personMapper.getPersonById(workspace.getId(), created.getId()).getOwnerId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId()).getOwnerId());
     }
 
     @Test
@@ -686,7 +710,7 @@ class PersonServiceTest extends AbstractServiceTest {
         assertEquals(managed, updated.getImageUrl());
         assertEquals(owner.getId(), updated.getOwnerId());
         assertEquals(managed,
-            personMapper.getPersonById(workspace.getId(), person.getId()).getImageUrl());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getImageUrl());
     }
 
     @Test
@@ -721,7 +745,7 @@ class PersonServiceTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class,
             () -> personService.updateOwner(person.getId(), outsider.getId()));
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
     }
 
     @Test
@@ -748,17 +772,17 @@ class PersonServiceTest extends AbstractServiceTest {
         shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true,
             orgWorkspaceIdsJson(workspaceMapper, other.getId()));
 
-        assertTrue(personMapper.exists(workspace.getId(), foreign.getId()));
+        assertTrue(personMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), foreign.getId()));
         assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()));
         assertThrows(ResourceNotFoundException.class,
             () -> personService.updateEvaluationExclusions(foreign.getId(), true, true));
-        Person ownerView = personMapper.getPersonById(other.getId(), foreign.getId());
+        Person ownerView = personMapper.getPersonById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreign.getId());
         assertFalse(ownerView.isRiskExcluded());
         assertFalse(ownerView.isIntroExcluded());
 
         assertThrows(ResourceNotFoundException.class,
             () -> personService.updateProcessingRestrictions(foreign.getId(), true, true));
-        ownerView = personMapper.getPersonById(other.getId(), foreign.getId());
+        ownerView = personMapper.getPersonById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreign.getId());
         assertNull(ownerView.getSuspendedAt());
         assertNull(ownerView.getProvisionCeasedAt());
     }
@@ -878,7 +902,7 @@ class PersonServiceTest extends AbstractServiceTest {
         Deal linked = newDeal(pipeline, stage, company);
         Deal unlinked = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), linked.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), linked.getId(), person.getId(), null);
 
         List<Deal> deals = personService.getDealsByPersonId(person.getId());
 
@@ -957,6 +981,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setName("Other Workspace");
         other.setSlug("other-" + unique());
         workspaceMapper.insert(other);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, other.getId());
         return other;
     }
 
@@ -966,6 +991,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setSlug("other-" + unique());
         other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
         workspaceMapper.insert(other);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, other.getId());
         return other;
     }
 

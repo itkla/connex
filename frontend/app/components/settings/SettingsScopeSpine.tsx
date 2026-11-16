@@ -67,7 +67,7 @@ export default function SettingsScopeSpine({
                                 className={cn(
                                     "-ml-px block border-l-2 py-1.5 pl-4 transition-colors duration-(--motion-micro) ease-calm motion-reduce:transition-none",
                                     active
-                                        ? "border-brand font-medium text-brand-dark"
+                                        ? "border-brand font-medium text-brand-text"
                                         : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
                                 )}
                             >

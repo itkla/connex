@@ -23,11 +23,15 @@ public interface AuditLogMapper {
 
     List<AuditLog> findWorkspaceExport(@Param("workspaceId") Integer workspaceId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("ids") List<Integer> ids,
+        @Param("entityType") String entityType,
+        @Param("entityId") Integer entityId);
 
     List<AuditLog> findOrgExport(@Param("orgId") int orgId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("ids") List<Integer> ids);
 
     List<AuditLog> findRecentByOrg(@Param("orgId") int orgId,
         @Param("limit") int limit,

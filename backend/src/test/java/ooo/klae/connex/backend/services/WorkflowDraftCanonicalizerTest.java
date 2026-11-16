@@ -176,6 +176,20 @@ class WorkflowDraftCanonicalizerTest {
     }
 
     @Test
+    void rejectsRecipientBindingsThatRequireSchemaV2() {
+        for (String binding : List.of("recipient", "assignee", "targetUser")) {
+            String json = definition("""
+                [{"type":"ACTION","id":"action","config":{"type":"notify","title":"Follow up","%s":{"kind":"record_owner"}}}]
+                """.formatted(binding), "[]", "action");
+            assertThrows(BadRequestException.class, () -> canonicalize(json, canvas("action")));
+        }
+        String dynamicId = definition("""
+            [{"type":"ACTION","id":"action","config":{"type":"notify","title":"Follow up","targetUserId":"record_owner"}}]
+            """, "[]", "action");
+        assertThrows(BadRequestException.class, () -> canonicalize(dynamicId, canvas("action")));
+    }
+
+    @Test
     void rejectsUnknownPropertiesAndDuplicateJsonKeys() {
         String unknown = """
             {"schemaVersion":1,"entryNodeId":"end","nodes":[{"type":"END","id":"end"}],"edges":[],"extra":true}

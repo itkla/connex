@@ -86,6 +86,7 @@ public class ShareService {
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
         OrganizationWorkspaces organizationWorkspaces =
             shareWorkspaceControlAccess.getForWorkspace(workspaceId);
+        String orgWorkspaceIdsJson = organizationWorkspaces.workspaceIdsJson();
         LockedPermissionSnapshot authority = type == Type.PIPELINE
             ? duplicateDecisionLockService.lockCurrentWorkspacesWithMemberWorkspace(
                 targetWorkspaceId, Permission.SHARE_MANAGE)
@@ -93,7 +94,7 @@ public class ShareService {
                 targetWorkspaceId, Permission.SHARE_MANAGE).authority();
         requireOwned(type, workspaceId, entityId);
         if (type == Type.PERSON) {
-            requirePersonProvisionAllowed(workspaceId, entityId);
+            requirePersonProvisionAllowed(workspaceId, entityId, orgWorkspaceIdsJson);
         }
         if (targetWorkspaceId == workspaceId) {
             throw new BadRequestException("A record cannot be shared with its own workspace");
@@ -107,7 +108,6 @@ public class ShareService {
             }
         }
         authority.revalidate();
-        String orgWorkspaceIdsJson = organizationWorkspaces.workspaceIdsJson();
         int granted = switch (type) {
             case COMPANY -> shareMapper.shareCompany(
                 entityId, workspaceId, targetWorkspaceId, actorId, canEdit, orgWorkspaceIdsJson);
@@ -117,7 +117,7 @@ public class ShareService {
                 entityId, workspaceId, targetWorkspaceId, actorId, canEdit, orgWorkspaceIdsJson);
         };
         if (granted == 0 && type == Type.PERSON) {
-            requirePersonProvisionAllowed(workspaceId, entityId);
+            requirePersonProvisionAllowed(workspaceId, entityId, orgWorkspaceIdsJson);
         }
         if (granted == 0 && !shareExists(type, entityId, workspaceId, targetWorkspaceId)) {
             throw new ForbiddenException("A record can only be shared by its owning workspace within its organization");
@@ -176,8 +176,8 @@ public class ShareService {
         }
     }
 
-    private void requirePersonProvisionAllowed(int workspaceId, int entityId) {
-        Person person = personMapper.getPersonById(workspaceId, entityId);
+    private void requirePersonProvisionAllowed(int workspaceId, int entityId, String personWorkspaceIdsJson) {
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, entityId);
         if (person == null) {
             throw new ResourceNotFoundException("Record not found in this workspace");
         }

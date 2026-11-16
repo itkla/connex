@@ -15,12 +15,14 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
+import ooo.klae.connex.backend.validation.ValidCurrency;
 
 public record GuidedDealRecordDto(
     @NotBlank @Size(max = 255) String name,
     @NotNull @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) @DecimalMax("9999999999999.99")
     BigDecimal value,
-    @NotBlank @Size(max = 8) String currency,
+    @ValidCurrency(allowBlank = true) String currency,
     @NotNull @Positive Integer pipeline,
     @NotNull @Positive Integer stage,
     @Positive Integer company,
@@ -28,11 +30,13 @@ public record GuidedDealRecordDto(
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Pattern(regexp = "^[0-9a-f]{64}$") String duplicateReviewToken
 ) {
+    /** Preserves the omitted realized amount for canonical resolution when the chosen stage wins. */
     public Deal toBean() {
         Deal deal = new Deal();
         deal.setName(name);
         deal.setValue(value);
-        deal.setCurrency(currency);
+        deal.setActualValue(null);
+        deal.setCurrency(CurrencyCodes.optional(currency == null || currency.isBlank() ? null : currency));
         deal.setPipelineId(pipeline);
         deal.setStageId(stage);
         deal.setCompanyId(company);

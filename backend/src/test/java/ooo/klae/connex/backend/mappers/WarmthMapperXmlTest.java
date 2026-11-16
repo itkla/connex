@@ -17,10 +17,12 @@ import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.WarmthFilter;
@@ -29,6 +31,41 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 /** Verifies warmth aggregate and evidence mapper statements bind the shared model contract. */
 class WarmthMapperXmlTest {
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
+    private static final String[] SEGMENT_STATEMENTS = {
+        "getSegmentCompaniesPage", "countSegmentCompanies", "getSegmentCompanyIdsFiltered"};
+
+    @Test
+    void personalWarmthImportsResolveTheirNestedFragmentsWithoutADatabase() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = Map.of(
+            "workspaceId", 7, "userId", 51,
+            "orgWorkspaceIdsJson", "[7,8]",
+            "reference", LocalDateTime.of(2026, 6, 30, 0, 0),
+            "model", RelationshipWarmthModel.current().sqlParameters(),
+            "coolingOnly", true, "limit", 6);
+        var visibility = configuration.getSqlFragments()
+            .get(PersonMapper.class.getName() + ".visibleAny");
+        assertNotNull(visibility);
+        String canonicalVisibility = visibility.getStringBody().replaceAll("\\s+", " ").trim()
+            .replace("#{workspaceId}", "?").replace("#{orgWorkspaceIdsJson}", "?");
+        for (String statement : List.of("relationshipCounts", "relationshipIds")) {
+            String sql = sql(configuration, MyWorkReadMapper.class, statement, parameters).replaceAll("\\s+", " ").trim();
+            assertTrue(sql.contains("CASE LOWER(a.type)"));
+            assertTrue(sql.contains("p.owner_id = ?"));
+            assertTrue(sql.contains("p.archived_at IS NULL"));
+            assertTrue(sql.contains("p.suspended_at IS NULL"));
+            assertTrue(sql.contains("p.provision_ceased_at IS NULL"));
+            assertTrue(sql.contains("FROM person_share ps"));
+            assertTrue(sql.contains("org_workspace.id = p.workspace_id"));
+            assertTrue(sql.contains(canonicalVisibility));
+            assertFalse(sql.contains("viewing_workspace"));
+            var bound = configuration.getMappedStatement(MyWorkReadMapper.class.getName() + "." + statement)
+                .getBoundSql(parameters);
+            assertEquals(List.of("workspaceId", "orgWorkspaceIdsJson", "workspaceId"),
+                bound.getParameterMappings().stream().limit(3).map(mapping -> mapping.getProperty()).toList());
+            assertEquals(10, timeout(configuration, MyWorkReadMapper.class, statement));
+        }
+    }
 
     @Test
     void warmthStatementsParseAndBindModelParameters() throws Exception {
@@ -88,6 +125,12 @@ class WarmthMapperXmlTest {
             )
         );
 
+        for (String statement : List.of(personAggregate, companyAggregate, personEvidenceTotals,
+                companyEvidenceTotals, personEvidence, companyEvidence)) {
+            assertTrue(statement.contains("t.completed = TRUE"));
+            assertTrue(statement.contains("t.completed_at AS touched_at"));
+            assertFalse(statement.contains("t.created_at AS touched_at"));
+        }
         assertTrue(personAggregate.contains("POW(?, -touch.age_days / ?)"));
         assertTrue(companyAggregate.contains("POW(?, -touch.age_days / ?)"));
         assertTrue(personEvidenceTotals.contains("POW(?, -capped.age_days / ?)"));
@@ -209,25 +252,85 @@ class WarmthMapperXmlTest {
     }
 
     /**
-     * The smart-segment company page shares the browser's sort whitelist but joins no warmth
-     * aggregate, so an unsupported warmth sort there must fall through to the default column.
+     * The smart-segment company statements apply the same warmth contract as the plain browser:
+     * the page joins the aggregate for a warmth filter or sort, while the count and id selection
+     * join it only when a band, the no-history bucket, or a horizon narrows the rows.
      */
     @Test
-    void theSegmentCompanyPageNeverEmitsTheWarmthSortColumn() throws Exception {
+    void segmentCompanyStatementsJoinTheWarmthAggregateOnlyWhenWarmthWasRequested() throws Exception {
         Configuration configuration = configuration();
-        Map<String, Object> parameters = new HashMap<>();
-        parameters.put("workspaceId", 7);
-        parameters.put("segmentIdsJson", "[1,2]");
-        parameters.put("sort", "warmth");
-        parameters.put("dir", "desc");
-        parameters.put("limit", 25);
-        parameters.put("offset", 0);
+        Map<String, Object> unfiltered = segmentParameters(null, MemberScope.allTeam());
+        Map<String, Object> sorted = segmentParameters(
+            WarmthFilter.fromRequest(null, false, null, "warmth", NOW), MemberScope.allTeam());
+        Map<String, Object> banded = segmentParameters(
+            WarmthFilter.fromRequest(List.of("hot", "cold"), true, 30, "warmth", NOW),
+            MemberScope.allTeam());
 
-        String sql = collapsed(
-            sql(configuration, CompanyMapper.class, "getSegmentCompaniesPage", parameters));
+        for (String statement : SEGMENT_STATEMENTS) {
+            String unfilteredSql = sql(configuration, CompanyMapper.class, statement, unfiltered);
+            assertFalse(unfilteredSql.contains("raw_weight"), statement + " scores an unfiltered segment");
+            assertTrue(unfilteredSql.contains("JSON_TABLE"), statement + " lost the segment id join");
+            assertTrue(sql(configuration, CompanyMapper.class, statement, banded)
+                .contains("raw_weight"), statement + " does not join the aggregate when filtering");
+        }
+        assertTrue(collapsed(sql(configuration, CompanyMapper.class, "getSegmentCompaniesPage", sorted))
+            .contains("ORDER BY COALESCE(w.raw_weight, 0.0) DESC"));
+        for (String statement : new String[] {"countSegmentCompanies", "getSegmentCompanyIdsFiltered"}) {
+            assertFalse(sql(configuration, CompanyMapper.class, statement, sorted)
+                .contains("raw_weight"), statement + " pays for a sort it cannot observe");
+        }
 
-        assertFalse(sql.contains("raw_weight"));
-        assertTrue(sql.contains("ORDER BY c.name DESC"));
+        String segmentBanded = collapsed(
+            sql(configuration, CompanyMapper.class, "getSegmentCompanyIdsFiltered", banded));
+        assertTrue(segmentBanded.contains("WHEN w.last_touch_at IS NULL THEN '__none__'"));
+        assertTrue(segmentBanded.contains("OR w.last_touch_at IS NULL"));
+        assertTrue(segmentBanded.contains("ROUND(? * LOG(?, w.raw_weight / ?)) <= ?"));
+        assertTrue(segmentBanded.contains("c.workspace_id = ?"));
+        assertFalse(segmentBanded.contains("0.913"), "band boundaries must stay model-bound");
+    }
+
+    /** Every smart-segment company statement narrows by the browser's owner scope. */
+    @Test
+    void segmentCompanyStatementsApplyTheOwnerScope() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> mine = segmentParameters(null, MemberScope.fromRequest("me", null, 17));
+        Map<String, Object> members = segmentParameters(
+            null, MemberScope.fromRequest("members", List.of(3, 5), 17));
+        Map<String, Object> unassigned = segmentParameters(
+            null, MemberScope.fromRequest("unassigned", null, 17));
+        Map<String, Object> team = segmentParameters(null, MemberScope.allTeam());
+
+        for (String statement : SEGMENT_STATEMENTS) {
+            assertTrue(collapsed(sql(configuration, CompanyMapper.class, statement, mine))
+                .contains("AND c.owner_id = ?"), statement);
+            assertTrue(collapsed(sql(configuration, CompanyMapper.class, statement, members))
+                .contains("AND c.owner_id IN"), statement);
+            assertTrue(collapsed(sql(configuration, CompanyMapper.class, statement, unassigned))
+                .contains("AND c.owner_id IS NULL"), statement);
+            assertFalse(collapsed(sql(configuration, CompanyMapper.class, statement, team))
+                .contains("AND c.owner_id"), statement);
+        }
+    }
+
+    /**
+     * The warmth sort column exists only when the aggregate was joined, so a warmth sort that
+     * arrives without a resolved filter falls through to the name column instead of naming a
+     * missing alias.
+     */
+    @Test
+    void anUnresolvedWarmthSortFallsThroughToTheNameColumn() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> segment = segmentParameters(null, MemberScope.allTeam());
+        segment.put("sort", "warmth");
+        Map<String, Object> browser = browserParameters(null);
+        browser.put("sort", "warmth");
+
+        for (Map.Entry<String, Map<String, Object>> page : Map.of(
+                "getSegmentCompaniesPage", segment, "getCompaniesPage", browser).entrySet()) {
+            String sql = collapsed(sql(configuration, CompanyMapper.class, page.getKey(), page.getValue()));
+            assertFalse(sql.contains("raw_weight"), page.getKey());
+            assertTrue(sql.contains("ORDER BY c.name DESC"), page.getKey());
+        }
     }
 
     @Test
@@ -270,6 +373,13 @@ class WarmthMapperXmlTest {
         return parameters;
     }
 
+    private static Map<String, Object> segmentParameters(WarmthFilter warmth, MemberScope memberScope) {
+        Map<String, Object> parameters = browserParameters(warmth);
+        parameters.put("segmentIdsJson", "[1,2]");
+        parameters.put("memberScope", memberScope);
+        return parameters;
+    }
+
     private static Integer timeout(Configuration configuration, Class<?> mapper, String statement) {
         return configuration.getMappedStatement(mapper.getName() + "." + statement).getTimeout();
     }
@@ -277,15 +387,20 @@ class WarmthMapperXmlTest {
     private Configuration configuration() throws Exception {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAlias("Company", Company.class);
+        configuration.getTypeAliasRegistry().registerAlias("Activity", Activity.class);
         configuration.getTypeAliasRegistry().registerAlias("Deal", Deal.class);
         configuration.getTypeAliasRegistry().registerAlias("Note", Note.class);
         configuration.getTypeAliasRegistry().registerAlias("Person", Person.class);
         configuration.getTypeAliasRegistry().registerAlias("Tag", Tag.class);
+        configuration.getTypeAliasRegistry().registerAlias("Task", Task.class);
         configuration.getTypeAliasRegistry().registerAlias("User", User.class);
         for (String resource : new String[] {
                 "mappers/PersonMapper.xml",
                 "mappers/CompanyMapper.xml",
-                "mappers/NoteMapper.xml"}) {
+                "mappers/NoteMapper.xml",
+                "mappers/TaskMapper.xml",
+                "mappers/ActivityMapper.xml",
+                "mappers/MyWorkReadMapper.xml"}) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 assertNotNull(input);
                 new XMLMapperBuilder(

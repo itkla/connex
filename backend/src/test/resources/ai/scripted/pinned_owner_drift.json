@@ -27,7 +27,7 @@
       "emit": {
         "kind": "tool_call",
         "toolName": "assign_owner",
-        "arguments": "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}"
+        "arguments": "{\"handle\":\"r1\",\"owner\":\"{{M1}}\"}"
       }
     },
     {

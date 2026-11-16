@@ -17,6 +17,10 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -67,6 +71,8 @@ public class ActivityService {
     private final LeadResponseSlaService leadResponseSlaService;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final Set<String> AUDIT_FIELDS =
         Set.of("type", "subject", "notes", "timestamp");
     private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -93,6 +99,16 @@ public class ActivityService {
         requireDealExists(workspaceId, dealId);
         return referenceService.hydrateActivities(workspaceId,
             activityMapper.getActivitiesFilteredPage(workspaceId, personId, dealId, createdById, limit, offset));
+    }
+
+    /** Reads only one page and its matching count under the same trusted visibility ceiling. */
+    public PageResponse<ActivityDto> getListPage(ActivityListFilter filter, PageBounds bounds) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        var rows = activityMapper.getListPage(workspaceId, scope, filter, bounds.size(), bounds.offset());
+        var items = referenceService.hydrateActivities(workspaceId, rows).stream().map(ActivityDto::from).toList();
+        long total = activityMapper.countList(workspaceId, scope, filter);
+        return new PageResponse<>(items, total);
     }
 
     public long countActivities(Integer personId, Integer dealId, Integer createdById) {
@@ -201,6 +217,20 @@ public class ActivityService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_CREATE)
     public Activity create(Activity activity) {
+        return create(activity, MutationAdmission.UNRESTRICTED);
+    }
+
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.ACTIVITY_CREATE)
+    public Activity create(Activity activity, MutationAdmission admission) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> createWithinVisibilityScope(activity, admission, personVisibilityScope.workspaceIdsJson()));
+    }
+
+    private Activity createWithinVisibilityScope(Activity activity, MutationAdmission admission, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         try {
@@ -208,14 +238,15 @@ public class ActivityService {
             activity.setCreatedBy(actor);
             activity.setType(normalizeType(activity.getType()));
             activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), null));
-            requireLinkedRecordsVisible(workspaceId, activity, true);
+            requireLinkedRecordsVisible(workspaceId, activity, true, personWorkspaceIdsJson);
             workspaceService.requirePermission(Permission.ACTIVITY_CREATE);
+            admission.beforeMutation();
             activityMapper.insert(activity);
             auditService.record("activity.create", "activity", activity.getId(), activity.getSubject(),
                     "Created activity " + activity.getSubject(),
                     auditService.diff(null, activity, AUDIT_FIELDS));
         } catch (Exception e) {
-            auditService.recordFailure("activity.create", "activity", null, activity.getSubject(),
+            auditService.deferFailure("activity.create", "activity", null, activity.getSubject(),
                     "Failed to create activity", e.getMessage());
             throw e;
         }
@@ -234,6 +265,12 @@ public class ActivityService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_UPDATE)
     public Activity update(int id, Activity activity) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> updateWithinVisibilityScope(id, activity, personVisibilityScope.workspaceIdsJson()));
+    }
+
+    private Activity updateWithinVisibilityScope(int id, Activity activity, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Activity before = activityMapper.getActivityById(workspaceId, id);
         if (before == null) {
@@ -248,7 +285,7 @@ public class ActivityService {
         activity.setCreatedBy(before.getCreatedBy());
         activity.setType(normalizeType(activity.getType()));
         activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), before.getTimestamp()));
-        requireLinkedRecordsVisible(workspaceId, activity, false);
+        requireLinkedRecordsVisible(workspaceId, activity, false, personWorkspaceIdsJson);
         workspaceService.requirePermission(Permission.ACTIVITY_UPDATE);
         activityMapper.update(activity);
         auditService.record("activity.update", "activity", id, activity.getSubject(),
@@ -301,11 +338,11 @@ public class ActivityService {
     }
 
     /** Retains the person and its exact visibility grant until the surrounding write commits. */
-    private void requireLinkedRecordsVisible(int workspaceId, Activity activity, boolean recordsFirstResponse) {
+    private void requireLinkedRecordsVisible(int workspaceId, Activity activity, boolean recordsFirstResponse, String personWorkspaceIdsJson) {
         if (activity.getPerson() != null) {
             Person person = recordsFirstResponse
-                ? personMapper.getVisiblePersonByIdForUpdate(workspaceId, activity.getPerson().getId())
-                : personMapper.getVisiblePersonByIdForShare(workspaceId, activity.getPerson().getId());
+                ? personMapper.getVisiblePersonByIdForUpdate(workspaceId, personWorkspaceIdsJson, activity.getPerson().getId())
+                : personMapper.getVisiblePersonByIdForShare(workspaceId, personWorkspaceIdsJson, activity.getPerson().getId());
             if (person == null || (person.getWorkspaceId() != workspaceId
                     && shareMapper.lockPersonShareForWorkspace(person.getId(), workspaceId) == null)) {
                 throw new ResourceNotFoundException("Contact not found");

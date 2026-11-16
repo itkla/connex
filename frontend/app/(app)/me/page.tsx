@@ -1,160 +1,82 @@
+import { Suspense } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Cog6ToothIcon } from "@heroicons/react/24/outline";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 
-import {
-    getContactTemperaturesFromCookie,
-    getContactsFromCookie,
-    getCurrentUserResultFromCookie,
-    getDealRisksFromCookie,
-    getDealsFromCookie,
-    getMyWorkResultFromCookie,
-    getUserActivitiesFromCookie,
-    getUserNotesFromCookie,
-    getUserNoteActivityResultFromCookie,
-    getUserTasksFromCookie,
-    getUsers,
-} from "@/app/lib/api";
-import SectionUnavailable from "@/app/components/SectionUnavailable";
+import { getCurrentUserResultFromCookie, getMyWorkReadResultFromCookie, getMyWorkResultFromCookie } from "@/app/lib/api";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import type { Activity, Contact, Deal, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
-import { formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/utils";
-import { computeKpis } from "@/app/components/overview/analytics/metrics";
-
-import Rise from "@/app/components/motion/Rise";
+import { formatDate, formatDateTime } from "@/app/lib/utils";
+import { settingsDestination } from "@/app/lib/settingsEntryPoints";
+import { requestNow } from "@/app/lib/requestClock";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PageShell } from "@/app/components/PageShell";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
-import Timeline from "@/app/components/me/Timeline";
-import MeHero from "@/app/components/me/MeHero";
-import SignalStrip from "@/app/components/me/SignalStrip";
-import NeedsYou from "@/app/components/me/NeedsYou";
-import MyWorkQueue from "@/app/components/me/MyWorkQueue";
-import PulseStrip from "@/app/components/me/PulseStrip";
+import { greetingKey } from "@/app/components/me/meData";
 import {
-    activityPulse,
-    constellationNodes,
-    coolingRelationships,
-    greetingKey,
-    riskItems,
-    warmthDistribution,
-} from "@/app/components/me/meData";
+    MyWorkAttentionSection, MyWorkDealSection, MyWorkHero, MyWorkHistorySection,
+    MyWorkPulseSection, MyWorkQueueSection,
+} from "@/app/components/me/MyWorkSections";
 
-/**
- * Computes the current user's deal KPIs over the trailing 90 days.
- * Kept at module scope so the `Date.now()` read stays out of the component render body.
- */
-function personalKpis(deals: Deal[]) {
-    return computeKpis(deals, Date.now(), 90);
-}
-
-export default async function MePage() {
-    const t = await getTranslations("MePage");
-    const locale = await getLocale();
-    const cookie = (await headers()).get("cookie");
+export default async function MePage({ searchParams }: {
+    searchParams: Promise<{ currency?: string | string[] }>;
+}) {
+    const [timeZone, t, locale, requestHeaders, params] = await Promise.all([
+        getTimeZone(), getTranslations("MePage"), getLocale(), headers(), searchParams,
+    ]);
+    const cookie = requestHeaders.get("cookie");
     const userResult = await getCurrentUserResultFromCookie(cookie);
-
     if (!userResult.ok) {
+        if (userResult.unauthenticated) redirect("/auth/login");
         return <WorkspaceUnavailablePage />;
     }
     const user = userResult.data;
-    if (!user) {
-        redirect("/auth/login");
-    }
+    if (!user) redirect("/auth/login");
 
-    const init = { headers: { cookie: cookie ?? "" } } as const;
-    const [contacts, deals, tasks, activities, notes, users, myWorkResult, noteActivityResult]
-        = await Promise.all([
-            getContactsFromCookie(cookie).catch(() => [] as Contact[]),
-            getDealsFromCookie(cookie).catch(() => [] as Deal[]),
-            getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
-            getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
-            getUserNotesFromCookie(user.id, cookie, { size: 25 }).catch(() => [] as Note[]),
-            getUsers(init).catch(() => [] as User[]),
-            getMyWorkResultFromCookie(cookie),
-            getUserNoteActivityResultFromCookie(user.id, cookie),
-        ]);
-    const myDeals = deals.filter((deal) => deal.ownerId === user.id);
-    const [temps, dealRisks] = await Promise.all([
-        getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id))
-            .catch(() => [] as RelationshipTemperature[]),
-        getDealRisksFromCookie(cookie, myDeals.map((deal) => deal.id))
-            .catch(() => [] as DealRisk[]),
-    ]);
-    const currency = pickDominantCurrency(myDeals);
-    const kpis = personalKpis(myDeals);
-    const distribution = warmthDistribution(temps);
-    const nodes = constellationNodes(temps, contacts, 18);
-    const cooling = coolingRelationships(temps, contacts, 6);
-    const risks = riskItems(dealRisks, myDeals, 6);
-    const pulse = noteActivityResult.ok ? activityPulse(activities, tasks, noteActivityResult.data, 84) : null;
-    const coolingCount = temps.filter((temp) => temp.trend === "cooling").length;
-    const greeting = t(`greeting_${greetingKey(user.timezone)}`);
-    const hasWork = tasks.length + activities.length + notes.length > 0;
+    const currency = typeof params.currency === "string" ? params.currency : undefined;
+    const relationships = getMyWorkReadResultFromCookie("relationships", cookie);
+    const deals = getMyWorkReadResultFromCookie("deal-kpis", cookie, currency);
+    const queue = getMyWorkResultFromCookie(cookie);
+    const risks = getMyWorkReadResultFromCookie("risks", cookie);
+    const pulse = getMyWorkReadResultFromCookie("pulse", cookie);
+    const history = getMyWorkReadResultFromCookie("history", cookie);
+    const greeting = t(`greeting_${greetingKey(timeZone, requestNow())}`);
 
     return (
         <PageShell>
-                <Rise>
-                    <MeHero
-                        user={user}
-                        greeting={greeting}
-                        nodes={nodes}
-                        distribution={distribution}
-                        coolingCount={coolingCount}
-                    />
-                </Rise>
-
-                <Rise delay={0.08}>
-                    <SignalStrip kpis={kpis} currency={currency} />
-                </Rise>
-
-                <Rise delay={0.14}>
-                    <MyWorkQueue userId={user.id} initial={myWorkResult} />
-                </Rise>
-
-                <Rise delay={0.2}>
-                    <NeedsYou cooling={cooling} risks={risks} />
-                </Rise>
-
-                <Rise delay={0.26}>
-                    {pulse ? <PulseStrip days={pulse.days} totalTouches={pulse.totalTouches} streak={pulse.streak} />
-                        : <SectionUnavailable />}
-                </Rise>
-
-                {hasWork && (
-                    <Rise delay={0.32}>
-                        <section>
-                            <SectionHeader title={t("recentWork")} />
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                <Timeline
-                                    tasks={tasks}
-                                    activities={activities}
-                                    notes={notes.slice(0, 25)}
-                                    noteTarget={{ type: "user", id: user.id }}
-                                    users={users}
-                                    persons={contacts}
-                                    deals={deals}
-                                    currentUserId={user.id}
-                                />
-                            </div>
-                        </section>
-                    </Rise>
-                )}
-
-                <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6 text-sm text-muted-foreground">
-                    <div className="flex flex-wrap gap-x-6 gap-y-1">
-                        <span>{t("memberSince", { date: formatDate(user.createdAt, locale) })}</span>
-                        <span>{t("lastActive", { date: formatDateTime(user.lastLoginAt, locale) })}</span>
-                    </div>
-                    <Link
-                        href="/account"
-                        className="inline-flex items-center gap-1.5 font-medium text-brand transition-colors hover:text-brand-hover"
-                    >
-                        <Cog6ToothIcon className="size-4" />
-                        {t("accountSettings")}
-                    </Link>
-                </footer>
+            <Suspense fallback={<section className="rounded-3xl border border-border bg-card p-6 sm:p-8">
+                <p className="text-sm font-medium text-muted-foreground">{greeting}</p>
+                <h1 className="mt-1 text-4xl font-extrabold tracking-tight sm:text-5xl">{user.displayName}</h1>
+                <Skeleton className="mt-5 min-h-[22rem]" />
+            </section>}>
+                <MyWorkHero read={relationships} user={user} greeting={greeting} />
+            </Suspense>
+            <Suspense fallback={<Skeleton className="h-40 rounded-2xl" />}>
+                <MyWorkDealSection read={deals} />
+            </Suspense>
+            <Suspense fallback={<Skeleton className="h-64 rounded-2xl" />}>
+                <MyWorkQueueSection read={queue} userId={user.id} />
+            </Suspense>
+            <Suspense fallback={<Skeleton className="h-48 rounded-2xl" />}>
+                <MyWorkAttentionSection relationships={relationships} risks={risks} />
+            </Suspense>
+            <Suspense fallback={<Skeleton className="h-48 rounded-2xl" />}>
+                <MyWorkPulseSection read={pulse} />
+            </Suspense>
+            <Suspense fallback={<Skeleton className="h-64 rounded-2xl" />}>
+                <MyWorkHistorySection read={history} user={user} />
+            </Suspense>
+            <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6 text-sm text-muted-foreground">
+                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                    <span>{t("memberSince", { date: formatDate(user.createdAt, locale, timeZone) })}</span>
+                    <span>{t("lastActive", { date: formatDateTime(user.lastLoginAt, locale, timeZone) })}</span>
+                </div>
+                <Link href={settingsDestination("account.home").href}
+                    className="inline-flex items-center gap-1.5 font-medium text-brand-text transition-colors hover:text-brand-text">
+                    <Cog6ToothIcon className="size-4" />
+                    {t("accountSettings")}
+                </Link>
+            </footer>
         </PageShell>
     );
 }

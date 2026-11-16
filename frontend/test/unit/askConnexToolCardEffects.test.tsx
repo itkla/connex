@@ -6,10 +6,12 @@ import AskConnexToolCard from "@/app/components/ask-connex/AskConnexToolCard";
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     askConnexProposalGroups,
+    askConnexToolCardAffordances,
     toggleAskConnexProposalExclusion,
     type AskConnexToolAction,
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
+import { observeProposalReviewClock, proposalReviewNow } from "@/app/lib/proposalReviewClock";
 import {
     askConnexCard,
     askConnexCardLabels,
@@ -66,13 +68,12 @@ vi.mock("@/components/ui/checkbox", async () => {
 });
 
 /**
- * The clock both the render and the card's own timer read.
+ * The server response and render timestamp, rounded to HTTP Date precision.
  *
- * The undo deadline has to sit in the real future, because the card schedules its retirement from
- * the wall clock while the rendered sentence comes from the shared render clock. Pinning both to
- * the same moment is what makes the two agree the way they do in a browser.
+ * Proposal tests advance monotonic elapsed time independently of the device clock. Undo retains
+ * its wall-clock timer, so its deadline must also sit in the real future.
  */
-const NOW = Date.now();
+const NOW = Math.floor(Date.now() / 1_000) * 1_000;
 const UNDO_DEADLINE = new Date(NOW + 600_000).toISOString();
 
 type Interactive = ReturnType<typeof installInteractiveDocument>;
@@ -119,13 +120,16 @@ async function mount(node: React.ReactNode): Promise<{
     interactive: Interactive;
     root: { render: (next: React.ReactNode) => void; unmount: () => void };
     rerender: (next: React.ReactNode) => Promise<void>;
-    scheduled: Array<() => void>;
+    scheduled: Array<{ handler: () => void; delay: number | undefined }>;
+    resume: (type: 'focus' | 'visibilitychange') => void;
 }> {
     const interactive = installInteractiveDocument();
-    const scheduled: Array<() => void> = [];
+    observeProposalReviewClock(new Headers({ Date: new Date(NOW).toUTCString() }));
+    const documentEvents = vi.spyOn(document, 'addEventListener');
+    const scheduled: Array<{ handler: () => void; delay: number | undefined }> = [];
     Object.assign(window, {
-        setTimeout: (handler: () => void) => {
-            scheduled.push(handler);
+        setTimeout: (handler: () => void, delay?: number) => {
+            scheduled.push({ handler, delay });
             return scheduled.length;
         },
         clearTimeout: () => {},
@@ -142,6 +146,16 @@ async function mount(node: React.ReactNode): Promise<{
         interactive,
         root,
         scheduled,
+        resume: (type) => {
+            const subscriptions = type === 'focus'
+                ? vi.mocked(window.addEventListener).mock.calls
+                : documentEvents.mock.calls;
+            for (const [eventType, listener] of subscriptions) {
+                if (eventType !== type) continue;
+                if (typeof listener === 'function') listener(new Event(type));
+                else listener.handleEvent(new Event(type));
+            }
+        },
         rerender: async (next: React.ReactNode) => {
             await act(async () => {
                 root.render(wrap(next));
@@ -151,6 +165,7 @@ async function mount(node: React.ReactNode): Promise<{
 }
 
 const EXECUTED = askConnexCard({
+    reviewExpiresAt: new Date(NOW + 72 * 3_600_000).toISOString(),
     id: 41,
     toolName: "create_task",
     tier: "auto",
@@ -195,7 +210,7 @@ describe("assistant tool card undo window", () => {
 
         await act(async () => {
             const close = scheduled[0];
-            if (close) close();
+            if (close) close.handler();
         });
 
         expect(present(interactive.elements, "You can undo this until")).toBe(false);
@@ -229,7 +244,9 @@ describe("assistant tool card focus after a decision", () => {
         vi.unstubAllGlobals();
     });
 
-    const proposal = askConnexCard({ id: 51, change: askConnexChange() });
+    const proposal = askConnexCard({
+        id: 51, change: askConnexChange(), reviewExpiresAt: UNDO_DEADLINE,
+    });
 
     it("returns a keyboard reader to the card their own pressed control left", async () => {
         const { interactive, root, rerender } = await mount(
@@ -324,8 +341,11 @@ describe("grouped review interaction", () => {
         vi.unstubAllGlobals();
     });
 
-    const first = askConnexCard({ id: 51, change: askConnexChange() });
+    const first = askConnexCard({
+        id: 51, change: askConnexChange(), reviewExpiresAt: UNDO_DEADLINE,
+    });
     const second = askConnexCard({
+        reviewExpiresAt: UNDO_DEADLINE,
         id: 52,
         target: { kind: "deal", id: 8, label: "Globex expansion" },
         requestSummary: "Change deal stage to: Won",
@@ -337,6 +357,7 @@ describe("grouped review interaction", () => {
         }),
     });
     const third = askConnexCard({
+        reviewExpiresAt: UNDO_DEADLINE,
         id: 53,
         target: { kind: "deal", id: 9, label: "Initech pilot" },
         change: askConnexChange(),
@@ -348,7 +369,7 @@ describe("grouped review interaction", () => {
         excluded: ReadonlySet<number>,
         onToggleInclusion: (toolCallId: number) => void,
     ) {
-        const [group] = askConnexProposalGroups(cards, actionable, excluded);
+        const [group] = askConnexProposalGroups(cards, actionable, excluded, NOW);
         if (!group) throw new Error("Expected a grouped review");
         return (
             <AskConnexProposalReview
@@ -402,7 +423,9 @@ describe("grouped review interaction", () => {
     });
 
     it("shows a half-failed batch as what it was, on the rows it failed on", async () => {
-        const applied = askConnexCard({ id: 54, status: "executed" });
+        const applied = askConnexCard({
+            id: 54, status: "executed", reviewExpiresAt: UNDO_DEADLINE,
+        });
         const { interactive, root } = await mount(review(
             [
                 first,
@@ -429,6 +452,76 @@ describe("grouped review interaction", () => {
                 .getAttribute("aria-checked"),
         ).toBe("true");
 
+        await act(async () => root.unmount());
+    });
+});
+
+describe("proposal review deadline", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it.each([-3_600_000, 3_600_000].flatMap((skew) =>
+        (['timer', 'focus', 'visibilitychange'] as const).map((trigger) => ({ skew, trigger }))))(
+        "clientDisarmsAtServerDeadlineWithoutNetwork: $trigger with device skew $skew",
+        async ({ skew, trigger }) => {
+            const deadline = NOW + 1_000;
+            vi.spyOn(Date, 'now').mockReturnValue(NOW + skew);
+            const elapsed = vi.spyOn(performance, 'now').mockReturnValue(0);
+            const action = vi.fn();
+            const proposal = askConnexCard({
+                change: askConnexChange(),
+                reviewExpiresAt: new Date(deadline).toISOString(),
+            });
+            const { interactive, root, scheduled, resume } = await mount(renderedCard(proposal, action));
+            expect(control(interactive, "Apply the proposed change to Acme renewal")).toBeDefined();
+            expect(control(interactive, "Discard the proposed change to Acme renewal")).toBeDefined();
+            expect(scheduled).toHaveLength(1);
+            const timer = scheduled[0];
+            if (!timer) throw new Error('Missing proposal deadline timer');
+            expect(timer.delay).toBe(deadline - NOW);
+            expect(askConnexToolCardAffordances(proposal, proposalReviewNow())).toEqual(['reject', 'approve']);
+
+            elapsed.mockReturnValue(999);
+            expect(askConnexToolCardAffordances(proposal, proposalReviewNow())).toEqual(['reject', 'approve']);
+            elapsed.mockReturnValue(1_000);
+            await act(async () => {
+                if (trigger === 'timer') {
+                    timer.handler();
+                } else resume(trigger);
+            });
+
+            const actions = interactive.elements.filter((element) => attached(element)
+                && ['Apply the proposed change to Acme renewal', 'Discard the proposed change to Acme renewal']
+                    .includes(element.getAttribute('aria-label') ?? ''));
+            expect(actions).toEqual([]);
+            expect(present(interactive.elements, 'Proposal expired')).toBe(true);
+            expect(present(interactive.elements, askConnexCardLabels.proposalExpired)).toBe(true);
+            expect(action).not.toHaveBeenCalled();
+            expect(askConnexToolCardAffordances(proposal, proposalReviewNow())).toEqual([]);
+            await act(async () => root.unmount());
+        },
+    );
+
+    it('reschedules a mounted deadline when a later response recalibrates server time', async () => {
+        vi.spyOn(performance, 'now').mockReturnValue(0);
+        const proposal = askConnexCard({
+            change: askConnexChange(), reviewExpiresAt: new Date(NOW + 10_000).toISOString(),
+        });
+        const { interactive, root, scheduled } = await mount(renderedCard(proposal, () => {}));
+        expect(scheduled.at(-1)?.delay).toBe(10_000);
+
+        await act(async () => {
+            observeProposalReviewClock(new Headers({ Date: new Date(NOW + 8_000).toUTCString() }));
+        });
+        expect(scheduled.at(-1)?.delay).toBe(2_000);
+        expect(control(interactive, "Apply the proposed change to Acme renewal")).toBeDefined();
+
+        await act(async () => {
+            observeProposalReviewClock(new Headers({ Date: new Date(NOW + 10_000).toUTCString() }));
+        });
+        expect(present(interactive.elements, 'Proposal expired')).toBe(true);
         await act(async () => root.unmount());
     });
 });

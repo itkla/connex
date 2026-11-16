@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ class UserServiceSessionRevocationTest {
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final AccountSessionRevocationService accountSessionRevocationService =
         mock(AccountSessionRevocationService.class);
+    private final NotificationChangePublisher notificationChanges = mock(NotificationChangePublisher.class);
     private final UserService userService = new UserService(
         userMapper,
         mock(ActivityMapper.class),
@@ -34,7 +36,7 @@ class UserServiceSessionRevocationTest {
         mock(TaskMapper.class),
         mock(AuditService.class),
         workspaceService,
-        mock(NotificationChangePublisher.class),
+        notificationChanges,
         mock(ReferenceService.class),
         mock(ManagedObjectService.class),
         mock(UserProfilePictureTransaction.class),
@@ -62,6 +64,35 @@ class UserServiceSessionRevocationTest {
 
         verify(accountSessionRevocationService).closeWebSocketsAfterRename(USER_ID);
         verify(accountSessionRevocationService, never()).expireAll(anyInt());
+    }
+
+    @Test
+    void putProfilePersistsTimezoneWithoutPublishingSourceChanges() {
+        User before = user("member", "Member");
+        User after = user(before.getUsername(), before.getDisplayName());
+        after.setTimezone("Asia/Tokyo");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        when(workspaceService.isMember(WORKSPACE_ID, USER_ID)).thenReturn(true);
+        when(userMapper.getUserById(USER_ID)).thenReturn(before, after);
+
+        userService.update(USER_ID, profileUpdate(after, after.getDisplayName()));
+
+        org.mockito.ArgumentCaptor<User> saved = org.mockito.ArgumentCaptor.forClass(User.class);
+        verify(userMapper).update(saved.capture());
+        org.junit.jupiter.api.Assertions.assertEquals("Asia/Tokyo", saved.getValue().getTimezone());
+        verifyNoInteractions(notificationChanges);
+    }
+
+    @Test
+    void patchTimezonePublishesTheTenantReconciliationSourceChange() {
+        User before = user("member", "Member");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        when(workspaceService.isMember(WORKSPACE_ID, USER_ID)).thenReturn(true);
+        when(userMapper.getUserById(USER_ID)).thenReturn(before);
+
+        userService.updateTimezone(USER_ID, "Asia/Tokyo");
+
+        verify(notificationChanges).publish(WORKSPACE_ID, "user", USER_ID);
     }
 
     private User user(String username, String displayName) {

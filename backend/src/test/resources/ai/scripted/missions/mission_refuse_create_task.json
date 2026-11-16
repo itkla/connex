@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_create_task",
+  "selector": "connex_script_mission_refuse_create_task",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_task",
+        "arguments": "{\"handle\":\"r1\",\"description\":\"Review follow-up\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

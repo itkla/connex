@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -60,6 +62,10 @@ public class AiChatMemoryService {
     private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private ooo.klae.connex.backend.ai.mission.AiAgentContextBuilder missionContextBuilder;
 
     /**
      * Prepares current provider-sized history, compacting the oldest whole messages before the
@@ -91,6 +97,12 @@ public class AiChatMemoryService {
             MaskingContext context,
             Instant deadline,
             Runnable ownershipGuard) {
+        return prepare(turn, context, deadline, ownershipGuard, new AiChatResourceRegistry(context));
+    }
+
+    /** Prepares mission context with the exact fresh registry owned by the executing loop. */
+    public AiChatMemory prepare(AiChatQueuedTurn turn, MaskingContext context, Instant deadline,
+            Runnable ownershipGuard, AiChatResourceRegistry resources) {
         Objects.requireNonNull(ownershipGuard, "ownershipGuard");
         requireBeforeDeadline(deadline);
         var capabilities = invocationService.currentProviderCapabilities(
@@ -117,6 +129,18 @@ public class AiChatMemoryService {
                 capabilities,
                 aiProperties.getAssistantMaxOutputTokens(),
                 fixedEnvelopeBytes);
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.forTurn(turn);
+        if (mission != null) {
+            persistenceService.requirePrivacyCurrent(turn);
+            AiAssistantToolResult missionContext = ooo.klae.connex.backend.ai.mission.AiAgentMissionCatalog.continuation(mission.runtimeContractVersion())
+                    ? missionContextBuilder.build(mission, context, resources) : null;
+            if (mission.goal().getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                    > budget.historyBytes()) {
+                throw new AiAssistantLoopException("mission_context_overflow", "mission_context_overflow");
+            }
+            return new AiChatMemory(List.of(mission.goal()), budget, 0, 0, nativeTools, 1,
+                    missionContext);
+        }
         List<AiChatMessage> recent = persistenceService.loadHistory(
                 turn, MAX_RECENT_MESSAGES);
         AiChatMessage initiatingMessage = recent.stream()
@@ -138,6 +162,23 @@ public class AiChatMemoryService {
         }
         int summaryThroughSeq = summaryThroughSeq(summary);
         List<AiChatMessage> dialogue = dialogueAfter(recent, summaryThroughSeq);
+        if (!shouldCompact(summary, dialogue, budget)) {
+            return new AiChatMemory(
+                    boundedHistory(summary, dialogue, initiatingMessage, budget.historyBytes()),
+                    budget, 0, 0, nativeTools, capabilities.parallelToolCalls());
+        }
+        AiChatMessage retainedInitiatingMessage = initiatingMessage;
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(turn.workspaceId(), () -> compact(
+                turn, context, deadline, ownershipGuard, budget, nativeTools,
+                capabilities.parallelToolCalls(), recent, retainedInitiatingMessage, summary,
+                summaryThroughSeq, dialogue));
+    }
+
+    private AiChatMemory compact(
+            AiChatQueuedTurn turn, MaskingContext context, Instant deadline, Runnable ownershipGuard,
+            AiAssistantPromptBudget budget, boolean nativeTools, int parallelToolCalls,
+            List<AiChatMessage> recent, AiChatMessage initiatingMessage, AiChatMessage summary,
+            int summaryThroughSeq, List<AiChatMessage> dialogue) {
         int inputTokens = 0;
         int outputTokens = 0;
         if (shouldCompact(summary, dialogue, budget)) {
@@ -196,7 +237,7 @@ public class AiChatMemoryService {
                                     throw new AiAssistantLoopException(
                                             "workspace_disabled", "workspace_disabled");
                                 }
-                                persistenceService.requireRunning(turn);
+                                persistenceService.requireExecutionCurrentNonlocking(turn);
                                 requireBeforeDeadline(deadline);
                             }).outcome();
                 }
@@ -230,7 +271,8 @@ public class AiChatMemoryService {
                         throughSeq,
                         summaryResources.snapshot(),
                         context,
-                        generated);
+                        generated,
+                        parsed.memberIdentifiers().getOrDefault("/summary", List.of()));
                 requireBeforeDeadline(deadline);
                 summary = persistenceService.upsertHistorySummary(
                         turn,
@@ -261,7 +303,7 @@ public class AiChatMemoryService {
                 inputTokens,
                 outputTokens,
                 nativeTools,
-                capabilities.parallelToolCalls());
+                parallelToolCalls);
     }
 
     static List<AiChatMessage> boundedHistory(
@@ -379,7 +421,8 @@ public class AiChatMemoryService {
             int throughSeq,
             java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources,
             MaskingContext context,
-            String generatedSummary) {
+            String generatedSummary,
+            List<String> demaskedMembers) {
         try {
             List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
                     .map(entry -> java.util.Map.<String, Object>of(
@@ -390,16 +433,26 @@ public class AiChatMemoryService {
             String maskedSummary = MaskingEngine.maskFreeText(generatedSummary, context);
             List<java.util.Map<String, String>> storedIdentifiers = context.tokenBindings().stream()
                     .filter(binding -> maskedSummary.contains(binding.getKey()))
+                    .filter(binding -> !"member".equals(identifierKind(binding.getKey())))
                     .map(binding -> java.util.Map.of(
                             "kind", identifierKind(binding.getKey()),
                             "value", binding.getValue()))
                     .toList();
+            var memberIdentifiers = demaskedMembers.stream()
+                    .map(value -> java.util.Map.of("kind", "member", "value", value)).toList();
+            if (storedIdentifiers.size() + memberIdentifiers.size() > 200
+                    || memberIdentifiers.stream().anyMatch(identifier ->
+                            !ooo.klae.connex.backend.services.ReferenceService.memberLabelWithinLimit(identifier.get("value")))
+                    || storedIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)) {
+                throw new IllegalStateException("Assistant summary identifier metadata is invalid");
+            }
             java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
             metadata.put("kind", "history_summary");
             metadata.put("sourceFromSeq", sourceFromSeq);
             metadata.put("throughSeq", throughSeq);
             metadata.put("resources", storedResources);
             metadata.put("identifiers", storedIdentifiers);
+            metadata.put("memberIdentifiers", memberIdentifiers);
             return objectMapper.writeValueAsString(metadata);
         } catch (JacksonException exception) {
             throw new IllegalStateException(
@@ -428,6 +481,8 @@ public class AiChatMemoryService {
         AiChatMessage omitted = new AiChatMessage();
         omitted.setId(source.getId());
         omitted.setWorkspaceId(source.getWorkspaceId());
+        omitted.setOrganizationPrivacyGeneration(source.getOrganizationPrivacyGeneration());
+        omitted.setPrivacyGeneration(source.getPrivacyGeneration());
         omitted.setSessionId(source.getSessionId());
         omitted.setSeq(source.getSeq());
         omitted.setAuthorKind(source.getAuthorKind());
@@ -450,6 +505,7 @@ public class AiChatMemoryService {
             case 'D' -> "deal";
             case 'E' -> "email";
             case 'H' -> "phone";
+            case 'M' -> "member";
             default -> throw new IllegalStateException(
                     "Assistant summary identifier token is invalid");
         };

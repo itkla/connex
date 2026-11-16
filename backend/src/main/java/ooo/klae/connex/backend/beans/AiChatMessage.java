@@ -8,7 +8,11 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AiChatMessage {
     private int id;
+    private Integer missionRunId;
+    private String missionMessageKind;
+    private Long privacyGeneration;
     private int workspaceId;
+    private long organizationPrivacyGeneration;
     private int sessionId;
     private int seq;
     private String authorKind;

@@ -1,6 +1,10 @@
-import type { RouteSearchParams } from "@/app/lib/settingsRedirects";
-
-export type { RouteSearchParams } from "@/app/lib/settingsRedirects";
+/**
+ * The search parameters a Next.js page receives, before they are resolved.
+ *
+ * Mirrors the App Router's own shape rather than narrowing it: a key repeated in the query string
+ * arrives as an array, and a redirect that flattened it would quietly drop every value but one.
+ */
+export type RouteSearchParams = Record<string, string | string[] | undefined>;
 
 /**
  * The route prefixes the D13 navigation restructure retired, paired with the address that serves

@@ -56,6 +56,8 @@ class NoteBodyReadBoundaryArchTest {
         Map.entry(NOTE_MAPPER + "getVisibleNotesByAuthorId", Set.of("NoteService", "UserService")),
         Map.entry(NOTE_MAPPER + "getVisibleCompanyNotes", Set.of("CompanyService")),
         Map.entry(NOTE_MAPPER + "getAiAssistantVisibleNotesByCompanyId", Set.of("AiAssistantHistoryService")),
+        Map.entry(NOTE_MAPPER + "getAiAssistantVisibleNotesByPersonId", Set.of("AiAssistantHistoryService")),
+        Map.entry(NOTE_MAPPER + "getAiAssistantVisibleNotesByDealId", Set.of("AiAssistantHistoryService")),
         Map.entry(NOTE_MAPPER + "getNotesReferencing", Set.of("NoteService")),
         Map.entry(NOTE_MAPPER + "searchVisible", Set.of("SearchService")),
         Map.entry(DISCLOSURE_NOTE_READ, Set.of("DataSubjectDisclosureReadTransaction")));
@@ -126,6 +128,45 @@ class NoteBodyReadBoundaryArchTest {
         }
         assertEquals(APPROVED_CALLERS, callers,
             "New note-body callers require an explicit bounded-reader review; metadata consumers cannot opt in");
+    }
+
+    @Test
+    void assistantFullNoteReadsRetainSqlBoundsAndReaderHydration() throws Exception {
+        String source = Files.readString(repoRoot().resolve(
+            "backend/src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantHistoryService.java"));
+        assertTrue(source.contains("private static final int MAX_LIMIT = 20;"));
+        assertTrue(source.contains("if (limit < 1 || limit > MAX_LIMIT)"));
+        for (String kind : List.of("Person", "Deal")) {
+            Matcher method = Pattern.compile("List<Note> notesFor" + kind + "\\([^}]+}")
+                .matcher(source);
+            assertTrue(method.find(), "Full note reader missing for " + kind);
+            String body = method.group();
+            assertTrue(body.contains("requireLimit(limit);"));
+            assertTrue(body.contains("referenceService.hydrateForMasking(workspaceId, noteMapper.getAiAssistantVisibleNotesBy" + kind + "Id("));
+            assertTrue(body.contains("workspaceId, " + kind.toLowerCase(Locale.ROOT)
+                + "Id, workspaceService.getCurrentUserId(),"));
+            assertTrue(body.contains("currentOrganizationWorkspaceIds(workspaceId), limit, includePrivateNotes)"));
+        }
+    }
+
+    @Test
+    void pendingMemberMaskingProvenanceIsConfinedToProviderCallers() throws Exception {
+        Path sources = repoRoot().resolve("backend/src/main/java/ooo/klae/connex/backend");
+        Set<Path> providerCallers = Set.of(
+            sources.resolve("ai/assistant/AiAssistantHistoryService.java"),
+            sources.resolve("ai/assistant/AiAssistantScopeReadService.java"),
+            sources.resolve("ai/assistant/AiAssistantWorkBriefReadService.java"),
+            sources.resolve("ai/assistant/AiAssistantIdentifierResolver.java"));
+        Pattern maskingRead = Pattern.compile(
+            "\\.(?:hydrate(?:Tasks|Activities)?ForMasking|memberIdsForMasking)\\s*\\(");
+        try (var files = Files.walk(sources)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                if (maskingRead.matcher(Files.readString(file)).find()) {
+                    assertTrue(providerCallers.contains(file),
+                        "Pending masking provenance cannot feed reader responses: " + sources.relativize(file));
+                }
+            }
+        }
     }
 
     @Test

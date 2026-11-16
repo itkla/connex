@@ -126,6 +126,14 @@ class SupportBundleServiceTest {
     }
 
     @Test
+    void missingOrganizationExportDataRefusesBeforeStepUpOrBundleAssembly() {
+        doThrow(new ForbiddenException("Requires EXPORT_DATA"))
+            .when(orgMemberService).requireExportData(ORG_ID, ACTOR_ID);
+        assertThrows(ForbiddenException.class, () -> service.generate(request(null), ACTOR_ID));
+        Mockito.verifyNoInteractions(sessionSecurityService, readinessService, auditService, clientErrorService);
+    }
+
+    @Test
     void checksOrgAdminBeforeRecentAuthentication() {
         service.generate(request(null), ACTOR_ID);
 
@@ -256,7 +264,7 @@ class SupportBundleServiceTest {
         AuditService realAuditService = new AuditService(
             mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
-            new ClientIpResolver(""), correlationPseudonymizer);
+            new ClientIpResolver(""), correlationPseudonymizer, new AutomationScope());
         when(auditLogMapper.findOrgSupportSlice(
                 anyInt(), any(), any(), any(), any(), anyInt()))
             .thenReturn(List.of(new AuditSupportRowDto(
@@ -344,7 +352,7 @@ class SupportBundleServiceTest {
         AuditService realAuditService = new AuditService(
             mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
-            new ClientIpResolver(""), correlationPseudonymizer);
+            new ClientIpResolver(""), correlationPseudonymizer, new AutomationScope());
         when(auditLogMapper.findOrgSupportSlice(
                 anyInt(), any(), any(), any(), any(), anyInt()))
             .thenReturn(List.of(new AuditSupportRowDto(
@@ -373,7 +381,7 @@ class SupportBundleServiceTest {
         AuditService realAuditService = new AuditService(
             mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
-            new ClientIpResolver(""), correlationPseudonymizer);
+            new ClientIpResolver(""), correlationPseudonymizer, new AutomationScope());
         when(auditLogMapper.findOrgSupportSlice(
                 anyInt(), any(), any(), any(), any(), anyInt()))
             .thenReturn(List.of(
@@ -410,7 +418,7 @@ class SupportBundleServiceTest {
         AuditService realAuditService = new AuditService(
             mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
-            new ClientIpResolver(""), correlationPseudonymizer);
+            new ClientIpResolver(""), correlationPseudonymizer, new AutomationScope());
         List<AuditSupportRowDto> rows = new ArrayList<>();
         for (int index = 0; index < 4; index++) {
             rows.add(new AuditSupportRowDto((long) index, 7, 3, "person.update", "person", index,

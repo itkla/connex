@@ -4,6 +4,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,6 +21,8 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantIdentifierResolver;
+import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
@@ -30,6 +33,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
     @Autowired NoteService noteService;
     @Autowired EntityReferenceMapper entityReferenceMapper;
     @Autowired AttachmentMapper attachmentMapper;
+    @Autowired AiAssistantIdentifierResolver identifierResolver;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -85,13 +89,9 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertEquals(currentUser.getId(), stored(note).get(0).getRefId());
     }
 
-    /**
-     * A pending (invited-but-not-yet-joined) member is a valid mention target:
-     * their reference is persisted so the chip renders, and they are returned as
-     * newly-added so the caller can notify them; they see it once they accept.
-     */
+    /** Historical pending grants retain authored mentions for notification delivery after acceptance. */
     @Test
-    void syncReferences_persistsPendingMemberMention() {
+    void syncReferences_persistsPendingMemberMentionWithoutReaderDisclosure() {
         User pending = newPendingMember();
         Note note = newNote(currentUser, null, null);
 
@@ -99,8 +99,8 @@ class ReferenceServiceTest extends AbstractServiceTest {
             "Welcome " + mention("Invitee", pending));
 
         assertEquals(List.of(pending.getId()), added);
-        assertEquals(1, stored(note).size());
-        assertEquals(pending.getId(), stored(note).get(0).getRefId());
+        assertEquals(pending.getId(), stored(note).getFirst().getRefId());
+        assertTrue(referenceService.referencesForReader(workspace.getId(), "note", note.getId()).isEmpty());
     }
 
     /**
@@ -116,6 +116,127 @@ class ReferenceServiceTest extends AbstractServiceTest {
 
         assertTrue(added.isEmpty());
         assertTrue(stored(note).isEmpty());
+    }
+
+    @Test
+    void memberTargetVisibilityExcludesPendingAndNonMembers() {
+        int active = newUser().getId();
+        int pending = newPendingMember().getId();
+        int outsider = newNonMember().getId();
+        Workspace other = new Workspace();
+        other.setOrgId(workspace.getOrgId());
+        other.setName("Other provenance " + unique());
+        other.setSlug("provenance_" + unique());
+        workspaceMapper.insert(other);
+        workspaceMapper.addPendingMember(other.getId(), outsider, "member");
+        assertEquals(java.util.Set.of(active),
+                referenceService.visibleMemberIds(workspace.getId(), List.of(active, pending, outsider, active)));
+        assertEquals(java.util.Set.of(active, pending),
+                referenceService.memberIdsForMasking(workspace.getId(), List.of(active, pending, outsider, active)));
+    }
+
+    @Test
+    void pendingAuthoredLabelsRemainInternalUntilAcceptance() {
+        User pending = newPendingMember();
+        User outsider = newNonMember();
+        Note pendingDraft = new Note();
+        pendingDraft.setContent(mention("Authored alias", pending));
+        pendingDraft.setVisibility("workspace");
+        Note created = noteService.create(pendingDraft);
+        Note outsiderDraft = new Note();
+        outsiderDraft.setContent(mention("Authored alias", outsider));
+        outsiderDraft.setVisibility("workspace");
+        Note foreign = noteService.create(outsiderDraft);
+
+        assertTrue(created.getReferences().isEmpty());
+        assertTrue(foreign.getReferences().isEmpty());
+        assertEquals(1, stored(created).size());
+        assertTrue(stored(foreign).isEmpty());
+        Note reader = noteService.getNoteById(created.getId());
+        assertTrue(reader.getReferences().isEmpty());
+        assertEquals("(unavailable reference)", reader.getContent());
+        assertEquals(reader.getContent(), noteService.getNoteById(foreign.getId()).getContent());
+
+        Note masking = referenceService.hydrateForMasking(workspace.getId(), List.of(created)).getFirst();
+        assertEquals(mention("Authored alias", pending), masking.getContent());
+        assertEquals("Authored alias", masking.getReferences().getFirst().getLabel());
+        assertFalse(masking.getContent().contains(pending.getDisplayName()));
+        assertEquals("(unavailable reference)", referenceService.hydrateForMasking(
+            workspace.getId(), List.of(foreign)).getFirst().getContent());
+
+        workspaceMapper.activateMember(workspace.getId(), pending.getId());
+        assertEquals(mention("Authored alias", pending), noteService.getNoteById(created.getId()).getContent());
+    }
+
+    @Test
+    void queuedMemberLabelsSurviveInvisibleTargetsWithRealMembershipChecks() {
+        User active = newUser();
+        User pending = newPendingMember();
+        User outsider = newNonMember();
+        Person visiblePerson = newPerson(newCompany());
+        String text = mention("Former Active Name", active) + " " + mention("Former Pending Name", pending)
+                + " " + mention("Foreign Alias", outsider) + " [Visible Contact](person:" + visiblePerson.getId()
+                + ") [Hidden Contact](person:2147483647 \"title\")";
+        assertEquals("(unavailable reference)", referenceService.redactInvisibleTargets(workspace.getId(),
+                List.of(new ReferenceService.ReaderVisibleContent(text, List.of()))).getFirst().content());
+
+        var result = identifierResolver.resolve(text);
+
+        assertEquals(List.of(
+                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Active Name"),
+                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Pending Name")),
+                result.identifiers());
+        assertTrue(result.resources().isEmpty());
+    }
+
+    @Test
+    void parserMemberReadingsAgreeWithRealPendingRemovedAndForeignMembership() {
+        User active = newUser();
+        User pending = newPendingMember();
+        User removed = newUser();
+        User outsider = newNonMember();
+        workspaceMapper.removeMember(workspace.getId(), removed.getId());
+        String content = "| ` | [Active Parser Alias][active] | ` |\n| --- | --- | --- |\n\n"
+                + "See [^f].\n\n[^f]: [Pending Parser Alias][pending]\n\n"
+                + "[Removed Parser Alias][removed] [Foreign Parser Alias][foreign]\n\n"
+                + "> [active]:\n> user:" + active.getId() + "\n\n"
+                + "- [pending]: user:" + pending.getId() + "\n\n"
+                + "[removed]:\ruser:" + removed.getId() + "\n\n[foreign]: user:" + outsider.getId();
+        var candidates = ReferenceService.memberReferencesInContent(content);
+        assertEquals(java.util.Set.of(active.getId(), pending.getId(), removed.getId(), outsider.getId()),
+                candidates.stream().flatMap(reference -> reference.memberIds().stream())
+                        .collect(java.util.stream.Collectors.toSet()));
+        assertEquals(java.util.Set.of(active.getId()), referenceService.visibleMemberIds(workspace.getId(),
+                List.of(active.getId(), pending.getId(), removed.getId(), outsider.getId())));
+        assertEquals("(unavailable reference)", referenceService.redactInvisibleTargets(workspace.getId(),
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+
+        var resolution = identifierResolver.resolve(content);
+
+        assertEquals(java.util.Set.of("Active Parser Alias", "Pending Parser Alias"), resolution.identifiers().stream()
+                .map(AiAssistantIdentifierResolver.Identifier::value).collect(java.util.stream.Collectors.toSet()));
+        assertTrue(resolution.resources().isEmpty());
+        Note note = newNote(currentUser, null, null);
+        assertTrue(referenceService.syncReferences(workspace.getId(), note.getId(), content).isEmpty());
+        assertTrue(stored(note).isEmpty());
+    }
+
+    @Test
+    void parserDefinitionsKeepForeignWorkspaceCompanyTargetsInvisible() {
+        Workspace other = new Workspace();
+        other.setName("Other " + unique());
+        other.setSlug("other_" + unique());
+        workspaceMapper.insert(other);
+        Company foreign = new Company();
+        foreign.setName("Foreign " + unique());
+        foreign.setWorkspaceId(other.getId());
+        companyMapper.insert(foreign);
+        String content = "See [^f].\n\n[^f]: [Foreign Company][m]\n\n> [m]: company:" + foreign.getId();
+
+        assertEquals("(unavailable reference)", referenceService.redactInvisibleTargets(workspace.getId(),
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        assertThrows(ResourceNotFoundException.class, () -> referenceService.requireVisibleTarget(
+                workspace.getId(), "company", foreign.getId(), currentUser.getId()));
     }
 
     /**
@@ -290,6 +411,69 @@ class ReferenceServiceTest extends AbstractServiceTest {
             "[Foreign](company:" + foreign.getId() + ")");
 
         assertTrue(stored(note).isEmpty());
+    }
+
+    @Test
+    void memberReferenceCandidatesExcludeBlankLabelsBeforeIdentifierConstruction() {
+        for (String label : List.of("", " ", "\t", "\n", "\u2003")) {
+            assertEquals(List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[" + label + "](user:42)"));
+            assertEquals(List.of("Li"), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[" + label + "](user:42) and [Li](user:42)"));
+        }
+    }
+
+    @Test
+    void readerVisibleMemberLabelsIncludeRepeatedTargetsAndReferenceStyleLabels() {
+        assertEquals(List.of("Old Alice", "Other Old Label", "Pending Invitee", "Shortcut"),
+                ReferenceService.memberLabelsFromReaderVisibleContent(
+                        "[Old Alice](user:42) and [Other Old Label](user:42) "
+                                + "[Pending Invitee][pending] and [Shortcut]\n\n"
+                                + "[pending]: user:43\n[Shortcut]: user:44"));
+        assertEquals(List.of("Nested [Alice]"), ReferenceService.memberLabelsFromReaderVisibleContent(
+                "[Nested [Alice]](user:42)"));
+        assertEquals(List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                "[Contact](person:42) (unavailable member)"));
+    }
+
+    @Test
+    void readerAuthorizedMemberCandidatesKeepEncodedSourceLabelsAndDecodedLabels() {
+        assertEquals(List.of("Alice & Bob", "Pending <Name>", "Alice &amp; Bob", "Pending &lt;Name&gt;"),
+                ReferenceService.memberLabelsFromReaderVisibleContent(
+                        "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n\n[invite]: user:43"));
+    }
+
+    @Test
+    void readerAuthorizedMemberCandidatesParseOriginalEncodedDelimiters() {
+        for (var label : List.of(
+                java.util.Map.entry("Al&#93;ice", "Al]ice"),
+                java.util.Map.entry("Al&#91;ice", "Al[ice"),
+                java.util.Map.entry("Alice &amp; Bob", "Alice & Bob"))) {
+            assertEquals(List.of(label.getValue(), label.getKey()),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(
+                            "[" + label.getKey() + "](user&#58;42)"));
+            assertEquals(List.of(label.getValue(), label.getKey()),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(
+                            "[" + label.getKey() + "][member&#93;key]\n\n[member&#93;key]: user&#58;42"));
+        }
+    }
+
+    @Test
+    void memberDefinitionTitlesNeverSuppressEncodedLabelCandidates() {
+        for (String lineBreak : List.of("&#10;", "&#x0A;", "&NewLine;", "&#13;")) {
+            for (String title : List.of("\"a" + lineBreak + "b\"", "'a" + lineBreak + "b'", "(a" + lineBreak + "b)")) {
+                for (String destination : List.of("user&#58;42", "<user&#58;42>", "&#32;user&#58;42&#32;")) {
+                    assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
+                            ReferenceService.memberLabelsFromReaderVisibleContent(
+                                    "[Alice &amp; Bob][m]\n\n[m]: " + destination + " " + title),
+                            destination + " " + title);
+                    assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
+                            ReferenceService.memberLabelsFromReaderVisibleContent(
+                                    "[Alice &amp; Bob](" + destination + " " + title + ")"),
+                            destination + " " + title);
+                }
+            }
+        }
     }
 
 }

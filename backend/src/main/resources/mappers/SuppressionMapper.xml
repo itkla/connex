@@ -14,6 +14,23 @@
     ORDER BY created_at DESC, id DESC
   </select>
 
+  <select id="findForPerson" resultType="ooo.klae.connex.backend.dto.ContactSuppressionDto">
+    SELECT id, channel, address, reason
+    FROM suppression_entry
+    WHERE workspace_id = #{workspaceId} AND id &gt; #{afterId}
+      AND (
+        person_id = #{personId}
+        <if test="addresses != null and addresses.size() > 0">
+          OR
+          <foreach collection="addresses" item="ref" open="(" separator=" OR " close=")">
+            (channel = #{ref.channel} AND address COLLATE utf8mb4_bin = #{ref.address})
+          </foreach>
+        </if>
+      )
+    ORDER BY id
+    LIMIT 51
+  </select>
+
   <!-- Contactability projection for one contact. Reproduces the send path's dual-arm match — the
        person-sticky link plus the canonical address the channel would actually use — and returns
        only the channel and reason. The address, note, author, and recording time stay behind the

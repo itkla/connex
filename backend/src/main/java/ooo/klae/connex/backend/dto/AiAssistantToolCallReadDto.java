@@ -11,6 +11,8 @@ public record AiAssistantToolCallReadDto(
         String toolName,
         String tier,
         String status,
+        String reviewState,
+        String reviewExpiresAt,
         Target target,
         String requestSummary,
         String outcomeSummary,

@@ -101,7 +101,7 @@ const DEPLOYMENT_SHAPES = [
 
 function Avatar({ initials, tone = "brand" }: { initials: string; tone?: "brand" | "muted" }) {
     const toneClass =
-        tone === "brand" ? "bg-brand-light text-brand-dark" : "bg-muted text-muted-foreground";
+        tone === "brand" ? "bg-brand-light text-brand-text" : "bg-muted text-muted-foreground";
     return (
         <span
             className={`flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${toneClass}`}
@@ -164,7 +164,7 @@ function ContactCard() {
                 {["Key account", "Champion"].map((tag) => (
                     <span
                         key={tag}
-                        className="rounded-full bg-brand-light px-2 py-0.5 text-xs font-medium text-brand-dark"
+                        className="rounded-full bg-brand-light px-2 py-0.5 text-xs font-medium text-brand-text"
                     >
                         {tag}
                     </span>
@@ -192,7 +192,7 @@ function PipelineBoard() {
                         >
                             <div
                                 className={`truncate text-xs font-medium ${
-                                    col.accent ? "text-brand-dark" : "text-foreground"
+                                    col.accent ? "text-brand-text" : "text-foreground"
                                 }`}
                             >
                                 {deal.n}
@@ -257,7 +257,7 @@ function ActivityTimeline() {
         <ol className="space-y-3">
             {ACTIVITY_ENTRIES.map((e, i) => (
                 <li key={i} className="flex items-center gap-3">
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-light text-brand-dark">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-light text-brand-text">
                         <e.Icon className="size-4" />
                     </span>
                     <span className="flex-1 text-xs text-foreground">{e.text}</span>
@@ -282,7 +282,7 @@ function ImportWizard() {
                         {r.from}
                     </span>
                     <span className="text-muted-foreground">&rarr;</span>
-                    <span className="truncate rounded-md border border-brand/30 bg-brand-light px-2.5 py-1.5 text-xs font-medium text-brand-dark">
+                    <span className="truncate rounded-md border border-brand/30 bg-brand-light px-2.5 py-1.5 text-xs font-medium text-brand-text">
                         {r.to}
                     </span>
                 </div>
@@ -371,10 +371,10 @@ function DealLineItems() {
             </ul>
             <div className="flex items-center gap-3 border-t border-brand/40 bg-brand-light px-3 py-2.5">
                 <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-semibold text-brand-dark">Deal value</span>
-                    <span className="block text-[10px] text-brand-dark/80">Derived from line items</span>
+                    <span className="block text-xs font-semibold text-brand-text">Deal value</span>
+                    <span className="block text-[10px] text-brand-text/80">Derived from line items</span>
                 </span>
-                <span className="shrink-0 text-sm font-semibold tabular-nums text-brand-dark">¥1,740,000</span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-brand-text">¥1,740,000</span>
             </div>
         </div>
     );
@@ -426,14 +426,14 @@ function CampaignFlow() {
                     >
                         <div
                             className={`text-[10px] uppercase tracking-wide ${
-                                step.accent ? "text-brand-dark/80" : "text-muted-foreground"
+                                step.accent ? "text-brand-text/80" : "text-muted-foreground"
                             }`}
                         >
                             {step.label}
                         </div>
                         <div
                             className={`mt-1 truncate text-xs font-medium ${
-                                step.accent ? "text-brand-dark" : "text-foreground"
+                                step.accent ? "text-brand-text" : "text-foreground"
                             }`}
                         >
                             {step.detail}
@@ -462,7 +462,7 @@ function DeploymentProfiles() {
                 >
                     <div
                         className={`text-xs font-semibold ${
-                            shape.accent ? "text-brand-dark" : "text-foreground"
+                            shape.accent ? "text-brand-text" : "text-foreground"
                         }`}
                     >
                         {shape.name}
@@ -470,7 +470,7 @@ function DeploymentProfiles() {
                     <div className="mt-2 space-y-1">
                         <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Operated by</div>
                         <div
-                            className={`text-xs ${shape.accent ? "text-brand-dark" : "text-foreground"}`}
+                            className={`text-xs ${shape.accent ? "text-brand-text" : "text-foreground"}`}
                         >
                             {shape.operator}
                         </div>

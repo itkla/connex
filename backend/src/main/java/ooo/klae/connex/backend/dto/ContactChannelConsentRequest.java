@@ -5,6 +5,8 @@ import java.time.LocalDateTime;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 
 /**
  * Consent state to set for the person identified by the route.
@@ -14,6 +16,7 @@ import jakarta.validation.constraints.Size;
  * @param source capture source
  * @param evidenceRef optional evidence reference
  * @param capturedAt optional capture timestamp
+ * @param expectedVersion reviewed consent version, or zero for an absent row
  */
 public record ContactChannelConsentRequest(
         @NotBlank @Pattern(regexp = "email|sms|line|whatsapp") String channel,
@@ -21,5 +24,12 @@ public record ContactChannelConsentRequest(
         @NotBlank @Pattern(regexp = "granted|revoked|unknown") String status,
         @NotBlank @Size(max = 64) String source,
         @Size(max = 255) String evidenceRef,
-        LocalDateTime capturedAt) {
+        LocalDateTime capturedAt,
+        @NotNull @PositiveOrZero Long expectedVersion) {
+
+    /** Creates a trusted internal update; HTTP writes require an explicit expected version. */
+    public ContactChannelConsentRequest(String channel, String purpose, String status, String source,
+            String evidenceRef, LocalDateTime capturedAt) {
+        this(channel, purpose, status, source, evidenceRef, capturedAt, null);
+    }
 }

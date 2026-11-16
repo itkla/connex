@@ -1,26 +1,39 @@
 "use client";
 
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
+import { Loader2Icon } from "lucide-react";
 
 import {
     createWorkspace,
     logout,
     WorkspaceSelectionUnavailableError,
 } from "@/app/lib/api";
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
+import { usePrivilegedMfaStanding } from "@/app/hooks/usePrivilegedMfaStanding";
+import OnboardingConfinement from "@/app/onboarding/OnboardingConfinement";
 import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
+import OwnershipConfinementDialog from "@/app/components/account/OwnershipConfinementDialog";
+import { Button } from "@/components/ui/button";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
 
 export default function OnboardingForm() {
     const t = useTranslations("Onboarding");
+    const tOffers = useTranslations("AccountInvites");
+    const format = useFormatter();
     const showApiError = useApiErrorToast("Onboarding");
+    const ownershipOffers = useSelfOwnershipOffers();
+    const standing = usePrivilegedMfaStanding();
+    const actionsAvailable = standing.status === "ready" && standing.fresh && !standing.confined;
     const router = useRouter();
     const reduce = useReducedMotion();
     const [name, setName] = useState("");
@@ -46,10 +59,10 @@ export default function OnboardingForm() {
         try {
             await createWorkspace(trimmed);
             toastSuccess(t("created"));
-            window.location.replace("/dashboard");
+            navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));
         } catch (err) {
             if (err instanceof WorkspaceSelectionUnavailableError) {
-                window.location.replace("/dashboard");
+                navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));
                 return;
             }
             showApiError(err, "createFailed");
@@ -79,7 +92,7 @@ export default function OnboardingForm() {
     }
 
     return (
-        <div className="min-h-dvh w-full bg-white lg:grid lg:h-dvh lg:grid-cols-[1fr_1.05fr] lg:overflow-hidden">
+        <div className="light-surface min-h-dvh w-full bg-white text-foreground lg:grid lg:h-dvh lg:grid-cols-[1fr_1.05fr] lg:overflow-hidden">
             <div className="relative flex min-h-dvh flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
                 <button
                     type="button"
@@ -98,56 +111,135 @@ export default function OnboardingForm() {
                             {t("subtitle")}
                         </p>
 
-                        <form onSubmit={onSubmit} className="mt-8 space-y-3" noValidate>
-                            <label className="block">
-                                <span className="mb-1.5 block text-sm font-medium text-neutral-700">
-                                    {t("nameLabel")}
-                                </span>
-                                <input
-                                    type="text"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    placeholder={t("namePlaceholder")}
-                                    autoFocus
-                                    maxLength={128}
-                                    className="h-12 w-full rounded-xl bg-neutral-100 px-4 text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
-                                />
-                            </label>
-                            <button
-                                type="submit"
-                                disabled={submitting}
-                                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
-                            >
-                                {submitting ? t("creating") : t("createButton")}
-                                {!submitting && <ArrowRightIcon className="size-4" />}
-                            </button>
-                        </form>
+                        {standing.confined ? (
+                            <OnboardingConfinement standing={standing} />
+                        ) : standing.status === "failed" || (standing.status === "ready" && !standing.fresh) ? (
+                            <div role="alert" className="mt-8 rounded-xl bg-neutral-100 px-4 py-3 ring-1 ring-black/5">
+                                <p className="text-sm font-medium text-neutral-900">{t("standingFailedTitle")}</p>
+                                <p className="mt-1 text-sm text-neutral-600 text-pretty">{t("standingFailedBody")}</p>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="toolbar"
+                                    className="mt-3"
+                                    onClick={() => void standing.refresh("check")}
+                                >
+                                    {t("standingRetry")}
+                                </Button>
+                            </div>
+                        ) : standing.status === "loading" ? (
+                            <div aria-busy="true" className="mt-8 space-y-3">
+                                <div className="h-12 w-full rounded-xl bg-neutral-100 motion-safe:animate-pulse" />
+                                <div className="h-12 w-full rounded-xl bg-neutral-100 motion-safe:animate-pulse" />
+                            </div>
+                        ) : null}
 
-                        <div className="mt-8 border-t border-neutral-200 pt-6">
-                            <span className="block text-sm font-medium text-neutral-700">
-                                {t("joinTitle")}
-                            </span>
-                            <form onSubmit={handleJoin} className="mt-2 flex gap-2">
-                                <input
-                                    type="text"
-                                    value={joinValue}
-                                    onChange={(e) => setJoinValue(e.target.value)}
-                                    placeholder={t("joinPlaceholder")}
-                                    className="h-11 flex-1 rounded-xl bg-neutral-100 px-4 text-sm text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
-                                />
+                        {actionsAvailable && (
+                            <form onSubmit={onSubmit} className="mt-8 space-y-3" noValidate>
+                                <label className="block">
+                                    <span className="mb-1.5 block text-sm font-medium text-neutral-700">
+                                        {t("nameLabel")}
+                                    </span>
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        placeholder={t("namePlaceholder")}
+                                        autoFocus
+                                        maxLength={128}
+                                        className="h-12 w-full rounded-xl bg-neutral-100 px-4 text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+                                    />
+                                </label>
                                 <button
                                     type="submit"
-                                    className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold text-neutral-700 ring-1 ring-neutral-200 transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                    disabled={submitting}
+                                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
                                 >
-                                    {t("joinButton")}
+                                    {submitting ? t("creating") : t("createButton")}
+                                    {!submitting && <ArrowRightIcon className="size-4" />}
                                 </button>
                             </form>
-                        </div>
+                        )}
+
+                        {actionsAvailable && (
+                            <div className="mt-8 border-t border-neutral-200 pt-6">
+                                <span className="block text-sm font-medium text-neutral-700">
+                                    {t("joinTitle")}
+                                </span>
+                                <form onSubmit={handleJoin} className="mt-2 flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={joinValue}
+                                        onChange={(e) => setJoinValue(e.target.value)}
+                                        placeholder={t("joinPlaceholder")}
+                                        className="h-11 flex-1 rounded-xl bg-neutral-100 px-4 text-sm text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold text-neutral-700 ring-1 ring-neutral-200 transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                    >
+                                        {t("joinButton")}
+                                    </button>
+                                </form>
+                            </div>
+                        )}
+
+                        {ownershipOffers.offers.length > 0 && (
+                            <section aria-labelledby="onboarding-ownership-offers" className="mt-8 border-t border-neutral-200 pt-6">
+                                <h2 id="onboarding-ownership-offers" className="text-sm font-medium text-neutral-700">
+                                    {tOffers("ownershipTitle")}
+                                </h2>
+                                <p className="mt-1 text-sm text-neutral-500 text-pretty">{tOffers("ownershipSubtitle")}</p>
+                                <ul className="mt-3 space-y-2">
+                                    {ownershipOffers.offers.map((offer) => {
+                                        const busy = ownershipOffers.busyOfferId === offer.id;
+                                        const scope = ownershipOffers.scopeLabel(offer);
+                                        const expires = format.dateTime(new Date(parseMysqlDateTime(offer.expiresAt)), { dateStyle: "medium" });
+                                        return (
+                                            <li
+                                                key={offer.id}
+                                                className="flex flex-wrap items-center gap-3 rounded-xl bg-neutral-100 px-4 py-3 ring-1 ring-black/5"
+                                            >
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-sm font-medium text-neutral-900">
+                                                        {tOffers("ownershipOfferTitle", { scope })}
+                                                    </p>
+                                                    <p className="truncate text-xs text-neutral-500">
+                                                        {offer.offerorDisplayName
+                                                            ? tOffers("ownershipOfferMeta", { name: offer.offerorDisplayName, date: expires })
+                                                            : tOffers("ownershipOfferExpires", { date: expires })}
+                                                    </p>
+                                                </div>
+                                                <Button
+                                                    size="toolbar"
+                                                    variant="outline"
+                                                    disabled={busy}
+                                                    onClick={() => ownershipOffers.decline(offer)}
+                                                >
+                                                    {tOffers("decline")}
+                                                </Button>
+                                                {actionsAvailable && (
+                                                    <Button
+                                                        size="toolbar"
+                                                        variant="brand"
+                                                        disabled={busy}
+                                                        onClick={() => ownershipOffers.accept(offer)}
+                                                    >
+                                                        {busy ? <Loader2Icon className="size-4 animate-spin" /> : tOffers("accept")}
+                                                    </Button>
+                                                )}
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </section>
+                        )}
                     </motion.div>
                 </div>
             </div>
 
             <AuthBrandPanel className="hidden lg:block lg:h-full" />
+            <OwnershipConfinementDialog offers={ownershipOffers} />
         </div>
     );
 }

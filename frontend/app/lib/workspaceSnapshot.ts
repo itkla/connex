@@ -7,7 +7,7 @@ import type {
 
 export type PublishedWorkspaceIdentity = Pick<
     WorkspaceIdentity,
-    "id" | "name" | "slug" | "timezone" | "identityVersion"
+    "id" | "name" | "slug" | "timezone" | "defaultCurrency" | "identityVersion"
 >;
 export type PublishedOrganizationIdentity = Pick<OrganizationIdentity, "id" | "name" | "identityVersion">;
 
@@ -54,6 +54,7 @@ export function adoptWorkspaces(
                 name: current.name,
                 slug: current.slug,
                 timezone: current.timezone,
+                defaultCurrency: current.defaultCurrency,
                 identityVersion: current.identityVersion,
             } : {}),
             ...(organizationIdentityIsNewer ? {
@@ -81,6 +82,7 @@ export function applyWorkspaceIdentity(
             name: identity.name,
             slug: identity.slug,
             timezone: identity.timezone,
+            ...(identity.defaultCurrency !== undefined ? { defaultCurrency: identity.defaultCurrency } : {}),
             identityVersion: identity.identityVersion,
         }
         : workspace);
@@ -99,6 +101,7 @@ export function restoreWorkspaceIdentity(
             || workspace.name !== expected.name
             || workspace.slug !== expected.slug
             || workspace.timezone !== expected.timezone
+            || (expected.defaultCurrency !== undefined && workspace.defaultCurrency !== expected.defaultCurrency)
             || workspace.identityVersion !== expected.identityVersion) {
             return workspace;
         }
@@ -108,6 +111,7 @@ export function restoreWorkspaceIdentity(
             name: replacement.name,
             slug: replacement.slug,
             timezone: replacement.timezone,
+            ...(replacement.defaultCurrency !== undefined ? { defaultCurrency: replacement.defaultCurrency } : {}),
             identityVersion: replacement.identityVersion,
         };
     });
@@ -133,7 +137,8 @@ export function preservePublishedWorkspaceIdentities(
         if (arriving.identityVersion === identity.identityVersion
             && arriving.name === identity.name
             && arriving.slug === identity.slug
-            && arriving.timezone === identity.timezone) {
+            && arriving.timezone === identity.timezone
+            && (identity.defaultCurrency === undefined || arriving.defaultCurrency === identity.defaultCurrency)) {
             continue;
         }
         pending.push(identity);

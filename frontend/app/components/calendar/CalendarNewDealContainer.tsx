@@ -1,11 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
+
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
@@ -13,7 +18,6 @@ import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
 const EMPTY_DRAFT: CreateDealPayload = {
     name: '',
     value: 0,
-    actualValue: 0,
     currency: 'USD',
     pipeline: 0,
     stage: 0,
@@ -40,53 +44,67 @@ export default function CalendarNewDealContainer({
     const t = useTranslations('Calendar');
     const showApiError = useApiErrorToast('Calendar');
 
-    const [loaded, setLoaded] = useState(false);
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-    const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
+    const [loadedScope, setLoadedScope] = useState<object | null>(null);
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const defaultCurrency = workspaceDefaultCurrency(activeWorkspace);
+    const seededScopeRef = useRef<string | null>(null);
+    const [seededCurrency, setSeededCurrency] = useState(defaultCurrency);
+    const { scope: pipelineScope, pipelines, stagesByPipeline, setPipelines, setStagesByPipeline } = usePipelineChoices();
+    const loaded = loadedScope === pipelineScope;
 
-    const [payload, setPayload] = useState<CreateDealPayload>(EMPTY_DRAFT);
+    const [payload, setPayload] = useState<CreateDealPayload>(() => ({ ...EMPTY_DRAFT, currency: defaultCurrency, expectedCloseDate: defaultExpectedCloseDate || undefined }));
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
 
     useEffect(() => {
         if (!open || loaded) return;
         let cancelled = false;
+        const origin = workspacePinnedRequest(activeWorkspaceId);
         void (async () => {
-            const nextPipelines = await getPipelines().catch(() => [] as Pipeline[]);
+            const nextPipelines = await getPipelines(origin).catch(() => [] as Pipeline[]);
             if (cancelled) return;
             setPipelines(nextPipelines);
             const entries = await Promise.all(
                 nextPipelines.map(
-                    async (p) => [p.id, await getStagesByPipelineId(p.id).catch(() => [] as Stage[])] as const,
+                    async (p) => [p.id, await getStagesByPipelineId(p.id, origin).catch(() => [] as Stage[])] as const,
                 ),
             );
             if (cancelled) return;
             setStagesByPipeline(Object.fromEntries(entries));
-            setLoaded(true);
+            setLoadedScope(pipelineScope);
         })();
         return () => {
             cancelled = true;
         };
-    }, [open, loaded]);
+    }, [pipelineScope, activeWorkspaceId, setPipelines, setStagesByPipeline, open, loaded]);
 
     useEffect(() => {
-        if (!open) return;
+        if (!open) {
+            seededScopeRef.current = null;
+            return;
+        }
+        const scope = JSON.stringify([activeWorkspaceId, defaultExpectedCloseDate]);
+        if (seededScopeRef.current === scope) return;
         const raf = window.requestAnimationFrame(() => {
-            setPayload({ ...EMPTY_DRAFT, expectedCloseDate: defaultExpectedCloseDate || undefined });
+            seededScopeRef.current = scope;
+            const currency = defaultCurrency;
+            setSeededCurrency(currency);
+            setPayload({ ...EMPTY_DRAFT, currency, expectedCloseDate: defaultExpectedCloseDate || undefined });
             setSucceeded(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [open, defaultExpectedCloseDate]);
+    }, [activeWorkspaceId, defaultCurrency, open, defaultExpectedCloseDate]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && creating) return;
         onOpenChange(next);
     };
 
-    const seededBaseline: CreateDealPayload = { ...EMPTY_DRAFT, expectedCloseDate: defaultExpectedCloseDate || undefined };
+    const seededBaseline: CreateDealPayload = { ...EMPTY_DRAFT, currency: seededCurrency, expectedCloseDate: defaultExpectedCloseDate || undefined };
     const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
 
-    const createNewDeal = async (duplicateReviewToken: string) => {
+    const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setSucceeded(false);
         setCreating(true);
         try {
@@ -94,13 +112,13 @@ export default function CalendarNewDealContainer({
                 ...payload,
                 name: payload.name.trim(),
                 value: Number.isFinite(payload.value) ? payload.value : 0,
-                actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : 0,
-                currency: payload.currency.trim() || 'USD',
+                actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : undefined,
+                currency: payload.currency.trim() || defaultCurrency,
                 pipeline: payload.pipeline || null,
                 stage: payload.stage || null,
                 duplicateReviewToken,
                 expectedCloseDate: payload.expectedCloseDate || undefined,
-            });
+            }, origin);
             toastSuccess(t('dealCreated'));
             setCreating(false);
             setSucceeded(true);
@@ -122,6 +140,10 @@ export default function CalendarNewDealContainer({
             setPayload={setPayload}
             pipelines={pipelines}
             stagesByPipeline={stagesByPipeline}
+            onPipelineCreated={(pipeline, stages) => {
+                setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+                setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+            }}
             isCreating={creating}
             isSuccess={succeeded}
             isDirty={isDirty}

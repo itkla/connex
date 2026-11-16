@@ -100,6 +100,69 @@ pending requests and terminates a request whose step is unsatisfiable: the block
 `unsatisfiable`, other open steps are cancelled, and the document returns to `draft`. Decisions
 already recorded and every frozen step and approver assignment remain as historical evidence.
 
+### Management candidate reads
+
+`GET /api/deals/{dealId}/documents/{documentId}/approval/steps/{stepId}/approver-candidates`
+requires `DOCUMENT_MANAGE` and returns advisory candidates for one active step of the document's
+pending approval, plus `requiredCount`, `approvedCount`, `remainingRequiredCount`,
+`decidedByUserIds` and `effectiveApproverIds` from the same hydrated step snapshot. The caller
+need not hold `DOCUMENT_APPROVE` or be assigned to that step. Parent-resource mismatches and a
+missing pending approval return 404; a matching inactive step returns 400.
+
+Candidates come only from active members of the server-resolved workspace with a current
+`DOCUMENT_APPROVE` grant from a built-in role or a custom role anchored to that workspace.
+Pending, disabled, suspended and removed members, deletion-reserved accounts, unresolved roles,
+foreign-workspace roles and revoked grants contribute no candidates. Candidate authorization uses
+three batch reads for members, workspace role grants and deletion reservations, rather than reading
+permissions per member. Unknown roles fail closed only in this candidate resolver. The request's frozen
+separation-of-duties exclusions apply; missing requester attribution (or missing author attribution
+under `strict`) produces an empty candidate list. `off` requires neither attribution.
+
+The response exposes only candidate id, username, display name and email. It does not filter by the
+step's current named assignment, past decisions or delegation history, and is not a selection
+preview or a guarantee that a proposed assignment can satisfy quorum. This read creates no
+assignments, audit events or notifications. Existing mutations and their locked validation remain
+unchanged. The picker uses these server candidates and quorum counts, aborts superseded reads,
+rejects stale workspace/document/approval/step responses and removes selections absent on refresh.
+Quorum checks use only the candidate response, including its decision authors and effective approver
+ids. A refused mutation refreshes both the document projection and candidates. The member directory
+supplies historical labels only.
+
+## Member departure and account erasure
+
+Administrative removal, leave, and invitation decline delete the member's personal report goals in
+that workspace. Team goals and other members' goals survive with `created_by` unchanged. Account
+erasure deletes personal goals in every active tenant catalog and clears `created_by` on surviving
+goals, including references in workspaces the account already left.
+
+Departure and erasure return the existing 409 conflict while the member is the sole **distinct named
+approver** on an active policy step or an open step of a pending request, including future sequential
+steps. The request check replays the latest reassignment, applicable escalation, and delegation;
+it checks the named route independently of current membership, permissions, separation of duties,
+and decisions. Reassigning away unblocks departure. `any_approver` routes, inactive policies, and
+terminal requests or steps never block. After the check passes, the member's policy-step and frozen
+approver rows are deleted, including inactive and terminal references. Decisions and appended
+assignment history remain as evidence.
+
+This guarantee is bounded to references committed before departure; writers take no new departure
+fence. A reference created concurrently with departure can survive it. A request naming the departed
+member follows the existing reconciliation rules in their existing order:
+
+1. Its deadline rules apply first. If the step expires it records `expired`; if it escalates it
+   appends `any_approver` and clears the deadline, and can then still pass with enough surviving
+   approvers.
+2. Only when quorum remains impossible after those rules does the bounded sweep terminate it as
+   `unsatisfiable`, cancel other open steps, and return the document to `draft`.
+
+A concurrently created personal goal remains until account erasure removes it. For an erased account
+it would be a dangling reference of exactly [#1941](https://github.com/itkla/connex/issues/1941)'s
+kind, so the orphan sweep covers `report_goal` too ([#2069](https://github.com/itkla/connex/issues/2069)).
+After the account's control-plane deletion commits, immediate and periodic recovery delete a personal
+goal whose owner no longer exists and clear a creator that no longer exists, so erasure eventually
+completes. Goals of live accounts, including reserved ones, are never touched. Final deletion proves
+its reservation with a current locking read once it holds the account lock
+([#2059](https://github.com/itkla/connex/issues/2059)).
+
 ## Why a request ended
 
 Every terminal request records an `outcome_reason` in addition to its coarse status:

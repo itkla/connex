@@ -23,6 +23,7 @@ export type PageParams = {
 };
 
 export type ContactsPageParams = PageParams & MemberScopeParams & {
+    tagIds?: number[];
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
@@ -68,7 +69,23 @@ export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
     definition: SegmentDefinition;
 };
 
-export type ActivitiesPageParams = PageParams & {
+export type ActivityListParams = PageParams & {
+    companyId?: number;
+    persons?: number[];
+    companies?: number[];
+    deals?: number[];
+    members?: number[];
+};
+
+export type TasksPageParams = ActivityListParams & {
+    queue?: string;
+    personId?: number;
+    dealId?: number;
+    assignedToId?: number;
+};
+
+export type ActivitiesPageParams = ActivityListParams & {
+    type?: string;
     personId?: number;
     dealId?: number;
     createdById?: number;
@@ -99,6 +116,17 @@ export type ProductSearchParams = {
     q?: string;
 };
 
+/**
+ * The product export's filter: the catalog search plus the products browser's facets. Values are
+ * the browser's own facet keys (`one_time`/`recurring`, `true`/`false`, `bounded`/`__empty__`),
+ * matched exactly; the server rejects anything else.
+ */
+export type ProductExportParams = ProductSearchParams & {
+    billingFrequency?: string[];
+    active?: string[];
+    effectiveDates?: string[];
+};
+
 export type ImportDuplicateAction = 'fill_empty' | 'skip' | 'overwrite';
 
 export type ImportColumnMapping = {
@@ -115,6 +143,8 @@ export type ImportRequest = {
     onDuplicate?: ImportDuplicateAction;
     links?: Record<number, number>;
     duplicateReviewProof?: string;
+    companyLinks?: Record<number, number>;
+    skippedRows?: number[];
 };
 
 export type ImportRowStatus = 'create' | 'match' | 'skip' | 'invalid';
@@ -146,12 +176,14 @@ export type DuplicatePreflightResponse = {
     candidates: DuplicateCandidate[];
     truncated: boolean;
     reviewToken: string;
+    allowSeparateCreation?: boolean;
 };
 
 export type PersonDuplicatePreflightRequest = {
     name?: string | null;
     emails: string[];
     phones: string[];
+    reviewToken?: string | null;
 };
 
 export type CompanyDuplicatePreflightRequest = {
@@ -166,6 +198,14 @@ export type DealDuplicatePreflightRequest = {
     reviewToken?: string;
 };
 
+export type DealImportDateReview = {
+    closedAt?: string | null;
+    createdAt?: string | null;
+    timezone: string;
+    usesImportTime: boolean;
+    futureClosedAt: boolean;
+};
+
 export type ImportRowAnalysis = {
     rowIndex: number;
     status: ImportRowStatus;
@@ -175,21 +215,36 @@ export type ImportRowAnalysis = {
     mergedRowCount?: number | null;
     errors?: string[] | null;
     candidates?: DuplicateCandidate[] | null;
+    dealDates?: DealImportDateReview | null;
+    problems?: ImportProblem[] | null;
+    companyDependency?: {
+        name: string;
+        key: string;
+        selectedId?: number | null;
+        candidates?: DuplicateCandidate[];
+        truncated: boolean;
+    } | null;
 };
 
+export type ImportProblem = { code: string; field?: string | null };
+
 export type ImportPreviewResult = {
+    defaultCurrency?: string;
     total: number;
     toCreate: number;
     toUpdate: number;
     toSkip: number;
     invalid: number;
     rows: ImportRowAnalysis[];
+    companyCandidates?: Record<string, DuplicateCandidate[]>;
     duplicateReviewProof?: string | null;
 };
 
 export type ImportRowError = {
     rowIndex: number;
     reason: string;
+    errors?: string[] | null;
+    problems?: ImportProblem[] | null;
 };
 
 export type ImportResult = {
@@ -844,13 +899,41 @@ export type RegisterPayload = {
     displayName: string;
     email: string;
     timezone?: string;
+    skipInitialWorkspace?: boolean;
 };
 
 /** Proof requirements for beginning passkey registration in the current account. */
+/** A privileged account's MFA standing under the current attestation policy (#1534). */
+export type PrivilegedMfaStanding = "UNPRIVILEGED" | "SATISFIED" | "ENROLLMENT_REQUIRED" | "ATTESTATION_REQUIRED";
+
+/** One organization where one of the account's own passkeys is not yet approved (#1534). */
+export type PasskeyApprovalGap = {
+    credentialId: string;
+    orgId: number;
+    orgName: string;
+};
+
+/**
+ * One organization where the signed-in account is privileged, with what makes it so (#1534): its
+ * org role, if any, and every workspace there whose role is privileged. These are its exits.
+ */
+export type PrivilegedMembership = {
+    orgId: number;
+    orgName: string;
+    orgRole: OrgRole | null;
+    lastOwner?: boolean;
+    workspaces: Array<{ workspaceId: number; workspaceName: string; lastOwner?: boolean }>;
+};
+
 export type PasskeyRegistrationRequirements = {
     currentPasswordRequired: boolean;
     emailConfirmationRequired: boolean;
     emailConfirmationSatisfied: boolean;
+    /** Absent from backends that predate standing; see `settlePrivilegedMfaStanding`. */
+    standing?: PrivilegedMfaStanding;
+    approvalGaps?: PasskeyApprovalGap[];
+    /** Absent from backends that predate it; an empty list for an unprivileged account. */
+    privilegedMemberships?: PrivilegedMembership[];
 };
 
 export type AuthResponse = {
@@ -863,6 +946,17 @@ export type Passkey = {
     transports: string[];
     createdAt: string;
     lastUsedAt: string | null;
+};
+
+/** A passkey approval code, shown to the administrator who created it exactly once (#1534). */
+export type MfaAttestationCode = {
+    code: string;
+    expiresAt: string;
+};
+
+/** The organization whose administrator access a redeemed passkey approval code now covers (#1534). */
+export type MfaAttestationRedemption = {
+    orgId: number;
 };
 
 export type ForgotPasswordPayload = {
@@ -1189,8 +1283,15 @@ export type UpdateCompanyPayload = {
     address?: string;
 };
 
+/** The only fields returned by the bounded contact reference endpoint. */
+export type ContactReference = Pick<Contact, 'id' | 'name' | 'companyId'>;
+
+/** Picker identity, with optional presentation metadata from page results or caller seeds. */
+export type ContactPickerOption = ContactReference & Partial<Pick<Contact, 'workspaceId' | 'imageUrl'>>;
+
 export type Contact = {
     id: number;
+    version?: number;
     workspaceId?: number;
     ownerId?: number | null;
     name: string;
@@ -1293,6 +1394,7 @@ export type ContactDisqualificationReason = string;
  * transition rules, so the client renders `allowedTransitions` rather than recomputing them.
  */
 export type ContactLifecycle = {
+    version?: number;
     personId: number | null;
     stage: ContactLifecycleStage | null;
     changedAt: string | null;
@@ -1377,11 +1479,11 @@ export type QualificationCriterionPayload = {
 export type DisqualificationReason = {
     id: number;
     code: string;
-    label: string | null;
+    label?: string | null;
     requiresNote: boolean;
     position: number;
     builtIn: boolean;
-    archivedAt: string | null;
+    archivedAt?: string | null;
 };
 
 /** Editable fields for a disqualification reason. Codes remain immutable after creation. */
@@ -1423,6 +1525,7 @@ export type DataSubjectRequestStatus =
     | 'closed';
 
 export type DataSubjectRequest = {
+    snapshotToken: string;
     id: number;
     orgId: number;
     requestType: DataSubjectRequestType;
@@ -1466,6 +1569,8 @@ export type DataSubjectRequestBody = {
 
 export type Deal = {
     id: number;
+    /** Database-owned token for conditional edits. */
+    version?: number;
     name: string;
     value: number;
     actualValue: number;
@@ -1519,7 +1624,7 @@ export type UpdateDealEvaluationPayload = {
 export type CreateDealPayload = {
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number | null;
     stage: number | null;
@@ -1533,9 +1638,11 @@ export type CreateDealPayload = {
 };
 
 export type UpdateDealPayload = {
+    /** Token from the form's base snapshot; omission retains legacy write behavior. */
+    expectedVersion?: number;
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number;
     stage: number;
@@ -1562,9 +1669,10 @@ export type DealStageHistory = {
     achievedAt: string;
 };
 
+/** Pipeline creation draft; stage client ids are editor keys omitted from requests. */
 export type CreatePipelinePayload = {
     name?: string;
-    stages?: { name: string; success?: boolean; failure?: boolean }[];
+    stages?: { name: string; success?: boolean; failure?: boolean; clientId?: string }[];
 };
 
 export type CreateStagePayload = {
@@ -1685,7 +1793,8 @@ export type UpdateProductPayload = Partial<CreateProductPayload>;
 /**
  * A line item on a deal. Catalog values are snapshotted at creation, so later product edits
  * never mutate an existing line. {@link lineSubtotal}/{@link lineTax}/{@link lineTotal} are
- * server-computed (BigDecimal) — the client never does money arithmetic.
+ * server-computed (BigDecimal). The client may reconcile rounded document displays, but never
+ * recomputes or persists canonical monetary values.
  */
 export type DealLineItem = {
     id: number;
@@ -1726,9 +1835,15 @@ export type DealLineItemsResponse = {
     items: DealLineItem[];
     /** Unavailable until every remaining line uses the deal currency. */
     totals: DealLineItemTotals | null;
+    manualValueToReplace?: number | null;
+    restorableManualValue?: number | null;
 };
 
 export type DealLineItemPayload = {
+    previewOnly?: boolean;
+    confirmValueReplacement?: boolean;
+    expectedManualValue?: number;
+    expectedCurrency?: string;
     productId?: number | null;
     name?: string;
     sku?: string | null;
@@ -1900,6 +2015,24 @@ export type ApprovalDelegate = {
     email: string;
 };
 
+/** One server-authorized candidate for managing an active approval step. */
+export type ApprovalStepCandidate = {
+    id: number;
+    username: string;
+    displayName: string | null;
+    email: string;
+};
+
+/** Advisory candidates and quorum context, resolved in the caller's active workspace. */
+export type ApprovalStepCandidates = {
+    candidates: ApprovalStepCandidate[];
+    requiredCount: number;
+    approvedCount: number;
+    remainingRequiredCount: number;
+    decidedByUserIds: number[];
+    effectiveApproverIds: number[];
+};
+
 /** One frozen step of an approval chain, with the approvals collected so far. */
 export type DocumentApprovalStep = {
     id: number;
@@ -1955,7 +2088,7 @@ export type ApprovalPolicyStep = {
 };
 
 /** Authoritative source family behind one My Work item. */
-export type WorkItemSource = "task" | "notification" | "document_approval";
+export type WorkItemSource = "task" | "notification" | "document_approval" | "ai_mission";
 
 /** Deterministic urgency band computed by the backend ranking contract. */
 export type WorkItemUrgency = "critical" | "high" | "normal" | "low";
@@ -1983,7 +2116,8 @@ export type WorkItemReasonCode =
     | "task_open"
     | "deal_close_overdue"
     | "deal_closing_soon"
-    | "document_approval_pending";
+    | "document_approval_pending"
+    | "mission_review_pending";
 
 /** Structured, prose-free reason payload for one work item. */
 export type WorkItemReason = {
@@ -1995,7 +2129,7 @@ export type WorkItemReason = {
 
 /** One evidence row backing a work item, always sourced from authoritative state. */
 export type WorkItemEvidence = {
-    code: "task_due" | "task_open" | "deal_close_date" | "approval_requested";
+    code: "task_due" | "task_open" | "deal_close_date" | "approval_requested" | "mission_output_prepared";
     sourceType: WorkItemSource;
     sourceId: number;
     occurredAt: string;
@@ -2081,6 +2215,7 @@ export type WorkItemActionResponse = {
 
 /** Declares when a generated document requires internal approval before finalization. */
 export type ApprovalPolicy = {
+    currencyValid?: boolean;
     id: number;
     name: string;
     active: boolean;
@@ -2190,6 +2325,7 @@ export type DealDocument = {
     createdBy: number | null;
     content: DocumentContent;
     requiresApproval: boolean;
+    approvalConfigurationError?: string | null;
     latestApproval?: DocumentApproval | null;
 };
 
@@ -2492,6 +2628,7 @@ export type CampaignSend = {
     createdById: number | null;
     createdAt: string;
     updatedAt: string;
+    contentRefused?: boolean;
 };
 
 /**
@@ -2505,10 +2642,13 @@ export type CampaignSendPayload = {
     purpose?: string | null;
 };
 
-/** Per-channel delivery tally within a campaign's engagement rollup. */
+/** Prepared send recipients, dispatch evidence, and receipt-backed outcomes for one channel. */
 export type CampaignChannelStat = {
     channel: string;
-    deliveries: number;
+    preparedRecipients: number;
+    dispatched: number;
+    delivered: number;
+    deliveryReceiptsAvailable: boolean;
 };
 
 /** Delivery-outcome rollup for a single send within a campaign's engagement view. */
@@ -2516,7 +2656,7 @@ export type CampaignSendEngagement = {
     sendId: number;
     status: string;
     channel: string;
-    totalRecipients: number;
+    preparedRecipients: number;
     dispatched: number;
     delivered: number;
     bounced: number;
@@ -2539,7 +2679,7 @@ export type CampaignSendEngagement = {
  */
 export type CampaignEngagement = {
     campaignId: number;
-    totalRecipients: number;
+    preparedRecipients: number;
     dispatched: number;
     delivered: number;
     bounced: number;
@@ -2575,6 +2715,8 @@ export type CampaignRecipient = {
     reasonCode: CampaignDeliveryFailureReason | null;
     createdAt?: string;
     updatedAt?: string;
+    messageName?: string;
+    sendNumber?: number;
 };
 
 export type CampaignDeliveryFailureReason =
@@ -2602,6 +2744,7 @@ export type CampaignRecipientsPageParams = PageParams & {
     sendId?: number;
     status?: string[];
     event?: string;
+    submitted?: boolean;
 };
 
 /**
@@ -2717,6 +2860,7 @@ export type ContactChannelConsent = {
     evidenceRef: string | null;
     capturedAt: string | null;
     updatedAt: string;
+    version: number;
 };
 
 export type ContactChannelConsentPayload = {
@@ -2726,6 +2870,20 @@ export type ContactChannelConsentPayload = {
     source: string;
     evidenceRef?: string | null;
     capturedAt?: string | null;
+    expectedVersion: number;
+};
+
+/** Minimal contact-scoped restriction details; excludes unrelated addresses and operator metadata. */
+export type ContactSuppression = {
+    id: number;
+    channel: string;
+    address: string;
+    reason: string;
+};
+
+export type ContactSuppressionPage = {
+    items: ContactSuppression[];
+    nextAfterId?: number | null;
 };
 
 export type SuppressionEntry = {
@@ -3074,6 +3232,7 @@ export type AiChatAttachment = {
 export type AiChatSession = {
     id: number;
     workspaceId: number;
+    organizationPrivacyGeneration?: string;
     createdByUserId: number | null;
     title: string;
     visibility: string;
@@ -3186,8 +3345,8 @@ export type AiChatMessage = {
     sessionId: number;
     seq: number;
     authorKind: string;
-    authorUserId: number | null;
-    authorDisplayName: string | null;
+    authorUserId?: number | null;
+    authorDisplayName?: string | null;
     content: string;
     contentWithheld?: boolean;
     historySummarized?: boolean;
@@ -3205,6 +3364,164 @@ export type AiChatMessage = {
      * transcript shows the work the answer was built from rather than only its conclusion.
      */
     todos?: AiChatTodo[] | null;
+};
+
+/** Slice-one record review scope, fixed when the request is accepted. */
+export type AiAgentRecordScope = {
+    kind: 'record';
+    recordKind: AiChatPageContextKind;
+    recordId: number;
+};
+
+export type AiAgentRunState = 'queued' | 'running' | 'waiting_approval' | 'paused' | 'done' | 'failed' | 'cancelled';
+export type AiAgentRunControl = 'pause' | 'resume' | 'cancel';
+export type AiAgentMissionType = 'record_review_v1' | 'record_preparation_v1';
+
+/** Mission revisions remain decimal strings throughout the browser. */
+export type AiAgentRun = {
+    schemaVersion: 1;
+    id: number;
+    sessionId: number | null;
+    missionType: AiAgentMissionType;
+    definitionVersion: 1;
+    state: AiAgentRunState;
+    reasonCode: string | null;
+    stateVersion: string;
+    goal: string | null;
+    scope: AiAgentRecordScope | null;
+    createdAt: string;
+    executionDeadlineAt: string;
+    hardDeadlineAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+    outputAvailable: boolean;
+    outputRevision: string | null;
+    proposalMembershipRevision: string | null;
+    proposalFrozenAt: string | null;
+    proposalFirstPreparedAt: string | null;
+    reviewExpiresAt: string | null;
+    proposalCounts: AiAgentProposalCounts | null;
+    contentWithheld: boolean;
+    availableActions: (AiAgentRunControl | 'view_output')[];
+    progress: {
+        phase: 'queued' | 'reading' | 'writing_report' | 'preparing_changes' | 'waiting_review';
+        completedRecords: number;
+        totalRecords: number;
+    } | null;
+};
+
+export type AiAgentRunCreateRequest = {
+    clientRequestKey: string;
+    missionType: AiAgentMissionType;
+    goal: string;
+    scope: AiAgentRecordScope;
+    limits?: {
+        maxSteps?: number;
+        maxTokens?: number;
+        executionLifetimeSeconds?: number;
+    };
+};
+
+export type AiAgentRunPage = { items: AiAgentRun[]; nextCursor: string | null };
+
+/** Counts reflect canonical decisions, including completed actions that were undone. */
+export type AiAgentProposalCounts = {
+    pending: number;
+    executed: number;
+    rejected: number;
+    withdrawn: number;
+    undone: number;
+};
+
+/** One immutable member and its current authorized card projection. */
+export type AiAgentProposalItem = {
+    actionSlot: string;
+    preparationId: string;
+    ordinal: number;
+    preparedAt: string;
+    card: AiAssistantToolCall;
+};
+
+/** Membership belongs to the root run and remains separate from transcript history. */
+export type AiAgentProposalSet = {
+    id: number;
+    revision: string;
+    frozen: true;
+    frozenAt: string | null;
+    firstPreparedAt: string | null;
+    reviewExpiresAt: string | null;
+    items: AiAgentProposalItem[];
+    derivedCounts: AiAgentProposalCounts;
+};
+
+export type AiAgentProposalDecisionRequest = {
+    expectedProposalRevision: string;
+    items: {
+        actionSlot: string;
+        expectedPreparationId: string;
+        decision: 'approve' | 'discard';
+    }[];
+};
+
+/** A batch can stop after earlier changes have committed; uncertainty requires a fresh read. */
+export type AiAgentProposalDecisionResult = {
+    complete: boolean;
+    stopReason: string | null;
+    items: {
+        actionSlot: string;
+        outcome: 'executed' | 'rejected' | 'withdrawn' | 'undone' | 'refused' | 'not_processed' | 'indeterminate';
+        code: string | null;
+    }[];
+    stateVersion: string | null;
+    outputRevision: string | null;
+    contentWithheld: boolean;
+};
+
+/** Canonical report and exact proposal membership, independent of transcript limits. */
+export type AiAgentOutput = {
+    schemaVersion: 1;
+    runId: number;
+    outputRevision: string;
+    report: {
+        messageId: number;
+        markdown: string;
+        citations: AiChatCitation[];
+        coverage: { processed: number; skipped: number; failed: number; unprocessed: number };
+        generatedAt: string;
+    };
+    proposalSet: AiAgentProposalSet;
+    autoWriteReceipts: never[];
+};
+
+/** Mission realtime carries invalidation metadata only; content comes from authorized GETs. */
+export type AiAgentRealtimeFrame = {
+    workspaceId: number;
+    sessionId: number;
+    runId: number;
+    stateVersion: string;
+    kind: 'mission_created' | 'mission_state' | 'mission_output';
+    coarseState: AiAgentRunState;
+};
+
+export type AiAgentHoldingsPurgeRequest = {
+    idempotencyKey: string;
+    snapshotToken: string;
+    scopeAcknowledgement: 'organization_mission_holdings_v1' | 'organization_assistant_holdings_v2';
+    cutoffPolicyAcknowledgement: 'contents_at_each_workspace_first_invalidation_v1' | 'organization_generation_at_acceptance_v2';
+};
+
+export type AiAgentHoldingsPurge = {
+    schemaVersion: 1 | 2;
+    operationId: string;
+    requestId: string;
+    scope: 'organization_mission_holdings_v1' | 'organization_assistant_holdings_v2';
+    cutoffPolicy: 'contents_at_each_workspace_first_invalidation_v1' | 'organization_generation_at_acceptance_v2';
+    acceptedAt: string;
+    state: 'invalidation_pending' | 'purging' | 'retrying' | 'complete';
+    workspaceCount: number;
+    completedWorkspaceCount: number;
+    completedAt: string | null;
+    reasonCode: string | null;
 };
 
 /** Viewer-safe membership state for one shared assistant session participant. */
@@ -3272,6 +3589,13 @@ export type AiChatNarrationFrame = {
 };
 
 /** Every frame the assistant session's metadata path can deliver. */
+/** Committed workspace cutoff metadata remains available after affected chat roots are erased. */
+export type AiChatPrivacyFrame = {
+    workspaceId: number;
+    kind: 'privacy_invalidated';
+    cutoffGeneration: string;
+};
+
 export type AiChatRealtimeFrame =
     | AiChatMetadataFrame
     | AiChatThinkingFrame
@@ -3325,7 +3649,8 @@ export type AiOrganizationBudget = {
 export type AiChatSessionDetail = {
     session: AiChatSession;
     messages: Page<AiChatMessage>;
-    activeTurn: AiChatTurn | null;
+    /** Omitted by the server's non-null JSON projection when no turn is active. */
+    activeTurn?: AiChatTurn | null;
 };
 
 /** One declared assistant capability the calling member may run on the current surface. */
@@ -3427,6 +3752,14 @@ export type AiChatTurnAccepted = {
     scope?: AiChatQueryScope | null;
 };
 
+/** Requester-only execution evidence classified by the server's authoritative tool catalog. */
+export type AiChatTurnToolCall = {
+    toolName: string;
+    /** Unknown tools have no tier; future tier values must remain unsafe to retry. */
+    tier: string | null;
+    status: string;
+};
+
 /** Caller-safe durable state for one assistant turn, including the persisted streamed partial. */
 export type AiChatTurn = {
     turnId: number;
@@ -3435,6 +3768,8 @@ export type AiChatTurn = {
     terminalReason: string | null;
     partialContent?: string | null;
     progress: AiChatProgressItem[];
+    /** Absent on older servers and null for readers other than the requester. */
+    toolCalls?: AiChatTurnToolCall[] | null;
     /**
      * Whether the reader asked for this turn. A shared-session participant watching another
      * member's turn is not its requester, and the cancellation endpoint rejects them, so the stop
@@ -3512,12 +3847,29 @@ export type AiAssistantToolCallCreatedRecord = {
     id: number;
 };
 
+/** Derived review outcome; the review deadline only expires still-pending proposals. */
+export type LegacyProposalReviewState =
+    | 'open'
+    | 'expired'
+    | 'applied'
+    | 'undone'
+    | 'discarded'
+    | 'failed'
+    | 'unavailable'
+    | 'withdrawn';
+
+/** Immutable review deadline shared by read and mutation responses. */
+export type ProposalExpiryFields = {
+    reviewState: LegacyProposalReviewState;
+    reviewExpiresAt: string | null;
+};
+
 /** Viewer-safe transcript projection for one assistant write-tool call. */
 export type AiAssistantToolCall = {
     id: number;
     toolName: string;
     tier: 'auto' | 'confirm';
-    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone';
+    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone' | 'withdrawn';
     target: AiAssistantToolCallTarget;
     requestSummary: string;
     outcomeSummary: string | null;
@@ -3532,18 +3884,18 @@ export type AiAssistantToolCall = {
     createdAt: string;
     updatedAt: string;
     executedAt: string | null;
-};
+} & ProposalExpiryFields;
 
 /** Mutation response returned after approving, rejecting, or undoing a tool call. */
 export type AiAssistantToolCallMutation = {
     id: number;
     tool: string;
     tier: 'auto' | 'confirm';
-    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone';
+    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone' | 'withdrawn';
     result: unknown;
     undoAvailable: boolean;
     undoExpiresAt: string | null;
-};
+} & ProposalExpiryFields;
 
 /** Minimal assistant-turn result retained behind the shared generation handle. */
 export type AiChatTurnGenerationResult = {
@@ -3713,6 +4065,7 @@ export type ReportGoal = ReportGoalInput & {
 };
 
 export type UpdateContactPayload = {
+    expectedVersion?: number;
     name?: string;
     email?: string;
     phone?: string;
@@ -3922,14 +4275,14 @@ export type RecordCommentAuthor = {
 export type RecordComment = {
     id: number;
     threadId: number;
-    /** Null when the author's account has been permanently erased. */
-    author: RecordCommentAuthor | null;
-    /** Null once the comment has been redacted; the row survives as a tombstone. */
-    content: string | null;
+    /** Absent or null when the author's account has been permanently erased. */
+    author?: RecordCommentAuthor | null;
+    /** Absent or null once the comment has been redacted; the row survives as a tombstone. */
+    content?: string | null;
     createdAt: string;
     /** Set when the author edited the comment within the edit window. */
     editedAt?: string | null;
-    deletedAt: string | null;
+    deletedAt?: string | null;
     deletedByUserId?: number | null;
     /** Server-authorized @/# references resolved from the content tokens. */
     references?: NoteReference[];
@@ -4302,6 +4655,13 @@ export type GeneratedDocumentSummary = {
     updatedAt?: string;
 };
 
+/** Minimal reference returned only when its parent deal is readable in the current workspace. */
+export type GeneratedDocumentTarget = {
+    id: number;
+    dealId: number;
+    title?: string;
+};
+
 /** Filters accepted by the cross-deal generated-document index. */
 export type GeneratedDocumentsPageParams = PageParams & MemberScopeParams & {
     status?: DocumentStatus[];
@@ -4347,7 +4707,11 @@ export type WorkspaceRole = "owner" | "admin" | "member";
 
 export type OrgRole = "owner" | "admin";
 
+/** Role-scoped export grants; organization member is always false. */
+export type ExportPermissions = { owner: boolean; admin: boolean; member: boolean };
+
 export type Workspace = {
+    defaultCurrency?: string | null;
     id: number;
     name: string;
     slug: string;
@@ -4361,6 +4725,7 @@ export type Workspace = {
 };
 
 export type WorkspaceIdentity = {
+    defaultCurrency?: string | null;
     id: number;
     orgId: number;
     name: string;
@@ -4425,6 +4790,11 @@ export type OrgMember = {
     email: string;
     profilePictureUrl: string | null;
     orgRole: OrgRole;
+    /**
+     * Shown only to a caller who could issue this member a passkey approval code (#1534): whether
+     * the member is privileged in the organization with no passkey approved there.
+     */
+    passkeyApprovalNeeded?: boolean | null;
 };
 
 export type MyWorkspaces = {
@@ -4446,9 +4816,60 @@ export type WorkspaceMember = {
     builtInRole: WorkspaceRole;
     roleId?: number | null;
     status?: string;
+    /**
+     * Shown only to a caller who could issue this member a passkey approval code (#1534): whether
+     * the member is privileged in the workspace's organization with no passkey approved there.
+     */
+    passkeyApprovalNeeded?: boolean | null;
+};
+
+/** Lifecycle state of an ownership offer (#1534 decision 4). */
+export type OwnershipOfferState = "OPEN" | "ACCEPTED" | "DECLINED" | "REVOKED" | "EXPIRED" | "INVALIDATED";
+
+/**
+ * An offer of workspace or organization ownership. Promotion to owner needs the offeree's consent:
+ * until they accept, they keep their current role. Offer ids are lossless decimal strings. The
+ * display labels let the offeree see who offered which scope, and let owners see who was offered.
+ */
+export type OwnershipOffer = {
+    id: string;
+    scopeKind: "WORKSPACE" | "ORGANIZATION";
+    orgId: number;
+    workspaceId: number | null;
+    offerorUserId: number;
+    offereeUserId: number;
+    state: OwnershipOfferState;
+    createdAt: string;
+    expiresAt: string;
+    closedAt: string | null;
+    closedByUserId: number | null;
+    closureReason: string | null;
+    scopeName: string | null;
+    offerorDisplayName: string | null;
+    offereeDisplayName: string | null;
+    offereeEmail: string | null;
+};
+
+/** The 202 body returned when an owner promotion becomes an offer instead of a role change. */
+export type OwnershipOfferCreated<T> = {
+    outcome: "ownership_offer";
+    offer: OwnershipOffer;
+    currentMember: T | null;
+};
+
+/** Privileged-MFA standing reported to an account that just accepted ownership. */
+export type PrivilegedStanding = "UNPRIVILEGED" | "SATISFIED" | "ENROLLMENT_REQUIRED" | "ATTESTATION_REQUIRED";
+
+/** Result of accepting an ownership offer. */
+export type OwnershipOfferAcceptance = {
+    offer: OwnershipOffer;
+    membership: WorkspaceMember | OrgMember | null;
+    standing: PrivilegedStanding;
+    enforcedStanding: PrivilegedStanding;
 };
 
 export type CustomRole = {
+    exportPermissionEditable?: boolean;
     id: number;
     name: string;
     permissions: string[];
@@ -4636,21 +5057,23 @@ export type WorkflowCanvas = {
 export type WorkflowDto = {
     id: number;
     name: string;
-    description: string | null;
+    description?: string | null;
     enabled: boolean;
     runtimeOwner: WorkflowRuntimeOwner;
-    archivedAt: string | null;
-    intakePausedAt: string | null;
-    intakePausedById: number | null;
+    executionAvailable: boolean;
+    executionUnavailableReason?: string | null;
+    archivedAt?: string | null;
+    intakePausedAt?: string | null;
+    intakePausedById?: number | null;
     draftRevision: number;
-    recordType: string | null;
+    recordType?: string | null;
     executionMode: WorkflowExecutionMode;
-    runAsUserId: number | null;
+    runAsUserId?: number | null;
     definition: WorkflowDefinition;
     canvas: WorkflowCanvas;
-    activeVersionId: number | null;
-    createdById: number | null;
-    updatedById: number | null;
+    activeVersionId?: number | null;
+    createdById?: number | null;
+    updatedById?: number | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -4667,7 +5090,7 @@ export type WorkflowRunStatus =
 
 export type WorkflowRunWireStatus = WorkflowRunStatus | "partial";
 
-export type WorkflowListItem = Omit<WorkflowDto, "definition" | "canvas" | "activeVersionId"> & {
+export type WorkflowListItem = Required<Omit<WorkflowDto, "definition" | "canvas" | "activeVersionId">> & {
     activeVersion: {
         id: number;
         number: number;
@@ -4832,6 +5255,8 @@ export type WorkflowRunFailure = {
     nodeId: string | null;
     code: string;
     message: string;
+    actionNumber?: number | null;
+    actionType?: string | null;
 };
 
 export type WorkflowRunSummary = {
@@ -4931,6 +5356,7 @@ export type WorkflowIntervention = {
 export type WorkflowOperationsSummary = {
     workflowCount: number;
     healthyCount: number;
+    unavailableCount: number;
     pausedCount: number;
     disabledCount: number;
     interventionRequiredCount: number;
@@ -4981,9 +5407,9 @@ export type WorkflowOperationsDetail = {
         id: number;
         name: string;
         enabled: boolean;
-        archivedAt: string | null;
-        intakePausedAt: string | null;
-        intakePausedById: number | null;
+        archivedAt?: string | null;
+        intakePausedAt?: string | null;
+        intakePausedById?: number | null;
         runtimeOwner: WorkflowRuntimeOwner;
     };
     health: {
@@ -5166,26 +5592,20 @@ export type Share = {
 };
 
 export type WorkspaceInvite = {
-    id: number;
+    id: string;
     email: string;
     role: WorkspaceRole;
     status: string;
     token?: string | null;
-    invitedByLabel: string | null;
-    expiresAt: string;
+    invitedByLabel?: string | null;
+    expiresAt?: string | null;
     createdAt: string;
 };
 
-/**
- * The outcome of inviting someone by email. Exactly one field is set: `invite`
- * for an emailed token invite (a new address, or one whose account still owes
- * email verification), or `member` when the address belongs to an existing
- * account whose mailbox ownership is settled, which is added as a pending member
- * and notified in-app instead.
- */
+/** The same address-only invitation result for every recipient. */
 export type InviteResult = {
-    invite: WorkspaceInvite | null;
-    member: WorkspaceMember | null;
+    invite: WorkspaceInvite;
+    emailDelivery?: "ACCEPTED" | "SKIPPED" | "FAILED" | "UNCONFIRMED";
 };
 
 export type InvitePreview = {
@@ -5222,13 +5642,13 @@ export type InviteLinkPreview = {
 export type AuditLogEntry = {
     id: number;
     action: string;
-    entityType: string | null;
-    entityId: number | null;
-    actorId: number | null;
-    actorLabel: string | null;
-    targetLabel: string | null;
-    outcome: string | null;
-    summary: string | null;
+    entityType?: string | null;
+    entityId?: number | null;
+    actorId?: number | null;
+    actorLabel?: string | null;
+    targetLabel?: string | null;
+    outcome?: string | null;
+    summary?: string | null;
     changes?: Record<string, unknown> | null;
     context?: Record<string, unknown> | null;
     ipAddress?: string | null;
@@ -5967,6 +6387,8 @@ export type AiWatchPayload = {
 
 /** Everything the Ask Connex command centre renders, in one authorized read. */
 export type AiCommandCenter = {
+    /** Full ASSISTANT_CHAT readiness, independent of the brief skill catalog. */
+    chatAvailable: boolean;
     schedule: AiBriefSchedule;
     latestBriefSessionId: number | null;
     latestBriefKind: AiBriefKind | null;
@@ -6026,3 +6448,16 @@ export type DocumentAcceptanceFailureKind =
     | "unavailable"
     | "throttled"
     | "service-unavailable";
+
+/** Fixed-size supporting projections for the authenticated member's My Work surface. */
+export type MyWorkReadSections = {
+    history: { tasks: Task[]; activities: Activity[]; notes: Note[] };
+    pulse: NoteActivityDay[];
+    relationships: {
+        counts: Record<TemperatureBand, number> & { cooling: number };
+        contacts: Contact[];
+        temperatures: RelationshipTemperature[];
+    };
+    "deal-kpis": { currency: string; metrics: DealMetrics; kpis: DealKpis };
+    risks: { risks: DealRisk[]; deals: Deal[]; inputLimitExceeded: boolean };
+};

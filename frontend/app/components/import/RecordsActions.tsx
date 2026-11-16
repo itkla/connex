@@ -12,6 +12,7 @@ import { toastDismiss, toastError, toastLoading, toastSuccess } from '@/app/lib/
 import type { ExportEntity, ImportEntity } from '@/app/lib/types';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import type { ActionContext, AppAction } from '@/app/lib/actions/types';
 import ImportDialog from '@/app/components/import/LazyImportDialog';
 
@@ -80,6 +81,8 @@ export type RecordsActionsProps = RecordsActionsCommonProps & (
 export default function RecordsActions(props: RecordsActionsProps) {
     const { entity, onNew, newLabel, newAriaLabel, onExport } = props;
     const t = useTranslations('importExport');
+    const exportPermission = usePermissionCheck('EXPORT_DATA');
+    const canExport = exportPermission === 'granted';
     const pathname = usePathname() ?? '';
     const { activeWorkspaceId, switching } = useWorkspace();
     const { pendingIds, run } = useActions();
@@ -100,7 +103,8 @@ export default function RecordsActions(props: RecordsActionsProps) {
     const handleExport = useCallback(async (context: ActionContext) => {
         const liveScope = liveScopeRef.current;
         if (
-            !liveScope.active
+            !canExport
+            || !liveScope.active
             || liveScope.switching
             || originWorkspaceId === null
             || liveScope.activeWorkspaceId !== originWorkspaceId
@@ -123,7 +127,7 @@ export default function RecordsActions(props: RecordsActionsProps) {
         } finally {
             if (activeControllerRef.current === controller) activeControllerRef.current = null;
         }
-    }, [originPathname, originWorkspaceId, t]);
+    }, [canExport, originPathname, originWorkspaceId, t]);
 
     useLayoutEffect(() => {
         liveScopeRef.current = { active: true, activeWorkspaceId, pathname, switching };
@@ -162,7 +166,7 @@ export default function RecordsActions(props: RecordsActionsProps) {
     }
 
     const exportActions = useMemo<readonly AppAction[]>(
-        () => !switching && activeWorkspaceId === originWorkspaceId && pathname === originPathname
+        () => canExport && !switching && activeWorkspaceId === originWorkspaceId && pathname === originPathname
             ? [
                 {
                     id: actionConfig.id,
@@ -178,7 +182,7 @@ export default function RecordsActions(props: RecordsActionsProps) {
                 },
             ]
             : [],
-        [activeWorkspaceId, actionConfig, handleExport, originPathname, originWorkspaceId, pathname, switching],
+        [activeWorkspaceId, actionConfig, canExport, handleExport, originPathname, originWorkspaceId, pathname, switching],
     );
 
     useRegisterActions(exportActions);
@@ -206,9 +210,12 @@ export default function RecordsActions(props: RecordsActionsProps) {
                         {t('openImport')}
                     </DropdownMenuItem>
                 )}
-                <DropdownMenuItem disabled={exportPending} aria-busy={exportPending} onSelect={runExport}>
+                <DropdownMenuItem disabled={!canExport || exportPending} aria-busy={exportPending} onSelect={runExport}>
                     <ArrowDownTrayIcon className="size-4" />
-                    {t('exportCurrentView')}
+                    <span>
+                        <span className="block">{t('exportCurrentView')}</span>
+                        {!canExport && <span className="block text-xs">{t(exportPermission === 'denied' ? 'exportPermissionDenied' : 'exportPermissionUnavailable')}</span>}
+                    </span>
                 </DropdownMenuItem>
             </SplitButton>
             {props.entity !== 'products' && (

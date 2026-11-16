@@ -23,6 +23,7 @@ public interface CampaignDeliveryMapper {
      * @param eventType a lifecycle event the delivery must carry, or null
      * @param limit the page size
      * @param offset the page offset
+     * @param submitted whether to restrict to confirmed submissions, regardless of current status
      * @return the page rows, ordered by delivery id
      */
     List<CampaignRecipientRow> listRecipients(
@@ -32,7 +33,8 @@ public interface CampaignDeliveryMapper {
             @Param("statuses") List<String> statuses,
             @Param("eventType") String eventType,
             @Param("limit") int limit,
-            @Param("offset") int offset);
+            @Param("offset") int offset,
+            @Param("submitted") boolean submitted);
 
     /**
      * The total row count the matching {@link #listRecipients} page is drawn from.
@@ -42,6 +44,7 @@ public interface CampaignDeliveryMapper {
      * @param sendId one send to restrict to, or null for every send
      * @param statuses the requested delivery statuses, or null for every status
      * @param eventType a lifecycle event the delivery must carry, or null
+     * @param submitted whether to restrict to confirmed submissions, regardless of current status
      * @return the matching recipient count
      */
     long countRecipients(
@@ -49,7 +52,8 @@ public interface CampaignDeliveryMapper {
             @Param("campaignId") int campaignId,
             @Param("sendId") Integer sendId,
             @Param("statuses") List<String> statuses,
-            @Param("eventType") String eventType);
+            @Param("eventType") String eventType,
+            @Param("submitted") boolean submitted);
 
     /**
      * One bounded page of the campaign touches on a contact's timeline, newest first.
@@ -93,8 +97,24 @@ public interface CampaignDeliveryMapper {
             @Param("sendId") int sendId,
             @Param("personId") int personId);
 
-    /** Resolves one delivery by the SHA-256 digest of its unsubscribe token, unrouted. */
+    /** Appends one issued unsubscribe digest to its delivery's lifetime history. */
+    int insertUnsubscribeTokenHash(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("tokenHash") String tokenHash);
+
+    /** Resolves one delivery by any of its issued unsubscribe digests, unrouted. */
     CampaignDelivery getByTokenHash(@Param("tokenHash") String tokenHash);
+
+    /** Resolves a digest by its primary key within the workspace, using a non-locking consistent read. */
+    Integer getUnsubscribeTokenDeliveryId(
+            @Param("workspaceId") int workspaceId,
+            @Param("tokenHash") String tokenHash);
+
+    /** Resolves a digest batch within the workspace, using a non-locking consistent read. */
+    List<String> findUnsubscribeTokenHashes(
+            @Param("workspaceId") int workspaceId,
+            @Param("tokenHashes") List<String> tokenHashes);
 
     CampaignDelivery findByProviderMessage(
             @Param("workspaceId") int workspaceId,
@@ -113,7 +133,29 @@ public interface CampaignDeliveryMapper {
 
     int countPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
 
-    int claim(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Claims one audience delivery under its own audience lease end time, with no owner (#1773).
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param leaseMicros the lease duration on the database clock
+     * @return one if this call claimed the pending row
+     */
+    int claim(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseMicros") long leaseMicros);
+
+    /**
+     * Renews an audience attempt's lease before egress unless a sweep has already taken the row.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param leaseMicros the lease duration on the database clock
+     * @return one if the attempt still owns its row
+     */
+    int renewAudienceClaim(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseMicros") long leaseMicros);
 
     /** Claims one triggered delivery under an owner-fenced database-clock lease. */
     int claimTriggered(
@@ -206,14 +248,15 @@ public interface CampaignDeliveryMapper {
             @Param("lastErrorCode") String lastErrorCode);
 
     /**
-     * Records the provider correlation of a submission whose terminal write lost to the audience
-     * reservation sweep, on the still-unresolved swept row that carries no provider id yet. It never
-     * changes the row's status, reconciliation requirement, or frequency reservation.
+     * Records the provider correlation of a submission whose terminal write lost to an audience sweep
+     * that held the row for reconciliation, on a swept row that carries no provider id yet, whether it
+     * still awaits reconciliation or an operator has resolved it. It never changes the row's status,
+     * reconciliation requirement, or frequency reservation.
      * @param workspaceId the owning workspace
      * @param id the delivery
      * @param providerId the provider that accepted the message
      * @param providerMessageId the provider's message id
-     * @param lastError the failure detail the sweep wrote
+     * @param lastErrors the failure details either audience sweep writes
      * @param lastErrorCode the reason code the sweep wrote
      * @return one if the swept row now carries the correlation
      */
@@ -222,6 +265,57 @@ public interface CampaignDeliveryMapper {
             @Param("id") int id,
             @Param("providerId") String providerId,
             @Param("providerMessageId") String providerMessageId,
+            @Param("lastErrors") List<String> lastErrors,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    /**
+     * Returns one page of audience attempts abandoned with no frequency reservation: leased rows
+     * whose lease has been expired for the grace, and lease-less rows from an older version idle past
+     * the legacy threshold, which is an expected bound rather than a guaranteed one (#1773).
+     * @param workspaceId the owning workspace
+     * @param graceMicros the grace beyond an expired lease
+     * @param legacyIdleSeconds how long a lease-less row must have been idle
+     * @param limit the page size
+     * @return the abandoned attempts, with their send and person
+     */
+    List<CampaignDelivery> abandonedUnreservedAudienceAttemptsPage(
+            @Param("workspaceId") int workspaceId,
+            @Param("graceMicros") long graceMicros,
+            @Param("legacyIdleSeconds") long legacyIdleSeconds,
+            @Param("limit") int limit);
+
+    /**
+     * Fails one abandoned person row that never reached the provider, without reconciliation.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param graceMicros the grace beyond an expired lease
+     * @param legacyIdleSeconds how long a lease-less row must have been idle
+     * @param lastError the failure detail
+     * @return one if this call settled the still-abandoned row
+     */
+    int markAbandonedUnreservedAudienceAttemptFailed(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("graceMicros") long graceMicros,
+            @Param("legacyIdleSeconds") long legacyIdleSeconds,
+            @Param("lastError") String lastError);
+
+    /**
+     * Holds one abandoned row with no person for reconciliation, since it may have reached the
+     * provider.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param graceMicros the grace beyond an expired lease
+     * @param legacyIdleSeconds how long a lease-less row must have been idle
+     * @param lastError the ambiguous failure detail
+     * @param lastErrorCode the ambiguous reason code
+     * @return one if this call settled the still-abandoned row
+     */
+    int markAbandonedUnreservedAudienceAttemptAmbiguous(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("graceMicros") long graceMicros,
+            @Param("legacyIdleSeconds") long legacyIdleSeconds,
             @Param("lastError") String lastError,
             @Param("lastErrorCode") String lastErrorCode);
 
@@ -365,6 +459,15 @@ public interface CampaignDeliveryMapper {
             @Param("priorFrequencyReservedAt") LocalDateTime priorFrequencyReservedAt);
 
     void insertEvent(CampaignDeliveryEvent event);
+
+    /** Appends one send-level refusal marker against a pending recipient while the send root is locked. */
+    int insertContentRefusal(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
+
+    /** Settles pending work while retaining possible prior submissions for reconciliation. */
+    int settleContentRefusedPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
+
+    /** Checks the owning send's internal marker after its mutex has been acquired. */
+    boolean hasContentRefusal(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
 
     boolean hasEvent(
             @Param("workspaceId") int workspaceId,

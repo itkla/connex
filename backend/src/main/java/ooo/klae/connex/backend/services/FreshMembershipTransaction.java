@@ -31,7 +31,20 @@ public class FreshMembershipTransaction {
     public <T> T execute(int workspaceId, Supplier<T> work) {
         T result = tenantWorkScope.inWorkspace(
             workspaceId,
-            () -> transactionTemplate.execute(status -> work.get()));
+            () -> OwnershipOfferReadCommittedTransactions.from(transactionTemplate).execute(status -> work.get()));
         return Objects.requireNonNull(result, "fresh-membership transaction result");
+    }
+
+    /**
+     * Prepares the membership target before its transaction in either mode. An enclosing actual
+     * single-database transaction retains lazy scope reads. The callback may return null, as the
+     * existing membership primitives permit.
+     */
+    public <T> T executeWithPreparedScopes(int workspaceId, Supplier<T> work) {
+        return tenantWorkScope.inWorkspace(workspaceId, () -> inTransaction(work));
+    }
+
+    private <T> T inTransaction(Supplier<T> work) {
+        return OwnershipOfferReadCommittedTransactions.from(transactionTemplate).execute(status -> work.get());
     }
 }

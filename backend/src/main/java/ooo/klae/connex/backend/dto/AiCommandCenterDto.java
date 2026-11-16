@@ -36,6 +36,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * provider, or promise briefs it cannot generate.
  *
  * @param briefSkillAvailable whether this build and workspace can actually run a brief
+ * @param chatAvailable whether the current member and workspace pass the full assistant feature gate
  * @param watchesAvailable whether the assistant is switched on for this member, provider aside
  * @param watches the member's watches, newest first
  * @param watchLimit the most watches this member may hold in this workspace
@@ -47,6 +48,7 @@ public record AiCommandCenterDto(
         String latestBriefKind,
         String latestBriefDeliveredAt,
         boolean briefSkillAvailable,
+        boolean chatAvailable,
         boolean watchesAvailable,
         List<AiWatchDto> watches,
         int watchLimit) {

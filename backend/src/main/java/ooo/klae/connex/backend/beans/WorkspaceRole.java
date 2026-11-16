@@ -15,6 +15,7 @@ public class WorkspaceRole {
     private int workspaceId;
     private String name;
     private List<String> permissions;
+    private Boolean exportPermissionEditable;
     private String createdAt;
     private String updatedAt;
 }

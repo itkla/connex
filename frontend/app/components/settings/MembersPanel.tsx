@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import {
+    ArrowUturnLeftIcon,
     CheckIcon,
     EllipsisHorizontalIcon,
     EnvelopeIcon,
     GlobeAltIcon,
+    KeyIcon,
     LinkIcon,
     MagnifyingGlassIcon,
     TrashIcon,
@@ -16,6 +18,7 @@ import {
 
 import type {
     CustomRole,
+    OwnershipOffer,
     WorkspaceInvite,
     WorkspaceInviteLink,
     WorkspaceMember,
@@ -29,10 +32,15 @@ import {
     getWorkspaceInviteLinks,
     getWorkspaceInvites,
     getWorkspaceMembers,
+    getWorkspaceOwnershipOffers,
     getWorkspaceRoles,
+    isOwnershipOfferCreated,
+    issueWorkspaceMfaAttestation,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
     revokeWorkspaceInviteLink,
+    revokeWorkspaceMfaAttestation,
+    revokeWorkspaceOwnershipOffer,
     updateMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -40,7 +48,10 @@ import { useGrantedPermissions, usePermission } from "@/app/hooks/usePermissions
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
+import { useConfinementAcknowledgement } from "@/app/hooks/useConfinementAcknowledgement";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,10 +74,14 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import {
+    Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import Rise from "@/app/components/motion/Rise";
 import AllowedDomainsPanel from "@/app/components/settings/AllowedDomainsPanel";
+import ConfinementAcknowledgementDialog from "@/app/components/settings/ConfinementAcknowledgementDialog";
+import PasskeyApprovalCodeDialog from "@/app/components/settings/PasskeyApprovalCodeDialog";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import {
@@ -94,7 +109,7 @@ function isWorkspaceRole(role: string): role is WorkspaceRole {
 
 function RoleBadge({ role, label }: { role: string; label: string }) {
     return role === "owner" ? (
-        <Badge className="border-transparent bg-brand-light text-brand-dark">{label}</Badge>
+        <Badge className="border-transparent bg-brand-light text-brand-text">{label}</Badge>
     ) : (
         <Badge variant="secondary">{label}</Badge>
     );
@@ -208,12 +223,17 @@ function MembersWorkspacePanel({
     const [inviteEmail, setInviteEmail] = useState("");
     const [inviteRole, setInviteRole] = useState<WorkspaceRole>("member");
     const [sending, setSending] = useState(false);
+    const [invitationTab, setInvitationTab] = useState("email");
+    const inviteLinkTab = useRef<HTMLButtonElement>(null);
+    const [copyRecoveryUrl, setCopyRecoveryUrl] = useState<string | null>(null);
+    const [mailOutcome, setMailOutcome] = useState<string | null>(null);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const [busyMemberId, setBusyMemberId] = useState<number | null>(null);
     const [removeTarget, setRemoveTarget] = useState<WorkspaceMember | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
-    const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
+    const [approvalTarget, setApprovalTarget] = useState<WorkspaceMember | null>(null);
+    const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
 
     const [inviteLinks, setInviteLinks] = useState<WorkspaceInviteLink[]>([]);
     const [linkRole, setLinkRole] = useState<WorkspaceRole>("member");
@@ -261,6 +281,28 @@ function MembersWorkspacePanel({
         };
     }, [workspaceId, canManageMembers, canManageRoles, t]);
 
+    const membersRefresh = useRef(0);
+    const refreshMembers = useCallback(async () => {
+        if (!workspaceId) return;
+        membersRefresh.current += 1;
+        const refreshId = membersRefresh.current;
+        try {
+            const loaded = await getWorkspaceMembers(workspaceId);
+            if (refreshId === membersRefresh.current) setMembers(loaded);
+        } catch (err) {
+            if (refreshId === membersRefresh.current) {
+                showApiError(err, "membersRefreshFailed", "membersRefreshFailedDescription");
+            }
+        }
+    }, [showApiError, workspaceId]);
+
+    useEffect(() => {
+        const generation = membersRefresh;
+        return () => {
+            generation.current += 1;
+        };
+    }, [workspaceId]);
+
     useEffect(() => {
         if (!workspaceId || (!canManageMembers && !canManageRoles)) return;
         let cancelled = false;
@@ -293,12 +335,38 @@ function MembersWorkspacePanel({
         return request;
     }, [workspaceId]);
 
+    const ownershipOffers = useScopeOwnershipOffers(
+        workspaceId,
+        isOwner,
+        getWorkspaceOwnershipOffers,
+        (err) => showApiError(err, "ownershipOffersLoadFailed"),
+    );
+    const { openOfferByOfferee } = ownershipOffers;
+    const confinement = useConfinementAcknowledgement();
+
     const changeRole = async (userId: number, next: WorkspaceRole) => {
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
-            const updated = await updateMemberRole(workspaceId, userId, next);
+            const name = members.find((m) => m.id === userId)?.displayName ?? "";
+            const updated = await confinement.run(
+                t("confinementSubjectRole", { name, role: roleLabel(next) }),
+                (acknowledge) => updateMemberRole(workspaceId, userId, next, acknowledge),
+            );
+            if (updated === null) return;
+            if (isOwnershipOfferCreated<WorkspaceMember>(updated)) {
+                const { offer, currentMember } = updated;
+                if (currentMember) {
+                    setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
+                }
+                void refreshMembers();
+                ownershipOffers.remember(offer);
+                toastSuccess(t("ownershipOffered", { name }));
+                return;
+            }
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            void refreshMembers();
+            ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
@@ -310,12 +378,36 @@ function MembersWorkspacePanel({
         }
     };
 
+    const withdrawOwnershipOffer = async (offer: OwnershipOffer) => {
+        if (!workspaceId) return;
+        setBusyMemberId(offer.offereeUserId);
+        try {
+            await revokeWorkspaceOwnershipOffer(workspaceId, offer.id);
+            ownershipOffers.forget(offer.id);
+            toastSuccess(t("ownershipOfferWithdrawn"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                showApiError(err, "ownershipOfferWithdrawFailed");
+            }
+        } finally {
+            setBusyMemberId(null);
+        }
+    };
+
     const assignCustom = async (userId: number, roleId: number) => {
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
-            const updated = await assignMemberCustomRole(workspaceId, userId, roleId);
+            const name = members.find((m) => m.id === userId)?.displayName ?? "";
+            const role = customRoles.find((candidate) => candidate.id === roleId)?.name ?? "";
+            const updated = await confinement.run(
+                t("confinementSubjectRole", { name, role }),
+                (acknowledge) => assignMemberCustomRole(workspaceId, userId, roleId, acknowledge),
+            );
+            if (updated === null) return;
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            void refreshMembers();
+            ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
@@ -332,8 +424,10 @@ function MembersWorkspacePanel({
         setIsRemoving(true);
         try {
             await removeWorkspaceMember(workspaceId, removeTarget.id);
+            membersRefresh.current += 1;
             setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
-            toastSuccess(t("removed"));
+            ownershipOffers.refresh();
+            toastSuccess(t("removed"), { description: t("removedDescription") });
             setRemoveTarget(null);
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -344,37 +438,43 @@ function MembersWorkspacePanel({
         }
     };
 
+    const copyUrl = useCallback(async (url: string, silent = false): Promise<boolean> => {
+        try {
+            await navigator.clipboard.writeText(url);
+            setCopyRecoveryUrl(null);
+            if (!silent) toastSuccess(t("linkCopied"));
+            return true;
+        } catch {
+            setCopyRecoveryUrl(url);
+            toastError(t("copyFailed"), { description: t("copyFailedDescription") });
+            return false;
+        }
+    }, [t]);
+
     const copyInviteLink = useCallback(
-        async (token: string, silent = false) => {
-            const link = `${window.location.origin}/invite#token=${token}`;
-            try {
-                await navigator.clipboard.writeText(link);
-                if (!silent) toastSuccess(t("linkCopied"));
-            } catch {
-                if (!silent) toastError(link);
-            }
-        },
-        [t],
+        (token: string, silent = false) => copyUrl(`${window.location.origin}/invite#token=${token}`, silent),
+        [copyUrl],
     );
 
-    const sendInvite = async () => {
+    const sendInvite = async (email = inviteEmail.trim(), requestedRole = inviteRole) => {
         if (!workspaceId || sending) return;
         resetFieldErrors();
+        setMailOutcome(null);
+        setCopyRecoveryUrl(null);
         setSending(true);
         try {
-            const result = await createWorkspaceInvite(workspaceId, inviteEmail.trim(), inviteRole);
+            const result = await createWorkspaceInvite(workspaceId, email, requestedRole);
             setInviteEmail("");
-            if (result.member) {
-                const member = result.member;
-                setMembers((prev) => [...prev.filter((m) => m.id !== member.id), member]);
-                toastSuccess(t("memberInvited"));
-            } else if (result.invite) {
+            if (result.invite) {
                 const invite = result.invite;
+                setMailOutcome(t(result.emailDelivery === "ACCEPTED" ? "emailAccepted"
+                    : result.emailDelivery === "SKIPPED" ? "emailSkipped"
+                        : result.emailDelivery === "FAILED" ? "emailFailed" : "emailUnconfirmed"));
                 setInvites((prev) => [invite, ...prev.filter((i) => i.email !== invite.email)]);
                 if (invite.token) {
                     await copyInviteLink(invite.token, true);
                 }
-                toastSuccess(t("inviteCreated"));
+                toastSuccess(t("invitationCreated"));
             } else {
                 toastError(t("inviteFailed"));
             }
@@ -387,12 +487,13 @@ function MembersWorkspacePanel({
         }
     };
 
-    const revoke = async (inviteId: number) => {
+    const revoke = async (inviteId: string) => {
         if (!workspaceId) return;
         setBusyInviteId(inviteId);
         try {
             await revokeWorkspaceInvite(workspaceId, inviteId);
             setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+            setCopyRecoveryUrl(null);
             toastSuccess(t("revoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -406,18 +507,15 @@ function MembersWorkspacePanel({
     const copyShareLink = useCallback(
         async (link: WorkspaceInviteLink) => {
             if (!link.token) return;
-            const url = `${window.location.origin}/invite-link#token=${link.token}`;
-            try {
-                await navigator.clipboard.writeText(url);
+            const copied = await copyUrl(`${window.location.origin}/invite-link#token=${link.token}`, true);
+            if (copied) {
                 setCopiedLinkId(link.id);
                 window.setTimeout(() => {
                     setCopiedLinkId((current) => (current === link.id ? null : current));
                 }, 1500);
-            } catch {
-                toastError(url);
             }
         },
-        [],
+        [copyUrl],
     );
 
     const createLink = async () => {
@@ -451,6 +549,7 @@ function MembersWorkspacePanel({
         try {
             await revokeWorkspaceInviteLink(workspaceId, linkId);
             setInviteLinks((prev) => prev.filter((l) => l.id !== linkId));
+            setCopyRecoveryUrl(null);
             toastSuccess(t("linkRevoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -553,6 +652,8 @@ function MembersWorkspacePanel({
                                         || (canManageRoles && grantableCustomRoles.length > 0)
                                     );
                                 const removable = canManageMembers && !isSelf && !protectedOwner;
+                                const openOffer = openOfferByOfferee.get(member.id);
+                                const withdrawable = isOwner && openOffer !== undefined;
                                 const currentCustomRoleIsGrantable = member.roleId != null
                                     && grantableCustomRoles.some((candidate) => candidate.id === member.roleId);
                                 const currentBuiltInRole = member.roleId == null && isWorkspaceRole(member.role)
@@ -560,6 +661,11 @@ function MembersWorkspacePanel({
                                     : null;
                                 const currentBuiltInRoleIsGrantable = currentBuiltInRole != null
                                     && grantableBuiltInRoleSet.has(currentBuiltInRole);
+                                const attestable = !isSelf && !pending && !protectedOwner && (
+                                    member.roleId != null
+                                        ? canManageRoles && currentCustomRoleIsGrantable
+                                        : canManageMembers && currentBuiltInRoleIsGrantable
+                                );
                                 return (
                                     <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
                                         <Avatar>
@@ -581,6 +687,20 @@ function MembersWorkspacePanel({
                                                 {pending && (
                                                     <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
                                                         {t("pending")}
+                                                    </Badge>
+                                                )}
+                                                {openOffer && (
+                                                    <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                        {t("ownershipPending")}
+                                                    </Badge>
+                                                )}
+                                                {member.passkeyApprovalNeeded === true && (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="border-warning/40 bg-warning/10 text-warning-foreground"
+                                                        title={t("passkeyNotApprovedHint")}
+                                                    >
+                                                        {t("passkeyNotApproved")}
                                                     </Badge>
                                                 )}
                                             </div>
@@ -646,7 +766,7 @@ function MembersWorkspacePanel({
                                             ) : null}
                                         </div>
 
-                                        {removable && (
+                                        {(removable || attestable || withdrawable) && (
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
@@ -657,14 +777,31 @@ function MembersWorkspacePanel({
                                                         <EllipsisHorizontalIcon className="size-5" />
                                                     </button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end" className="w-40">
-                                                    <DropdownMenuItem
-                                                        variant="destructive"
-                                                        onSelect={() => setRemoveTarget(member)}
-                                                    >
-                                                        <TrashIcon className="size-4" />
-                                                        {t("remove")}
-                                                    </DropdownMenuItem>
+                                                <DropdownMenuContent align="end" className="w-56">
+                                                    {attestable && (
+                                                        <DropdownMenuItem onSelect={() => setApprovalTarget(member)}>
+                                                            <KeyIcon className="size-4" />
+                                                            {t("approvalCode")}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {withdrawable && openOffer && (
+                                                        <DropdownMenuItem
+                                                            disabled={busy}
+                                                            onSelect={() => withdrawOwnershipOffer(openOffer)}
+                                                        >
+                                                            <ArrowUturnLeftIcon className="size-4" />
+                                                            {t("withdrawOwnershipOffer")}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {removable && (
+                                                        <DropdownMenuItem
+                                                            variant="destructive"
+                                                            onSelect={() => setRemoveTarget(member)}
+                                                        >
+                                                            <TrashIcon className="size-4" />
+                                                            {t("remove")}
+                                                        </DropdownMenuItem>
+                                                    )}
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
                                         )}
@@ -685,13 +822,13 @@ function MembersWorkspacePanel({
                         title={showDomains ? t("inviteAccessTitle") : t("inviteMemberTitle")}
                         description={showDomains ? t("inviteAccessSubtitle") : t("inviteMemberSubtitle")}
                     >
-                        <Tabs defaultValue="email" className="gap-5">
+                        <Tabs value={invitationTab} onValueChange={setInvitationTab} className="gap-5">
                             <TabsList className="w-full sm:w-auto">
                                 <TabsTrigger value="email">
                                     <EnvelopeIcon />
                                     {t("inviteTabEmail")}
                                 </TabsTrigger>
-                                <TabsTrigger value="link">
+                                <TabsTrigger ref={inviteLinkTab} value="link">
                                     <LinkIcon />
                                     {t("inviteTabLink")}
                                 </TabsTrigger>
@@ -702,6 +839,20 @@ function MembersWorkspacePanel({
                                     </TabsTrigger>
                                 )}
                             </TabsList>
+
+                            {copyRecoveryUrl ? (
+                                <Alert role="region" aria-label={t("copyFailed")}>
+                                    <AlertTitle>{t("copyFailed")}</AlertTitle>
+                                    <AlertDescription className="gap-3">
+                                        <p>{t("copyFailedDescription")}</p>
+                                        <Input aria-label={t("inviteUrl")} readOnly value={copyRecoveryUrl} onFocus={(event) => event.currentTarget.select()} />
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button variant="outline" onClick={() => setCopyRecoveryUrl(null)}>{t("close")}</Button>
+                                            <Button onClick={() => { void copyUrl(copyRecoveryUrl); }}>{t("copyLink")}</Button>
+                                        </div>
+                                    </AlertDescription>
+                                </Alert>
+                            ) : null}
 
                             <TabsContent value="email" className="space-y-5">
                                 <p className="max-w-prose text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
@@ -786,8 +937,10 @@ function MembersWorkspacePanel({
                                     </form>
                                 )}
 
+                                <p role="status" aria-live="polite" aria-atomic="true" className="max-w-prose text-sm text-muted-foreground">{mailOutcome}</p>
                                 <div className="space-y-2">
                                     <TabListHeading title={t("pendingTitle")} count={invites.length} />
+                                    <p className="max-w-prose text-sm text-muted-foreground">{t("replaceInviteHint")}</p>
                                     {invites.length === 0 ? (
                                         <EmptyRow>{t("pendingEmpty")}</EmptyRow>
                                     ) : (
@@ -810,9 +963,22 @@ function MembersWorkspacePanel({
                                                                 />
                                                             </div>
                                                             <p className="text-xs text-muted-foreground">
-                                                                {t("expires", { date: invite.expiresAt.slice(0, 10) })}
+                                                                {invite.expiresAt
+                                                                    ? t("expires", { date: invite.expiresAt.slice(0, 10) })
+                                                                    : t("inviteNoExpiry")}
                                                             </p>
                                                         </div>
+                                                        {!invite.token && grantableInviteRoles.includes(invite.role) && (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="inline"
+                                                                disabled={sending || busy}
+                                                                onClick={() => void sendInvite(invite.email, invite.role)}
+                                                            >
+                                                                {t("replaceInvite")}
+                                                            </Button>
+                                                        )}
                                                         {busy ? (
                                                             <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
                                                         ) : (
@@ -859,6 +1025,7 @@ function MembersWorkspacePanel({
 
                             <TabsContent value="link" className="space-y-5">
                                 <p className="max-w-prose text-sm text-muted-foreground">{t("linkSubtitle")}</p>
+                                <p className="max-w-prose text-sm text-muted-foreground">{t("revokeLinkConsequences")}</p>
                                 {roleOptionsStatus === "loading" ? (
                                     <InviteRoleOptionsSkeleton />
                                 ) : roleOptionsStatus === "error" ? (
@@ -1031,17 +1198,39 @@ function MembersWorkspacePanel({
                 </Rise>
             )}
 
-            <DeleteRecordDialog
-                open={removeTarget !== null}
-                onOpenChange={(open) => {
-                    if (!open) setRemoveTarget(null);
-                }}
-                selectedIds={new Set(removeTarget ? [removeTarget.id] : [])}
-                selectedItems={removeTarget ? [removeTarget] : []}
-                entityLabel={t("memberEntityLabel")}
-                getDisplayName={(m) => m.displayName}
-                isDeleting={isRemoving}
-                confirmDelete={confirmRemove}
+            <Dialog open={removeTarget !== null} onOpenChange={(open) => { if (!open && !isRemoving) setRemoveTarget(null); }}>
+                <DialogContent className="max-h-[80dvh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>{t("removeTitle", { name: removeTarget?.displayName ?? "" })}</DialogTitle>
+                        <DialogDescription>{t("removeDescription", { workspace: activeWorkspace?.name ?? "" })}</DialogDescription>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">{t("removeOwnershipConsequences")}</p>
+                    <p className="text-sm text-muted-foreground">{t("removeRejoinConsequences")}</p>
+                    <Button variant="outline" disabled={isRemoving} onClick={() => {
+                        setRemoveTarget(null);
+                        setInvitationTab("link");
+                        requestAnimationFrame(() => {
+                            inviteLinkTab.current?.scrollIntoView({ block: "center" });
+                            inviteLinkTab.current?.focus({ preventScroll: true });
+                        });
+                    }}>{t("reviewInvitations")}</Button>
+                    <DialogFooter>
+                        <DialogClose asChild><Button variant="outline" disabled={isRemoving}>{t("cancel")}</Button></DialogClose>
+                        <Button variant="destructive" disabled={isRemoving} onClick={confirmRemove}>
+                            {isRemoving ? <Loader2Icon className="size-4 animate-spin" /> : t("remove")}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <ConfinementAcknowledgementDialog acknowledgement={confinement} />
+
+            <PasskeyApprovalCodeDialog
+                target={approvalTarget}
+                organizationName={activeWorkspace?.orgName ?? ""}
+                onClose={() => setApprovalTarget(null)}
+                issue={(userId) => issueWorkspaceMfaAttestation(workspaceId, userId)}
+                revoke={(userId) => revokeWorkspaceMfaAttestation(workspaceId, userId)}
             />
         </div>
     );

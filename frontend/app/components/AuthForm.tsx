@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { sameOriginPath } from "@/app/lib/sessionExpiry";
+import { authReturnPath, authSwitchHref, returnsToInvitation } from "@/app/lib/authReturnPath";
+import { withSectionFragment } from "@/app/lib/sessionExpiry";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 import {
@@ -27,6 +28,8 @@ import {
     ssoStartPath,
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
+import { MAX_NEW_PASSWORD_LENGTH, missingPasswordRequirements } from "@/app/lib/passwordPolicy";
+import { PasswordRequirements } from "@/app/components/auth/PasswordRequirements";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
@@ -41,7 +44,6 @@ const SSO_ENFORCED_CODE = "SSO_ENFORCED";
 const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
 const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
 const PASSWORD_TOO_LONG_CODE = "PASSWORD_TOO_LONG";
-const MAX_NEW_PASSWORD_LENGTH = 72;
 
 const FORM_FIELDS: Record<AuthMode, FieldKey[]> = {
     login: ["username", "password"],
@@ -95,12 +97,13 @@ export function AuthForm({
 }) {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
+    const tPassword = useTranslations("PasswordPolicy");
     const tMode = useTranslations(mode === "login" ? "AuthLogin" : "AuthRegister");
     const tLogin = useTranslations("AuthLogin");
     const tCapability = useTranslations("CapabilityUnavailable");
 
     const fields = FORM_FIELDS[mode];
-    const altHref = ALT_HREF[mode];
+    const altHref = authSwitchHref(ALT_HREF[mode], redirectUrl);
 
     const fieldLabels: Record<FieldKey, string> = {
         username: mode === "login" ? tForm("labelLoginIdentifier") : tForm("labelUsername"),
@@ -127,9 +130,9 @@ export function AuthForm({
 
     function routeAfterAuth() {
         const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
-        const safeRedirect = sameOriginPath(redirectUrl);
+        const safeRedirect = authReturnPath(redirectUrl);
         if (safeRedirect) {
-            router.push(safeRedirect);
+            router.push(withSectionFragment(safeRedirect, window.location.hash));
         } else if (!hasWorkspace) {
             router.replace("/onboarding");
         } else {
@@ -177,7 +180,7 @@ export function AuthForm({
         try {
             const discovery = await discoverSso(identifier);
             if (discovery.available && discovery.registrationId && discovery.protocol) {
-                window.location.assign(ssoStartPath(discovery.registrationId, discovery.protocol));
+                window.location.assign(ssoStartPath(discovery.registrationId, discovery.protocol, redirectUrl));
                 return;
             }
             const message = tLogin("ssoUnavailable");
@@ -250,6 +253,13 @@ export function AuthForm({
         e.preventDefault();
         setError(null);
         setFieldErrors({});
+        if (mode === "register") {
+            const missing = missingPasswordRequirements(values.password)[0];
+            if (missing) {
+                setFieldErrors({ password: tPassword(missing) });
+                return;
+            }
+        }
         setSubmitting(true);
 
         try {
@@ -265,6 +275,7 @@ export function AuthForm({
                     displayName: values.displayName,
                     password: values.password,
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+                    skipInitialWorkspace: returnsToInvitation(redirectUrl),
                 });
             }
 
@@ -302,7 +313,7 @@ export function AuthForm({
     const hasFieldErrors = Object.keys(fieldErrors).length > 0;
 
     return (
-        <div className="min-h-[100dvh] w-full bg-background lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
+        <main className="min-h-[100dvh] w-full bg-background lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
             <div className="relative flex min-h-[100dvh] flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
                 <Link
                     href="/"
@@ -339,7 +350,7 @@ export function AuthForm({
                                 const fieldId = `${mode}-${key}`;
                                 const errorId = `${fieldId}-error`;
                                 const isNewPassword = isPassword && mode === "register";
-                                const hintId = isNewPassword && !fieldError ? `${fieldId}-hint` : undefined;
+                                const hintId = isNewPassword ? `${fieldId}-hint` : undefined;
 
                                 return (
                                     <div
@@ -358,7 +369,7 @@ export function AuthForm({
                                                 maxLength={isNewPassword ? MAX_NEW_PASSWORD_LENGTH : undefined}
                                                 required
                                                 aria-invalid={Boolean(fieldError)}
-                                                aria-describedby={fieldError ? errorId : hintId}
+                                                aria-describedby={[fieldError ? errorId : undefined, hintId].filter(Boolean).join(" ") || undefined}
                                                 className={`peer h-14 w-full rounded-xl border bg-input px-4 pt-5 pb-1.5 text-base text-foreground outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-background focus:ring-4 ${
                                                     isPassword ? "pr-12" : ""
                                                 } ${
@@ -404,9 +415,7 @@ export function AuthForm({
                                             </p>
                                         )}
                                         {hintId && (
-                                            <p id={hintId} className="mt-1.5 px-1 text-sm text-muted-foreground">
-                                                {tForm("passwordLengthHint")}
-                                            </p>
+                                            <PasswordRequirements id={hintId} password={values.password} />
                                         )}
                                     </div>
                                 );
@@ -437,10 +446,10 @@ export function AuthForm({
 
                             <button
                                 type="submit"
-                                disabled={submitting || hasFieldErrors}
+                                disabled={submitting || (mode === "login" && hasFieldErrors)}
                                 style={{ animationDelay: `${120 + fields.length * 60}ms` }}
                                 className={`connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold transition-[transform,background-color,opacity] duration-150 ease-out active:scale-[0.98] disabled:cursor-not-allowed ${
-                                    hasFieldErrors
+                                    mode === "login" && hasFieldErrors
                                         ? "bg-muted text-muted-foreground"
                                         : "bg-brand text-brand-foreground hover:bg-brand-hover disabled:opacity-70"
                                 }`}
@@ -450,7 +459,7 @@ export function AuthForm({
                                         <LoaderCircle className="size-4 animate-spin" />
                                         {tMode("submittingLabel")}
                                     </>
-                                ) : hasFieldErrors ? (
+                                ) : mode === "login" && hasFieldErrors ? (
                                     tForm("resolveErrors")
                                 ) : (
                                     <>
@@ -528,7 +537,7 @@ export function AuthForm({
                                     {socialProviders.google && (
                                         <button
                                             type="button"
-                                            onClick={() => window.location.assign(socialLoginStartPath("google"))}
+                                            onClick={() => window.location.assign(socialLoginStartPath("google", redirectUrl))}
                                             className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                                         >
                                             <svg className="size-5" width={20} height={20} viewBox="0 0 48 48" aria-hidden="true">
@@ -555,7 +564,7 @@ export function AuthForm({
                                     {socialProviders.microsoft && (
                                         <button
                                             type="button"
-                                            onClick={() => window.location.assign(socialLoginStartPath("microsoft"))}
+                                            onClick={() => window.location.assign(socialLoginStartPath("microsoft", redirectUrl))}
                                             className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                                         >
                                             <svg className="size-5" width={20} height={20} viewBox="0 0 23 23" aria-hidden="true">
@@ -588,6 +597,6 @@ export function AuthForm({
             </div>
 
             <AuthBrandPanel className="hidden lg:block lg:h-full" />
-        </div>
+        </main>
     );
 }

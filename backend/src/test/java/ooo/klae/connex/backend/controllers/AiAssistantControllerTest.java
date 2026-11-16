@@ -32,6 +32,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
@@ -53,6 +54,7 @@ import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
 import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatTurnDto;
+import ooo.klae.connex.backend.dto.AiChatTurnToolCallDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -268,6 +270,39 @@ class AiAssistantControllerTest {
     }
 
     @Test
+    void turnGetSerializesExecutionEvidenceOnlyForTheRequester() throws Exception {
+        var calls = List.of(new AiChatTurnToolCallDto(
+                "list_tasks", AiAssistantToolCatalog.ToolTier.READ, "executed"));
+        when(turnService.get(42, 19)).thenReturn(
+                new AiChatTurnDto(19, 42, "timed_out", "generation_timeout",
+                        null, List.of(), true, null, calls),
+                new AiChatTurnDto(19, 42, "timed_out", "generation_timeout",
+                        null, List.of(), false, null, calls));
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/turns/19"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.toolCalls.length()").value(1))
+                .andExpect(jsonPath("$.toolCalls[0].toolName").value("list_tasks"))
+                .andExpect(jsonPath("$.toolCalls[0].tier").value("READ"))
+                .andExpect(jsonPath("$.toolCalls[0].status").value("executed"))
+                .andExpect(jsonPath("$.toolCalls[0].argumentsJson").doesNotExist())
+                .andExpect(jsonPath("$.toolCalls[0].resultJson").doesNotExist());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/turns/19"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasKey("toolCalls")))
+                .andExpect(jsonPath("$.toolCalls").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void turnGetPropagatesAuthorizationFailureWithoutExecutionEvidence() throws Exception {
+        when(turnService.get(42, 19)).thenThrow(new ForbiddenException("AI use denied"));
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/turns/19"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.toolCalls").doesNotExist());
+    }
+
+    @Test
     void attachmentEndpointsUseSessionScopedMultipartContract() throws Exception {
         AiChatAttachmentDto attachment = new AiChatAttachmentDto(
                 91, "notes.txt", "text/plain", 7, "text",
@@ -314,16 +349,30 @@ class AiAssistantControllerTest {
     }
 
     @Test
+    void expiredProposalDecisionsUseTheCentralConflictContract() throws Exception {
+        when(writeToolService.approve(42, 29))
+                .thenThrow(new ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException());
+        when(writeToolService.reject(42, 29))
+                .thenThrow(new ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException());
+        for (String operation : java.util.List.of("approve", "reject")) {
+            mockMvc.perform(post("/api/ai/assistant/sessions/42/tool-calls/29/" + operation))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("AI_PROPOSAL_EXPIRED"))
+                    .andExpect(jsonPath("$.message").value("Assistant proposal review window has expired"));
+        }
+    }
+
+    @Test
     void approvalRejectionAndUndoUseSessionScopedToolCallEndpoints() throws Exception {
         JsonMapper objectMapper = JsonMapper.builder().build();
         when(writeToolService.approve(42, 29)).thenReturn(new AiAssistantToolCallDto(
-                29, "change_deal_stage", "confirm", "executed",
+                29, "change_deal_stage", "confirm", "executed", "applied", null,
                 objectMapper.readTree("{\"stage\":\"Proposal\"}"), false, null));
         when(writeToolService.reject(42, 30)).thenReturn(new AiAssistantToolCallDto(
-                30, "assign_owner", "confirm", "rejected",
+                30, "assign_owner", "confirm", "rejected", "discarded", null,
                 objectMapper.createObjectNode(), false, null));
         when(writeToolService.undo(42, 31)).thenReturn(new AiAssistantToolCallDto(
-                31, "create_note", "auto", "undone",
+                31, "create_note", "auto", "undone", "undone", null,
                 objectMapper.readTree("{\"recordType\":\"note\"}"), false,
                 "2026-08-10T12:10:00Z"));
 
@@ -350,6 +399,8 @@ class AiAssistantControllerTest {
                 "assign_owner",
                 "confirm",
                 "proposed",
+                "open",
+                "2026-08-13T12:00:00Z",
                 new AiAssistantToolCallReadDto.Target("person", 31, "Ada Lovelace"),
                 "Assign an owner",
                 null,

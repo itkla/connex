@@ -127,11 +127,11 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
         Target target = execution.row().target();
         Integer applied = switch (target.kind()) {
             case "person" -> appliedOwner(
-                    personService.updateOwner(target.id(), ownerId), Person::getOwnerId);
+                    personService.updateOwner(target.id(), ownerId, execution.admission()), Person::getOwnerId);
             case "company" -> appliedOwner(
-                    companyService.updateOwner(target.id(), ownerId), Company::getOwnerId);
+                    companyService.updateOwner(target.id(), ownerId, execution.admission()), Company::getOwnerId);
             case "deal" -> appliedOwner(
-                    dealService.updateOwner(target.id(), ownerId), Deal::getOwnerId);
+                    dealService.updateOwner(target.id(), ownerId, execution.admission()), Deal::getOwnerId);
             default -> throw new BadRequestException("Unsupported owner target");
         };
         Map<String, Object> outcome = new LinkedHashMap<>();
@@ -239,6 +239,14 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
         AiAssistantWriteTool.copyText(storedOutcome, result, "recordType");
         AiAssistantWriteTool.copyText(storedOutcome, result, OWNER_FIELD);
         return result;
+    }
+
+    @Override
+    public List<AiAssistantToolResult.Identifier> modelIdentifiers(JsonNode storedOutcome) {
+        JsonNode owner = storedOutcome == null ? null : storedOutcome.get(OWNER_FIELD);
+        return owner != null && owner.isString() && !owner.asString().isBlank()
+                && !UNASSIGNED.equals(owner.asString())
+                ? List.of(new AiAssistantToolResult.Identifier("member", owner.asString(), "/owner")) : List.of();
     }
 
     @Override

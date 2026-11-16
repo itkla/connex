@@ -73,7 +73,9 @@ public class AiBriefScheduler {
         int delivered = 0;
         int startedRuns = 0;
         int failed = 0;
+        int attempted = 0;
         for (AiBriefSchedule schedule : scheduleMapper.findPendingDelivery(workspaceId)) {
+            attempted++;
             switch (safeDeliver(schedule)) {
                 case DELIVERED -> delivered++;
                 case FAILED -> failed++;
@@ -85,6 +87,7 @@ public class AiBriefScheduler {
             if (kind == null) {
                 continue;
             }
+            attempted++;
             switch (safeStart(schedule, kind)) {
                 case STARTED -> startedRuns++;
                 case FAILED -> failed++;
@@ -96,6 +99,7 @@ public class AiBriefScheduler {
                 workspaceId,
                 failed == 0 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED,
                 new JobRunDetail(started.startedAt(), Map.of(
+                        "attemptedCount", attempted,
                         "startedCount", startedRuns,
                         "deliveredCount", delivered,
                         "failedCount", failed)));

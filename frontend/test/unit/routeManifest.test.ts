@@ -9,7 +9,7 @@ import {
     SHIPPED_APP_ROUTES,
     SHIPPED_ROUTE_QUERY_PARAMS,
 } from "@/app/lib/routeManifest";
-import { isProtectedPath } from "@/app/lib/protectedRoutes";
+import { PROTECTED_PREFIXES, isProtectedPath } from "@/app/lib/protectedRoutes";
 import {
     ACTIVITY_URL_KEY,
     COMMENT_URL_KEY,
@@ -254,6 +254,7 @@ describe("deep-link producers emit the consumers' canonical params", () => {
 
         expect(resolveShippedRoute(href)).toBe("/records/deals");
         expect(queryOf(href).get(DEAL_RISK_FILTER_KEY)).toBe("high");
+        expect(queryOf(href).get(DEAL_STATUS_FILTER_KEY)).toBe("open");
     });
 
     it("links an at-risk total to every flagged severity rather than the whole browser", () => {
@@ -336,9 +337,15 @@ describe("deep-link producers emit the consumers' canonical params", () => {
 
 const DYNAMIC_SEGMENT = "__dynamic__";
 
-const APP_SHELL_TOP_SEGMENTS = new Set(
-    shippedRoutes.map((route) => route.split("/").filter(Boolean)[0]).filter(Boolean),
-);
+/**
+ * Every top-level segment the authenticated shell owns: those of shipped routes, plus every
+ * protected prefix, so an href under a prefix whose pages were all retired into config redirects
+ * (`/organization`, `/admin`) is still checked rather than silently skipped.
+ */
+const APP_SHELL_TOP_SEGMENTS = new Set([
+    ...shippedRoutes.map((route) => route.split("/").filter(Boolean)[0]).filter(Boolean),
+    ...PROTECTED_PREFIXES.map((prefix) => prefix.slice(1)),
+]);
 
 /** Recursively lists every TypeScript source file under a directory. */
 function sourceFiles(directory: string): string[] {

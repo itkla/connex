@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.AutomationScope;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
@@ -422,7 +423,7 @@ class SecretStoreTest {
         properties.setDisabledKeyIds(disabledKeyIds);
         properties.setLazyRewrapEnabled(lazyRewrapEnabled);
         return new SecretStore(secretValueMapper, userMapper, workspaceMapper, organizationMapper,
-                new SecretStoreCrypto(properties), properties, auditService);
+                new SecretStoreCrypto(properties), properties, auditService, new AutomationScope());
     }
 
     private static String base64Key(byte fill) {

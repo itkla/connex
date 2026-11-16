@@ -113,7 +113,7 @@
        a mention queued while pending — but surfaces only once their membership activates, so workspace
        content is never disclosed to a not-yet-joined invitee. The sole exception is the
        'workspace.join' invitation itself, which carries no workspace content and must reach the
-       pending member so they can accept. Member removal deletes a member's notifications in the service layer
+       pending member while its effective deadline is still in the future. Member removal deletes a member's notifications in the service layer
        (UserOffboardingService.detachMemberContent; the FK cascade was dropped in #440 increment 3). -->
   <sql id="inboxScope">
     n.recipient_id = #{recipientId}
@@ -131,6 +131,7 @@
             WHERE pending_wm.workspace_id = n.workspace_id
               AND pending_wm.user_id = n.recipient_id
               AND pending_wm.status = 'pending'
+              AND COALESCE(pending_wm.expires_at, #{pendingInvitationCutoverDeadline,jdbcType=VARCHAR}) &gt; UTC_TIMESTAMP()
           )
         )
       )
@@ -229,6 +230,22 @@
         SELECT 1 FROM ai_chat_session source_session
         WHERE source_session.workspace_id = n.workspace_id
           AND source_session.id = n.source_id
+          AND
+          <choose>
+            <when test="assistantWorkspaceGenerations != null and !assistantWorkspaceGenerations.isEmpty()">
+              <foreach collection="assistantWorkspaceGenerations" index="privacyWorkspaceId" item="privacyGeneration"
+                  open="(" separator=" OR " close=")">
+                (source_session.workspace_id = #{privacyWorkspaceId}
+                  AND source_session.organization_privacy_generation = #{privacyGeneration})
+              </foreach>
+            </when>
+            <otherwise>FALSE</otherwise>
+          </choose>
+          AND (source_session.mission_taint_generation IS NULL OR EXISTS (
+            SELECT 1 FROM ai_agent_privacy_barrier source_barrier
+            WHERE source_barrier.workspace_id = source_session.workspace_id
+              AND source_barrier.blocked = FALSE
+          ))
           AND (
             source_session.created_by_user_id = n.recipient_id
             OR EXISTS (
@@ -383,7 +400,15 @@
       AND <include refid="contentAccessible"/>
       AND <include refid="contextAccessible"/>
     <include refid="inboxFilters"/>
-    ORDER BY n.triggered_at DESC, n.id DESC
+    <choose>
+      <when test="_parameter.containsKey('afterId')">
+        AND n.id &gt; #{afterId} AND n.id &lt;= #{cutoffId}
+        ORDER BY n.id
+      </when>
+      <otherwise>
+        ORDER BY n.triggered_at DESC, n.id DESC
+      </otherwise>
+    </choose>
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
@@ -476,6 +501,24 @@
     ), 0)
   </select>
 
+  <select id="lockTeardownBatch" resultType="ooo.klae.connex.backend.mappers.NotificationMapper$DeletionCandidate">
+    SELECT id, recipient_id
+    FROM notification
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY id
+    LIMIT #{limit}
+    FOR UPDATE
+  </select>
+
+  <delete id="deleteTeardownBatch">
+    DELETE FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+  </delete>
+
   <insert id="bumpStateVersions">
     INSERT INTO notification_recipient_state (recipient_id, state_version)
     VALUES
@@ -486,9 +529,9 @@
       state_version = notification_recipient_state.state_version + 1
   </insert>
 
-  <select id="lockRecipientMemberships" resultType="int">
+  <select id="lockRecipientMemberships" resultType="int" flushCache="true" useCache="false">
     SELECT workspace_id
-    FROM workspace_member
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
     WHERE user_id = #{recipientId}
     ORDER BY workspace_id
     FOR UPDATE
@@ -643,6 +686,7 @@
       AND <include refid="contentAccessible"/>
       AND <include refid="contextAccessible"/>
       AND n.id = #{id}
+      AND (n.type &lt;&gt; 'ownership.offer' OR n.resolved_at IS NULL)
       AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
   </update>
 
@@ -703,6 +747,7 @@
     WHERE <include refid="inboxScope"/>
       AND <include refid="contentAccessible"/>
       AND <include refid="contextAccessible"/>
+      AND n.type &lt;&gt; 'ownership.offer'
       AND n.id &lt;= #{cutoffId}
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
@@ -725,6 +770,26 @@
       #{contextLabel}, #{actionUrl}, #{data}, #{dedupeKey}, #{triggeredAt}
     ) AS incoming
     ON DUPLICATE KEY UPDATE
+      updated_at = IF(
+        notification.resolved_at IS NULL
+          AND BINARY notification.type &lt;=&gt; BINARY incoming.type
+          AND BINARY notification.category &lt;=&gt; BINARY incoming.category
+          AND BINARY notification.severity &lt;=&gt; BINARY incoming.severity
+          AND notification.template_version &lt;=&gt; incoming.template_version
+          AND BINARY notification.title &lt;=&gt; BINARY incoming.title
+          AND BINARY notification.body &lt;=&gt; BINARY incoming.body
+          AND notification.actor_id &lt;=&gt; incoming.actor_id
+          AND BINARY notification.actor_label &lt;=&gt; BINARY incoming.actor_label
+          AND BINARY notification.source_type &lt;=&gt; BINARY incoming.source_type
+          AND notification.source_id &lt;=&gt; incoming.source_id
+          AND BINARY notification.source_label &lt;=&gt; BINARY incoming.source_label
+          AND BINARY notification.context_type &lt;=&gt; BINARY incoming.context_type
+          AND notification.context_id &lt;=&gt; incoming.context_id
+          AND BINARY notification.context_label &lt;=&gt; BINARY incoming.context_label
+          AND BINARY notification.action_url &lt;=&gt; BINARY incoming.action_url
+          AND notification.data &lt;=&gt; CAST(incoming.data AS JSON),
+        notification.updated_at, CURRENT_TIMESTAMP
+      ),
       read_at = IF(
         notification.severity &lt;&gt; incoming.severity
           OR notification.resolved_at IS NOT NULL,
@@ -778,6 +843,16 @@
       data = incoming.data,
       severity = incoming.severity
   </insert>
+
+  <select id="existsDelivery" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM notification
+      WHERE workspace_id = #{workspaceId}
+        AND recipient_id = #{recipientId}
+        AND id = #{id}
+        AND dedupe_key &lt;=&gt; #{dedupeKey}
+    )
+  </select>
 
   <update id="claimEmailDelivery">
     UPDATE notification
@@ -839,7 +914,7 @@
 
   <select id="findHistoricalNotificationBaselines"
           resultType="ooo.klae.connex.backend.beans.HistoricalNotificationBaseline">
-    SELECT workspace_id, recipient_id, dedupe_key, notification_type, baseline_severity,
+    SELECT workspace_id, recipient_id, dedupe_key, notification_type, baseline_severity, model_version,
            LOWER(HEX(source_state_hash)) AS source_state_hash,
            LOWER(HEX(import_run_id)) AS import_run_id, created_at
     FROM historical_notification_baseline
@@ -850,13 +925,13 @@
   <insert id="insertHistoricalNotificationBaselines">
     INSERT INTO historical_notification_baseline (
       workspace_id, recipient_id, dedupe_key, notification_type,
-      baseline_severity, source_state_hash, import_run_id, created_at
+      baseline_severity, model_version, source_state_hash, import_run_id, created_at
     )
     VALUES
     <foreach collection="baselines" item="baseline" separator=",">
       (
         #{workspaceId}, #{baseline.recipientId}, #{baseline.dedupeKey},
-        #{baseline.notificationType}, #{baseline.baselineSeverity},
+        #{baseline.notificationType}, #{baseline.baselineSeverity}, #{baseline.modelVersion},
         UNHEX(#{baseline.sourceStateHash}), UNHEX(#{baseline.importRunId}),
         UTC_TIMESTAMP(6)
       )
@@ -864,6 +939,7 @@
     ON DUPLICATE KEY UPDATE
       notification_type = VALUES(notification_type),
       baseline_severity = VALUES(baseline_severity),
+      model_version = VALUES(model_version),
       source_state_hash = VALUES(source_state_hash),
       import_run_id = VALUES(import_run_id),
       created_at = VALUES(created_at)
@@ -902,6 +978,16 @@
     DELETE FROM historical_notification_baseline
     WHERE recipient_id = #{recipientId}
   </delete>
+
+  <update id="resolveTaskAssignment">
+    UPDATE notification
+    SET resolved_at = #{resolvedAt}, snoozed_until = NULL, snooze_timezone = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND type = 'task.assigned'
+      AND source_type = 'task' AND source_id = #{taskId}
+      AND resolved_at IS NULL
+  </update>
 
   <update id="resolveReminder">
     UPDATE notification
@@ -1130,4 +1216,33 @@
     UPDATE notification SET actor_id = NULL WHERE actor_id = #{userId}
   </update>
 
+  <update id="resolveOwnershipOffer">
+    UPDATE notification SET resolved_at = COALESCE(resolved_at, UTC_TIMESTAMP(6)),
+      snoozed_until = NULL, snooze_timezone = NULL
+    WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
+      AND type = 'ownership.offer' AND source_type IS NULL AND source_id IS NULL
+      AND context_type IS NULL AND context_id IS NULL
+      AND dedupe_key = CONCAT('ownership.offer:', #{offerId}) AND resolved_at IS NULL
+  </update>
+  <delete id="deleteOwnershipOffer">
+    DELETE FROM notification WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
+      AND type = 'ownership.offer' AND source_type IS NULL AND source_id IS NULL
+      AND context_type IS NULL AND context_id IS NULL
+      AND dedupe_key = CONCAT('ownership.offer:', #{offerId})
+  </delete>
+  <select id="getWarmthModelVersion" resultType="string">
+    SELECT model_version FROM warmth_notification_model_state WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <insert id="setWarmthModelVersion">
+    INSERT INTO warmth_notification_model_state (workspace_id, model_version)
+    VALUES (#{workspaceId}, #{modelVersion})
+    ON DUPLICATE KEY UPDATE model_version = VALUES(model_version)
+  </insert>
+
+  <delete id="deletePreviousWarmthBaselines">
+    DELETE FROM historical_notification_baseline
+    WHERE workspace_id = #{workspaceId} AND model_version &lt;&gt; #{modelVersion}
+      AND notification_type IN ('relationship.cooling', 'relationship.intro_opportunity', 'deal.risk')
+  </delete>
 </mapper>

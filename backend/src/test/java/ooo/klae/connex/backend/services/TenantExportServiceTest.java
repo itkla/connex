@@ -8,8 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -43,10 +43,15 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongConsumer;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -56,6 +61,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -99,13 +106,24 @@ class TenantExportServiceTest {
     @Mock private TenantExportSnapshotTransaction snapshotTransaction;
     @Mock private ManagedObjectService managedObjectService;
     @Mock private AuditService auditService;
+    @Mock private AuditService.PreparedWorkspaceExportAudit preparedAudit;
 
     private final TenantLifecycleProperties properties = new TenantLifecycleProperties();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard publicationGuard;
     private TenantExportService service;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws java.io.IOException {
+        lenient().when(auditService.recordWorkspaceExportStarted(eq(WORKSPACE_ID), eq(ORG_ID), eq(ACTOR_ID), anyInt()))
+            .thenReturn(preparedAudit);
+        lenient().when(assistantPrivacyService.current(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1L);
+        lenient().doAnswer(call -> {
+            call.<ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard.IoAction>getArgument(2).run();
+            return null;
+        }).when(publicationGuard).withCurrent(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyLong(), any());
         service = new TenantExportService(
             orgMemberService,
             sessionSecurityService,
@@ -117,9 +135,32 @@ class TenantExportServiceTest {
             auditService,
             properties,
             objectMapper,
-            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC),
+            assistantPrivacyService, publicationGuard);
         lenient().doAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get())
             .when(tenantWorkScope).unrouted(any());
+    }
+
+    private TenantExportService createService(
+            LongSupplier nanoTime,
+            LongConsumer admissionWait,
+            ScheduledThreadPoolExecutor deadlineExecutor) {
+        return new TenantExportService(
+            orgMemberService,
+            sessionSecurityService,
+            tenantWorkScope,
+            controlOperations,
+            lifecycleAccess,
+            snapshotTransaction,
+            managedObjectService,
+            auditService,
+            properties,
+            objectMapper,
+            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC),
+            assistantPrivacyService, publicationGuard,
+            nanoTime,
+            admissionWait,
+            deadlineExecutor);
     }
 
     @AfterEach
@@ -164,15 +205,8 @@ class TenantExportServiceTest {
         stubPreparedRoute();
         IllegalStateException primary = new IllegalStateException("audit failed");
         IllegalStateException cleanup = new IllegalStateException("release failed");
-        doThrow(primary).when(auditService).recordStrictIndependentScoped(
-            any(),
-            any(),
-            anyInt(),
-            any(),
-            anyInt(),
-            any(),
-            any(),
-            any());
+        doThrow(primary).when(auditService).recordWorkspaceExportStarted(
+            eq(WORKSPACE_ID), eq(ORG_ID), eq(ACTOR_ID), anyInt());
         doThrow(cleanup).when(controlOperations).release(OPERATION_LEASE);
 
         IllegalStateException thrown = assertThrows(
@@ -222,6 +256,36 @@ class TenantExportServiceTest {
 
         verify(controlOperations).release(OPERATION_LEASE);
         verify(tenantWorkScope, times(2)).unrouted(any());
+    }
+
+    @Test
+    void invalidationCancelsActualZipWriteAndDeletesPrivateSpool() throws Exception {
+        stubStreamingRoute();
+        AtomicReference<Path> capturedSpool = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicInteger writes = new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call -> {
+            if (writes.incrementAndGet() == 2) {
+                throw new IOException("Assistant content is no longer available");
+            }
+            call.<ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard.IoAction>getArgument(2).run();
+            return null;
+        }).when(publicationGuard).withCurrent(eq(ORG_ID), eq(1L), any());
+        doAnswer(call -> {
+            Path spool = call.getArgument(2);
+            capturedSpool.set(spool);
+            java.util.zip.ZipOutputStream zip = call.getArgument(1);
+            zip.putNextEntry(new java.util.zip.ZipEntry("data/ai_chat_message.jsonl"));
+            zip.write("retained content".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            return new Snapshot(List.of(), 0);
+        }).when(snapshotTransaction).capture(eq(WORKSPACE_ID), any(), any(Path.class), any());
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertThrows(IOException.class, () -> download.writeTo(output));
+        assertFalse(Files.exists(capturedSpool.get()));
+        verify(controlOperations).release(OPERATION_LEASE);
+        assertFalse(output.toString(StandardCharsets.UTF_8).contains("manifest.json"));
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
     }
 
     @Test
@@ -366,6 +430,7 @@ class TenantExportServiceTest {
         TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
 
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
         download.writeTo(output);
 
         JsonNode manifest = manifest(output.toByteArray());
@@ -386,8 +451,107 @@ class TenantExportServiceTest {
             List.of("data/person.jsonl", "manifest.json"),
             entryNames(output.toByteArray()));
         verify(controlOperations).release(OPERATION_LEASE);
-        verify(tenantWorkScope, times(2)).unrouted(any());
+        verify(tenantWorkScope, times(3)).unrouted(any());
+        verify(auditService).recordWorkspaceExportCompleted(preparedAudit, 1L, 1, 0L);
         assertFalse(Files.exists(capturedSpool.get()));
+    }
+
+    @Test
+    void interruptedZipOutputNeverRecordsSuccess() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        OutputStream output = new OutputStream() {
+            @Override
+            public void write(int value) throws IOException {
+                throw new IOException("Output interrupted");
+            }
+        };
+
+        assertThrows(IOException.class, () -> download.writeTo(output));
+
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
+        verify(controlOperations).release(OPERATION_LEASE);
+    }
+
+    @Test
+    void completionAddsActualRowCountsAcrossAllCapturedTables() throws Exception {
+        stubStreamingRoute();
+        doAnswer(invocation -> {
+            ZipOutputStream zip = invocation.getArgument(1);
+            zip.putNextEntry(new ZipEntry("data/person.jsonl"));
+            zip.write("{}\n{}\n{}\n".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            zip.putNextEntry(new ZipEntry("data/company.jsonl"));
+            zip.write("{}\n{}\n{}\n{}\n{}\n".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            return new Snapshot(List.of(new CapturedTable("person", "data/person.jsonl", 3),
+                new CapturedTable("company", "data/company.jsonl", 5)), 0);
+        }).when(snapshotTransaction).capture(eq(WORKSPACE_ID), any(), any(Path.class), any());
+
+        service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID).writeTo(new ByteArrayOutputStream());
+
+        verify(auditService).recordWorkspaceExportCompleted(preparedAudit, 8L, 2, 0L);
+    }
+
+    @Test
+    void completionAuditFailurePropagatesAfterAssemblyAndReleasesTheLease() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        doThrow(new IllegalStateException("Completion audit unavailable")).when(auditService)
+            .recordWorkspaceExportCompleted(preparedAudit, 0L, 0, 0L);
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+
+        assertThrows(IllegalStateException.class, () -> download.writeTo(new ByteArrayOutputStream()));
+
+        verify(controlOperations).release(OPERATION_LEASE);
+    }
+
+    @Test
+    void finalOutputCloseFailureNeverRecordsSuccessEvenWhenCleanupCanRetryTheClose() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream() {
+            private boolean firstClose = true;
+
+            @Override
+            public void close() throws IOException {
+                if (firstClose) {
+                    firstClose = false;
+                    throw new IOException("Final output close failed");
+                }
+                super.close();
+            }
+        };
+
+        assertThrows(IOException.class, () -> download.writeTo(output));
+
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
+        verify(controlOperations).release(OPERATION_LEASE);
+    }
+
+    @Test
+    void cancellationDuringFinalOutputClosePreventsTheCompletionAppend() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream() {
+            @Override
+            public void close() throws IOException {
+                download.cancel();
+                super.close();
+            }
+        };
+
+        assertThrows(IOException.class, () -> download.writeTo(output));
+
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
+        verify(controlOperations, timeout(1_000)).release(OPERATION_LEASE);
     }
 
     @Test
@@ -524,11 +688,27 @@ class TenantExportServiceTest {
 
         assertTrue(input.closed());
         assertTrue(releasedAfterClose.get());
-        assertFalse(entryNames(output.toByteArray()).contains("manifest.json"));
+        assertThrows(IOException.class, () -> entryNames(output.toByteArray()));
+        assertFalse(output.toString(StandardCharsets.ISO_8859_1).contains("manifest.json"));
     }
 
-    @Test
-    void objectAdmissionRetryUsesOneBoundedDeadlineWithoutResetting() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void objectAdmissionRetryUsesOneBoundedDeadlineWithoutResetting(boolean admissionSucceeds)
+            throws Exception {
+        AtomicLong nanoTime = new AtomicLong();
+        List<Duration> waits = new ArrayList<>();
+        ScheduledThreadPoolExecutor deadlineExecutor = mock(ScheduledThreadPoolExecutor.class);
+        ScheduledFuture<?> deadlineTask = mock(ScheduledFuture.class);
+        doAnswer(invocation -> deadlineTask).when(deadlineExecutor).schedule(
+            any(Runnable.class),
+            eq(properties.getExportTimeout().toNanos()),
+            eq(TimeUnit.NANOSECONDS));
+        service.shutdownDeadlineExecutor();
+        service = createService(nanoTime::get, nanos -> {
+            waits.add(Duration.ofNanos(nanos));
+            nanoTime.addAndGet(nanos);
+        }, deadlineExecutor);
         properties.setExportObjectReadTimeout(Duration.ofMillis(45));
         stubStreamingRoute();
         ActiveObjectReference reference = reference("retry.pdf", 1);
@@ -544,26 +724,59 @@ class TenantExportServiceTest {
             any(),
             any(Path.class),
             any(TenantExportExecution.class));
-        when(managedObjectService.openTenantExportObject(
-                eq(WORKSPACE_ID),
-                eq(ACTOR_ID),
-                eq(reference),
-                any()))
-            .thenThrow(new TooManyRequestsException("busy"));
+        TooManyRequestsException busy = new TooManyRequestsException("busy");
+        var admission = when(managedObjectService.openTenantExportObject(
+            eq(WORKSPACE_ID),
+            eq(ACTOR_ID),
+            eq(reference),
+            any()));
+        if (admissionSucceeds) {
+            admission.thenThrow(busy, busy).thenReturn(new ManagedTenantObject(
+                reference.objectKey(),
+                new StoredObject(new ByteArrayInputStream(new byte[] {1}), 1),
+                1));
+        } else {
+            admission.thenThrow(busy, busy, busy, busy, busy,
+                new AssertionError("Object admission exceeded the bounded retry attempts"));
+        }
         TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-        assertThrows(
-            TooManyRequestsException.class,
-            () -> download.writeTo(new ByteArrayOutputStream()));
+        if (admissionSucceeds) {
+            download.writeTo(output);
+            assertTrue(entryNames(output.toByteArray()).contains("manifest.json"));
+            assertArrayEquals(
+                new byte[] {1},
+                entryBytes(output.toByteArray(), "objects/" + reference.objectKey()));
+        } else {
+            assertSame(busy, assertThrows(
+                TooManyRequestsException.class,
+                () -> download.writeTo(output)));
+            assertFalse(entryNames(output.toByteArray()).contains("manifest.json"));
+        }
 
+        List<Duration> expectedTimeouts = (admissionSucceeds
+            ? List.of(45L, 35L, 25L)
+            : List.of(45L, 35L, 25L, 15L, 5L))
+            .stream().map(Duration::ofMillis).toList();
         ArgumentCaptor<Duration> timeouts = ArgumentCaptor.forClass(Duration.class);
-        verify(managedObjectService, atLeast(2)).openTenantExportObject(
+        verify(managedObjectService, times(expectedTimeouts.size())).openTenantExportObject(
             eq(WORKSPACE_ID),
             eq(ACTOR_ID),
             eq(reference),
             timeouts.capture());
-        List<Duration> captured = timeouts.getAllValues();
-        assertTrue(captured.getLast().compareTo(captured.getFirst()) < 0);
+        assertEquals(expectedTimeouts, timeouts.getAllValues());
+        assertEquals(
+            (admissionSucceeds ? List.of(10L, 10L) : List.of(10L, 10L, 10L, 10L, 5L))
+                .stream().map(Duration::ofMillis).toList(),
+            waits);
+        assertEquals(Duration.ofMillis(admissionSucceeds ? 20 : 45).toNanos(), nanoTime.get());
+        verify(deadlineExecutor).schedule(
+            any(Runnable.class),
+            eq(properties.getExportTimeout().toNanos()),
+            eq(TimeUnit.NANOSECONDS));
+        verify(deadlineTask).cancel(false);
+        verify(controlOperations).release(OPERATION_LEASE);
     }
 
     @Test

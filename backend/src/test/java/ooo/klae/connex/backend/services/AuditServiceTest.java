@@ -19,13 +19,20 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.concurrent.Executors;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.firewall.RequestRejectedException;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -47,7 +54,10 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.config.AuditIntegrityProperties;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
@@ -79,13 +89,14 @@ class AuditServiceTest {
             objectMapper,
             tenantContext,
             new ClientIpResolver(""),
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            new AutomationScope());
         lenient().when(tenantContext.getWorkspaceId()).thenReturn(7);
         lenient().when(tenantContext.getOrgId()).thenReturn(8);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"workspace", "entity", "organization"})
+    @ValueSource(strings = {"workspace", "entity", "organization", "selectedWorkspace", "selectedOrg"})
     void auditExportsRequireStepUpBeforeReadingEvents(String surface) {
         doThrow(new RecentAuthenticationRequiredException())
                 .when(sessionSecurityService).requireExportStepUp();
@@ -94,10 +105,13 @@ class AuditServiceTest {
                 case "workspace" -> service.exportRecent(10, 0);
                 case "entity" -> service.exportForEntity("person", 1, 10, 0);
                 case "organization" -> service.exportRecentForOrg(8, 10, 0);
+                case "selectedWorkspace" -> service.exportSelected(null, null, List.of(1), 10, 0);
+                case "selectedOrg" -> service.exportSelectedForOrg(8, List.of(1), 10, 0);
                 default -> throw new IllegalArgumentException(surface);
             }
         });
         verifyNoInteractions(auditLogMapper);
+        verify(auditIntegrityService, never()).append(any());
     }
 
     @Test
@@ -186,19 +200,176 @@ class AuditServiceTest {
         entry.setAction("audit.export");
         entry.setSummary("=formula [Private](note:42)");
         entry.setRowHash("abc123");
-        when(auditLogMapper.findWorkspaceExport(7, 10_000, 0)).thenReturn(List.of(entry));
+        when(auditLogMapper.findWorkspaceExport(7, 10_000, 0, null, null, null)).thenReturn(List.of(entry));
         when(auditIntegrityService.integrityPayload(entry))
             .thenReturn("{\"summary\":\"=formula [Private](note:42)\"}");
 
         String csv = service.exportRecent(50_000, -1);
 
-        verify(auditLogMapper).findWorkspaceExport(7, 10_000, 0);
+        verify(auditLogMapper).findWorkspaceExport(7, 10_000, 0, null, null, null);
         assertTrue(csv.contains("rowHash"));
         assertTrue(csv.contains("integrityPayloadRedacted"));
         assertTrue(csv.contains("contentRedacted"));
         assertTrue(csv.contains("'=formula a note"));
         assertFalse(csv.contains("Private"));
         assertTrue(csv.contains("abc123"));
+    }
+
+    @Test
+    void completedCrmExportCapturesActorAndOnlySafeScopeMetadata() {
+        User actor = new User();
+        actor.setId(41);
+        actor.setDisplayName("Export Actor");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        try {
+            service.recordDataExportCompleted("person", 23,
+                new MemberScope(MemberScope.Mode.MEMBERS, null, List.of(51, 52)), true, false);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals("person.export", entry.getAction());
+        assertEquals("person", entry.getEntityType());
+        assertNull(entry.getEntityId());
+        assertNull(entry.getTargetLabel());
+        assertEquals(41, entry.getActorId());
+        assertEquals(7, entry.getWorkspaceId());
+        assertEquals(8, entry.getOrgId());
+        assertEquals("success", entry.getOutcome());
+        assertEquals(objectMapper.readTree("""
+            {"format":"csv","rowCount":23,"scope":"workspace","memberScope":"MEMBERS","filtered":true,"segment":false}
+            """), objectMapper.readTree(entry.getChanges()));
+        assertNull(entry.getContext());
+    }
+
+    @Test
+    void workspaceExportAttemptAndAsyncCompletionRetainTheOriginalActorAndServerCounts() throws Exception {
+        User actor = new User();
+        actor.setId(41);
+        actor.setDisplayName("Original export actor");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        AuditService.PreparedWorkspaceExportAudit prepared;
+        try {
+            prepared = service.recordWorkspaceExportStarted(7, 8, 41, 50);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            executor.submit(() -> service.recordWorkspaceExportCompleted(prepared, 27L, 2, 4L)).get();
+        }
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService, org.mockito.Mockito.times(2)).appendIndependent(captor.capture());
+        AuditLog attempt = captor.getAllValues().getFirst();
+        AuditLog completed = captor.getAllValues().getLast();
+        assertEquals("org.workspace.export_started", attempt.getAction());
+        assertEquals("attempt", attempt.getOutcome());
+        assertEquals("org.workspace.export", completed.getAction());
+        assertEquals("success", completed.getOutcome());
+        assertEquals(41, completed.getActorId());
+        assertEquals("Original export actor", completed.getActorLabel());
+        assertNull(completed.getWorkspaceId());
+        assertEquals(8, completed.getOrgId());
+        assertEquals(7, completed.getEntityId());
+        assertNull(completed.getTargetLabel());
+        assertEquals(objectMapper.readTree("""
+            {"format":"zip","scope":"workspace","rowCount":27,"tableCount":2,"objectCount":4}
+            """), objectMapper.readTree(completed.getChanges()));
+        assertThrows(IllegalStateException.class,
+            () -> service.recordWorkspaceExportCompleted(prepared, 27L, 2, 4L));
+    }
+
+    @Test
+    void workspaceExportCaptureRejectsAnActorDifferentFromTheAuthenticatedMember() {
+        assertThrows(ForbiddenException.class, () -> service.recordWorkspaceExportStarted(7, 8, 41, 50));
+        verifyNoInteractions(auditIntegrityService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void selectedAuditExportsCaptureTheAuthorizedScopeAndActualCount(boolean organization) {
+        AuditLog row = new AuditLog();
+        row.setId(91);
+        if (organization) {
+            when(auditLogMapper.findOrgExport(8, 200, 0, List.of(91, 92))).thenReturn(List.of(row));
+            service.exportSelectedForOrg(8, List.of(91, 92), 200, 0);
+        } else {
+            when(auditLogMapper.findWorkspaceExport(7, 200, 0, List.of(91, 92), "company", 12))
+                .thenReturn(List.of(row));
+            service.exportSelected("company", 12, List.of(91, 92), 200, 0);
+        }
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(organization ? "organization.audit.export" : "audit.export", entry.getAction());
+        assertEquals("audit_log", entry.getEntityType());
+        assertEquals(organization ? null : Integer.valueOf(7), entry.getWorkspaceId());
+        assertEquals(8, entry.getOrgId());
+        var metadata = objectMapper.readTree(entry.getChanges());
+        assertEquals(1, metadata.get("rowCount").intValue());
+        assertTrue(metadata.get("selected").booleanValue());
+        assertEquals(!organization, metadata.get("entityScoped").booleanValue());
+        assertEquals(organization ? "organization" : "workspace", metadata.get("scope").stringValue());
+        assertFalse(entry.getChanges().contains("91"));
+        assertFalse(entry.getChanges().contains("92"));
+    }
+
+    @Test
+    void selectedAuditExportsRejectEmptyInvalidOrOversizedSelectionsBeforeReading() {
+        List<List<Integer>> invalid = List.of(
+            List.of(), List.of(0), List.of(-1), Arrays.asList(1, null), Collections.nCopies(201, 1));
+        for (List<Integer> ids : invalid) {
+            assertThrows(BadRequestException.class, () -> service.exportSelected(null, null, ids, 200, 0));
+            assertThrows(BadRequestException.class, () -> service.exportSelectedForOrg(8, ids, 200, 0));
+        }
+        assertThrows(BadRequestException.class, () -> service.exportSelected(null, null, null, 200, 0));
+        assertThrows(BadRequestException.class, () -> service.exportSelectedForOrg(8, null, 200, 0));
+        verifyNoInteractions(auditLogMapper, auditIntegrityService);
+    }
+
+    @Test
+    void selectedAuditExportDeduplicatesWithoutBroadeningItsScope() {
+        when(auditLogMapper.findWorkspaceExport(7, 10_000, 100_000, List.of(91), null, null))
+            .thenReturn(List.of());
+
+        service.exportSelected("company", null, List.of(91, 91), Integer.MAX_VALUE, Integer.MAX_VALUE);
+
+        verify(auditLogMapper).findWorkspaceExport(7, 10_000, 100_000, List.of(91), null, null);
+    }
+
+    @Test
+    void failedAuditQueryDoesNotRecordACompletedExport() {
+        when(auditLogMapper.findWorkspaceExport(7, 200, 0, List.of(91), null, null))
+            .thenThrow(new IllegalStateException("Read failed"));
+
+        assertThrows(IllegalStateException.class, () -> service.exportSelected(null, null, List.of(91), 200, 0));
+
+        verifyNoInteractions(auditIntegrityService);
+    }
+
+    @Test
+    void failedAuditRenderingDoesNotRecordACompletedExport() {
+        AuditLog row = new AuditLog();
+        row.setId(91);
+        when(auditLogMapper.findOrgExport(8, 200, 0, List.of(91))).thenReturn(List.of(row));
+        when(auditIntegrityService.integrityPayload(row)).thenThrow(new IllegalStateException("Rendering failed"));
+
+        assertThrows(IllegalStateException.class, () -> service.exportSelectedForOrg(8, List.of(91), 200, 0));
+
+        verify(auditIntegrityService, never()).append(any());
+    }
+
+    @Test
+    void failedAuditAppendPreventsTheAuditCsvFromBeingReturned() {
+        when(auditLogMapper.findWorkspaceExport(7, 200, 0, List.of(91), null, null)).thenReturn(List.of());
+        doThrow(new IllegalStateException("Audit unavailable")).when(auditIntegrityService).append(any());
+
+        assertThrows(IllegalStateException.class, () -> service.exportSelected(null, null, List.of(91), 200, 0));
     }
 
     @Test
@@ -219,6 +390,23 @@ class AuditServiceTest {
         assertEquals("Updated a note", entry.getSummary());
         assertFalse(entry.getChanges().contains("Private"));
         assertTrue(entry.getChanges().contains("See a note"));
+    }
+
+    static java.util.stream.Stream<String> ordinaryReferenceLikeProse() {
+        return java.util.stream.Stream.concat(ReferenceProseReadings.all().stream(), java.util.stream.Stream.of(
+                "2026-10-16T10:30:00Z", "::1", "{\"at\":\"2026-10-16T10:30:00Z\",\"path\":\"C:\\\\audit\"}"));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("ordinaryReferenceLikeProse")
+    void recordPreservesReferenceLikeEnglishAndJapaneseProse(String content) throws Exception {
+        service.record("deal.update", "deal", 12, content, content,
+                Map.of("closedReason", Map.of("old", "", "new", content)));
+        var captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        assertEquals(content, captor.getValue().getTargetLabel());
+        assertEquals(content, captor.getValue().getSummary());
+        assertEquals(content, objectMapper.readTree(captor.getValue().getChanges()).at("/closedReason/new").asString());
     }
 
     @Test
@@ -479,7 +667,7 @@ class AuditServiceTest {
                 {"provider":"vertex","model":"sk-proj-abc123","feature":"report.narrative","outcome":"success",
                 "prompt":"private CRM content","credential":"raw-secret-token"}
                 """);
-        when(auditLogMapper.findWorkspaceExport(7, 25, 0)).thenReturn(List.of(entry));
+        when(auditLogMapper.findWorkspaceExport(7, 25, 0, null, null, null)).thenReturn(List.of(entry));
 
         String csv = service.exportRecent(25, 0);
 
@@ -629,6 +817,237 @@ class AuditServiceTest {
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
+    }
+
+    @Test
+    void strictFailureAuditRecordsAdvisoryFetchMetadata() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Sec-Fetch-Site", "cross-site");
+        request.addHeader("Sec-Fetch-Mode", "no-cors");
+        request.addHeader("Sec-Fetch-Dest", "image");
+        request.addHeader("Authorization", "must-not-be-copied");
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog entry = appended.getValue();
+        assertEquals("auth.mfa.policy.denied", entry.getAction());
+        assertEquals("failure", entry.getOutcome());
+        assertEquals("user", entry.getEntityType());
+        assertEquals(7, entry.getEntityId());
+        assertNull(entry.getWorkspaceId());
+        assertNull(entry.getOrgId());
+        assertEquals(objectMapper.valueToTree(Map.of(
+                "error", "enrollment_required", "secFetchSite", "cross-site",
+                "secFetchMode", "no-cors", "secFetchDest", "image")),
+                objectMapper.readTree(entry.getContext()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"})
+    void strictFailureAuditCapsAndSanitizesEveryFetchMetadataValue(String header) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(header, "  cross\u0000-site\r\n\t\u007f\u0085" + "x".repeat(128));
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        String key = switch (header) {
+            case "Sec-Fetch-Site" -> "secFetchSite";
+            case "Sec-Fetch-Mode" -> "secFetchMode";
+            case "Sec-Fetch-Dest" -> "secFetchDest";
+            default -> throw new IllegalArgumentException(header);
+        };
+        assertEquals(objectMapper.valueToTree(Map.of(
+                "error", "enrollment_required", key, "cross -site" + " ".repeat(5) + "x".repeat(48))),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditSanitizesReferenceTokensInFetchMetadata() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Sec-Fetch-Site", "[Private](note:42)");
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchSite", "a note")),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditOmitsAbsentFetchMetadata() {
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required",
+                new MockHttpServletRequest());
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required")),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditOmitsFetchMetadataTheFirewallRejects() {
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.addHeader("Sec-Fetch-Site", "cross\u0085site");
+        raw.addHeader("Sec-Fetch-Mode", "no-cors");
+        raw.addHeader("Sec-Fetch-Dest", "image\u009f");
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("Sec-Fetch-Site"));
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("Sec-Fetch-Dest"));
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchMode", "no-cors")),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void denialAuditUsesItsResolvedAddressWithoutReadingTheRejectedForwardedHeaderAgain() {
+        service = new AuditService(sessionSecurityService, auditLogMapper, auditIntegrityService,
+            objectMapper, tenantContext, new ClientIpResolver("10.0.0.1"),
+            correlationPseudonymizer, new AutomationScope());
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.setRemoteAddr("10.0.0.1");
+        raw.addHeader("X-Forwarded-For", "198.51.100.19\u0085");
+        raw.addHeader("User-Agent", "denied-request-test");
+        raw.addHeader("Sec-Fetch-Site", "cross-site");
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            assertThrows(RequestRejectedException.class, () ->
+                service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                    "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request));
+            verifyNoInteractions(auditIntegrityService);
+
+            service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request,
+                "10.0.0.1");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals("10.0.0.1", appended.getValue().getIpAddress());
+        assertEquals("denied-request-test", appended.getValue().getUserAgent());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchSite", "cross-site")),
+            objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"denied\u0085agent", "denied\u009fagent"})
+    void onlyDenialAuditsOmitFirewallRejectedUserAgents(String userAgent) {
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.setRemoteAddr("10.0.0.1");
+        raw.addHeader("User-Agent", userAgent);
+        raw.addHeader("Sec-Fetch-Site", "cross-site");
+        raw.getSession();
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("User-Agent"));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            assertThrows(RequestRejectedException.class, () ->
+                service.recordStrictIndependentScoped("company.update", "company", 7, 7, 8,
+                    "Company", "Company updated", null));
+            verifyNoInteractions(auditIntegrityService);
+
+            service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request,
+                "10.0.0.1");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog entry = appended.getValue();
+        assertNull(entry.getUserAgent());
+        assertEquals("10.0.0.1", entry.getIpAddress());
+        assertEquals("auth.mfa.policy.denied", entry.getAction());
+        assertEquals("failure", entry.getOutcome());
+        assertNotNull(entry.getSessionId());
+        assertNotEquals(raw.getSession().getId(), entry.getSessionId());
+        assertNotNull(entry.getRequestId());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchSite", "cross-site")),
+            objectMapper.readTree(entry.getContext()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"denied\u0085agent", "denied\u009fagent"})
+    void denialAuditReadsUserAgentFromItsFirewalledRequestWhenThreadBoundAttributesAreRaw(String userAgent) {
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.addHeader("User-Agent", userAgent);
+        raw.addHeader("Sec-Fetch-Site", "cross-site");
+        raw.getSession();
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("User-Agent"));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(raw));
+        try {
+            service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request,
+                "10.0.0.1");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog entry = appended.getValue();
+        assertNull(entry.getUserAgent());
+        assertEquals("10.0.0.1", entry.getIpAddress());
+        assertNotNull(entry.getSessionId());
+        assertNotEquals(raw.getSession().getId(), entry.getSessionId());
+        assertNotNull(entry.getRequestId());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchSite", "cross-site")),
+            objectMapper.readTree(entry.getContext()));
+    }
+
+    @Test
+    void denialAuditsPropagateOtherUserAgentReadFailures() {
+        IllegalStateException failure = new IllegalStateException("User agent read failed");
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies") {
+            @Override
+            public String getHeader(String name) {
+                if ("User-Agent".equals(name)) {
+                    throw failure;
+                }
+                return super.getHeader(name);
+            }
+        };
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            assertSame(failure, assertThrows(IllegalStateException.class, () ->
+                service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                    "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request,
+                    "10.0.0.1")));
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+        verifyNoInteractions(auditIntegrityService);
+    }
+
+    @Test
+    void strictFailureAuditWithFetchMetadataPropagatesAppendFailures() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Sec-Fetch-Site", "cross-site");
+        IllegalStateException failure = new IllegalStateException("audit store unavailable");
+        doThrow(failure).when(auditIntegrityService).appendIndependent(any());
+
+        assertSame(failure, assertThrows(IllegalStateException.class, () ->
+                service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                        "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request)));
     }
 
     /** A deferred append that fails is logged, never thrown into the completed transaction's cleanup. */
@@ -943,6 +1362,73 @@ class AuditServiceTest {
         assertDoesNotThrow(() -> service.record("deal.update", "deal", 5, "Deal", "Updated deal", null));
         assertDoesNotThrow(() -> service.recordWithoutRequestMetadata(
                 "document.accept", "document", 6, "Quote", "Accepted quote", null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {TransactionSynchronization.STATUS_COMMITTED, TransactionSynchronization.STATUS_ROLLED_BACK})
+    void lockedDenialCapturesMetadataAndAppendsOnlyAfterCompletion(int completion) {
+        User actor = new User();
+        actor.setId(42);
+        actor.setDisplayName("Refused actor");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/companies");
+        request.addHeader("User-Agent", "captured-agent");
+        request.addHeader("Sec-Fetch-Site", "same-origin");
+        request.getSession().setAttribute("proof", "captured");
+        Runnable appendFailed = mock(Runnable.class);
+        TransactionSynchronizationManager.initSynchronization();
+        List<TransactionSynchronization> callbacks;
+        try {
+            service.deferStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 42,
+                null, null, actor.getDisplayName(), "Privileged account confined pending MFA enrollment",
+                "enrollment_required", request, "192.0.2.73", appendFailed);
+            verifyNoInteractions(auditIntegrityService, appendFailed);
+            callbacks = TransactionSynchronizationManager.getSynchronizations();
+            assertEquals(1, callbacks.size());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+        }
+        request.removeHeader("User-Agent");
+        request.addHeader("User-Agent", "later-agent");
+        request.removeHeader("Sec-Fetch-Site");
+        callbacks.getFirst().afterCompletion(completion);
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(42, entry.getActorId());
+        assertEquals(42, entry.getEntityId());
+        assertEquals("Refused actor", entry.getActorLabel());
+        assertNull(entry.getWorkspaceId());
+        assertNull(entry.getOrgId());
+        assertEquals("192.0.2.73", entry.getIpAddress());
+        assertEquals("captured-agent", entry.getUserAgent());
+        assertNotNull(entry.getSessionId());
+        assertEquals("same-origin", objectMapper.readTree(entry.getContext()).path("secFetchSite").stringValue());
+        assertEquals("enrollment_required", objectMapper.readTree(entry.getContext()).path("error").stringValue());
+        verifyNoInteractions(appendFailed);
+    }
+
+    @Test
+    void deferredDenialAppendFailureReturnsItsRateLimiterAdmission() {
+        Runnable appendFailed = mock(Runnable.class);
+        doThrow(new IllegalStateException("append rejected"))
+            .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+        TransactionSynchronizationManager.initSynchronization();
+        List<TransactionSynchronization> callbacks;
+        try {
+            service.deferStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 42,
+                null, null, null, "Refused", "enrollment_required",
+                new MockHttpServletRequest(), "192.0.2.73", appendFailed);
+            verifyNoInteractions(appendFailed, auditIntegrityService);
+            callbacks = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        assertDoesNotThrow(() -> callbacks.getFirst().afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        verify(appendFailed).run();
     }
 
     /**

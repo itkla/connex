@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -24,15 +25,22 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.AuthenticatedCredential;
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.RoutingBinding;
 import ooo.klae.connex.backend.config.PrivilegedMfaEnforcementFilter;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
+import ooo.klae.connex.backend.config.PrivilegedMfaRequestPolicy;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
+import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -45,6 +53,7 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         ApiCredentialAuthenticationFilter.class.getName() + ".TENANT_BINDING";
 
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String MFA_DENIED_ACTION = "auth.mfa.policy.denied";
     private static final Logger log = LoggerFactory.getLogger(ApiCredentialAuthenticationFilter.class);
 
     private final ApiCredentialService apiCredentialService;
@@ -52,10 +61,12 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final PrivilegedMfaProperties privilegedMfaProperties;
     private final PrivilegedAccountService privilegedAccountService;
-    private final WebAuthnService webAuthnService;
+    private final AuditService auditService;
+    private final DenialAuditRateLimiter denialAuditRateLimiter;
     private final ClientIpResolver clientIpResolver;
     private final TenantCatalogResolver tenantCatalogResolver;
     private final TenantContext tenantContext;
+    private final TenantWorkScope tenantWorkScope;
     private final RouteTransactionModeResolver routeTransactionModeResolver;
     private final TransactionTemplate readTransactionTemplate;
 
@@ -66,10 +77,12 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             ObjectMapper objectMapper,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
+            AuditService auditService,
+            DenialAuditRateLimiter denialAuditRateLimiter,
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
+            TenantWorkScope tenantWorkScope,
             RouteTransactionModeResolver routeTransactionModeResolver,
             PlatformTransactionManager transactionManager) {
         this(
@@ -78,10 +91,12 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             objectMapper,
             privilegedMfaProperties,
             privilegedAccountService,
-            webAuthnService,
+            auditService,
+            denialAuditRateLimiter,
             clientIpResolver,
             tenantCatalogResolver,
             tenantContext,
+            tenantWorkScope,
             routeTransactionModeResolver,
             readTransactionTemplate(transactionManager));
     }
@@ -92,10 +107,12 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             ObjectMapper objectMapper,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
+            AuditService auditService,
+            DenialAuditRateLimiter denialAuditRateLimiter,
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
+            TenantWorkScope tenantWorkScope,
             RouteTransactionModeResolver routeTransactionModeResolver,
             TransactionTemplate readTransactionTemplate) {
         this.apiCredentialService = apiCredentialService;
@@ -103,10 +120,12 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         this.objectMapper = objectMapper;
         this.privilegedMfaProperties = privilegedMfaProperties;
         this.privilegedAccountService = privilegedAccountService;
-        this.webAuthnService = webAuthnService;
+        this.auditService = auditService;
+        this.denialAuditRateLimiter = denialAuditRateLimiter;
         this.clientIpResolver = clientIpResolver;
         this.tenantCatalogResolver = tenantCatalogResolver;
         this.tenantContext = tenantContext;
+        this.tenantWorkScope = tenantWorkScope;
         this.routeTransactionModeResolver = routeTransactionModeResolver;
         this.readTransactionTemplate = readTransactionTemplate;
     }
@@ -153,12 +172,19 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
                     binding.credentialId());
                 return;
             }
-            tenantContext.set(
-                binding.workspaceId(),
-                binding.organizationId(),
-                binding.userId(),
-                "public_api",
-                catalog);
+            var scopes = tenantWorkScope.prepareWorkspaceScopes(
+                binding.workspaceId(), binding.organizationId(), catalog);
+            if (scopes != null) {
+                tenantContext.setWithWorkspaceScopes(binding.workspaceId(), binding.organizationId(),
+                    binding.userId(), "public_api", catalog, scopes);
+            } else {
+                tenantContext.set(
+                    binding.workspaceId(),
+                    binding.organizationId(),
+                    binding.userId(),
+                    "public_api",
+                    catalog);
+            }
             request.setAttribute(
                 TENANT_BINDING_ATTRIBUTE,
                 new TenantBinding(
@@ -182,6 +208,16 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             if (authenticatedCredentialId != null) {
                 recordSuccessfulUse(authenticatedCredentialId, binding.presentedHash());
             }
+        } catch (PrivilegedMfaDenialException exception) {
+            tenantContext.clear();
+            recordDenial(request, exception);
+            PublicApiErrorAdvice.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
+                exception.code, exception.getMessage());
+        } catch (PrivilegedMfaEnrollmentRequiredException | PrivilegedMfaAttestationRequiredException exception) {
+            PublicApiErrorAdvice.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
+                exception.getCode(), exception.getMessage());
+        } catch (RequestRejectedException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             unexpectedFailure(request, response, credentialId);
         } finally {
@@ -218,22 +254,29 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         }
 
         AuthenticatedCredential authenticated = resolved.get();
-        boolean enrollmentRequired;
+        PrivilegedMfaStanding standing;
         try {
-            enrollmentRequired = privilegedMfaProperties.isEnforced()
-                && privilegedAccountService.isPrivileged(authenticated.user().getId())
-                && !webAuthnService.hasPasskey(authenticated.user().getId());
+            standing = privilegedMfaProperties.isEnforced()
+                ? privilegedAccountService.enforcedStanding(authenticated.user().getId())
+                : PrivilegedMfaStanding.UNPRIVILEGED;
         } catch (RuntimeException exception) {
             throw new AuthenticationLookupException(exception);
         }
-        if (enrollmentRequired) {
-            writePublicError(
-                request,
-                response,
-                HttpStatus.UNAUTHORIZED,
+        if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
+            throw new PrivilegedMfaDenialException(
+                authenticated.user(),
                 PrivilegedMfaEnforcementFilter.ENROLLMENT_REQUIRED_CODE,
+                "Public API privileged account confined pending MFA enrollment",
+                "enrollment_required",
                 "A passkey must be enrolled before this privileged account can continue");
-            return null;
+        }
+        if (standing == PrivilegedMfaStanding.ATTESTATION_REQUIRED) {
+            throw new PrivilegedMfaDenialException(
+                authenticated.user(),
+                PrivilegedMfaEnforcementFilter.ATTESTATION_REQUIRED_CODE,
+                "Public API privileged account confined pending passkey approval",
+                "attestation_required",
+                "A passkey must be approved before this privileged account can continue");
         }
         ApiRateLimiter.Decision rateLimit = apiRateLimiter.acquire(
             authenticated.credential().credentialId());
@@ -279,10 +322,19 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         SecurityContext apiContext = SecurityContextHolder.createEmptyContext();
         apiContext.setAuthentication(authentication);
         SecurityContextHolder.setContext(apiContext);
+        PrivilegedMfaRequestPolicy.bindPublicApi(request, authenticated.user().getId());
         try {
             chain.doFilter(request, response);
             return authenticated.credential().credentialId();
-        } catch (IOException | ServletException exception) {
+        } catch (ServletException exception) {
+            if (exception.getRootCause() instanceof PrivilegedMfaEnrollmentRequiredException refusal) {
+                throw refusal;
+            }
+            if (exception.getRootCause() instanceof PrivilegedMfaAttestationRequiredException refusal) {
+                throw refusal;
+            }
+            throw new FilterExecutionException(exception);
+        } catch (IOException exception) {
             throw new FilterExecutionException(exception);
         } finally {
             SecurityContextHolder.setContext(previous);
@@ -294,6 +346,42 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             apiCredentialService.recordSuccessfulUse(credentialId, presentedHash);
         } catch (RuntimeException exception) {
             log.warn("Failed to update public API credential usage credentialId={}", credentialId);
+        }
+    }
+
+    /**
+     * Appends only after the authentication transaction ends and its tenant binding is cleared,
+     * so the independent account-scoped audit uses the control catalog. A failed append returns
+     * its admission just as the browser filter does, while the request remains refused.
+     * The shared limiter admits four fingerprints in each of eight address slots without extending
+     * address windows. Without releases, it admits every address-only admission while windows are
+     * retained. Releases preserve other fingerprints' evidence and their occupied address slot.
+     */
+    private void recordDenial(HttpServletRequest request, PrivilegedMfaDenialException denial) {
+        User user = denial.user;
+        String clientIp = clientIpResolver.resolveForDenialAudit(request);
+        Optional<DenialAuditRateLimiter.Admission> admission = denialAuditRateLimiter.acquire(
+            user.getId(), MFA_DENIED_ACTION, denial.reason, clientIp, request);
+        if (admission.isEmpty()) {
+            return;
+        }
+        boolean written = false;
+        SecurityContext previous = SecurityContextHolder.getContext();
+        SecurityContext auditContext = SecurityContextHolder.createEmptyContext();
+        auditContext.setAuthentication(new PreAuthenticatedAuthenticationToken(user, null, List.of()));
+        SecurityContextHolder.setContext(auditContext);
+        try {
+            auditService.recordStrictFailureIndependentScoped(MFA_DENIED_ACTION, "user", user.getId(),
+                null, null, user.getDisplayName(), denial.summary, denial.reason, request, clientIp);
+            written = true;
+        } catch (RuntimeException exception) {
+            log.error("Failed to record access denial action={} userId={}",
+                MFA_DENIED_ACTION, user.getId(), exception);
+        } finally {
+            SecurityContextHolder.setContext(previous);
+            if (!written) {
+                denialAuditRateLimiter.release(admission.get());
+            }
         }
     }
 
@@ -373,19 +461,6 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             HttpStatus status,
             String code,
-            String message) {
-        try {
-            PublicApiErrorAdvice.write(objectMapper, request, response, status, code, message);
-        } catch (IOException exception) {
-            throw new FilterExecutionException(exception);
-        }
-    }
-
-    private void writePublicError(
-            HttpServletRequest request,
-            HttpServletResponse response,
-            HttpStatus status,
-            String code,
             String message,
             long credentialId) {
         try {
@@ -452,6 +527,22 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             "X-RateLimit-Remaining", Integer.toString(rateLimit.remaining()),
             "X-RateLimit-Reset", Long.toString(rateLimit.resetAt()),
             "Retry-After", Long.toString(rateLimit.retryAfterSeconds()));
+    }
+
+    private static final class PrivilegedMfaDenialException extends RuntimeException {
+        private final User user;
+        private final String code;
+        private final String summary;
+        private final String reason;
+
+        private PrivilegedMfaDenialException(
+                User user, String code, String summary, String reason, String message) {
+            super(message);
+            this.user = user;
+            this.code = code;
+            this.summary = summary;
+            this.reason = reason;
+        }
     }
 
     private static final class AuthenticationLookupException extends RuntimeException {

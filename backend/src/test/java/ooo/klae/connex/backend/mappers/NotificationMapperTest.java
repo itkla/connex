@@ -43,6 +43,54 @@ class NotificationMapperTest extends AbstractMapperTest {
     @Autowired private TaskMapper taskMapper;
 
     @Test
+    void deliveryIdentityIncludesWorkspaceRecipientIdAndDedupeEvenForHiddenRows() {
+        User recipient = newUser();
+        User stranger = newUser();
+        Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
+        notification.setSourceType("task");
+        notification.setSourceId(0);
+        assertEquals(1, notificationMapper.upsert(notification));
+        int id = notification.getId();
+        String dedupe = notification.getDedupeKey();
+
+        assertNull(notificationMapper.findById(recipient.getId(), id));
+        assertTrue(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), id, dedupe));
+        assertFalse(notificationMapper.existsDelivery(0, recipient.getId(), id, dedupe));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), stranger.getId(), id, dedupe));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), 0, dedupe));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), id, "another-key"));
+        assertFalse(notificationMapper.existsDelivery(workspace.getId(), recipient.getId(), id, null));
+    }
+
+    @Test
+    void boundedInboxCursorAdvancesUnchangedRowsWithoutChangingOrdinaryPageOrder() {
+        User recipient = newUser();
+        Notification first = reminder(recipient, "info", "2026-01-03 00:00:00", 1);
+        Notification second = reminder(recipient, "info", "2026-01-01 00:00:00", 2);
+        Notification afterCutoff = reminder(recipient, "info", "2026-01-02 00:00:00", 3);
+        for (Notification notice : List.of(first, second, afterCutoff)) {
+            notice.setType("ownership.offer");
+            notice.setDedupeKey("ownership.offer:" + unique());
+            notificationMapper.upsert(notice);
+        }
+        String asOf = notificationMapper.getDatabaseUtcTimestamp();
+        List<String> types = List.of("ownership.offer");
+
+        assertEquals(List.of(first.getId()), notificationMapper.findPage(recipient.getId(), "unread",
+            types, null, null, null, null, null, asOf, 1, 0, 0L, second.getId())
+            .stream().map(Notification::getId).toList());
+        assertEquals(List.of(second.getId()), notificationMapper.findPage(recipient.getId(), "unread",
+            types, null, null, null, null, null, asOf, 1, 0, first.getId(), second.getId())
+            .stream().map(Notification::getId).toList());
+        assertTrue(notificationMapper.findPage(recipient.getId(), "unread",
+            types, null, null, null, null, null, asOf, 1, 0, second.getId(), second.getId()).isEmpty());
+        assertEquals(List.of(first.getId(), afterCutoff.getId(), second.getId()),
+            notificationMapper.findPage(recipient.getId(), "unread",
+                types, null, null, null, null, null, asOf, 100, 0)
+                .stream().map(Notification::getId).toList());
+    }
+
+    @Test
     void stableUpsertPreservesOrResetsLifecycleByPhase() {
         User recipient = newUser();
         Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
@@ -522,7 +570,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         );
 
         Person stakeholder = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), stakeholder.getId(), "champion");
 
         Set<Integer> recipients = notificationMapper
             .findRelationshipNudgeCandidates(workspace.getId())
@@ -570,7 +618,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         dealMapper.updateOwner(workspace.getId(), deal.getId(), owner.getId());
         Person stakeholder = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), stakeholder.getId(), "champion");
 
         assertTrue(notificationMapper.findRelationshipNudgeCandidates(workspace.getId()).stream()
             .anyMatch(candidate -> candidate.getPersonId() == stakeholder.getId()));
@@ -812,6 +860,83 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertNull(notificationMapper.findById(recipient.getId(), invitation.getId()));
         assertEquals(0, notificationMapper.snooze(
             recipient.getId(), invitation.getId(), "2026-07-21 03:00:00", "UTC"));
+    }
+
+    @Test
+    void expiredInvitationsAreExcludedFromInboxListingButFutureInvitationsRemain() {
+        User recipient = newUser();
+        Notification expired = invitationWithDeadline(recipient, false);
+        Notification future = invitationWithDeadline(recipient, true);
+        assertEquals(List.of(future.getId()), notificationMapper.findPage(
+            recipient.getId(), "unread", null, null, null, 50, 0).stream().map(Notification::getId).toList());
+        assertTrue(notificationMapper.findPage(recipient.getId(), "active", null, null, null,
+            expired.getWorkspaceId(), null, null, notificationMapper.getDatabaseUtcTimestamp(), 50, 0).isEmpty());
+    }
+
+    @Test
+    void expiredInvitationsAreExcludedFromPageUnreadAndFacetCounts() {
+        User recipient = newUser();
+        Notification expired = invitationWithDeadline(recipient, false);
+        Notification future = invitationWithDeadline(recipient, true);
+        assertEquals(1, notificationMapper.countPage(recipient.getId(), "unread", null, null, null));
+        assertEquals(1, notificationMapper.getUnreadCounts(recipient.getId(),
+            notificationMapper.getDatabaseUtcTimestamp()).getUnread());
+        assertEquals(0, notificationMapper.countPage(recipient.getId(), "unread", null, null, null,
+            expired.getWorkspaceId(), null, null, notificationMapper.getDatabaseUtcTimestamp()));
+        assertEquals(1, notificationMapper.countPage(recipient.getId(), "unread", null, null, null,
+            future.getWorkspaceId(), null, null, notificationMapper.getDatabaseUtcTimestamp()));
+        assertEquals(1, notificationMapper.countsByCategory(recipient.getId())
+            .stream().mapToLong(FacetCount::getCount).sum());
+    }
+
+    @Test
+    void expiredInvitationsCannotBeLookedUpDirectlyOrReadByAnotherRecipient() {
+        User recipient = newUser();
+        User stranger = newUser();
+        Notification expired = invitationWithDeadline(recipient, false);
+        Notification future = invitationWithDeadline(recipient, true);
+        assertNull(notificationMapper.findById(recipient.getId(), expired.getId()));
+        assertNull(notificationMapper.findByIdForUpdate(recipient.getId(), expired.getId()));
+        Notification visible = notificationMapper.findById(recipient.getId(), future.getId());
+        assertNotNull(visible);
+        assertEquals("Stored inviter identity", visible.getActorLabel());
+        assertEquals("Invitation workspace", visible.getWorkspaceName());
+        assertNull(notificationMapper.findById(stranger.getId(), future.getId()));
+        assertEquals(0, notificationMapper.markRead(recipient.getId(), expired.getId()));
+    }
+
+    @Test
+    void unfinishedBackfillKeepsLegacyInvitationVisibleBeforeFixedCutover() {
+        User recipient = newUser();
+        Notification legacy = invitationWithDeadline(recipient, true);
+        jdbcTemplate.update("UPDATE workspace_member SET expires_at = NULL WHERE workspace_id = ? AND user_id = ?",
+            legacy.getWorkspaceId(), recipient.getId());
+
+        assertNotNull(notificationMapper.findById(recipient.getId(), legacy.getId()));
+        assertEquals(1, notificationMapper.countPage(recipient.getId(), "unread", null, null, null));
+        assertEquals(1, notificationMapper.getUnreadCounts(recipient.getId(),
+            notificationMapper.getDatabaseUtcTimestamp()).getUnread());
+    }
+
+    private Notification invitationWithDeadline(User recipient, boolean future) {
+        Workspace invited = new Workspace();
+        invited.setName("Invitation workspace");
+        invited.setSlug("inbox-deadline-" + unique());
+        workspaceMapper.insert(invited);
+        workspaceMapper.addPendingMember(invited.getId(), recipient.getId(), "member");
+        if (!future) {
+            jdbcTemplate.update("UPDATE workspace_member SET expires_at = UTC_TIMESTAMP() - INTERVAL 1 DAY "
+                + "WHERE workspace_id = ? AND user_id = ?", invited.getId(), recipient.getId());
+        }
+        Notification notice = reminder(recipient, "info", notificationMapper.getDatabaseUtcTimestamp());
+        notice.setWorkspaceId(invited.getId());
+        notice.setType("workspace.join");
+        notice.setCategory("workspace");
+        notice.setDedupeKey("workspace.join:" + invited.getId());
+        notice.setActorId(recipient.getId());
+        notice.setActorLabel("Stored inviter identity");
+        notificationMapper.upsert(notice);
+        return notice;
     }
 
     private List<Notification> activeInbox(User recipient) {

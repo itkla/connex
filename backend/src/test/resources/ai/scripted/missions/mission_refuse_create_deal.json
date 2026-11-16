@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_create_deal",
+  "selector": "connex_script_mission_refuse_create_deal",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_deal",
+        "arguments": "{\"handle\":\"r1\",\"name\":\"Review Deal\",\"stage\":\"Discovery\",\"value\":\"1000\",\"currency\":\"USD\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

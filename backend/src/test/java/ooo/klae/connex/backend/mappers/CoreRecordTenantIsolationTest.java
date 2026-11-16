@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -38,11 +40,11 @@ class CoreRecordTenantIsolationTest extends AbstractMapperTest {
         Company company = newCompany();
 
         for (Workspace unauthorized : unauthorizedWorkspaces()) {
-            assertNull(companyMapper.getCompanyById(unauthorized.getId(), company.getId()));
+            assertNull(companyMapper.getCompanyById(unauthorized.getId(), orgWorkspaceIdsJson(workspaceMapper, unauthorized.getId()), company.getId()));
             assertEquals(0, companyMapper.archive(unauthorized.getId(), company.getId()));
         }
 
-        assertNotNull(companyMapper.getCompanyById(workspace.getId(), company.getId()));
+        assertNotNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()));
     }
 
     @Test
@@ -50,11 +52,11 @@ class CoreRecordTenantIsolationTest extends AbstractMapperTest {
         Person person = newPerson(newCompany());
 
         for (Workspace unauthorized : unauthorizedWorkspaces()) {
-            assertNull(personMapper.getPersonById(unauthorized.getId(), person.getId()));
+            assertNull(personMapper.getPersonById(unauthorized.getId(), orgWorkspaceIdsJson(workspaceMapper, unauthorized.getId()), person.getId()));
             assertEquals(0, personMapper.archive(unauthorized.getId(), person.getId()));
         }
 
-        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId()));
+        assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()));
     }
 
     @Test

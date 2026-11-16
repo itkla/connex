@@ -366,7 +366,7 @@ function CustomFieldForm({
                                 <button
                                     type="button"
                                     onClick={addOption}
-                                    className="inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-brand transition hover:bg-brand/10 active:scale-[0.98]"
+                                    className="inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-brand-text transition hover:bg-brand/10 active:scale-[0.98]"
                                 >
                                     <PlusIcon className="size-4" />
                                     {t("dialog.addOption")}

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -39,8 +40,10 @@ import org.mockito.InOrder;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -85,10 +88,14 @@ class AiAssistantWriteToolServiceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-03-06T15:00:00Z"), ZoneOffset.UTC);
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
+            AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+            new AiChatPrivacyToken(7, 13, 1, null, 1, 1L));
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiChatMapper chatMapper;
+    private AiAssistantPrivacyService organizationAuthority;
+    private AiChatPrivacyGuard privacyGuard;
     private WorkspaceService workspaceService;
     private ActivityService activityService;
     private PersonService personService;
@@ -105,26 +112,39 @@ class AiAssistantWriteToolServiceTest {
     private AiAssistantWriteToolService service;
     private AiAssistantAddTagWriteTool addTagTool;
     private AiChatToolCall storedToolCall;
+    private AiChatSession session;
+    private AiAgentPrivacyBarrier barrier;
 
     @AfterAll
     static void closeValidatorFactory() {
         VALIDATORS.close();
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void closeAdmissionTransaction() {
+        AiAssistantAdmissionTestSupport.endTransaction();
+    }
+
     @BeforeEach
     void setUp() {
+        AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
+        organizationAuthority = mock(AiAssistantPrivacyService.class);
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
+        privacyGuard = new AiChatPrivacyGuard(organizationAuthority);
         workspaceService = mock(WorkspaceService.class);
-        activityService = mock(ActivityService.class);
-        personService = mock(PersonService.class);
+        activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
+        personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
         when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
-        companyService = mock(CompanyService.class);
-        dealService = mock(DealService.class);
-        taskService = mock(TaskService.class);
-        noteService = mock(NoteService.class);
-        tagService = mock(TagService.class);
+        companyService = AiAssistantAdmissionTestSupport.admittingMock(CompanyService.class);
+        dealService = AiAssistantAdmissionTestSupport.admittingMock(DealService.class);
+        taskService = AiAssistantAdmissionTestSupport.admittingMock(TaskService.class);
+        noteService = AiAssistantAdmissionTestSupport.admittingMock(NoteService.class);
+        tagService = AiAssistantAdmissionTestSupport.admittingMock(TagService.class);
         pipelineService = mock(PipelineService.class);
-        leadResponseSlaService = mock(LeadResponseSlaService.class);
+        leadResponseSlaService = AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
         AuthService authService = mock(AuthService.class);
@@ -140,14 +160,15 @@ class AiAssistantWriteToolServiceTest {
         when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
                 .thenReturn(authority);
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
+        when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         PersonMapper personMapper = mock(PersonMapper.class);
-        when(personMapper.getPersonById(TURN.workspaceId(), 31))
+        when(personMapper.getPersonById(TURN.workspaceId(), "[7,8,9]", 31))
                 .thenReturn(person(31));
-        when(personMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(personMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         addTagTool = spy(new AiAssistantAddTagWriteTool(
                 tagService, personService, companyService, dealService));
@@ -161,8 +182,8 @@ class AiAssistantWriteToolServiceTest {
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService),
-                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
@@ -185,13 +206,14 @@ class AiAssistantWriteToolServiceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
         service = new AiAssistantWriteToolService(
                 catalog,
                 registry,
                 readExecutor,
+                privacyGuard,
                 chatMapper,
-                workspaceService,
+                workspaceService, unfiltered(),
                 taskService,
                 personService,
                 companyService,
@@ -202,32 +224,51 @@ class AiAssistantWriteToolServiceTest {
                 governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
-                CLOCK);
-        AiChatSession session = new AiChatSession();
+                CLOCK, tagService);
+        service.setTransactionProvider(new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                Map.of("service", service)).getBeanProvider(AiAssistantWriteToolService.class));
+        session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
+        barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1);
+        when(chatMapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId()))
+                .thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
         turn.setId(TURN.turnId());
+        turn.setWorkspaceId(TURN.workspaceId());
+        turn.setOrganizationPrivacyGeneration(1L);
+        turn.setSessionId(TURN.sessionId());
+        turn.setPrivacyGeneration(1L);
         turn.setRequestedByUserId(TURN.userId());
         turn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setOrganizationPrivacyGeneration(1L);
+        storedToolCall.setServerProposal(true);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
         storedToolCall.setMessageId(TURN.userMessageId());
         storedToolCall.setSessionId(TURN.sessionId());
         storedToolCall.setRequestedByUserId(TURN.userId());
+        storedToolCall.setPrivacyGeneration(1L);
         storedToolCall.setStatus("proposed");
+        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         when(chatMapper.getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
         when(chatMapper.getToolCallBySession(
-                TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
+                TURN.workspaceId(), TURN.sessionId(), 29, 1L)).thenReturn(storedToolCall);
         when(chatMapper.updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
                 eq("executed"), any(), eq(TURN.userId()))).thenReturn(1);
@@ -300,6 +341,52 @@ class AiAssistantWriteToolServiceTest {
 
         assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
         verify(activityService).deleteIf(eq(73), any());
+    }
+
+    @Test
+    void organizationAuthorityWaitCannotExtendTheOriginalUndoWindow() throws Exception {
+        AtomicReference<Task> createdTask = new AtomicReference<>();
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setStatus("todo");
+            createdTask.set(created);
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared("create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}", "person", 31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        String originalResult = capturedResultJson();
+        storedToolCall.setResultJson(originalResult);
+        Instant deadline = Instant.parse(objectMapper.readTree(originalResult).path("undo").path("expiresAt").asString());
+        AtomicReference<Instant> now = new AtomicReference<>(deadline.minusNanos(1));
+        Clock waitingClock = mock(Clock.class);
+        when(waitingClock.instant()).thenAnswer(invocation -> now.get());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock", waitingClock);
+        when(organizationAuthority.retain(1, 1L)).thenAnswer(invocation -> {
+            now.set(deadline.plusNanos(1));
+            return 1L;
+        });
+        AtomicBoolean inverseApplied = new AtomicBoolean();
+        doAnswer(invocation -> {
+            java.util.function.Predicate<Task> inverseGuard = invocation.getArgument(1);
+            if (inverseGuard.test(createdTask.get())) {
+                inverseApplied.set(true);
+            }
+            return null;
+        }).when(taskService).deleteIf(eq(74), any());
+        clearInvocations(chatMapper, organizationAuthority);
+
+        ConflictException refused = assertThrows(ConflictException.class,
+                () -> service.undo(TURN.sessionId(), 29));
+
+        assertEquals("Assistant tool undo window has expired", refused.getMessage());
+        assertFalse(inverseApplied.get());
+        assertEquals(originalResult, storedToolCall.getResultJson());
+        assertEquals("available", objectMapper.readTree(originalResult).path("undo").path("status").asString());
+        verify(organizationAuthority).retain(1, 1L);
+        verify(chatMapper, never()).updateExecutedToolResult(anyInt(), anyInt(), any(), anyInt());
     }
 
     @Test
@@ -455,7 +542,7 @@ class AiAssistantWriteToolServiceTest {
                 ConflictException.class, () -> service.undo(TURN.sessionId(), 29));
 
         assertEquals("Assistant tool has no owned inverse", refused.getMessage());
-        verify(addTagTool, never()).undo(any(), any());
+        verify(addTagTool, never()).undo(any(), any(), any());
         verify(personService, never()).removeTag(anyInt(), anyInt());
         verify(personService, never()).removeTagIfUnchanged(anyInt(), anyInt());
         verify(chatMapper, never()).updateExecutedToolResult(
@@ -483,7 +570,7 @@ class AiAssistantWriteToolServiceTest {
         service.executeAuto(TURN, 29, result -> { });
 
         InOrder order = inOrder(personService, restrictionEpoch);
-        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(restrictionEpoch)
                 .retainReadFenceUntilTransactionCompletionIfCurrent(
                         TURN.workspaceId(), TURN.restrictionEpoch());
@@ -690,7 +777,7 @@ class AiAssistantWriteToolServiceTest {
         assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
         InOrder order = inOrder(personService, restrictionEpoch);
-        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(restrictionEpoch)
                 .retainReadFenceUntilTransactionCompletionIfCurrent(
                         TURN.workspaceId(), TURN.restrictionEpoch());
@@ -709,7 +796,7 @@ class AiAssistantWriteToolServiceTest {
                 "person",
                 31);
         stored(write, 29);
-        when(personService.lockProcessablePersonForUpdate(31))
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString()))
                 .thenThrow(new ResourceNotFoundException("Person not found"));
 
         assertThrows(
@@ -742,7 +829,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt(proposedAt);
         Person edited = person(31);
         edited.setUpdatedAt(updatedAt);
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
 
         assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
@@ -767,7 +854,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-05 12:00:00.400000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 11:59:59");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
         Person owned = person(31);
         owned.setOwnerId(21);
         when(personService.updateOwner(31, 21)).thenReturn(owned);
@@ -794,7 +881,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 12:00:30.000000");
-        when(personService.lockProcessablePersonForShare(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForShare(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
         when(personService.getPersonById(31)).thenReturn(edited);
 
         assertEquals(
@@ -803,7 +890,7 @@ class AiAssistantWriteToolServiceTest {
 
         InOrder order = inOrder(taskService, personService, restrictionEpoch);
         order.verify(taskService).lockBoardForCreation();
-        order.verify(personService).lockProcessablePersonForShare(31);
+        order.verify(personService).lockProcessablePersonForShare(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
         order.verify(taskService).create(any(Task.class));
@@ -909,14 +996,19 @@ class AiAssistantWriteToolServiceTest {
 
         AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
-                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of());
+                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of(),
+                AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), TURN.privacyToken());
         AiChatTurn secondStoredTurn = new AiChatTurn();
+        secondStoredTurn.setOrganizationPrivacyGeneration(1L);
         secondStoredTurn.setId(secondTurn.turnId());
         secondStoredTurn.setRequestedByUserId(secondTurn.userId());
         secondStoredTurn.setStatus("running");
         AiChatToolCall secondToolCall = new AiChatToolCall();
+        secondToolCall.setServerProposal(true);
+        secondToolCall.setCreatedAt(storedToolCall.getCreatedAt());
         secondToolCall.setId(30);
         secondToolCall.setWorkspaceId(secondTurn.workspaceId());
+        secondToolCall.setOrganizationPrivacyGeneration(1L);
         secondToolCall.setMessageId(secondTurn.userMessageId());
         secondToolCall.setSessionId(secondTurn.sessionId());
         secondToolCall.setRequestedByUserId(secondTurn.userId());
@@ -1020,6 +1112,61 @@ class AiAssistantWriteToolServiceTest {
                 TURN.workspaceId(), TURN.sessionId(), 29);
     }
 
+    @ParameterizedTest
+    @CsvSource({"reject", "undo"})
+    void missionOriginCannotEnterLegacyDecisionLocks(String decision) {
+        when(chatMapper.getToolArtifactOrigin(TURN.workspaceId(), TURN.sessionId(), 29))
+                .thenReturn("mission");
+        var missionDecisions = mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService.class);
+        when(missionDecisions.undo(TURN.sessionId(), 29)).thenThrow(new ConflictException("Assistant tool cannot be undone"));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionDecisions",
+                new org.springframework.beans.factory.support.StaticListableBeanFactory(Map.of("decisions", missionDecisions))
+                        .getBeanProvider(ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService.class));
+
+        ConflictException failure = assertThrows(ConflictException.class, () -> {
+            if ("reject".equals(decision)) {
+                service.reject(TURN.sessionId(), 29);
+            } else {
+                service.undo(TURN.sessionId(), 29);
+            }
+        });
+
+        assertEquals("undo".equals(decision) ? "Assistant tool cannot be undone" : "mission_control_required", failure.getMessage());
+        if ("undo".equals(decision)) {
+            verify(missionDecisions).undo(TURN.sessionId(), 29);
+        }
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(anyInt(), anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(anyInt(), anyInt(), any(), anyInt());
+        verify(taskService, never()).deleteIf(anyInt(), any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"reject", "undo"})
+    void oldGenerationDecisionStaysClosedAfterPurgeUnblocks(String decision) {
+        session.setMissionTaintSeq(4);
+        session.setMissionTaintGeneration(1L);
+        barrier.setGeneration(2);
+        barrier.setBlocked(false);
+
+        AiAssistantLoopException failure = assertThrows(AiAssistantLoopException.class, () -> {
+            if ("reject".equals(decision)) {
+                service.reject(TURN.sessionId(), 29);
+            } else {
+                service.undo(TURN.sessionId(), 29);
+            }
+        });
+
+        assertEquals("restrictions_changed", failure.getMessage());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(anyInt(), anyInt(), any(), anyInt());
+        verify(taskService, never()).deleteIf(anyInt(), any());
+    }
+
     @Test
     void governanceDisableBeforeToolDecisionBlocksToolMutations() {
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
@@ -1057,7 +1204,14 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setStatus("executed");
         storedToolCall.setResultJson(capturedResultJson());
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
-        doAnswer(invocation -> null).when(taskService).deleteIf(eq(74), any());
+        doAnswer(invocation -> {
+            java.util.function.Predicate<Task> guard = invocation.getArgument(1);
+            Task created = org.mockito.Mockito.mockingDetails(taskService).getInvocations().stream()
+                    .filter(call -> call.getMethod().getName().equals("create"))
+                    .map(call -> (Task) call.getArgument(0)).findFirst().orElseThrow();
+            assertTrue(guard.test(created));
+            return null;
+        }).when(taskService).deleteIf(eq(74), any());
 
         assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
         verify(taskService).deleteIf(eq(74), any());
@@ -1077,6 +1231,63 @@ class AiAssistantWriteToolServiceTest {
         assertEquals("rejected", service.reject(TURN.sessionId(), 29).status());
         assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
         verify(governanceService, times(2)).isEnabled(TURN.workspaceId());
+    }
+
+    /**
+     * A pending row the server did not prepare, such as a refusal an interrupted run stranded as
+     * {@code proposed}, can be neither approved nor rejected: nothing is locked, written or
+     * executed. An executed row the server did not flag can still be undone, because it was already
+     * acted on (#1867).
+     */
+    @Test
+    void aPendingRowTheServerDidNotPrepareCanBeNeitherApprovedNorRejectedButExecutedOnesStillUndo()
+            throws Exception {
+        AiAssistantPreparedWrite proposal = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(proposal, 29);
+        storedToolCall.setServerProposal(false);
+
+        ConflictException approval = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+        ConflictException rejection = assertThrows(
+                ConflictException.class, () -> service.reject(TURN.sessionId(), 29));
+
+        assertEquals("Assistant tool proposal was not prepared by the server", approval.getMessage());
+        assertEquals("Assistant tool proposal was not prepared by the server", rejection.getMessage());
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setStatus("todo");
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setServerProposal(true);
+        service.executeAuto(TURN, 29, result -> { });
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(capturedResultJson());
+        storedToolCall.setServerProposal(false);
+        doAnswer(invocation -> {
+            java.util.function.Predicate<Task> guard = invocation.getArgument(1);
+            Task created = org.mockito.Mockito.mockingDetails(taskService).getInvocations().stream()
+                    .filter(call -> call.getMethod().getName().equals("create"))
+                    .map(call -> (Task) call.getArgument(0)).findFirst().orElseThrow();
+            assertTrue(guard.test(created));
+            return null;
+        }).when(taskService).deleteIf(eq(74), any());
+
+        assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
     }
 
     /**
@@ -1322,7 +1533,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         Person unchanged = person(31);
         unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(unchanged);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(unchanged);
         when(personService.getPersonById(31)).thenReturn(unchanged);
         when(personService.removeTag(31, 9)).thenReturn(true);
 
@@ -1356,7 +1567,7 @@ class AiAssistantWriteToolServiceTest {
                 ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
         assertEquals("Assistant proposal target changed", refused.getMessage());
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(personService, never()).removeTag(anyInt(), anyInt());
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
@@ -1378,38 +1589,19 @@ class AiAssistantWriteToolServiceTest {
         verify(companyService, never()).removeTag(anyInt(), anyInt());
     }
 
-    /**
-     * The tag row is never locked, so a rename can commit after the approval resolved the reviewed
-     * tag and before the record lock is held. The same association is removed, because the pin
-     * compares ids, and the stored outcome names the tag as it reads after the record lock, which
-     * is the name the record service's audit row records, not the one it had lost by then.
-     */
+    /** The definition lock revalidates the name resolved before waiting, before any target lock. */
     @Test
-    void aTagRenamedWhileItsRemovalIsApprovedIsNamedInTheOutcomeAsItReadsAfterTheRecordLock()
-            throws Exception {
-        AtomicBoolean recordLocked = new AtomicBoolean();
-        when(tagService.getAllTags()).thenAnswer(invocation -> recordLocked.get()
-                ? List.of(tag(9, "Urgent"))
-                : List.of(tag(9, "Priority")));
+    void aTagRenamedBeforeItsDefinitionLockRefusesRemoval() throws Exception {
+        when(tagService.getAllTags()).thenReturn(List.of(tag(9, "Priority")));
         stored(prepared(
                 "remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}", "person", 31), 29);
-        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
-        Person unchanged = person(31);
-        unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenAnswer(invocation -> {
-            recordLocked.set(true);
-            return unchanged;
-        });
-        when(personService.getPersonById(31)).thenReturn(unchanged);
-        when(personService.removeTag(31, 9)).thenReturn(true);
+        when(tagService.lockDefinitionForShare(9)).thenReturn(tag(9, "Urgent"));
 
-        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+        assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
-        verify(personService).removeTag(31, 9);
-        assertEquals(
-                "{\"status\":\"executed\",\"recordType\":\"person\",\"tag\":\"Urgent\","
-                        + "\"changed\":true}",
-                objectMapper.readTree(capturedResultJson()).get("outcome").toString());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
+        verify(personService, never()).removeTag(anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
     }
 
     /**
@@ -1473,7 +1665,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         Person unchanged = person(31);
         unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(unchanged);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(unchanged);
         when(personService.getPersonById(31)).thenReturn(unchanged);
         when(leadResponseSlaService.startFirstResponseClock(31, 48)).thenReturn(true);
 
@@ -1502,14 +1694,14 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-06 14:59:30.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
         when(personService.getPersonById(31)).thenReturn(edited);
 
         ConflictException refused = assertThrows(
                 ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
         assertEquals("Assistant proposal target changed", refused.getMessage());
-        verify(personService).lockProcessablePersonForUpdate(31);
+        verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
@@ -1532,7 +1724,7 @@ class AiAssistantWriteToolServiceTest {
 
         assertEquals(
                 "Requires the PERSON_UPDATE permission in this workspace", refused.getMessage());
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
     }
 
@@ -1554,7 +1746,7 @@ class AiAssistantWriteToolServiceTest {
         assertTrue(refusal.recoverable());
         assertEquals("unresolved_reference", refusal.detailReason());
         verify(personService).isOwnedByCurrentWorkspace(31);
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
     }
 
@@ -1706,6 +1898,8 @@ class AiAssistantWriteToolServiceTest {
             assertEquals("unresolved_reference", refusal.detailReason());
         }
         clearInvocations(workspaceService, pipelineService, dealService);
+        var recordScopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", recordScopes);
 
         assertEquals(storedOwner,
                 replayed("assign_owner", ownerCall, "company", 52, storedOwner).argumentsJson());
@@ -1715,6 +1909,7 @@ class AiAssistantWriteToolServiceTest {
         verify(workspaceService, never()).getMembers(anyInt());
         verify(pipelineService, never()).getAllStages();
         verify(dealService, never()).getDealById(anyInt());
+        org.mockito.Mockito.verifyNoInteractions(recordScopes);
 
         String malformed = storedStage.replace("\"principals\":[]", "\"principals\":[0]");
         assertThrows(IllegalStateException.class,
@@ -1803,4 +1998,192 @@ class AiAssistantWriteToolServiceTest {
         activity.setPerson(person);
         return activity;
     }
+    @Test
+    void replayedOwnerProvenanceUsesTheStoredLabelWithoutDirectoryReadsAndRemovalHasNone() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member(21, "Grace Hopper")));
+        AiAssistantPreparedWrite write = prepared("assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}", "person", 31);
+        org.mockito.Mockito.clearInvocations(workspaceService);
+        AiAssistantToolResult replay = service.proposalResult(write, new AiAssistantToolProposal(29, "executed",
+                "{\"tier\":\"confirm\",\"outcome\":{\"recordType\":\"person\",\"owner\":\"Former Label\"}}", true));
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Label", "/outcome/owner")), replay.identifiers());
+        assertTrue(objectMapper.writeValueAsString(replay.data()).contains("Former Label"));
+        verify(workspaceService, never()).getMembers(anyInt());
+        AiAssistantAssignOwnerWriteTool declared = new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService);
+        assertEquals(List.of(), declared.modelIdentifiers(objectMapper.readTree("{\"owner\":\"unassigned\"}")));
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "fallback-username", "/owner")),
+                declared.modelIdentifiers(objectMapper.readTree("{\"owner\":\"fallback-username\"}")));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "false,false,create_task", "false,true,create_task", "true,false,create_task", "true,true,create_task",
+            "false,false,create_note", "false,true,create_note", "true,false,create_note", "true,true,create_note"})
+    void echoedWriteArgumentsPersistMemberProvenanceAcrossRenameAndFreshReplay(
+            boolean nativeProtocol, boolean rawLabel, String tool) throws Exception {
+        var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("Ed");
+        context.registerMemberCandidate("Tas");
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("person", 31);
+        String description = "Bob_team xBob Li xLi Ed Tas";
+        if (!rawLabel) {
+            String token = context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Bob");
+            context.exposeDispatchedPayload(token);
+            var arguments = objectMapper.createObjectNode().put("description", token + "_team x" + token + " Li xLi Ed Tas");
+            assertEquals(0, ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(arguments, context));
+            description = arguments.get("description").asString();
+        }
+        boolean task = "create_task".equals(tool);
+        var args = objectMapper.createObjectNode().put("handle", "r1");
+        args.put(task ? "description" : "title", description);
+        if (!task) {
+            args.put("content", "Shared follow-up").put("visibility", "workspace");
+        }
+        var write = service.prepare(tool, args, resources, TURN.restrictionEpoch());
+        var provenance = objectMapper.readTree(write.argumentsJson()).path("memberIdentifiers");
+        var expectedLabels = Set.of("Bob", "Li", "Ed", "Tas");
+        var storedLabels = new java.util.HashSet<String>();
+        provenance.forEach(identifier -> storedLabels.add(identifier.path("value").asString()));
+        assertEquals(4, provenance.size());
+        assertEquals(expectedLabels, storedLabels);
+        var titlePaths = provenance.valueStream().filter(identifier -> !"/content".equals(identifier.path("path").asString())).toList();
+        assertEquals(4, titlePaths.size());
+        titlePaths.forEach(identifier -> assertEquals(task ? "/description" : "/title", identifier.path("path").asString()));
+        if (!task) {
+            assertEquals(0, provenance.valueStream().filter(identifier -> "/content".equals(identifier.path("path").asString())
+                    && "Ed".equals(identifier.path("value").asString())).count());
+        }
+        assertFalse(write.argumentsJson().contains("{{M"));
+        if (task) {
+            doAnswer(invocation -> {
+                Task created = invocation.getArgument(0);
+                created.setId(74);
+                created.setStatus("todo");
+                return created;
+            }).when(taskService).create(any(Task.class));
+        } else {
+            doAnswer(invocation -> {
+                Note created = invocation.getArgument(0);
+                created.setId(75);
+                created.setVisibility("workspace");
+                return created;
+            }).when(noteService).create(any(Note.class));
+        }
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        var resultJson = capturedResultJson();
+        assertEquals(provenance, objectMapper.readTree(resultJson).path("memberIdentifiers"));
+        var fresh = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        fresh.registerMemberCandidate("Renamed Bob");
+        var freshResources = new AiChatResourceRegistry(fresh);
+        freshResources.register("person", 31);
+        var replayWrite = service.prepareReplay(tool, args, freshResources,
+                TURN.restrictionEpoch(), write.argumentsJson());
+        assertEquals(write.argumentsJson(), replayWrite.argumentsJson());
+        var legacyResult = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(resultJson);
+        legacyResult.remove("memberIdentifiers");
+        var replay = service.proposalResult(replayWrite, new AiAssistantToolProposal(
+                29, "executed", objectMapper.writeValueAsString(legacyResult), true));
+        assertEquals(4, replay.identifiers().size());
+        assertEquals(expectedLabels, replay.identifiers().stream().map(AiAssistantToolResult.Identifier::value)
+                .collect(java.util.stream.Collectors.toSet()));
+        assertFalse(objectMapper.writeValueAsString(replay.data()).contains("memberIdentifiers"));
+        var support = new AiAssistantMaskingTestSupport(TURN.workspaceId(), 11);
+        try {
+            var assembler = new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog());
+            var turns = List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, tool, replay));
+            var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+            var empty = new AiAssistantToolResult(Map.of(), List.of());
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(), empty, turns, fresh, freshResources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(), empty, turns, fresh, freshResources, AiAssistantToolCatalog.ALL);
+            var replayArgs = args.deepCopy();
+            String replayDescription = description;
+            String maskedDescription = fresh.withReplayMemberValues(List.copyOf(expectedLabels), () ->
+                    ooo.klae.connex.backend.ai.masking.MaskingEngine.maskFreeText(replayDescription, fresh));
+            var tokens = fresh.tokenBindings().stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
+            String bob = tokens.get("Bob");
+            org.junit.jupiter.api.Assertions.assertNotNull(bob);
+            replayArgs.put(task ? "description" : "title", maskedDescription);
+            if (nativeProtocol) {
+                var priorPrompt = ooo.klae.connex.backend.ai.masking.PromptAssembly.builder(fresh)
+                        .system("Use concise analysis").userTurn(maskedDescription).build();
+                var prior = support.captureAssistantPayload(priorPrompt, fresh, objectMapper, true, List.of(),
+                        AiAssistantMaskingTestSupport.finalOutput(true, "Ready"), false, null);
+                assertEquals(0, prior.warnings());
+                assertTrue(objectMapper.writeValueAsString(prior.request().messages()).contains(bob));
+                assertEquals("Bob", ooo.klae.connex.backend.ai.masking.Demasker.demask(bob, fresh).text());
+            }
+            var exchanges = nativeProtocol ? assembler.nativeReplay(turns,
+                    Map.of(new AiAssistantToolCallRef(1, 0), new ooo.klae.connex.backend.ai.provider.AiToolCall(
+                            "create", tool, objectMapper.writeValueAsString(replayArgs))),
+                    fresh, budget, null).exchanges() : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
+            var capture = support.captureAssistantPayload(prompt, fresh, objectMapper, nativeProtocol, exchanges,
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+            String payload = objectMapper.writeValueAsString(capture.request().messages()) + objectMapper.writeValueAsString(exchanges);
+            assertFalse(payload.contains("Bob"));
+            assertTrue(payload.contains(bob + "_team x" + bob));
+            assertEquals("Bob", ooo.klae.connex.backend.ai.masking.Demasker.demask(bob, fresh).text());
+            assertTrue(payload.contains("executed"));
+            assertTrue(payload.contains(tool));
+            assertTrue(payload.contains(task ? "task" : "note"));
+            assertFalse(payload.contains("execut{{M"));
+            assertFalse(payload.contains("create_{{M"));
+            assertEquals(0, capture.warnings());
+        } finally {
+            support.releaseFixtureMocks();
+        }
+        verify(taskService, times(task ? 1 : 0)).create(any(Task.class));
+        verify(noteService, times(task ? 0 : 1)).create(any(Note.class));
+    }
+
+
+    @Test
+    void exactDemaskedArgumentProvenanceSurvivesWithoutWideningRawSiblingFields() throws Exception {
+        var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        var token = context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Bob");
+        context.exposeDispatchedPayload(token);
+        var args = objectMapper.createObjectNode().put("handle", "r1")
+                .put("title", "x" + token).put("content", "client xBob").put("visibility", "workspace");
+        var exact = new java.util.LinkedHashMap<String, List<String>>();
+        assertEquals(0, ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(args, context,
+                (path, member) -> exact.put(path, List.of(member))));
+        assertEquals(Map.of("/title", List.of("Bob")), exact);
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("person", 31);
+        var write = service.prepare("create_note", args, resources, TURN.restrictionEpoch(), exact);
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob", "/title")),
+                AiAssistantMemberIdentifiers.stored(objectMapper.readTree(write.argumentsJson())));
+        var raw = service.prepare("create_note", args, resources, TURN.restrictionEpoch());
+        assertEquals(List.of(), AiAssistantMemberIdentifiers.stored(objectMapper.readTree(raw.argumentsJson())));
+        var fresh = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        var freshResources = new AiChatResourceRegistry(fresh);
+        freshResources.register("person", 31);
+        var replay = service.prepareReplay("create_note", args, freshResources, TURN.restrictionEpoch(), write.argumentsJson());
+        assertEquals(write.argumentsJson(), replay.argumentsJson());
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob", "/title")),
+                AiAssistantMemberIdentifiers.stored(objectMapper.readTree(replay.argumentsJson())));
+    }
+
+    @Test
+    void legacyResultRetainsProposalMemberProvenance() throws Exception {
+        var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        context.registerMemberCandidate("Bob");
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("person", 31);
+        var write = service.prepare("create_task", objectMapper.readTree(
+                "{\"handle\":\"r1\",\"description\":\"Bob_team xBob\"}"), resources, TURN.restrictionEpoch());
+        clearInvocations(workspaceService);
+        var replay = service.proposalResult(write, new AiAssistantToolProposal(29, "executed",
+                "{\"tier\":\"auto\",\"outcome\":{\"recordType\":\"task\",\"description\":\"Bob_team xBob\"}}", true));
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob", "/outcome/description")), replay.identifiers());
+        assertFalse(objectMapper.writeValueAsString(replay.data()).contains("memberIdentifiers"));
+        assertEquals("Bob_team xBob", ((Map<?, ?>) replay.data().get("outcome")).get("description"));
+        verify(workspaceService, never()).getMembers(anyInt());
+    }
+
 }

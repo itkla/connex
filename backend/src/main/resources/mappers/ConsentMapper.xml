@@ -5,7 +5,7 @@
 
   <sql id="consentColumns">
     id, workspace_id, person_id, channel, purpose, status, source,
-    evidence_ref, captured_at, updated_at
+    evidence_ref, captured_at, updated_at, version
   </sql>
 
   <select id="getForPerson" resultType="ContactChannelConsent">
@@ -13,6 +13,37 @@
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
     ORDER BY channel, purpose
   </select>
+
+  <select id="getBySubjectForUpdate" resultType="ContactChannelConsent" flushCache="true" useCache="false">
+    SELECT <include refid="consentColumns"/> FROM contact_channel_consent
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
+      AND channel = #{channel} AND purpose = #{purpose}
+    FOR UPDATE
+  </select>
+
+  <select id="getBySubject" resultType="ContactChannelConsent" flushCache="true" useCache="false">
+    SELECT <include refid="consentColumns"/> FROM contact_channel_consent
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
+      AND channel = #{channel} AND purpose = #{purpose}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO contact_channel_consent
+      (workspace_id, person_id, channel, purpose, status, source, evidence_ref, captured_at)
+    VALUES
+      (#{workspaceId}, #{personId}, #{channel}, #{purpose}, #{status}, #{source},
+       #{evidenceRef}, #{capturedAt})
+  </insert>
+
+  <update id="updateIfVersion">
+    UPDATE contact_channel_consent
+    SET status = #{consent.status}, source = #{consent.source},
+      evidence_ref = #{consent.evidenceRef}, captured_at = #{consent.capturedAt},
+      updated_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{consent.workspaceId} AND person_id = #{consent.personId}
+      AND channel = #{consent.channel} AND purpose = #{consent.purpose}
+      AND version = #{expectedVersion}
+  </update>
 
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO contact_channel_consent

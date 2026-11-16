@@ -26,4 +26,35 @@ public interface WebauthnCredentialMapper {
             @Param("expectedSignatureCount") long expectedSignatureCount);
     int updateLabel(@Param("credentialId") byte[] credentialId, @Param("label") String label);
     int delete(byte[] credentialId);
+
+    /**
+     * Returns the credential's row id when it exists and belongs to the account. Callers hold the
+     * account's {@code app_user} row, which every credential delete takes first.
+     *
+     * @param credentialRowId the {@code webauthn_credential.id} to check
+     * @param userId the account it must belong to
+     * @return the row id, or null when the credential is gone or another account's
+     */
+    Integer findOwnedRowId(
+            @Param("credentialRowId") int credentialRowId, @Param("userId") int userId);
+
+    /**
+     * Copies a source credential's account-wide privileged assurance, if it has any, to a new
+     * credential of the same account, stamped with the time it was copied (#1534).
+     *
+     * @param credentialRowId the new credential
+     * @param sourceCredentialRowId the credential whose step-up authorized the enrollment
+     * @return one when assurance was copied, zero when the source carries none
+     */
+    int copyPrivilegedAssurance(
+            @Param("credentialRowId") int credentialRowId,
+            @Param("sourceCredentialRowId") int sourceCredentialRowId);
+
+    /**
+     * Records that the operator recovery session itself enrolled this credential (#1534).
+     *
+     * @param credentialRowId the replacement credential
+     * @return one when the credential exists
+     */
+    int markBreakGlassAssurance(@Param("credentialRowId") int credentialRowId);
 }

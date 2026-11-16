@@ -32,7 +32,7 @@ const inputBase =
     "w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand";
 const inputError = "ring-2 ring-destructive focus:ring-destructive";
 const leadIcon =
-    "pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand";
+    "pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand-text";
 
 const CHANNELS: CampaignChannel[] = ["email", "sms"];
 

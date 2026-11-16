@@ -6,6 +6,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
+import org.springframework.validation.annotation.Validated;
+import ooo.klae.connex.backend.validation.ValidCurrency;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.CompanyDto;
@@ -42,7 +44,7 @@ public class LegacyRecordCreationController {
     }
 
     @PostMapping("/api/deals")
-    public DealDto createDeal(@Valid @RequestBody DealDto request) {
+    public DealDto createDeal(@Validated(ValidCurrency.OnCreate.class) @RequestBody DealDto request) {
         return DealDto.from(dealService.createReviewed(
             request.toBean(), request.getDuplicateReviewToken()));
     }

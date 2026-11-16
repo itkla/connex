@@ -8,5 +8,6 @@ public enum WorkItemReasonCode {
     task_open,
     deal_close_overdue,
     deal_closing_soon,
-    document_approval_pending
+    document_approval_pending,
+    mission_review_pending
 }

@@ -5,9 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
+import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +24,16 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.ExtractionOrigin;
 
 class BusinessCardExtractorTest {
+    private static final List<String> SCORED_FIELDS = List.of("name", "email", "phone", "title", "company");
+    private static final Map<String, Double> RELEASE_GATES = Map.of(
+            "email", 0.95,
+            "phone", 0.95,
+            "name", 0.85,
+            "title", 0.8,
+            "company", 0.8);
+    private static final Pattern CJK_ADJACENT_SPACE = Pattern.compile(
+            " (?=[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}])|(?<=[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}]) ");
+
     private final BusinessCardExtractor extractor = new BusinessCardExtractor();
 
     @Test
@@ -100,10 +116,7 @@ class BusinessCardExtractorTest {
 
     @Test
     void perfectBenchmarkOcrMeetsTheDeterministicTitleGate() throws IOException {
-        Path manifestPath = Path.of(System.getProperty("user.dir"))
-                .resolve("../ocr/benchmark/manifest.json")
-                .normalize();
-        JsonNode cases = new ObjectMapper().readTree(manifestPath.toFile()).path("cases");
+        JsonNode cases = new ObjectMapper().readTree(benchmarkManifest().toFile()).path("cases");
         int correctTitles = 0;
         List<String> missedCases = new ArrayList<>();
         for (JsonNode benchmarkCase : cases) {
@@ -124,6 +137,142 @@ class BusinessCardExtractorTest {
         assertTrue(cases.size() >= 40);
         assertTrue(correctTitles / (double) cases.size() >= 0.8,
                 "Perfect OCR missed benchmark titles: " + missedCases);
+    }
+
+    @Test
+    void recordedBenchmarkOcrMeetsEveryReleaseAccuracyGate() throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, JsonNode> expectedById = new HashMap<>();
+        for (JsonNode benchmarkCase : mapper.readTree(benchmarkManifest().toFile()).path("cases")) {
+            expectedById.put(benchmarkCase.path("id").asText(), benchmarkCase.path("fields"));
+        }
+        JsonNode recording;
+        try (InputStream input = getClass().getResourceAsStream(
+                "/fixtures/business-card-benchmark-ocr-lines.json")) {
+            recording = mapper.readTree(input);
+        }
+        JsonNode recordedCases = recording.path("cases");
+        assertEquals(expectedById.size(), recordedCases.size());
+
+        Map<String, Integer> correct = new HashMap<>();
+        Map<String, List<String>> misses = new HashMap<>();
+        for (JsonNode recordedCase : recordedCases) {
+            String id = recordedCase.path("id").asText();
+            JsonNode expected = expectedById.get(id);
+            assertTrue(expected != null, "Recorded OCR case is not in the canonical manifest: " + id);
+            List<OcrLine> lines = new ArrayList<>();
+            for (JsonNode recordedLine : recordedCase.path("lines")) {
+                JsonNode box = recordedLine.path("box");
+                lines.add(new OcrLine(
+                        recordedLine.path("text").asText(),
+                        recordedLine.path("confidence").asDouble(),
+                        box.path(0).asInt(),
+                        box.path(1).asInt(),
+                        box.path(2).asInt(),
+                        box.path(3).asInt()));
+            }
+            BusinessCardScanResponse response = extractor.extract(lines);
+            Map<String, String> actual = new HashMap<>();
+            actual.put("name", response.fields().name().value());
+            actual.put("email", response.fields().email().value());
+            actual.put("phone", response.fields().phone().value());
+            actual.put("title", response.fields().title().value());
+            actual.put("company", response.company().value());
+            for (String field : SCORED_FIELDS) {
+                if (benchmarkEqual(field, expected.path(field).asText(), actual.get(field))) {
+                    correct.merge(field, 1, Integer::sum);
+                } else {
+                    misses.computeIfAbsent(field, ignored -> new ArrayList<>())
+                            .add(id + "=" + actual.get(field));
+                }
+            }
+        }
+
+        for (String field : SCORED_FIELDS) {
+            double accuracy = correct.getOrDefault(field, 0) / (double) recordedCases.size();
+            assertTrue(accuracy >= RELEASE_GATES.get(field),
+                    field + " accuracy " + accuracy + " is below the release gate; misses: "
+                            + misses.getOrDefault(field, List.of()));
+        }
+    }
+
+    @Test
+    void separatesALabelFromTheEmailAddressItIntroduces() {
+        assertEquals("ada.lovelace@example.test", emailFrom("EMAIL ada.lovelace@example.test"));
+        assertEquals("ada.lovelace@example.test", emailFrom("E-mail: ada.lovelace@example.test"));
+        assertEquals("ada.lovelace@example.test", emailFrom("メール：ada.lovelace@example.test"));
+        assertEquals("ada.lovelace@example.test", emailFrom("EMAILada.lovelace@example.test"));
+        assertEquals("ada.lovelace@example.test", emailFrom("ada. lovelace @ example.test"));
+        assertEquals("mail.desk@example.test", emailFrom("mail.desk@example.test"));
+        assertEquals("emailteam@example.test", emailFrom("emailteam@example.test"));
+        assertEquals("EMAILdesk@example.test", emailFrom("Email: EMAILdesk@example.test"));
+        assertEquals("mail@example.test", emailFrom("mail @ example.test"));
+        assertEquals("email@example.test", emailFrom("email @ example.test"));
+        assertEquals("john@example.test", emailFrom("mail john @ example.test"));
+    }
+
+    @Test
+    void acceptsAJapaneseNameThatOcrReturnedWithoutTheSeparatingSpace() {
+        BusinessCardScanResponse response = extractor.extract(List.of(
+                line("株式会社みらい研究所", 0.99, 20),
+                line("佐藤花子", 0.99, 80),
+                line("代表取締役", 0.99, 140),
+                line("EMAIL hanako.sato@example.test", 0.99, 200)));
+
+        assertEquals("佐藤花子", response.fields().name().value());
+        assertEquals("株式会社みらい研究所", response.company().value());
+        assertEquals("代表取締役", response.fields().title().value());
+    }
+
+    @Test
+    void prefersASpacedJapaneseNameOverAnUnspacedCandidate() {
+        BusinessCardScanResponse response = extractor.extract(List.of(
+                line("総務部", 0.99, 20),
+                line("佐藤 花子", 0.99, 80)));
+
+        assertEquals("佐藤 花子", response.fields().name().value());
+    }
+
+    @Test
+    void keepsAnUppercaseLatinNameOverAnUnspacedJapaneseFallback() {
+        BusinessCardScanResponse response = extractor.extract(List.of(
+                line("ADA LOVELACE", 0.99, 20),
+                line("総務部", 0.99, 80),
+                line("Principal Engineer", 0.99, 140),
+                line("ada.lovelace@example.test", 0.99, 200)));
+
+        assertEquals("ADA LOVELACE", response.fields().name().value());
+    }
+
+    private String emailFrom(String text) {
+        return extractor.extract(List.of(line(text, 0.99, 20))).fields().email().value();
+    }
+
+    /**
+     * Mirrors the release benchmark's field comparison in {@code ocr/benchmark/run_benchmark.py}.
+     */
+    private static boolean benchmarkEqual(String field, String expected, String actual) {
+        if (actual == null) {
+            return false;
+        }
+        if (field.equals("phone")) {
+            return expected.replaceAll("\\D", "").equals(actual.replaceAll("\\D", ""));
+        }
+        return benchmarkNormalized(expected).equals(benchmarkNormalized(actual));
+    }
+
+    private static String benchmarkNormalized(String value) {
+        String collapsed = Normalizer.normalize(value, Normalizer.Form.NFKC)
+                .toLowerCase(Locale.ROOT)
+                .trim()
+                .replaceAll("\\s+", " ");
+        return CJK_ADJACENT_SPACE.matcher(collapsed).replaceAll("");
+    }
+
+    private static Path benchmarkManifest() {
+        return Path.of(System.getProperty("user.dir"))
+                .resolve("../ocr/benchmark/manifest.json")
+                .normalize();
     }
 
     private static OcrLine line(String text, double confidence, int y) {

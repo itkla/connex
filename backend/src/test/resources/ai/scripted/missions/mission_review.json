@@ -1,0 +1,33 @@
+{
+  "id": "mission_review",
+  "selector": "connex_script_mission_review",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "list_activities",
+        "arguments": "{\"handle\":\"r1\",\"limit\":5}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I reviewed [the selected record](record:r1).\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

@@ -33,10 +33,79 @@
     )
   </select>
 
+  <!-- Who may be addressed by an add at all: an existing member of the active organization, or an
+       active member of one of its active workspaces (#1534). One statement answers for an unknown
+       account and an outsider alike, before any lock is taken, so neither the refusal nor its cost
+       tells the two apart. -->
+  <sql id="eligibleForOrganizationMembership">
+    (EXISTS (
+       SELECT 1
+       FROM org_member om
+       JOIN organization o ON o.id = om.org_id
+       WHERE om.org_id = #{orgId}
+         AND om.user_id = u.id
+         AND o.lifecycle_state = 'active'
+     )
+     OR EXISTS (
+       SELECT 1
+       FROM workspace_member wm
+       JOIN workspace w ON w.id = wm.workspace_id
+       WHERE w.org_id = #{orgId}
+         AND w.lifecycle_state = 'active'
+         AND wm.user_id = u.id
+         AND wm.status = 'active'
+     ))
+  </sql>
+
+  <select id="isEligibleForMembership" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM app_user u
+      WHERE u.id = #{userId}
+        AND <include refid="eligibleForOrganizationMembership"/>
+    )
+  </select>
+
+  <select id="findEligibleUserIdByEmail" resultType="java.lang.Integer">
+    SELECT u.id
+    FROM app_user u
+    WHERE u.email = #{email}
+      AND <include refid="eligibleForOrganizationMembership"/>
+  </select>
+
+  <select id="isActiveWorkspaceTenant" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workspace_member wm
+      JOIN workspace w ON w.id = wm.workspace_id
+      WHERE w.org_id = #{orgId}
+        AND w.lifecycle_state = 'active'
+        AND wm.user_id = #{userId}
+        AND wm.status = 'active'
+    )
+  </select>
+
   <insert id="addMember">
     INSERT INTO org_member (org_id, user_id, org_role)
     VALUES (#{orgId}, #{userId}, #{orgRole})
     ON DUPLICATE KEY UPDATE org_role = #{orgRole}
+  </insert>
+
+  <select id="lockExactRole" resultType="string" flushCache="true">
+    SELECT org_role FROM org_member
+    WHERE org_id = #{orgId} AND user_id = #{userId}
+    FOR UPDATE
+  </select>
+
+  <insert id="addFoundingMember">
+    INSERT INTO org_member (org_id, user_id, org_role, founder)
+    VALUES (#{orgId}, #{userId}, 'owner', TRUE)
+  </insert>
+
+  <insert id="addMemberClearingFounder">
+    INSERT INTO org_member (org_id, user_id, org_role)
+    VALUES (#{orgId}, #{userId}, #{orgRole})
+    ON DUPLICATE KEY UPDATE org_role = #{orgRole}, founder = FALSE
   </insert>
 
   <update id="updateRole">
@@ -68,6 +137,15 @@
     SELECT org_id FROM org_member WHERE user_id = #{userId} AND org_role = 'owner' ORDER BY org_id
   </select>
 
+  <select id="discoverAccountMembershipOrgIds" resultType="int" flushCache="true" useCache="false">
+    SELECT org_id FROM org_member WHERE user_id = #{userId}
+  </select>
+
+  <select id="lockAccountMembershipOrgIds" resultType="int" flushCache="true" useCache="false">
+    SELECT org_id FROM org_member FORCE INDEX (idx_org_member_user)
+    WHERE user_id = #{userId} FOR UPDATE
+  </select>
+
   <select id="getMembers" resultType="ooo.klae.connex.backend.dto.OrgMemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl, om.org_role AS orgRole
@@ -97,5 +175,8 @@
     JOIN org_member om ON om.org_id = o.id
     WHERE om.user_id = #{userId} AND o.lifecycle_state = 'active'
     ORDER BY o.name, o.id
+  </select>
+  <select id="hasOrganizationWorkspace" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM workspace WHERE org_id = #{orgId})
   </select>
 </mapper>

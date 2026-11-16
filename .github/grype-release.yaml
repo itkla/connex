@@ -1,0 +1,12 @@
+# Release image scan exceptions (anchore/scan-action `config`). Each entry needs an owner-approved
+# tracking issue with a reachability analysis and a removal condition; everything else gates.
+ignore:
+  # OCR: ffmpeg 5.1.4 bundled in the opencv-contrib-python 4.10.0.84 wheel, which paddlex 3.7.2
+  # pins exactly. OCR decodes uploads with Pillow and passes raw pixels to PaddleOCR, so OpenCV's
+  # video I/O (the only ffmpeg user) is never reached. The version and path pins make the rule
+  # lapse if OpenCV ships a different ffmpeg. Remove once paddlex no longer pins OpenCV 4.10 (#2395).
+  - package:
+      name: ffmpeg
+      version: 5.1.4
+      type: binary
+      location: "/usr/local/lib/python3.12/site-packages/opencv_contrib_python.libs/**"

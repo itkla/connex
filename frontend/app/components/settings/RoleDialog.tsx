@@ -217,7 +217,7 @@ function RoleForm({
                                 <button
                                     type="button"
                                     onClick={() => setSelected(allSelected ? new Set() : new Set(allPermissions))}
-                                    className="font-medium text-brand transition hover:text-brand-hover"
+                                    className="font-medium text-brand-text transition hover:text-brand-text"
                                 >
                                     {allSelected ? t('clearAll') : t('selectAll')}
                                 </button>
@@ -238,19 +238,19 @@ function RoleForm({
                                             <button
                                                 type="button"
                                                 onClick={() => setGroup(keys, !groupAll)}
-                                                className="text-[11px] font-medium text-muted-foreground transition hover:text-brand"
+                                                className="text-[11px] font-medium text-muted-foreground transition hover:text-brand-text"
                                             >
                                                 {groupAll ? t('clearAll') : t('selectAll')}
                                             </button>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-1">
-                                            {items.map(({ permission, action }) => {
+                                        <div className="grid gap-1">
+                                            {items.map(({ permission, action, description }) => {
                                                 const checked = selected.has(permission);
                                                 return (
                                                     <label
                                                         key={permission}
                                                         className={cn(
-                                                            'flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition',
+                                                            'flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-sm transition',
                                                             checked
                                                                 ? 'bg-background text-foreground ring-1 ring-border'
                                                                 : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
@@ -258,11 +258,16 @@ function RoleForm({
                                                     >
                                                         <input
                                                             type="checkbox"
+                                                            aria-labelledby={`role-action-${permission}`}
+                                                            aria-describedby={`role-description-${permission}`}
                                                             checked={checked}
                                                             onChange={() => toggle(permission)}
                                                             className="size-4 shrink-0 rounded border-border accent-brand"
                                                         />
-                                                        <span className="truncate">{action}</span>
+                                                        <span className="min-w-0">
+                                                            <span id={`role-action-${permission}`} className="block">{action}</span>
+                                                            <span id={`role-description-${permission}`} className="block text-xs text-muted-foreground">{description}</span>
+                                                        </span>
                                                     </label>
                                                 );
                                             })}

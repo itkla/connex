@@ -1,13 +1,16 @@
 "use client";
 
+import { formatDate, parseMysqlDateTime } from "@/app/lib/utils";
+
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { EllipsisVerticalIcon, ArrowDownTrayIcon, PencilSquareIcon, PlusIcon } from "@heroicons/react/24/outline";
 
 import type { DataSubjectRequest, DataSubjectRequestStatus } from "@/app/lib/types";
-import { ApiError, getDataSubjectRequests, getDataSubjectDisclosure } from "@/app/lib/api";
+import { ApiError, assembleDataSubjectDisclosure, getDataSubjectRequests } from "@/app/lib/api";
 import { toastSuccess } from "@/app/lib/toast";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +33,7 @@ import {
     type SettingsPanelPresentation,
 } from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
+import MissionHoldingsPurgeDialog from "@/app/components/organization/MissionHoldingsPurgeDialog";
 import DataRequestDialog from "@/app/components/organization/DataRequestDialog";
 
 const PAGE_SIZE = 30;
@@ -52,17 +56,11 @@ const STATUS_VARIANT: Record<DataSubjectRequestStatus, "default" | "secondary" |
     closed: "secondary",
 };
 
-function formatDate(iso: string | null | undefined, locale: string) {
-    if (!iso) return null;
-    const date = new Date(iso.includes("T") ? iso : `${iso.replace(" ", "T")}`);
-    if (Number.isNaN(date.getTime())) return iso;
-    return date.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
-}
 
-function isOverdue(request: DataSubjectRequest) {
+function isOverdue(request: DataSubjectRequest, now: number) {
     if (!request.dueAt || request.respondedAt || request.closedAt) return false;
-    const due = new Date(request.dueAt);
-    return !Number.isNaN(due.getTime()) && due.getTime() < Date.now();
+    const due = new Date(parseMysqlDateTime(request.dueAt));
+    return !Number.isNaN(due.getTime()) && due.getTime() < now;
 }
 
 /**
@@ -84,7 +82,9 @@ export default function DataRequestsPanel({
     const t = useTranslations("OrgDataRequests");
     const showApiError = useApiErrorToast("OrgDataRequests");
     const locale = useLocale();
-    const { activeWorkspace } = useWorkspace();
+    const now = useLiveNow();
+    const timeZone = useTimeZone();
+    const { activeWorkspace, switching } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
 
     const [requests, setRequests] = useState<DataSubjectRequest[]>([]);
@@ -97,6 +97,8 @@ export default function DataRequestsPanel({
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState<DataSubjectRequest | null>(null);
     const [downloadingId, setDownloadingId] = useState<number | null>(null);
+    const [purging, setPurging] = useState<{ orgId: number; request: DataSubjectRequest } | null>(null);
+    const [reloadVersion, setReloadVersion] = useState(0);
 
     useEffect(() => {
         if (!orgId) return;
@@ -124,7 +126,7 @@ export default function DataRequestsPanel({
         return () => {
             cancelled = true;
         };
-    }, [orgId, statusFilter]);
+    }, [orgId, reloadVersion, statusFilter]);
 
     async function loadMore() {
         if (!orgId) return;
@@ -148,7 +150,7 @@ export default function DataRequestsPanel({
         if (!orgId || downloadingId != null) return;
         setDownloadingId(request.id);
         try {
-            const disclosure = await getDataSubjectDisclosure(orgId, request.id);
+            const disclosure = await assembleDataSubjectDisclosure(orgId, request.id);
             const blob = new Blob([JSON.stringify(disclosure, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
@@ -237,9 +239,9 @@ export default function DataRequestsPanel({
                 <>
                     <ListCard>
                         {requests.map((request) => {
-                            const overdue = isOverdue(request);
-                            const received = formatDate(request.receivedAt, locale);
-                            const due = formatDate(request.dueAt, locale);
+                            const overdue = isOverdue(request, now);
+                            const received = formatDate(request.receivedAt ?? undefined, locale, timeZone);
+                            const due = formatDate(request.dueAt ?? undefined, locale, timeZone);
                             return (
                                 <li key={request.id} className="group flex items-center gap-4 px-4 py-3">
                                     <div className="min-w-0 flex-1">
@@ -271,6 +273,11 @@ export default function DataRequestsPanel({
                                                 <PencilSquareIcon className="size-4" />
                                                 {t("edit")}
                                             </DropdownMenuItem>
+                                            {request.orgId === orgId && request.identityVerifiedAt && request.subjectPersonId && request.subjectWorkspaceId && request.snapshotToken ? (
+                                                <DropdownMenuItem onClick={() => { if (orgId !== null) setPurging({ orgId, request }); }}>
+                                                    {t("assistantPurge.action")}
+                                                </DropdownMenuItem>
+                                            ) : null}
                                             {request.requestType === "disclosure" && (
                                                 <DropdownMenuItem
                                                     disabled={downloadingId != null}
@@ -296,6 +303,11 @@ export default function DataRequestsPanel({
                 </>
             )}
 
+            {purging && purging.orgId === orgId && !switching ? (
+                <MissionHoldingsPurgeDialog key={`${orgId}:${purging.request.id}`} orgId={purging.orgId}
+                    request={purging.request} onClose={() => setPurging(null)}
+                    onStale={() => setReloadVersion((version) => version + 1)} />
+            ) : null}
             <DataRequestDialog
                 open={dialogOpen}
                 onOpenChange={setDialogOpen}

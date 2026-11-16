@@ -19,7 +19,7 @@ const api = vi.hoisted(() => ({
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
 
 vi.mock('next-intl', () => ({
-    useTranslations: () => (key: string) => key,
+    useTimeZone: () => "UTC", useTranslations: () => (key: string) => key,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -53,7 +53,6 @@ const ACTIVE_REASON: DisqualificationReason = {
     requiresNote: true,
     position: 10,
     builtIn: false,
-    archivedAt: null,
 };
 
 let container: HTMLDivElement;

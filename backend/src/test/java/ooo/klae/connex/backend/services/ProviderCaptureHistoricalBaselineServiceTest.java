@@ -10,14 +10,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 class ProviderCaptureHistoricalBaselineServiceTest {
+    private static final RecordVisibilityScope RECORD_SCOPE = new RecordVisibilityScope(1, List.of(7));
 
     @Test
     void updateUsesActualBeforeStateAndProviderFreeConcurrencyFence() {
@@ -34,16 +37,16 @@ class ProviderCaptureHistoricalBaselineServiceTest {
             actualAfter = snapshot("actual-after");
         NotificationReconciliationService.HistoricalExpectationSnapshot
             counterfactualAfter = snapshot("provider-free");
-        when(reconciliation.historicalExpectationSnapshot(7, at))
+        when(reconciliation.historicalExpectationSnapshot(7, at, RECORD_SCOPE))
             .thenReturn(actualBefore, actualAfter);
         when(reconciliation.historicalExpectationSnapshot(
                 eq(7),
                 eq(at),
-                any(NotificationReconciliationService.HistoricalBaselineScope.class)))
+                any(NotificationReconciliationService.HistoricalBaselineScope.class), eq(RECORD_SCOPE)))
             .thenReturn(counterfactualBefore, counterfactualAfter);
 
         ProviderCaptureHistoricalBaselineService.Snapshot before =
-            service.snapshot(7, at, Set.of(44), Set.of(101));
+            service.snapshot(7, at, Set.of(44), Set.of(101), RECORD_SCOPE);
         service.persist(
             7,
             at,
@@ -58,8 +61,8 @@ class ProviderCaptureHistoricalBaselineServiceTest {
             same(actualAfter),
             eq(scope(Set.of(44), Set.of(202))),
             eq("capture-run"));
-        verify(reconciliation).historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(101)));
-        verify(reconciliation).historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(202)));
+        verify(reconciliation).historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(101)), RECORD_SCOPE);
+        verify(reconciliation).historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(202)), RECORD_SCOPE);
     }
 
     @Test
@@ -68,14 +71,14 @@ class ProviderCaptureHistoricalBaselineServiceTest {
         ProviderCaptureHistoricalBaselineService service =
             new ProviderCaptureHistoricalBaselineService(reconciliation);
         Instant at = Instant.parse("2026-07-30T09:00:00Z");
-        when(reconciliation.historicalExpectationSnapshot(7, at))
+        when(reconciliation.historicalExpectationSnapshot(7, at, RECORD_SCOPE))
             .thenReturn(snapshot("actual-before"), snapshot("actual-after"));
-        when(reconciliation.historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(101))))
+        when(reconciliation.historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(101)), RECORD_SCOPE))
             .thenReturn(snapshot("provider-free-before"));
-        when(reconciliation.historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(202))))
+        when(reconciliation.historicalExpectationSnapshot(7, at, scope(Set.of(44), Set.of(202)), RECORD_SCOPE))
             .thenReturn(snapshot("provider-free-changed"));
         ProviderCaptureHistoricalBaselineService.Snapshot before =
-            service.snapshot(7, at, Set.of(44), Set.of(101));
+            service.snapshot(7, at, Set.of(44), Set.of(101), RECORD_SCOPE);
 
         assertThrows(ConflictException.class,
             () -> service.persist(7, at, before, Set.of(44), Set.of(202), "capture-run"));

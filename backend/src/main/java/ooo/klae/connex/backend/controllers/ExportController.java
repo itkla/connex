@@ -20,12 +20,16 @@ import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
  * REST controller for CSV export of contacts, companies, deals, and products. Each endpoint returns
@@ -47,11 +51,13 @@ public class ExportController {
     private final MemberScopeResolver memberScopeResolver;
     private final WarmthFilterResolver warmthFilterResolver;
     private final WorkspaceService workspaceService;
+    private final CurrencyFilterService currencyFilterService;
 
     /**
      * Export contacts as CSV, honoring the contact list's search, facet, and member-scope filters.
      */
     @GetMapping("/persons")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportPersons(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<String> companies,
@@ -67,19 +73,21 @@ public class ExportController {
             @RequestParam(defaultValue = "false") boolean noFirstResponse,
             @RequestParam(required = false) List<String> warmthBands,
             @RequestParam(defaultValue = "false") boolean noWarmth,
-            @RequestParam(required = false) Integer goesColdWithinDays) {
+            @RequestParam(required = false) Integer goesColdWithinDays,
+            @RequestParam(required = false) List<Integer> tagIds) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         return csv("contacts.csv", exportService.exportPersons(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
             leadSources, noLeadSource, firstResponseStates, noFirstResponse,
-            warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null)));
+            warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null), tagIds));
     }
 
     /**
      * Export companies as CSV, honoring the company list's search, facet, and member-scope filters.
      */
     @GetMapping("/companies")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportCompanies(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<String> industry,
@@ -97,17 +105,28 @@ public class ExportController {
             warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null)));
     }
 
-    /** Export products as CSV, honoring the product catalog's search. */
+    /**
+     * Export products as CSV, honoring the product catalog's search and the browser's Billing,
+     * Availability, and Effective dates facets, so the file holds exactly the products the view
+     * lists.
+     */
     @GetMapping("/products")
-    public ResponseEntity<byte[]> exportProducts(@RequestParam(required = false) String q) {
+    @RequirePermission(Permission.EXPORT_DATA)
+    public ResponseEntity<byte[]> exportProducts(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) List<String> billingFrequency,
+            @RequestParam(required = false) List<String> active,
+            @RequestParam(required = false) List<String> effectiveDates) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q.trim());
-        return csv("products.csv", exportService.exportProducts(query));
+        ProductFacetFilter facets = ProductFacetFilter.fromRequest(billingFrequency, active, effectiveDates);
+        return csv("products.csv", exportService.exportProducts(query, facets));
     }
 
     /**
      * Export deals as CSV, honoring the deal list's search, facet, and member-scope filters.
      */
     @GetMapping("/deals")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportDeals(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String currency,
@@ -123,7 +142,7 @@ public class ExportController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         return csv("deals.csv", exportService.exportDeals(
-            query, currency,
+            query, currencyFilterService.resolve(currency),
             DealFilterNormalizer.normalizeIds(pipelineId, "pipelineId"),
             DealFilterNormalizer.normalizeIds(stageId, "stageId"),
             DealFilterNormalizer.normalizeIds(companyId, "companyId"),
@@ -136,6 +155,7 @@ public class ExportController {
 
     /** Export deals matching both a Smart Segment and the complete native list filter. */
     @PostMapping("/deals/segment")
+    @RequirePermission(Permission.EXPORT_DATA)
     public ResponseEntity<byte[]> exportSegmentDeals(
             @Valid @RequestBody DealSegmentQueryRequest request) {
         String query = request.getQ() == null || request.getQ().isBlank()
@@ -144,7 +164,7 @@ public class ExportController {
         MemberScope memberScope = resolveMemberScope(request.getScope(), request.getMemberIds());
         return csv("deals.csv", exportService.exportSegmentDeals(
             request.getDefinition(), query,
-            request.getCurrency() == null || request.getCurrency().isBlank() ? null : request.getCurrency(),
+            currencyFilterService.resolve(request.getCurrency()),
             DealFilterNormalizer.normalizeIds(request.getPipelineId(), "pipelineId"),
             DealFilterNormalizer.normalizeIds(request.getStageId(), "stageId"),
             DealFilterNormalizer.normalizeIds(request.getCompanyId(), "companyId"),

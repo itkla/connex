@@ -56,6 +56,17 @@
       AND high_person.archived_at IS NULL
       AND high_person.suspended_at IS NULL
       AND high_person.provision_ceased_at IS NULL
+    LEFT JOIN company low_company
+      ON low_company.workspace_id = d.workspace_id
+      AND low_company.id = d.low_company_id
+      AND low_company.archived_at IS NULL
+    LEFT JOIN company high_company
+      ON high_company.workspace_id = d.workspace_id
+      AND high_company.id = d.high_company_id
+      AND high_company.archived_at IS NULL
+  </sql>
+
+  <sql id="visibleReviewCompanyJoins">
     LEFT JOIN company low_person_company
       ON low_person_company.id = low_person.company_id
       AND (
@@ -63,11 +74,8 @@
         OR EXISTS (
           SELECT 1
           FROM company_share low_company_share
-          JOIN workspace vws
-            ON vws.id = low_company_share.workspace_id
-          JOIN workspace ows
-            ON ows.id = low_person_company.workspace_id
-            AND ows.org_id = vws.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = low_person_company.workspace_id
           WHERE low_company_share.company_id = low_person_company.id
             AND low_company_share.workspace_id = #{workspaceId}
         )
@@ -80,24 +88,13 @@
         OR EXISTS (
           SELECT 1
           FROM company_share high_company_share
-          JOIN workspace vws
-            ON vws.id = high_company_share.workspace_id
-          JOIN workspace ows
-            ON ows.id = high_person_company.workspace_id
-            AND ows.org_id = vws.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = high_person_company.workspace_id
           WHERE high_company_share.company_id = high_person_company.id
             AND high_company_share.workspace_id = #{workspaceId}
         )
       )
       AND high_person_company.archived_at IS NULL
-    LEFT JOIN company low_company
-      ON low_company.workspace_id = d.workspace_id
-      AND low_company.id = d.low_company_id
-      AND low_company.archived_at IS NULL
-    LEFT JOIN company high_company
-      ON high_company.workspace_id = d.workspace_id
-      AND high_company.id = d.high_company_id
-      AND high_company.archived_at IS NULL
   </sql>
 
   <sql id="visibleCurrentReviewPredicate">
@@ -498,6 +495,7 @@
   <select id="findVisibleItems" resultMap="reviewItemRow" timeout="3">
     SELECT /*+ MAX_EXECUTION_TIME(3000) */ <include refid="reviewItemColumns"/>
     <include refid="visibleReviewJoins"/>
+    <include refid="visibleReviewCompanyJoins"/>
     WHERE <include refid="visibleReviewPredicate"/>
     ORDER BY d.detected_at DESC, d.id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -563,6 +561,7 @@
   <select id="findVisibleItemById" resultMap="reviewItemRow">
     SELECT <include refid="reviewItemColumns"/>
     <include refid="visibleReviewJoins"/>
+    <include refid="visibleReviewCompanyJoins"/>
     WHERE <include refid="visibleCurrentReviewPredicate"/>
       AND d.id = #{id}
   </select>

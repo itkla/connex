@@ -4,12 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.lang.reflect.Field;
@@ -27,6 +29,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLContext;
@@ -38,15 +41,138 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 
+import org.eclipse.angus.mail.smtp.SMTPOutputStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
+import org.slf4j.bridge.SLF4JBridgeHandler;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+
+import ooo.klae.connex.backend.delivery.provider.smtp.BodySafeSmtpTransport;
+import ooo.klae.connex.backend.support.SmtpCaptureServer;
 
 class JavaMailSenderFactoryTest {
 
     private static final long STALL_DEADLINE_MILLIS = 2_000L;
     private static final long RELAY_LATCH_SECONDS = 5L;
     private static final long STALL_MARGIN_MILLIS = 6_000L;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void originalMessageSerializesExactlyOnceToTheSmtpStreamAfterData(boolean deadline) throws Exception {
+        try (SmtpCaptureServer smtp = new SmtpCaptureServer()) {
+            ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
+                    "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
+            JavaMailSenderFactory factory = new JavaMailSenderFactory();
+            JavaMailSenderFactory.DeadlineBoundSender bounded = deadline
+                    ? factory.deadlineBoundForConfig(config, InetAddress.getLoopbackAddress(), false,
+                            TimeUnit.SECONDS.toNanos(5)) : null;
+            JavaMailSender sender = deadline ? bounded.sender() : factory.forConfig(config);
+            AtomicInteger serializations = new AtomicInteger();
+            AtomicReference<MimeMessage> serialized = new AtomicReference<>();
+            MimeMessage message = new MimeMessage(((JavaMailSenderImpl) sender).getSession()) {
+                @Override
+                public void writeTo(OutputStream stream, String[] ignoredHeaders) throws IOException, MessagingException {
+                    serialized.set(this);
+                    serializations.incrementAndGet();
+                    assertTrue(smtp.hasReceivedData());
+                    assertInstanceOf(SMTPOutputStream.class, stream);
+                    super.writeTo(stream, ignoredHeaders);
+                }
+            };
+            message.setFrom(new InternetAddress(config.fromAddress()));
+            message.setRecipient(Message.RecipientType.TO, new InternetAddress("recipient@example.test"));
+            message.setSubject("Original message");
+            String body = "SMTP serialization sentinel\r\n";
+            message.setText(body);
+            if (deadline) {
+                bounded.connectAndSend(message, () -> {});
+            } else {
+                sender.send(message);
+            }
+
+            assertSame(message, serialized.get());
+            assertEquals(1, serializations.get());
+            assertEquals(body, smtp.awaitMessage().getContent());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"base64, false", "base64, true", "quoted-printable, false", "quoted-printable, true"})
+    void protocolTraceSuppressesEncodedDataButKeepsCommandsAndReplies(String encoding, boolean deadline)
+            throws Exception {
+        String bearer = "0123456789abcdef".repeat(4);
+        Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        Level previousLevel = logger.getLevel();
+        java.util.logging.Logger protocolLogger = java.util.logging.Logger.getLogger(
+                BodySafeSmtpTransport.class.getPackageName() + ".protocol");
+        java.util.logging.Level previousProtocolLevel = protocolLogger.getLevel();
+        boolean bridgeInstalled = SLF4JBridgeHandler.isInstalled();
+        if (!bridgeInstalled) {
+            SLF4JBridgeHandler.install();
+        }
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(Level.TRACE);
+        protocolLogger.setLevel(java.util.logging.Level.FINEST);
+        try (SmtpCaptureServer smtp = new SmtpCaptureServer()) {
+            ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
+                    "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
+            JavaMailSenderFactory factory = new JavaMailSenderFactory();
+            JavaMailSenderFactory.DeadlineBoundSender bounded = deadline
+                    ? factory.deadlineBoundForConfig(config, InetAddress.getLoopbackAddress(), false,
+                            TimeUnit.SECONDS.toNanos(5)) : null;
+            JavaMailSender sender = deadline ? bounded.sender() : factory.forConfig(config);
+            MimeMessage message = message(sender, "<a href=\"https://example.test/unsubscribe#token="
+                    + bearer + "\">Unsubscribe</a>\r\n.\r\n<p>PRIVATE_DATA_SENTINEL</p>");
+            message.setHeader("Content-Transfer-Encoding", encoding);
+            if (deadline) {
+                bounded.connectAndSend(message, () -> {});
+            } else {
+                sender.send(message);
+            }
+            MimeMessage captured = smtp.awaitMessage();
+            assertEquals(encoding, captured.getEncoding());
+            assertEquals(bearer, SmtpCaptureServer.unsubscribeBearer(captured));
+            String encoded = new String(captured.getRawInputStream().readAllBytes(), StandardCharsets.US_ASCII);
+            assertFalse(encoded.contains(bearer));
+            if ("quoted-printable".equals(encoding)) {
+                assertTrue(encoded.contains("=\r\n"));
+                assertTrue(encoded.replace("=\r\n", "").contains(bearer));
+            }
+            String protocol = appender.list.stream()
+                    .filter(event -> event.getLevel() == Level.TRACE && event.getLoggerName().endsWith(".protocol"))
+                    .map(ILoggingEvent::getFormattedMessage).collect(java.util.stream.Collectors.joining("\n"));
+            assertTrue(protocol.contains("DATA"));
+            assertTrue(protocol.contains("354"));
+            assertTrue(protocol.contains("250 accepted"));
+            assertFalse(protocol.contains("Content-Transfer-Encoding"));
+            assertFalse(protocol.contains("PRIVATE_DATA_SENTINEL"));
+            for (String line : encoded.split("\r?\n")) {
+                if (line.length() > 16) {
+                    assertFalse(protocol.contains(line));
+                }
+            }
+            assertTrue(appender.list.stream().noneMatch(event -> event.getFormattedMessage().contains(bearer)));
+        } finally {
+            logger.setLevel(previousLevel);
+            protocolLogger.setLevel(previousProtocolLevel);
+            if (!bridgeInstalled) {
+                SLF4JBridgeHandler.uninstall();
+            }
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
 
     @Test
     void authenticatedConfigsAreNotCachedWithPlaintextPasswords() throws Exception {

@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.AssertTrue;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
@@ -21,6 +23,19 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 public class DealLineItemRequest {
+    /** Computes the proposed line and totals without persisting any changes. */
+    private boolean previewOnly;
+
+    /** Explicit consent to replace a nonzero manual deal value with line totals. */
+    private boolean confirmValueReplacement;
+
+    @DecimalMin("0")
+    @Digits(integer = 13, fraction = 2)
+    private BigDecimal expectedManualValue;
+
+    @Size(max = 8)
+    private String expectedCurrency;
+
     private Integer productId;
 
     @Size(max = 255)
@@ -66,4 +81,12 @@ public class DealLineItemRequest {
     private LocalDate servicePeriodEnd;
 
     private Integer position;
+
+    /** Percentage discounts must stay within 100; fixed-amount discounts retain money bounds. */
+    @AssertTrue(message = "Percentage discount must not exceed 100%")
+    @JsonIgnore
+    public boolean isPercentageDiscountValid() {
+        return !"percent".equals(discountType) || discountValue == null
+            || discountValue.compareTo(new BigDecimal("100")) <= 0;
+    }
 }

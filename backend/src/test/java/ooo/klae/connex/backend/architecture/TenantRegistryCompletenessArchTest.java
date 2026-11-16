@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +18,8 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.w3c.dom.Document;
 
+import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
+import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
 import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
 
 /**
@@ -31,6 +34,15 @@ import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
  * exists. Adding a mapper without classifying it fails the build.
  */
 class TenantRegistryCompletenessArchTest {
+
+    @Test
+    void privacyPlacementEvidenceHasOrganizationOwnedLifecycleDisposition() {
+        String ledger = "ai_assistant_privacy_operation_workspace";
+        assertTrue(TablePlaneRegistry.CONTROL_PLANE_TABLES.contains(ledger));
+        assertTrue(TablePlaneRegistry.CONTROL_PLANE_WORKSPACE_STATE_TABLES.contains(ledger));
+        assertFalse(TablePlaneRegistry.CONTROL_PLANE_WORKSPACE_DATA_TABLES.contains(ledger));
+        assertFalse(ControlWorkspaceLifecycleRegistry.declarations().containsKey(ledger));
+    }
 
     @Test
     void every_mapper_namespace_is_classified_as_scoped_or_control_plane() throws Exception {

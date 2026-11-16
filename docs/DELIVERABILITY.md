@@ -365,6 +365,67 @@ Those items' webhooks match no delivery and record no suppression and no consent
 records for that recipient and add any suppression by hand** (`POST /api/suppressions`). Where the
 message ID was attached after all, the webhook has already recorded the suppression and the manual
 check simply finds nothing left to add.
+Each campaign dispatch attempt re-renders its unsubscribe link with a fresh random 64-character
+lowercase hexadecimal bearer. Registration commits only its SHA-256 digest before submission;
+`campaign_delivery_unsubscribe_token` retains all issued digests, including migrated deliveries and
+prior attempts. Links have no expiry and work while their delivery exists. Newly materialized recipients
+have no digest until dispatch reaches registration. Workspace exports reveal digests, which
+cannot be exchanged as bearers.
+
+Provider diagnostics and returned message ids can echo the rendered message. Before truncation,
+storage in delivery errors or event details, or logging, Connex replaces the attempt's bearer and
+any 64-hex run with `[redacted]`, keeping the remaining diagnostic text. Returned provider message
+ids use one correlation form: inspect every case-insensitive 64-hex window, including windows inside
+longer runs, and replace a matching bearer window with the SHA-256 digest of its lowercase text.
+Each pass uses the leftmost non-overlapping replacements and rescans its output, since a replacement
+can recreate an overlapping bearer. After at most four replacement passes, a final scan must find
+no recorded bearer. An identifier still containing one is unusable: dispatch stores a NULL message
+id and logs a WARN without the identifier; webhook message lookup returns no match; event persistence
+stores NULL and gives up provider-key deduplication for that event. Ordinary missing event ids retain
+the existing event-type fallback. Dispatch and webhooks match the same workspace's recorded digests;
+dispatch also recognizes the current attempt's digest explicitly,
+so a replay returning the original receipt is safe. Webhooks normalize both incoming message ids
+before lookup and event ids before deduplication against recorded digests in the resolved workspace.
+Unrelated ids, including opaque 64-hex ids, stay byte-identical, so bounce and complaint webhooks still
+correlate, suppress, and revoke consent. Webhook free-text reasons use the generic `[redacted]` rule.
+Each pass computes every candidate digest before one workspace-scoped `token_hash IN (...)` query
+resolves uncached membership. Positive and negative results are cached for that identifier only.
+There are at most five queries per identifier, including the final residual check; short ids do not
+query. These are plain non-locking consistent reads, and dispatch's current digest needs no lookup.
+Identifiers exceeding the 255-code-point storage limit are rejected before persistence or digest
+probes; accepted receipts then require reconciliation. Oversized incoming webhook message ids
+cannot match stored ids and are ignored without probes; oversized event ids still reject persistence.
+V228 rewrites each delivery's own historical bearer case-insensitively and clears any message id
+still containing it after replacement. Foreign historical bearers are outside that bounded guarantee
+(see `UPGRADING.md`). Event rekeying skips
+unique-key conflicts, then clears every remaining bearer-bearing key to NULL, covering collisions
+with existing canonical keys and between legacy rows being rekeyed.
+Both the native Angus SMTP loggers and Connex's transport package loggers receive the free-text
+scrubbing before their diagnostics reach logging handlers. SMTP MIME DATA tracing is suppressed entirely, including at
+TRACE, regardless of body encoding; command and response diagnostics remain available. The native
+Angus transport starts suppression when `data()` returns its stream after the 354 response, and
+serializes the original message directly to that stream once. It performs no message copy or
+pre-egress serialization. `mail.smtp.chunksize=0` keeps BDAT disabled; the `bdat()` stream hook also
+starts fail-safe suppression if chunking is ever enabled: without a DATA dot terminator, suppression
+lasts until send cleanup and hides BDAT commands and replies too. Under DATA, the dot terminator
+resumes response tracing, and send/close cleanup clears suppression even on failure. Socket abort still precedes synchronized
+transport close at the deadline, releasing a blocked send before cross-thread close acquires its
+monitor.
+Angus names its loggers after the transport class's package, so SMTP diagnostics and protocol
+traces now log under `ooo.klae.connex.backend.delivery.provider.smtp` and
+`ooo.klae.connex.backend.delivery.provider.smtp.protocol`; enable those, not the
+`org.eclipse.angus.mail.smtp` names, when tracing SMTP commands.
+
+**An idempotent replay re-renders the unsubscribe link under the unchanged
+`send:{sendId}:{deliveryId}` key.** An endpoint that compares request bodies under a key (such as
+Resend's 409 response) refuses the changed replay. The earlier acceptance remains **ambiguous** and
+enters the reconciliation path and manual suppression check above. An endpoint that deduplicates
+solely by key returns the original receipt, allowing recovery. With either contract the provider
+accepts at most one message, and every emailed link remains valid. This applies to claims in flight
+at the V227/V228 cutover too; their old bearer cannot be reconstructed. Connector administrators
+must account for this difference when opting into replay; Connex introduces no new provider retry
+policy or required secret.
+
 Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no
@@ -692,12 +753,92 @@ will not catch the resolution failure above.
 
 The two are asymmetric, and the asymmetry is easy to misread as a product-wide capability.
 
+**Saved campaign content and personalization**
+
+Saved campaign revisions are immutable and can be reopened from Delivery → Messages → View content.
+Inspection shows the exact saved subject, HTML source and plain-text body in read-only controls.
+HTML is inert text: it is never inserted as markup, executed, or loaded as a document. Saving keeps
+the author's draft available. Starting a new revision copies saved content into the authoring form;
+replacing nonempty, different input requires discard confirmation and never edits the saved revision.
+
+The only supported personalization token is the exact, case-sensitive `{{unsubscribe_url}}`, in
+subject, HTML and plain-text content (SMS uses plain text only). There is no whitespace or alias
+normalization. Unknown or incomplete placeholders beginning with `{{` are refused by the server
+before revision insertion, audience-send creation, queueing an existing draft, or workflow enrollment. Existing
+invalid revisions remain inspectable and must be copied into a corrected new revision before use;
+validation does not rewrite historical content. Queue validation reads the send's bound revision,
+including drafts created before this guard was introduced. Dispatch also validates existing queued
+content before provider resolution or any pending delivery claim. Unsupported content produces a
+persisted `contentRefused` send outcome, shown to campaign readers as “Content refused” with correction
+guidance, and causes the dispatch job to report failure with a fixed, content-free diagnostic.
+Correct the revision and prepare a new send;
+this refusal never retries invalid content. Completed sends are not reopened or reclassified.
+
+Refusal has terminal scheduling semantics. Under the send row mutex, one transaction appends the
+internal refusal marker against a pending delivery, settles pending work, refreshes counters, and
+records completion. Audience sends become `failed`. The schema requires triggered sends to retain
+stored status `triggered`; their completion time and refusal marker close scheduling and enrollment,
+and the send API presents terminal status `failed`. The existing localized “Content refused” reason
+remains visible. Subsequent sweeps do not rediscover the send as normal dispatch work. An older
+marker-only refusal is discovered once more and settled by the same idempotent transaction.
+
+Clean pending deliveries become `skipped/not_dispatchable` without incrementing attempts. A pending
+row carrying prior possible-submission history becomes `failed` with reconciliation required instead;
+its diagnostics, provider correlation, fingerprint, attempt count, and reservation remain intact.
+Completed and in-flight rows and all prior events are unchanged by refusal. Already in-flight attempts
+may complete normally. Their expiry recovery is still discoverable, but a closed send cannot requeue
+them: an expired attempt becomes ambiguous and requires reconciliation. A late pre-egress release
+also cannot restore pending work after closure. Corrected content uses a new revision and send.
+
+Recording uses a short `READ_COMMITTED` transaction, rechecks active status, and serializes duplicate
+recorders. The marker uses reserved `provider_event_id` `connex-content-refusal:<sendId>` with
+`provider_id=NULL`; this internal-marker exception distinguishes it from provider-controlled failure
+detail and allows indexed lookup. Ordinary internal events retain null provider correlation fields.
+Workspace predicates and the owning delivery join protect marker attribution. If another claim has
+already taken the last pending delivery, refusal does not append a marker to completed/in-flight
+history; ordinary claim completion and recovery remain responsible for those attempts.
+
+This guard protects pending claims by this release's workers. Quiesce older workers before relying
+on it; a pre-fix worker does not understand the refusal marker, including after a rollback. Attempts
+already claimed remain governed by their original lease and outcome handling.
+
+Ordinary closing CSS braces remain literal content, so nested email stylesheet rules remain usable.
+HTML validation uses the pinned jsoup HTML5 parser on an analysis-only copy: entity-decoded text
+is joined across inline elements, while `<br>`, block boundaries, and literal newlines break adjacency.
+Decoded attribute values are checked too. Outlook conditional comments, including downlevel-revealed
+variants, are checked as raw inner source after entity decoding, before any markup is removed. This
+preserves attributes on table elements that body-context fragment parsing would discard. A separate
+lexical pass joins inline fragments and preserves block/`<br>` boundaries without reparsing HTML.
+Both inclusion and omission of conditional branches are considered when checking adjacent braces;
+ordinary comments remain inert. The document traversal uses an explicit stack, and conditional
+contents are scanned without recursive fragment parsing.
+Stylesheets never globally disable structural boundaries. Only explicit `display:none` or inline
+display declarations, in a local style or a matching simple tag, class, ID or universal stylesheet
+selector, affect the corresponding elements. A visible `<br>` still breaks adjacency with inline
+display. Other styling preserves block and line boundaries, including literal newlines in `<pre>`.
+Hidden/inactive content and non-visible metadata may be omitted when checking adjacency. This
+conservative check is not a CSS rendering engine and may refuse ambiguous conditional/styled source.
+No CSS is executed or externally loaded. Exact literal supported markers are masked before parsing; encoded or tag-split spellings are refused even for
+`unsubscribe_url`, since dispatch cannot substitute those spellings. HTML is decoded once, so escaped
+literal entity text is not double-decoded. Original saved HTML, subject, and plain-text source remain
+unchanged. Subject/plain-text validation remains literal. Admission refusals return HTTP 400 with
+`CAMPAIGN_UNSUPPORTED_TOKEN` without echoing customer content.
+
+Authors must include `{{unsubscribe_url}}` in the message body, or supply an equivalent opt-out
+instruction themselves. Connex substitutes existing markers only: neither the renderer nor the
+SMTP, ESP, or SMS adapter appends an opt-out link or instruction. A subject-only marker does not
+provide an opt-out mechanism in the body.
+
+A visual editor, rendered/recipient-specific previews and test-send flow are deferred. This source
+inspection adds no external delivery. The instance capability, transport readiness, permissions,
+consent and suppression gates continue to apply.
+
 | | Campaign (marketing) | Transactional (invites, notifications, reports, account mail) |
 |---|---|---|
 | Bounce handling | Yes — **ESP provider with webhooks only** | **None** |
 | Complaint handling | Yes — same condition | **None** |
 | Suppression list | Yes — `unsubscribe`, `hard_bounce`, `complaint`, `do_not_contact`, `manual` | **None** |
-| Unsubscribe | Yes — body link, per recipient | **None** |
+| Unsubscribe | Body link when the author includes `{{unsubscribe_url}}`; otherwise author-supplied instructions | **None** |
 | `List-Unsubscribe` header | **No** | **No** |
 | Per-message outcome | Recorded against the delivery row | Swallowed ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)) |
 | Worker-loss replay | Triggered sends: HTTP ESP/SMS only when that connector explicitly declares idempotent submission; SMTP requires reconciliation. Audience sends: never; requires reconciliation | None |
@@ -708,6 +849,30 @@ automatically. On the **built-in SMTP provider none of that exists**: you get `s
 handoff and nothing after, so `delivered`, `bounced`, and `complained` on the campaign engagement
 figures are all zero. Zero there means *no receipts*, not *no bounces* — do not read a clean SMTP
 campaign report as a clean campaign.
+
+Campaign engagement separates preparation from delivery evidence. The campaign and per-send
+engagement APIs expose `preparedRecipients` for materialized send recipients, including drafts.
+The campaign total counts a contact again for each send; it is not a distinct audience or reach
+count. Snapshot inclusion remains a separate audience estimate. `dispatched` counts deliveries
+with a persisted `submitted_at` fact, including operator-confirmed acceptance and receipt recovery
+without an earlier dispatch event. A later failure receipt does not erase that submission. The
+Sent drill-through uses `submitted=true` on the recipient endpoint to select the same population.
+Repeated receipts do not inflate status counts.
+`delivered`, `bounced`, and `complained` use current provider-confirmed delivery statuses; their
+rates divide by the confirmed-handoff count. No dispatch or eligibility decision depends on these reporting counts.
+
+Channel summaries use those same preparation, dispatch, and delivery counts. Receipt availability
+is evaluated independently for each channel, so a receipt on one channel does not make another
+channel measurable. `deliveryReceiptsAvailable` means receipts have actually been observed,
+not that a provider supports them. Without observed receipts, the UI shows delivery outcomes
+and rates as not measured, including for unsent drafts and for services such as SMTP that supply
+no delivery receipts.
+
+Engagement recipient lists count message entries for individual sends, not unique contacts. The
+same contact can appear once for each send. Each row identifies the message name and a one-based
+send number in creation order within its campaign, independent of database identifiers. Recipient
+pages preserve their contact access checks. Deprecated numeric response aliases remain available
+for older frontends under the [response compatibility contract](UPGRADING.md#campaign-engagement-response-compatibility-2257).
 
 **SMTP acceptance is not idempotent.** The stable `Message-ID` is useful when searching relay logs,
 but it is not a duplicate-suppression guarantee. When a campaign recipient is marked as needing

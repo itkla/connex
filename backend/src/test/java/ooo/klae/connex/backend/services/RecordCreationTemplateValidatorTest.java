@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,6 +18,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -63,7 +67,24 @@ class RecordCreationTemplateValidatorTest {
             personMapper,
             pipelineMapper,
             workspaceService,
-            objectMapper);
+            objectMapper, unfiltered());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(RecordCreationRecordType.class)
+    void definitionsWithoutReferenceDefaultsSkipTheScope(RecordCreationRecordType type) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(7))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            var guarded = new RecordCreationTemplateValidator(
+                new RecordCreationFieldRegistry(), customFieldMapper, tagMapper, companyMapper,
+                personMapper, pipelineMapper, workspaceService, objectMapper, fixture.scopes);
+
+            guarded.validateAndCanonicalize(type, new LocalizedTextDto("Basic", "基本"), null,
+                definition(field("name", false, null)));
+
+            org.mockito.Mockito.verifyNoInteractions(fixture.control, companyMapper, pipelineMapper);
+        }
     }
 
     @Test
@@ -285,8 +306,8 @@ class RecordCreationTemplateValidatorTest {
         Stage stage = new Stage();
         stage.setId(5);
         stage.setPipeline(other);
-        when(pipelineMapper.pipelineExists(7, 3)).thenReturn(true);
-        when(pipelineMapper.getVisibleStageById(7, 5)).thenReturn(stage);
+        when(pipelineMapper.pipelineExists(7, "[7,8,9]", 3)).thenReturn(true);
+        when(pipelineMapper.getVisibleStageById(7, "[7,8,9]", 5)).thenReturn(stage);
         RecordCreationTemplateDefinitionDto mismatched = new RecordCreationTemplateDefinitionDto(
             1,
             List.of(group(
@@ -354,6 +375,25 @@ class RecordCreationTemplateValidatorTest {
             names(),
             null,
             definition(field("value", false, number(value))));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"usd,USD", "' kwd ',KWD", "CLF,CLF"})
+    void currencyDefaultsShareMonetaryValidationAndNormalization(String input, String expected) {
+        var spec = new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_string, input, null, null, null, null, null);
+        var result = validator.validateAndCanonicalize(RecordCreationRecordType.deal, names(), null,
+            definition(field("currency", false, spec)));
+        assertEquals(expected, result.definition().groups().getFirst().fields().getFirst().defaultSpec().stringValue());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"YEN", "XXX", "XTS", "XAU"})
+    void nonmonetaryCurrencyDefaultsAreRefused(String currency) {
+        var spec = new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_string, currency, null, null, null, null, null);
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validator.validateAndCanonicalize(
+            RecordCreationRecordType.deal, names(), null, definition(field("currency", false, spec))));
     }
 
     private void validate(RecordCreationTemplateDefinitionDto definition) {

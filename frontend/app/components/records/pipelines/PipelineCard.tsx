@@ -150,7 +150,7 @@ export default function PipelineCard({
                     {metricsStatus === 'ready' && metrics && (
                         <div className="flex flex-wrap items-start gap-8">
                             <CountTile label={t('stages')} value={metrics.numStages} />
-                            <Link href={pipelineDealsHref(pipeline.id)} className=""><CountTile className="hover:text-brand transition-colors duration-300 transition-ease-in-out" label={t('deals')} value={metrics.numDeals} /></Link>
+                            <Link href={pipelineDealsHref(pipeline.id)} className=""><CountTile className="hover:text-brand-text transition-colors duration-300 transition-ease-in-out" label={t('deals')} value={metrics.numDeals} /></Link>
                             <RelatedUsersSection users={metrics.relatedUsers} />
                             <AssociatedStagesSection stages={stages} />
                         </div>
@@ -227,7 +227,7 @@ function AssociatedStagesSection({ stages }: { stages: Stage[] }) {
             <div className="flex flex-wrap items-start gap-2">
                 {stages.map((s) => (
                     // <div key={s.id}>{s.name}</div>
-                    <Chip key={s.id} type="default" color="bg-brand-light text-brand-dark">{s.name}</Chip>
+                    <Chip key={s.id} type="default" color="bg-brand-light text-brand-text">{s.name}</Chip>
                 ))}
             </div>
         </div>

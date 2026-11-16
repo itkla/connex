@@ -30,7 +30,11 @@
         "joinTitle": "Have an invite link?",
         "joinPlaceholder": "Paste your invite link",
         "joinButton": "Continue",
-        "joinInvalid": "That doesn't look like a valid invite link."
+        "joinInvalid": "That doesn't look like a valid invite link.",
+        "standingFailedTitle": "We couldn't check your account",
+        "standingFailedBody": "Try again in a moment. You can still decline ownership offers or sign out.",
+        "standingRetry": "Try again",
+        "confinedRecheck": "Check again"
     },
     "InviteAccept": {
         "metaTitle": "Accept your invitation",
@@ -153,6 +157,14 @@
         "showArchived": "Show archived ({count})"
     },
     "WorkspaceIdentity": {
+        "currencyTitle": "Default deal currency",
+        "currencyDescription": "New deals start in this currency. Existing deals and amounts stay as they are.",
+        "currencyLabel": "Default currency",
+        "currencyEffective": "Current default: {currency}, chosen in workspace settings. You can choose another currency for an individual deal.",
+        "currencyFallback": "Current default: {currency}. No workspace default has been saved, so new deals use the original USD default. Save a currency to choose one explicitly.",
+        "currencyInvalid": "Choose a supported currency from the list.",
+        "currencySaved": "Default deal currency saved",
+        "currencySave": "Save default currency",
         "title": "Workspace identity",
         "description": "Keep the name people see and the time boundary used for shared reporting accurate.",
         "nameLabel": "Workspace name",
@@ -208,6 +220,23 @@
         "memberActions": "Member actions",
         "inviteActions": "Invite actions",
         "remove": "Remove",
+        "removeTitle": "Remove {name}?",
+        "removeDescription": "They will lose access to {workspace}. Their Connex account and workspace records are kept.",
+        "removeOwnershipConsequences": "Their contacts, companies, deals, campaigns and sequences will have no owner, and their tasks will become unassigned. Review those records and assign a teammate afterwards.",
+        "removeRejoinConsequences": "They can join again through a still-valid invite link. Removal does not revoke outstanding invitations or shared links. Review and explicitly revoke any you no longer want to allow.",
+        "reviewInvitations": "Review invite links",
+        "removedDescription": "Their contacts, companies, deals, campaigns and sequences now have no owner, and their tasks are unassigned. Outstanding invitations and shared links remain unchanged.",
+        "revokeLinkConsequences": "Revoking a link stops anyone else from joining through it, including other invitees. People who already joined keep their membership.",
+        "replaceInvite": "Replace invitation",
+        "replaceInviteHint": "After a reload, replace an invitation to get a new copyable link. The previous invitation will stop working.",
+        "emailAccepted": "The email service accepted the invitation email. Delivery to the inbox is not confirmed. You can also copy and share the link.",
+        "emailSkipped": "No email was sent because email delivery is not configured. Copy and share the invitation link.",
+        "emailFailed": "The invitation was created, but the email could not be submitted. Copy and share the link, or replace the invitation to try again.",
+        "emailUnconfirmed": "The invitation was created. Email submission is not confirmed. Copy and share the link if needed.",
+        "copyFailed": "Couldn't copy the invite link",
+        "copyFailedDescription": "The invitation is still available. Select and copy the link below, or try Copy link again.",
+        "inviteUrl": "Invitation link",
+        "close": "Close",
         "removeConfirm": "Confirm",
         "cancel": "Cancel",
         "removed": "Member removed",
@@ -228,6 +257,8 @@
         "sendInvite": "Send invite",
         "sending": "Sending",
         "inviteCreated": "Invite link copied to clipboard",
+        "invitationCreated": "Invitation created",
+        "inviteNoExpiry": "No expiry",
         "memberInvited": "Invitation sent — they'll see it in their notifications.",
         "inviteFailed": "Couldn't create the invite",
         "pendingTitle": "Pending invites",
@@ -268,7 +299,19 @@
         "domainsLoadFailedBody": "Nothing changed. The policy itself didn't load, so try again in a moment.",
         "domainRemoved": "Domain removed",
         "domainRemoveFailed": "Couldn't remove the domain",
-        "domainsEmpty": "No domain restrictions. Anyone with an invite link can join, regardless of their email."
+        "domainsEmpty": "No domain restrictions. Anyone with an invite link can join, regardless of their email.",
+        "approvalCode": "Passkey approval code",
+        "ownershipOffered": "Ownership offered to {name}. They become an owner when they accept.",
+        "ownershipPending": "Ownership offered",
+        "withdrawOwnershipOffer": "Withdraw ownership offer",
+        "ownershipOfferWithdrawn": "Ownership offer withdrawn",
+        "ownershipOffersLoadFailed": "Couldn't load pending ownership offers",
+        "ownershipOfferWithdrawFailed": "Couldn't withdraw the ownership offer",
+        "confinementSubjectRole": "Change {name} to {role}",
+        "passkeyNotApproved": "Passkey not approved",
+        "passkeyNotApprovedHint": "None of their passkeys is approved in this organization yet. Give them a passkey approval code from this member's menu.",
+        "membersRefreshFailed": "Couldn't refresh the member list",
+        "membersRefreshFailedDescription": "The change was saved. Reload the page to see the latest approval status."
     },
     "WorkspaceRoles": {
         "title": "Roles",
@@ -288,13 +331,13 @@
         "deleteFailed": "Couldn't delete the role",
         "loadFailed": "Couldn't load roles",
         "nameRequired": "Enter a role name",
-        "noAccess": "Only workspace owners can manage roles.",
+        "noAccess": "Your role doesn't include managing workspace roles. Ask a workspace owner to grant access.",
         "empty": "No custom roles yet.",
         "permissionCount": "{count} permissions",
         "defaultRolesLabel": "Built-in roles",
         "customRolesLabel": "Custom roles",
         "builtInBadge": "Built-in",
-        "builtInSubtitle": "Standard access levels. These can't be edited.",
+        "builtInSubtitle": "Standard access levels. Export data can be changed for each role.",
         "fullAccess": "Full access",
         "noPermissions": "No permissions",
         "createTitle": "New role",
@@ -305,14 +348,280 @@
         "selectAll": "Select all",
         "clearAll": "Clear",
         "create": "Create role",
-        "noPermissionsHint": "Select at least the actions this role should allow.",
+        "noPermissionsHint": "No actions selected. Members can still read records available to them through workspace membership.",
         "roleEntityLabel": "role",
         "permissionLabels": {
-            "teamManage": {
-                "group": "Teams",
-                "action": "Manage"
+            "COMPANY_CREATE": {
+                "action": "Create",
+                "description": "Create companies in this workspace."
+            },
+            "COMPANY_UPDATE": {
+                "action": "Edit",
+                "description": "Edit companies you have access to."
+            },
+            "COMPANY_DELETE": {
+                "action": "Archive and restore",
+                "description": "Archive and restore companies you have access to. Archiving keeps their history and can be undone."
+            },
+            "PERSON_CREATE": {
+                "action": "Create",
+                "description": "Create contacts in this workspace."
+            },
+            "PERSON_UPDATE": {
+                "action": "Edit",
+                "description": "Edit contacts you have access to."
+            },
+            "PERSON_DELETE": {
+                "action": "Archive and restore",
+                "description": "Archive and restore contacts you have access to. Archiving keeps their history and can be undone."
+            },
+            "DEAL_CREATE": {
+                "action": "Create",
+                "description": "Create deals in this workspace."
+            },
+            "DEAL_UPDATE": {
+                "action": "Edit",
+                "description": "Edit deals you have access to."
+            },
+            "DEAL_DELETE": {
+                "action": "Delete",
+                "description": "Delete deals you have access to. If a deal has documents beyond draft, deletion also needs a built-in Owner or Admin role with no custom role assigned."
+            },
+            "ACTIVITY_CREATE": {
+                "action": "Create",
+                "description": "Create activities in this workspace."
+            },
+            "ACTIVITY_UPDATE": {
+                "action": "Edit",
+                "description": "Edit activities you have access to. Activities captured from connected accounts remain read-only."
+            },
+            "ACTIVITY_DELETE": {
+                "action": "Delete",
+                "description": "Delete activities you have access to. Activities captured from connected accounts remain read-only."
+            },
+            "NOTE_CREATE": {
+                "action": "Create",
+                "description": "Create notes in this workspace."
+            },
+            "NOTE_UPDATE": {
+                "action": "Edit",
+                "description": "Edit notes you have access to."
+            },
+            "NOTE_DELETE": {
+                "action": "Delete",
+                "description": "Delete notes you have access to."
+            },
+            "TASK_CREATE": {
+                "action": "Create",
+                "description": "Create tasks in this workspace."
+            },
+            "TASK_UPDATE": {
+                "action": "Edit",
+                "description": "Edit tasks you have access to."
+            },
+            "TASK_DELETE": {
+                "action": "Delete",
+                "description": "Delete tasks you have access to."
+            },
+            "REPORT_CREATE": {
+                "action": "Create",
+                "description": "Create reports in this workspace."
+            },
+            "REPORT_UPDATE": {
+                "action": "Edit",
+                "description": "Edit reports you have access to."
+            },
+            "REPORT_DELETE": {
+                "action": "Delete",
+                "description": "Delete your own reports and snapshots. Deleting another member's work or a report containing scheduled snapshots needs a built-in Owner or Admin role with no custom role assigned."
+            },
+            "COMMENT_CREATE": {
+                "action": "Add comments",
+                "description": "Add comments to records you have access to."
+            },
+            "COMMENT_MODERATE": {
+                "action": "Moderate comments",
+                "description": "Remove other authors' comment text from accessible records; permission to add comments is also required. Authors can remove their own comments without moderation access."
+            },
+            "ATTACHMENT_CREATE": {
+                "action": "Upload files",
+                "description": "Upload files to records you have access to."
+            },
+            "ATTACHMENT_DELETE": {
+                "action": "Delete files",
+                "description": "Delete files you have access to. Deleting quarantined files also needs permission to manage quarantined files."
+            },
+            "ATTACHMENT_QUARANTINE_MANAGE": {
+                "action": "Manage quarantined files",
+                "description": "Review and manage quarantined files. This does not grant access to their contents."
+            },
+            "REPORT_READ": {
+                "action": "View reports",
+                "description": "View workspace reports; creating and editing reports need separate permissions."
+            },
+            "GOAL_READ": {
+                "action": "View goals",
+                "description": "View goals and progress."
+            },
+            "GOAL_MANAGE": {
+                "action": "Manage goals",
+                "description": "Create, edit, and delete goals."
+            },
+            "PIPELINE_MANAGE": {
+                "action": "Manage pipelines",
+                "description": "Create, edit, and delete pipelines and their stages."
+            },
+            "TAG_MANAGE": {
+                "action": "Manage tags",
+                "description": "Create, edit, and delete workspace tags."
+            },
+            "PRODUCT_MANAGE": {
+                "action": "Manage products",
+                "description": "Create, edit, and delete products in the workspace catalog."
+            },
+            "DOCUMENT_MANAGE": {
+                "action": "Manage document templates and approval policies",
+                "description": "Create, edit, and delete document templates and configure document approval policies. Editing deal documents needs permission to edit deals; sending and approving need separate permissions."
+            },
+            "DOCUMENT_SEND": {
+                "action": "Send documents",
+                "description": "Send, resend, and void document deliveries."
+            },
+            "DOCUMENT_APPROVE": {
+                "action": "Approve documents",
+                "description": "Approve or reject documents routed for your review. This does not grant approval-policy management."
+            },
+            "CUSTOM_FIELD_MANAGE": {
+                "action": "Manage custom fields",
+                "description": "Create, edit, and delete custom field definitions."
+            },
+            "SHARE_MANAGE": {
+                "action": "Manage sharing",
+                "description": "Manage sharing of this workspace's companies, contacts, and pipelines within the same organization. Sharing requires membership in the destination workspace; privacy protections still apply."
+            },
+            "MEMBER_MANAGE": {
+                "action": "Manage members",
+                "description": "Invite and remove members and assign built-in roles within your authority. Only workspace owners can change ownership; new owners must accept. Assigning custom roles needs permission to manage roles."
+            },
+            "ROLE_MANAGE": {
+                "action": "Manage roles",
+                "description": "Create, edit, and assign custom roles within your own permissions, and delete unused roles. Changing a role held by an owner also requires workspace ownership. Custom roles do not grant ownership."
+            },
+            "AUDIT_READ": {
+                "action": "View workspace audit log",
+                "description": "View workspace audit history. Organization audit access is separate."
+            },
+            "WORKSPACE_SETTINGS": {
+                "action": "Manage workspace settings",
+                "description": "Edit workspace settings. Organization security and single sign-on settings require organization authority. AI settings require organization administrator access."
+            },
+            "API_CREDENTIAL_MANAGE": {
+                "action": "Manage API credentials",
+                "description": "View the workspace's API credential list, issue your own credentials within your permissions, and revoke workspace credentials."
+            },
+            "RULE_MANAGE": {
+                "action": "Manage workflows",
+                "description": "Create, edit, publish, and manage workspace workflows. Each action still requires its own access."
+            },
+            "CAMPAIGN_VIEW": {
+                "action": "View campaigns",
+                "description": "View campaigns and results. Viewing contact audiences also requires permission to manage contact preferences; editing and sending need separate permissions."
+            },
+            "CAMPAIGN_MANAGE": {
+                "action": "Manage campaigns",
+                "description": "Create, edit, and delete campaigns and manage messages and audiences. Contact audiences and draft sends also need permission to manage contact preferences; sending needs separate permission."
+            },
+            "CAMPAIGN_SEND": {
+                "action": "Send campaigns",
+                "description": "Send campaigns to eligible recipients. Contact preferences and privacy protections still apply."
+            },
+            "CONSENT_MANAGE": {
+                "action": "Manage contact preferences",
+                "description": "Manage marketing contact preferences for contacts owned by this workspace and manage its contact exclusions. Privacy protections still apply."
+            },
+            "AI_USE": {
+                "action": "Use AI features",
+                "description": "Use Ask Connex and AI features when enabled with an organization provider. This does not grant access to other members' private chats. AI settings require organization administrator access."
+            },
+            "AI_SESSION_SHARE": {
+                "action": "Share your chats",
+                "description": "Share your chats before they contain an AI answer and invite workspace members. You and participants also need permission to use AI features."
+            },
+            "AI_SESSION_ADMIN": {
+                "action": "View retained chats",
+                "description": "Read chats retained after their creator leaves the workspace. This does not allow changing them or sending messages on the creator's behalf."
+            },
+            "SEQUENCE_VIEW": {
+                "action": "View sequences",
+                "description": "View sequence templates available to you. Editing and publishing need permission to manage sequences."
+            },
+            "SEQUENCE_MANAGE": {
+                "action": "Manage sequences",
+                "description": "Create, edit, archive, and publish sequence templates available to you. This does not grant permission to send campaigns."
+            },
+            "TEAM_MANAGE": {
+                "action": "Manage teams",
+                "description": "Create teams and manage their members and managers. Team membership does not grant workspace permissions."
+            },
+            "EXPORT_DATA": {
+                "action": "Export data",
+                "description": "Export data you can access. Existing record, report, audit, and security requirements still apply."
             }
-        }
+        },
+        "confinementSubjectRoleEdit": "Save changes to the {name} role",
+        "permissionGroups": {
+            "COMPANY": "Companies",
+            "PERSON": "Contacts",
+            "DEAL": "Deals",
+            "ACTIVITY": "Activities",
+            "NOTE": "Notes",
+            "COMMENT": "Comments",
+            "TASK": "Tasks",
+            "ATTACHMENT": "Files",
+            "REPORT": "Reports",
+            "GOAL": "Goals",
+            "PIPELINE": "Pipelines",
+            "TAG": "Tags",
+            "PRODUCT": "Products",
+            "DOCUMENT": "Documents",
+            "CUSTOM": "Custom fields",
+            "SHARE": "Sharing",
+            "MEMBER": "Members",
+            "ROLE": "Roles",
+            "AUDIT": "Audit log",
+            "WORKSPACE": "Workspace settings",
+            "API": "API credentials",
+            "RULE": "Workflows",
+            "CAMPAIGN": "Campaigns",
+            "CONSENT": "Contact preferences",
+            "AI": "Ask Connex and AI features",
+            "SEQUENCE": "Sequences",
+            "TEAM": "Teams",
+            "EXPORT": "Data exports"
+        },
+        "accessDetails": "View allowed and unavailable actions",
+        "accessScopeHint": "Only actions marked Allowed are granted. Record visibility, organization authority, and security checks still apply.",
+        "allowed": "Allowed",
+        "notAllowed": "Not allowed",
+        "unknownPermission": "Additional action",
+        "unknownPermissionDescription": "This action has no description yet. Ask a workspace owner before granting it.",
+        "unknownPermissionGroup": "Additional permissions",
+        "builtInRoles": {
+            "owner": {
+                "name": "Owner",
+                "description": "All workspace permissions, including member and role management. Organization authority is separate; AI settings require organization administrator access."
+            },
+            "admin": {
+                "name": "Admin",
+                "description": "Manage workspace settings, members, and workflows; use AI features. AI settings require organization administrator access. Cannot manage custom roles or grant workspace ownership."
+            },
+            "member": {
+                "name": "Member",
+                "description": "Work with contacts, deals, activities, notes, comments, tasks, files, and reports. Cannot manage workspace settings, members, roles, or workflows, or use AI features."
+            }
+        },
+        "exportPermissionSaving": "Saving export permission…",
+        "exportPermissionLabel": "Allow {role} to export data"
     },
     "WorkflowAuthoring": {
         "noAccess": "You can't manage workflows in this workspace. Ask a workspace admin if you need access.",
@@ -333,6 +642,12 @@
         "actionBodyPlaceholder": "Message (optional)",
         "actionNotePlaceholder": "Note text",
         "dueIn": "Due in days",
+        "taskAssignee": "Task assignee",
+        "notificationRecipient": "Notification recipient",
+        "workflowMember": "Member running the workflow",
+        "workflowCreator": "Member who created the workflow",
+        "recipientHelp": "Choose a workspace member. Automatically choosing the record owner is not available yet.",
+        "dueInHelp": "0 means today. Choose between 0 and 365 days.",
         "respondWithin": "Respond within hours",
         "activityTypePlaceholder": "Activity type (e.g. call)",
         "activitySubjectPlaceholder": "Subject",
@@ -517,6 +832,17 @@
             "additional": "an additional workspace permission"
         },
         "validationReady": "All checks passed. This saved draft is ready to publish.",
+        "validationBlocked": "This draft can't be published yet. Review its permissions and setup.",
+        "publicationReason": {
+            "delay": "Delays can't run here yet. Remove the Delay step before publishing.",
+            "multiple_conditions": "This workflow can have one Condition step here. Combine the checks in that step before publishing.",
+            "no_branch_actions": "The No branch must end without actions here. Move those actions to the Yes branch or remove them.",
+            "action_limit": "This workflow can run up to 16 actions here. Remove extra actions before publishing.",
+            "condition_position": "The Condition step must come before all actions here. Move it directly after the trigger.",
+            "unsupported_structure": "These branches can't run here yet. Use one Condition step followed by a single sequence of actions."
+        },
+        "unavailableBadge": "Unavailable",
+        "executionUnavailable": "This workflow can't run here. Ask your administrator for help.",
         "validationErrorTitle": "Fix {count, plural, one {# issue} other {# issues}} before publishing",
         "authoringModeLabel": "Authoring view",
         "authoringMode": {
@@ -663,7 +989,7 @@
             "description": "Every run recorded for {name}.",
             "detailTitle": "Run path",
             "detailDescription": "What run #{run} did, step by step.",
-            "legacyDetailDescription": "What earlier run #{run} did, step by step.",
+            "legacyDetailDescription": "Summary for run A{run}.",
             "emptyTitle": "No runs yet",
             "emptyBody": "This workflow hasn't run yet.",
             "errorTitle": "Couldn't load the runs",
@@ -683,14 +1009,23 @@
             "recordFallback": "Record",
             "target": "{record} #{id}",
             "latest": "Last run {time}",
-            "legacyVersion": "Carried over from an earlier automation",
+            "legacyVersion": "Published version not recorded",
             "legacyPartial": "Partly finished",
-            "legacySummaryOnly": "Only a summary was kept for this run",
+            "legacySummaryOnly": "Step details were not recorded for this run",
             "inspectPath": "Inspect path",
             "showOverlay": "Show on workflow",
             "pathLabel": "What ran",
             "durationPending": "In progress",
             "durationMs": "{value, number} ms",
+            "failedAction": "Action {number} · {action}",
+            "failureUnknown": "This run could not finish. A detailed reason was not recorded.",
+            "failureRecovery": "Review the workflow’s settings and the record before running it again. Actions that finished successfully may already have changed the record.",
+            "reviewWorkflow": "Review workflow",
+            "targetUnavailable": "Record name could not be loaded",
+            "documentTargetUnavailable": "Document unavailable",
+            "targetLoading": "Loading record name…",
+            "targetNameNotRecorded": "Record name not available in this history",
+            "failureTitle": "This run needs attention",
             "failureAtNode": "This step failed.",
             "stepFailure": "Failure attributed to this step",
             "actionOutcome": {
@@ -710,7 +1045,7 @@
                 "intervention_required": "Needs a person"
             },
             "reference": "Run #{run}",
-            "legacyReference": "Earlier run #{run}",
+            "legacyReference": "Run A{run}",
             "copyReference": "{reference} — copy the run reference",
             "referenceCopied": "Run reference copied",
             "referenceCopyFailed": "Couldn't copy the run reference"
@@ -767,7 +1102,7 @@
             "delay_duration_below_minimum": "A wait must be at least one minute.",
             "delay_duration_above_maximum": "A single wait cannot exceed 30 days.",
             "cumulative_delay_above_maximum": "The waits on this path cannot exceed 90 days in total.",
-            "legacy_projection_unsupported": "The automation behind this workflow can't run these steps yet. Simplify the branches, or ask support to move it over.",
+            "legacy_projection_unsupported": "These steps can't run here. Simplify the branches before publishing.",
             "actor_unavailable": "The configured workflow actor is no longer available.",
             "record_unavailable": "The selected record is unavailable or not visible.",
             "trigger_filter_not_matched": "The selected record does not match the trigger filter.",

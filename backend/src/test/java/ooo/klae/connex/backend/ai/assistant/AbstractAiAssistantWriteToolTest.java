@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -14,6 +15,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +23,10 @@ import org.mockito.ArgumentCaptor;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -65,12 +69,18 @@ abstract class AbstractAiAssistantWriteToolTest {
     static final ValidatorFactory VALIDATORS = Validation.buildDefaultValidatorFactory();
     static final Clock CLOCK = Clock.fixed(Instant.parse("2026-03-06T15:00:00Z"), ZoneOffset.UTC);
     static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
+            AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+            new AiChatPrivacyToken(7, 13, 1, null, 1, 1L));
     static final int TOOL_CALL_ID = 29;
 
     final ObjectMapper objectMapper = JsonMapper.builder().build();
     AiChatMapper chatMapper;
+    private AiAssistantPrivacyService organizationAuthority;
+    AiChatPrivacyGuard privacyGuard;
     WorkspaceService workspaceService;
+    final ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes =
+        unfiltered();
     ActivityService activityService;
     NoteService noteService;
     PersonService personService;
@@ -101,28 +111,39 @@ abstract class AbstractAiAssistantWriteToolTest {
         VALIDATORS.close();
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void closeAdmissionTransaction() {
+        AiAssistantAdmissionTestSupport.endTransaction();
+    }
+
     @BeforeEach
     void setUpFramework() {
+        AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
+        organizationAuthority = mock(AiAssistantPrivacyService.class);
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
+        privacyGuard = new AiChatPrivacyGuard(organizationAuthority);
         workspaceService = mock(WorkspaceService.class);
-        activityService = mock(ActivityService.class);
-        noteService = mock(NoteService.class);
-        personService = mock(PersonService.class);
+        activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
+        noteService = AiAssistantAdmissionTestSupport.admittingMock(NoteService.class);
+        personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
         when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
-        companyService = mock(CompanyService.class);
+        companyService = AiAssistantAdmissionTestSupport.admittingMock(CompanyService.class);
         when(companyService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
         duplicateDecisionLockService = mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class);
         duplicatePreflightService = mock(ooo.klae.connex.backend.services.DuplicatePreflightService.class);
-        creationService = mock(ooo.klae.connex.backend.services.GuidedRecordCreationService.class);
+        creationService = AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.GuidedRecordCreationService.class);
         presetService = mock(ooo.klae.connex.backend.services.RecordCreationPresetService.class);
-        dealService = mock(DealService.class);
-        reportService = mock(ooo.klae.connex.backend.services.ReportService.class);
-        taskService = mock(TaskService.class);
-        documentService = mock(DealDocumentService.class);
+        dealService = AiAssistantAdmissionTestSupport.admittingMock(DealService.class);
+        reportService = AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.ReportService.class);
+        taskService = AiAssistantAdmissionTestSupport.admittingMock(TaskService.class);
+        documentService = AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class);
         templateService = mock(DocumentTemplateService.class);
-        tagService = mock(TagService.class);
+        tagService = AiAssistantAdmissionTestSupport.admittingMock(TagService.class);
         pipelineService = mock(PipelineService.class);
-        leadResponseSlaService = mock(LeadResponseSlaService.class);
+        leadResponseSlaService = AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class);
         executorPersonMapper = mock(PersonMapper.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
@@ -139,26 +160,38 @@ abstract class AbstractAiAssistantWriteToolTest {
         when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
                 .thenReturn(authority);
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
+        when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         catalog = new AiAssistantToolCatalog();
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
+        AiAgentPrivacyBarrier barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1);
+        when(chatMapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setId(TURN.turnId());
         turn.setRequestedByUserId(TURN.userId());
         turn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setOrganizationPrivacyGeneration(1L);
+        storedToolCall.setServerProposal(true);
         storedToolCall.setId(TOOL_CALL_ID);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
         storedToolCall.setMessageId(TURN.userMessageId());
@@ -170,7 +203,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         when(chatMapper.getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID)).thenReturn(storedToolCall);
         when(chatMapper.getToolCallBySession(
-                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID)).thenReturn(storedToolCall);
+                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID, 1L)).thenReturn(storedToolCall);
         when(chatMapper.updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(TOOL_CALL_ID),
                 any(), any(), eq(TURN.userId()))).thenReturn(1);
@@ -239,13 +272,14 @@ abstract class AbstractAiAssistantWriteToolTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class));
-        return new AiAssistantWriteToolService(
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
+        AiAssistantWriteToolService service = new AiAssistantWriteToolService(
                 catalog,
                 registry,
                 readExecutor,
+                privacyGuard,
                 chatMapper,
-                workspaceService,
+                workspaceService, recordScopes,
                 taskService,
                 personService,
                 companyService,
@@ -256,7 +290,10 @@ abstract class AbstractAiAssistantWriteToolTest {
                 governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
-                CLOCK);
+                CLOCK, tagService);
+        service.setTransactionProvider(new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                Map.of("service", service)).getBeanProvider(AiAssistantWriteToolService.class));
+        return service;
     }
 
     AiAssistantDraftDocumentWriteTool draftDocumentTool() {
@@ -319,6 +356,11 @@ abstract class AbstractAiAssistantWriteToolTest {
             Task created = invocation.getArgument(0);
             created.setId(74);
             created.setStatus("todo");
+            doAnswer(deletion -> {
+                java.util.function.Predicate<Task> guard = deletion.getArgument(1);
+                org.junit.jupiter.api.Assertions.assertTrue(guard.test(created));
+                return null;
+            }).when(taskService).deleteIf(eq(74), any());
             return created;
         }).when(taskService).create(any(Task.class));
     }
@@ -346,7 +388,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         Person person = new Person();
         person.setId(31);
         person.setName("Ada Lovelace");
-        when(executorPersonMapper.getPersonById(TURN.workspaceId(), 31)).thenReturn(person);
+        when(executorPersonMapper.getPersonById(TURN.workspaceId(), "[7,8,9]", 31)).thenReturn(person);
     }
 
     /**

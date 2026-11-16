@@ -112,7 +112,9 @@ public final class ArchiveVisibilityRegistry {
          * retroactively rewrite. Checked: the statement is bounded by a report period parameter, so
          * an unbounded live worklist cannot claim this reason.
          */
-        CLOSED_PERIOD_ANALYTICS
+        CLOSED_PERIOD_ANALYTICS,
+        /** Bounded source reads exclusively for source-checked, same-record search projection repair. */
+        SEARCH_PROJECTION_REPAIR
     }
 
     /** One namespace's archive strategy and review rationale. */
@@ -161,11 +163,17 @@ public final class ArchiveVisibilityRegistry {
 
     private static Map<String, ArchiveDisposition> buildDispositions() {
         Map<String, ArchiveDisposition> entries = new LinkedHashMap<>();
+        declare(entries, "AiAgentPrivacyMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
+            "Erasure resolves independent CRM attachment ownership by numeric keys only, including "
+                + "archived records that still retain their files; no identifying record columns are projected.");
         declare(entries, "PersonMapper", ArchiveStrategy.ARCHIVE_TOGGLE,
             "The shared `visible` fragment excludes archived contacts from every ordinary read and "
                 + "`companyJoin` drops an archived employer from the contact's company projection; "
                 + "only the browser page/count/ids statements opt into the archived set, owned-only, "
                 + "so it can be reviewed and restored.");
+        declare(entries, "MyWorkReadMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Personal relationship counts and display candidates exclude archived contacts before "
+                + "aggregating their warmth or selecting bounded display ids.");
         declare(entries, "CompanyMapper", ArchiveStrategy.ARCHIVE_TOGGLE,
             "The shared `visible` fragment excludes archived companies from every ordinary read; only "
                 + "the browser page/count/ids statements opt into the archived set, owned-only. "
@@ -215,6 +223,9 @@ public final class ArchiveVisibilityRegistry {
         declare(entries, "LegacyTenantUploadMigrationMapper", ArchiveStrategy.REACH_ARCHIVED,
             "Offline storage reconciliation must include archived owners so their binaries are not "
                 + "stranded.");
+        declare(entries, "RecordSearchMapper", ArchiveStrategy.REACH_ARCHIVED,
+            "Bounded search projection repair maintains retained archived records for authorized "
+                + "archive searches and restoration; it never returns records to a product caller.");
         declare(entries, "IdentityMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
             "Canonical identity rows remain stored for reversibility, while every parent read used "
                 + "for backfill, active matching, preflight, or identity maintenance excludes "
@@ -228,18 +239,18 @@ public final class ArchiveVisibilityRegistry {
             "Duplicate review is an actionable worklist, so pair summaries and materialized groups "
                 + "exclude archived contacts and companies while retaining prior decision rows for "
                 + "suppression memory and later restoration.");
-        declare(entries, "ActivityMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
-            "Activity reads join contacts only to resolve which activities belong to a company, so "
-                + "the company timeline excludes rows linked to archived contacts while direct "
-                + "association reads remain reachable for compliance and erasure.");
+        declare(entries, "ActivityMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Paged activity search matches visible contact names and company context, excluding "
+                + "archived contacts and companies in those predicates. Retained direct association "
+                + "reads remain reachable for compliance and erasure.");
         declare(entries, "NoteMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
             "Retained note associations remain reachable for compliance and erasure; the only reads "
                 + "that touch a contact's name are the two note searches, and they exclude archived "
                 + "contacts so a note stops being findable by an archived person's name.");
-        declare(entries, "TaskMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
-            "Task reads join contacts only to resolve which tasks belong to a company, so retained "
-                + "associations stay reachable for compliance and erasure while the company timeline "
-                + "excludes rows linked to archived contacts.");
+        declare(entries, "TaskMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Paged task search matches visible contact names and company context, excluding "
+                + "archived contacts and companies in those predicates. Retained direct association "
+                + "reads remain reachable for compliance and erasure.");
         declare(entries, "AttachmentMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
             "The owner-label joins that back the file browser exclude archived contacts and companies, "
                 + "so an archived owner's name never becomes a file's chip. Retention, quota, and "
@@ -250,6 +261,9 @@ public final class ArchiveVisibilityRegistry {
                 + "keyed by an already-authorised contact. The recent-moves feed projects the "
                 + "contact's own name and picture and is returned verbatim by EmploymentService, so "
                 + "its join carries the archive predicate itself.");
+        declare(entries, "AssignmentSweepMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
+            "Catalog-pinned assignment maintenance discovers numeric keys and locks exact parent ids; "
+                + "it projects no identifying person or company fields and must reach archived rows.");
         declare(entries, "PersonLifecyclePassMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
             "Lifecycle passes join the contact only to resolve its key and copy the pass's own "
                 + "response timestamps, and project no identifying person column. Archiving a "
@@ -268,6 +282,10 @@ public final class ArchiveVisibilityRegistry {
 
     private static List<StatementExemption> buildExemptions() {
         List<StatementExemption> entries = new ArrayList<>();
+        exempt(entries, "RecordSearchMapper", "findMissing", List.of("p", "c"),
+            ExemptionReason.SEARCH_PROJECTION_REPAIR,
+            "Only the bounded maintenance page reads names and phones of retained archived records; "
+                + "source-checked same-row updates maintain search projections without exposing a live worklist.");
         exempt(entries, "PersonMapper", "getOwnedPersonByIdForUpdate", List.of("p"),
             ExemptionReason.RECORD_LIFECYCLE_LOCK,
             "The row lock every contact write takes first. It has to see the archived row so restore "

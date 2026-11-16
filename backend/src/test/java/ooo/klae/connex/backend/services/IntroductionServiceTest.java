@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.mappers.PersonEmploymentMapper;
  * tenant-scoping invariants on reads and writes.
  */
 class IntroductionServiceTest extends AbstractServiceTest {
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @Autowired private IntroductionService introductionService;
     @Autowired private PersonEdgeMapper personEdgeMapper;
@@ -219,7 +220,8 @@ class IntroductionServiceTest extends AbstractServiceTest {
         connect(hub.getId(), p2.getId());
         personMapper.updateEvaluationExclusions(workspace.getId(), hub.getId(), null, true);
 
-        assertFalse(introductionMapper.findCandidatePersons(workspace.getId()).stream()
+        assertFalse(introductionMapper.findCandidatePersons(workspace.getId(),
+                recordVisibilityScopeControlAccess.getForWorkspace(workspace.getId()).workspaceIdsJson()).stream()
             .anyMatch(candidate -> candidate.getId() == p1.getId() || candidate.getId() == p2.getId()));
         assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
     }

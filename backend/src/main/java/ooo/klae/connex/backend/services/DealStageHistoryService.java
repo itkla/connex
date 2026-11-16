@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.mappers.DealStageHistoryMapper;
@@ -43,9 +44,10 @@ public class DealStageHistoryService {
             int dealId,
             int stageId,
             Boolean previousOutcome,
-            Boolean currentOutcome) {
+            Boolean currentOutcome,
+            RecordVisibilityScope scope) {
         boolean conversionEligible = previousOutcome == null || currentOutcome == null;
-        recordAt(workspaceId, dealId, stageId, conversionEligible);
+        recordAt(workspaceId, dealId, stageId, conversionEligible, scope);
     }
 
     /**
@@ -55,12 +57,15 @@ public class DealStageHistoryService {
      * or created already won or lost never occupied the stage while open and is ineligible — so it
      * cannot bias forecast conversion rates.
      */
-    public void recordInitial(int workspaceId, int dealId, int stageId, Boolean currentOutcome) {
-        recordAt(workspaceId, dealId, stageId, currentOutcome == null);
+    public void recordInitial(int workspaceId, int dealId, int stageId, Boolean currentOutcome,
+            RecordVisibilityScope scope) {
+        recordAt(workspaceId, dealId, stageId, currentOutcome == null, scope);
     }
 
-    private void recordAt(int workspaceId, int dealId, int stageId, boolean conversionEligible) {
-        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
+    private void recordAt(
+            int workspaceId, int dealId, int stageId, boolean conversionEligible, RecordVisibilityScope scope) {
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId);
         DealStageHistory history = new DealStageHistory();
         history.setWorkspaceId(workspaceId);
         history.setDealId(dealId);

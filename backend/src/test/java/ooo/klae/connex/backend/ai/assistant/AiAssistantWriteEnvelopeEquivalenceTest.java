@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,8 +38,10 @@ import org.mockito.ArgumentCaptor;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -100,15 +103,20 @@ import tools.jackson.databind.node.ObjectNode;
  * drifts, a value that is re-derived differently, or a new sibling such as a divergence record
  * appearing on an ordinary write turns this red where no behavioural test would notice.
  *
- * <p>One change is deliberate and additive. Since issue 1865, a confirm-tier proposal is stored
+ * <p>Proposal pinning is deliberate and additive. Since issue 1865, a confirm-tier proposal is stored
  * with two siblings after its request: {@code resolution}, the stage id {@code change_deal_stage}
  * resolved, and {@code principals}, the member ids {@code assign_owner} resolved, empty for a stage
  * change or an owner removal. Every other byte of the stored proposal is unchanged, and so is every
- * response, model view and result envelope. The transcript cards are still projected from the
+ * model view and result envelope. The transcript cards are still projected from the
  * envelopes stored before pinning, {@code STAGE_ARGUMENTS} and {@code ownerArguments}, which is
  * what proves a proposal stored before this change still renders exactly as it did. Preparing a
  * confirm proposal now resolves its stage or its owner once, so the stage fixtures are armed
  * before a proposal is prepared, and an assignment reads the member directory once more.
+ *
+ * <p>The 72-hour review contract adds {@code reviewState} and {@code reviewExpiresAt} to API
+ * responses and transcript cards. Trusted terminal rows retain their original deadline without
+ * changing their outcome or undo eligibility. These fields are pinned in place; all other bytes
+ * remain identical.
  */
 class AiAssistantWriteEnvelopeEquivalenceTest {
     private static final ValidatorFactory VALIDATORS =
@@ -116,7 +124,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-03-06T15:00:00Z"), ZoneOffset.UTC);
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
+            AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+            new AiChatPrivacyToken(7, 13, 1, null, 1, 1L));
     private static final String TASK_ARGUMENTS = "{\"tool\":\"create_task\",\"tier\":\"auto\","
             + "\"restrictionEpoch\":23,\"target\":{\"kind\":\"person\",\"id\":31},"
             + "\"request\":{\"handle\":\"r1\",\"description\":\"Prepare agenda\","
@@ -158,6 +168,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiChatMapper chatMapper;
+    private AiAssistantPrivacyService organizationAuthority;
+    private AiChatPrivacyGuard privacyGuard;
     private WorkspaceService workspaceService;
     private PersonService personService;
     private CompanyService companyService;
@@ -177,17 +189,28 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         VALIDATORS.close();
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void closeAdmissionTransaction() {
+        AiAssistantAdmissionTestSupport.endTransaction();
+    }
+
     @BeforeEach
     void setUp() {
+        AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
+        organizationAuthority = mock(AiAssistantPrivacyService.class);
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
+        privacyGuard = new AiChatPrivacyGuard(organizationAuthority);
         workspaceService = mock(WorkspaceService.class);
-        personService = mock(PersonService.class);
-        dealService = mock(DealService.class);
-        taskService = mock(TaskService.class);
+        personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
+        dealService = AiAssistantAdmissionTestSupport.admittingMock(DealService.class);
+        taskService = AiAssistantAdmissionTestSupport.admittingMock(TaskService.class);
         pipelineService = mock(PipelineService.class);
-        activityService = mock(ActivityService.class);
-        noteService = mock(NoteService.class);
-        tagService = mock(TagService.class);
+        activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
+        noteService = AiAssistantAdmissionTestSupport.admittingMock(NoteService.class);
+        tagService = AiAssistantAdmissionTestSupport.admittingMock(TagService.class);
         executorPersonMapper = mock(PersonMapper.class);
         AiRestrictionEpoch restrictionEpoch = mock(AiRestrictionEpoch.class);
         AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
@@ -204,11 +227,12 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
                 .thenReturn(authority);
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
+        when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
-        companyService = mock(CompanyService.class);
+        companyService = AiAssistantAdmissionTestSupport.admittingMock(CompanyService.class);
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
                 new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
                 new AiAssistantDraftDocumentWriteTool(null, null),
@@ -219,14 +243,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         tagService, personService, companyService, dealService),
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
-                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
                 new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateReportWriteTool(null),
-                new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
@@ -244,13 +268,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
         service = new AiAssistantWriteToolService(
                 catalog,
                 registry,
                 readExecutor,
+                privacyGuard,
                 chatMapper,
-                workspaceService,
+                workspaceService, unfiltered(),
                 taskService,
                 personService,
                 companyService,
@@ -261,23 +286,36 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
-                CLOCK);
+                CLOCK, tagService);
+        service.setTransactionProvider(new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                Map.of("service", service)).getBeanProvider(AiAssistantWriteToolService.class));
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
+        AiAgentPrivacyBarrier barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1);
+        when(chatMapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setId(TURN.turnId());
         turn.setRequestedByUserId(TURN.userId());
         turn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setOrganizationPrivacyGeneration(1L);
+        storedToolCall.setServerProposal(true);
         storedToolCall.setId(29);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
         storedToolCall.setMessageId(TURN.userMessageId());
@@ -289,7 +327,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(chatMapper.getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
         when(chatMapper.getToolCallBySession(
-                TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
+                TURN.workspaceId(), TURN.sessionId(), 29, 1L)).thenReturn(storedToolCall);
         when(chatMapper.updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
                 any(), any(), eq(TURN.userId()))).thenReturn(1);
@@ -327,6 +365,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(expectedResult, resultJson);
         assertEquals(
                 "{\"id\":29,\"tool\":\"create_task\",\"tier\":\"auto\",\"status\":\"executed\","
+                        + "\"reviewState\":\"applied\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
                         + "\"result\":{\"status\":\"executed\",\"recordType\":\"task\","
                         + "\"description\":\"Prepare agenda\",\"dueDate\":\"2026-03-12\"},"
                         + "\"undoAvailable\":true,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
@@ -369,6 +409,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
         assertEquals(
                 "{\"id\":29,\"tool\":\"create_task\",\"tier\":\"auto\",\"status\":\"undone\","
+                        + "\"reviewState\":\"undone\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
                         + "\"result\":{\"status\":\"executed\",\"recordType\":\"task\","
                         + "\"description\":\"Prepare agenda\",\"dueDate\":\"2026-03-12\"},"
                         + "\"undoAvailable\":false,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
@@ -416,7 +458,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 resultJson);
         assertEquals(
                 "{\"id\":29,\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
-                        + "\"status\":\"executed\",\"result\":{\"status\":\"executed\","
+                        + "\"status\":\"executed\","
+                        + "\"reviewState\":\"applied\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":{\"status\":\"executed\","
                         + "\"recordType\":\"deal\",\"stage\":\"Proposal\","
                         + "\"closedAt\":\"2026-03-06 15:00:00\"},\"undoAvailable\":false,"
                         + "\"undoExpiresAt\":null}",
@@ -442,7 +487,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
         assertEquals(
                 "{\"id\":29,\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
-                        + "\"status\":\"rejected\",\"result\":{},\"undoAvailable\":false,"
+                        + "\"status\":\"rejected\","
+                        + "\"reviewState\":\"discarded\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":{},\"undoAvailable\":false,"
                         + "\"undoExpiresAt\":null}",
                 objectMapper.writeValueAsString(service.reject(TURN.sessionId(), 29)));
         ArgumentCaptor<String> rejected = ArgumentCaptor.forClass(String.class);
@@ -468,11 +516,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
                 .thenReturn(EnumSet.allOf(Permission.class));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String taskResult = "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"task\",\"description\":\"Prepare agenda\","
                 + "\"dueDate\":\"2026-03-12\"},\"undo\":{\"status\":\"available\","
@@ -495,19 +545,19 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"at\":\"2026-03-06T15:00:00Z\"}}"),
                 card(48, TURN.userId(), "failed", STAGE_ARGUMENTS, null));
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(cards);
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(cards);
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
         Person person = new Person();
         person.setId(31);
         person.setName("Ada Lovelace");
-        when(personMapper.getByIds(TURN.workspaceId(), List.of(31))).thenReturn(List.of(person));
+        when(personMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31))).thenReturn(List.of(person));
         Deal deal = deal();
         deal.setStageId(5);
         deal.setUpdatedAt("2026-03-06 14:00:00.000000");
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(TURN.workspaceId())).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(TURN.workspaceId(), "[7,8,9]")).thenReturn(List.of(
                 stage(5, "Qualified"), stage(6, "Proposal")));
         when(taskMapper.getVisibleIdsIn(TURN.workspaceId(), List.of(74))).thenReturn(List.of(74));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
@@ -525,25 +575,26 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 personMapper,
                 mock(CompanyMapper.class),
                 dealMapper,
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 taskMapper,
                 mock(NoteMapper.class),
@@ -555,7 +606,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(
                 "[" + String.join(",", List.of(
                         "{\"id\":41,\"toolName\":\"create_task\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\",\"target\":{\"kind\":\"person\","
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"person\","
                                 + "\"id\":31,\"label\":\"Ada Lovelace\"},"
                                 + "\"requestSummary\":\"Create a task\","
                                 + "\"outcomeSummary\":\"Task created\",\"change\":null,"
@@ -567,7 +621,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":true," + TIMES + "}",
                         "{\"id\":42,\"toolName\":\"create_task\",\"tier\":\"auto\","
-                                + "\"status\":\"undone\",\"target\":{\"kind\":\"person\","
+                                + "\"status\":\"undone\","
+                                + "\"reviewState\":\"undone\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"person\","
                                 + "\"id\":31,\"label\":\"Ada Lovelace\"},"
                                 + "\"requestSummary\":\"Create a task\","
                                 + "\"outcomeSummary\":\"Created record removed\","
@@ -576,7 +633,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":43,\"toolName\":\"create_task\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\",\"target\":{\"kind\":\"person\","
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"person\","
                                 + "\"id\":31,\"label\":\"Ada Lovelace\"},"
                                 + "\"requestSummary\":\"Create a task\","
                                 + "\"outcomeSummary\":\"Task created\",\"change\":null,"
@@ -585,7 +645,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":44,\"toolName\":\"change_deal_stage\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\",\"target\":{\"kind\":\"deal\","
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"deal\","
                                 + "\"id\":44,\"label\":\"Acme renewal\"},"
                                 + "\"requestSummary\":\"Change deal stage to: Proposal\","
                                 + "\"outcomeSummary\":null,\"change\":{\"field\":\"stage\","
@@ -596,7 +659,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":45,\"toolName\":\"change_deal_stage\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\",\"target\":{\"kind\":\"deal\","
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"deal\","
                                 + "\"id\":44,\"label\":\"Acme renewal\"},"
                                 + "\"requestSummary\":\"Change the deal stage\","
                                 + "\"outcomeSummary\":null,\"change\":null,"
@@ -604,7 +670,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":46,\"toolName\":\"change_deal_stage\",\"tier\":\"confirm\","
-                                + "\"status\":\"executed\",\"target\":{\"kind\":\"deal\","
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"deal\","
                                 + "\"id\":44,\"label\":\"Acme renewal\"},"
                                 + "\"requestSummary\":\"Change deal stage to: Proposal\","
                                 + "\"outcomeSummary\":\"Deal stage changed\",\"change\":null,"
@@ -613,7 +682,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":47,\"toolName\":\"change_deal_stage\",\"tier\":\"confirm\","
-                                + "\"status\":\"rejected\",\"target\":{\"kind\":\"deal\","
+                                + "\"status\":\"rejected\","
+                                + "\"reviewState\":\"discarded\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"deal\","
                                 + "\"id\":44,\"label\":\"Acme renewal\"},"
                                 + "\"requestSummary\":\"Change deal stage to: Proposal\","
                                 + "\"outcomeSummary\":\"Request rejected\",\"change\":null,"
@@ -621,7 +693,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":48,\"toolName\":\"change_deal_stage\",\"tier\":\"confirm\","
-                                + "\"status\":\"failed\",\"target\":{\"kind\":\"deal\","
+                                + "\"status\":\"failed\","
+                                + "\"reviewState\":\"failed\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                                + "\"target\":{\"kind\":\"deal\","
                                 + "\"id\":44,\"label\":\"Acme renewal\"},"
                                 + "\"requestSummary\":\"Change deal stage to: Proposal\","
                                 + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
@@ -668,7 +743,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(expectedResult, resultJson);
         assertEquals(
                 "{\"id\":29,\"tool\":\"create_activity\",\"tier\":\"auto\","
-                        + "\"status\":\"executed\",\"result\":" + MEETING_OUTCOME + ","
+                        + "\"status\":\"executed\","
+                        + "\"reviewState\":\"applied\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":" + MEETING_OUTCOME + ","
                         + "\"undoAvailable\":true,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
                 objectMapper.writeValueAsString(execution.toolCall()));
         String modelView = "{\"toolCallId\":29,\"tool\":\"create_activity\",\"tier\":\"auto\","
@@ -708,7 +786,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
         assertEquals(
                 "{\"id\":29,\"tool\":\"create_activity\",\"tier\":\"auto\","
-                        + "\"status\":\"undone\",\"result\":" + MEETING_OUTCOME + ","
+                        + "\"status\":\"undone\","
+                        + "\"reviewState\":\"undone\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":" + MEETING_OUTCOME + ","
                         + "\"undoAvailable\":false,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
                 objectMapper.writeValueAsString(service.undo(TURN.sessionId(), 29)));
         ArgumentCaptor<String> undone = ArgumentCaptor.forClass(String.class);
@@ -800,7 +881,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(expectedResult, resultJson);
         assertEquals(
                 "{\"id\":29,\"tool\":\"create_note\",\"tier\":\"auto\","
-                        + "\"status\":\"executed\",\"result\":" + NOTE_OUTCOME + ","
+                        + "\"status\":\"executed\","
+                        + "\"reviewState\":\"applied\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":" + NOTE_OUTCOME + ","
                         + "\"undoAvailable\":true,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
                 objectMapper.writeValueAsString(execution.toolCall()));
         String modelView = "{\"toolCallId\":29,\"tool\":\"create_note\",\"tier\":\"auto\","
@@ -837,7 +921,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
         assertEquals(
                 "{\"id\":29,\"tool\":\"create_note\",\"tier\":\"auto\","
-                        + "\"status\":\"undone\",\"result\":" + NOTE_OUTCOME + ","
+                        + "\"status\":\"undone\","
+                        + "\"reviewState\":\"undone\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":" + NOTE_OUTCOME + ","
                         + "\"undoAvailable\":false,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
                 objectMapper.writeValueAsString(service.undo(TURN.sessionId(), 29)));
         ArgumentCaptor<String> undone = ArgumentCaptor.forClass(String.class);
@@ -907,11 +994,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
                 .thenReturn(EnumSet.allOf(Permission.class));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String meetingResult = "{\"tier\":\"auto\",\"outcome\":" + MEETING_OUTCOME
                 + ",\"undo\":{\"status\":\"available\","
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"activity\","
@@ -921,7 +1010,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
                 + "\"entityId\":75,\"fingerprint\":\"f\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(41, TURN.userId(), "executed", "create_activity",
                         MEETING_ARGUMENTS, meetingResult),
                 card(42, TURN.userId(), "executed", "create_activity", MEETING_ARGUMENTS,
@@ -933,9 +1022,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         noteResult.replace("\"available\"", "\"undone\"")),
                 card(47, 99, "executed", "create_note", NOTE_ARGUMENTS, noteResult)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
-        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(readPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal()));
         when(activityMapper.getVisibleIdsIn(TURN.workspaceId(), List.of(73)))
@@ -957,25 +1046,26 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
                 mock(CompanyMapper.class),
                 dealMapper,
-                mock(PipelineMapper.class),
+                mock(PipelineMapper.class), unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 activityMapper,
                 mock(TaskMapper.class),
                 noteMapper,
@@ -989,7 +1079,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(
                 "[" + String.join(",", List.of(
                         "{\"id\":41,\"toolName\":\"create_activity\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + person31
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Create an activity\","
                                 + "\"outcomeSummary\":\"Activity created\",\"change\":null,"
                                 + "\"outcomeValues\":[{\"field\":\"type\",\"value\":\"meeting\"},"
@@ -1000,7 +1092,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":true," + TIMES + "}",
                         "{\"id\":42,\"toolName\":\"create_activity\",\"tier\":\"auto\","
-                                + "\"status\":\"undone\"," + person31
+                                + "\"status\":\"undone\","
+                                + "\"reviewState\":\"undone\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Create an activity\","
                                 + "\"outcomeSummary\":\"Created record removed\","
                                 + "\"change\":null,\"outcomeValues\":[],"
@@ -1008,7 +1102,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":43,\"toolName\":\"create_activity\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + person31
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Create an activity\","
                                 + "\"outcomeSummary\":\"Activity created\",\"change\":null,"
                                 + "\"outcomeValues\":[],\"createdRecord\":null,"
@@ -1016,14 +1112,18 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":44,\"toolName\":\"create_activity\",\"tier\":\"auto\","
-                                + "\"status\":\"failed\"," + person31
+                                + "\"status\":\"failed\","
+                                + "\"reviewState\":\"failed\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Create an activity\","
                                 + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
                                 + "\"outcomeValues\":[],\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":45,\"toolName\":\"create_note\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + deal44
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + deal44
                                 + "\"requestSummary\":\"Create a note\","
                                 + "\"outcomeSummary\":\"Note created\",\"change\":null,"
                                 + "\"outcomeValues\":[{\"field\":\"title\",\"value\":\"Follow-up\"},"
@@ -1033,7 +1133,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":true," + TIMES + "}",
                         "{\"id\":46,\"toolName\":\"create_note\",\"tier\":\"auto\","
-                                + "\"status\":\"undone\"," + deal44
+                                + "\"status\":\"undone\","
+                                + "\"reviewState\":\"undone\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + deal44
                                 + "\"requestSummary\":\"Create a note\","
                                 + "\"outcomeSummary\":\"Created record removed\","
                                 + "\"change\":null,\"outcomeValues\":[],"
@@ -1041,7 +1143,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":47,\"toolName\":\"create_note\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + deal44
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + deal44
                                 + "\"requestSummary\":\"Create a note\","
                                 + "\"outcomeSummary\":\"Note created\",\"change\":null,"
                                 + "\"outcomeValues\":[],\"createdRecord\":null,"
@@ -1090,7 +1194,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(tagResult(kind, id, changed), resultJson);
         assertEquals(
                 "{\"id\":29,\"tool\":\"add_tag\",\"tier\":\"auto\","
-                        + "\"status\":\"executed\",\"result\":" + outcome + ","
+                        + "\"status\":\"executed\","
+                        + "\"reviewState\":\"applied\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":" + outcome + ","
                         + "\"undoAvailable\":false,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
                 objectMapper.writeValueAsString(execution.toolCall()));
         String modelView = "{\"toolCallId\":29,\"tool\":\"add_tag\",\"tier\":\"auto\","
@@ -1100,7 +1207,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertFalse(resultJson.contains("verification"));
         switch (kind) {
             case "person" -> {
-                verify(personService).lockProcessablePersonForUpdate(31);
+                verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
                 verify(personService).addTag(31, 9);
             }
             case "company" -> {
@@ -1164,13 +1271,15 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
                 .thenReturn(EnumSet.allOf(Permission.class));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(51, TURN.userId(), "executed", "add_tag",
                         tagArguments("person", 31), tagResult("person", 31, true)),
                 card(52, TURN.userId(), "executed", "add_tag",
@@ -1186,14 +1295,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}"),
                 card(57, TURN.userId(), "failed", "add_tag", tagArguments("person", 31), null)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
-        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(readPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         Company company = new Company();
         company.setId(52);
         company.setName("Acme Holdings");
-        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+        when(companyMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(52)))
                 .thenReturn(List.of(company));
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal()));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
@@ -1211,25 +1320,26 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
                 companyMapper,
                 dealMapper,
-                mock(PipelineMapper.class),
+                mock(PipelineMapper.class), unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1247,44 +1357,58 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(
                 "[" + String.join(",", List.of(
                         "{\"id\":51,\"toolName\":\"add_tag\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + person31
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Add an existing tag\","
                                 + "\"outcomeSummary\":\"Tag added\",\"change\":null,"
                                 + priority + "\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
                         "{\"id\":52,\"toolName\":\"add_tag\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + company52
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Add an existing tag\","
                                 + "\"outcomeSummary\":\"Tag was already present\","
                                 + "\"change\":null," + priority + "\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
                         "{\"id\":53,\"toolName\":\"add_tag\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + deal44
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + deal44
                                 + "\"requestSummary\":\"Add an existing tag\","
                                 + "\"outcomeSummary\":\"Tag added\",\"change\":null,"
                                 + priority + "\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
                         "{\"id\":54,\"toolName\":\"add_tag\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + person31
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Add an existing tag\","
                                 + "\"outcomeSummary\":\"Tag was already present\","
                                 + "\"change\":null,\"outcomeValues\":[],\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
                         "{\"id\":55,\"toolName\":\"add_tag\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + person31
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Add an existing tag\","
                                 + "\"outcomeSummary\":\"Tag added\",\"change\":null,"
                                 + priority + "\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
                         "{\"id\":56,\"toolName\":\"add_tag\",\"tier\":\"auto\","
-                                + "\"status\":\"executed\"," + person31
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Add an existing tag\","
                                 + "\"outcomeSummary\":\"Request completed\",\"change\":null,"
                                 + "\"outcomeValues\":[],\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}",
                         "{\"id\":57,\"toolName\":\"add_tag\",\"tier\":\"auto\","
-                                + "\"status\":\"failed\"," + person31
+                                + "\"status\":\"failed\","
+                                + "\"reviewState\":\"failed\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Add an existing tag\","
                                 + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
                                 + "\"outcomeValues\":[],\"createdRecord\":null,"
@@ -1338,7 +1462,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":" + outcome + "}",
                 resultJson);
         String dto = "{\"id\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
-                + "\"status\":\"executed\",\"result\":" + outcome + ","
+                + "\"status\":\"executed\","
+                + "\"reviewState\":\"applied\","
+                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                + "\"result\":" + outcome + ","
                 + "\"undoAvailable\":false,\"undoExpiresAt\":null}";
         assertEquals(dto, approved);
         assertEquals(
@@ -1348,6 +1475,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 objectMapper.writeValueAsString(service.proposalResult(
                         write,
                         new AiAssistantToolProposal(29, "executed", resultJson, true)).data()));
+        AiAssistantToolResult replayed = service.proposalResult(write,
+                new AiAssistantToolProposal(29, "executed", resultJson, true));
+        assertEquals(assignedOwnerId == null ? List.of()
+                        : List.of(new AiAssistantToolResult.Identifier("member", label, "/outcome/owner")), replayed.identifiers());
         assertFalse(resultJson.contains("verification"));
         verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(),
@@ -1386,7 +1517,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
         assertEquals(
                 "{\"id\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
-                        + "\"status\":\"rejected\",\"result\":{},\"undoAvailable\":false,"
+                        + "\"status\":\"rejected\","
+                        + "\"reviewState\":\"discarded\","
+                        + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\","
+                        + "\"result\":{},\"undoAvailable\":false,"
                         + "\"undoExpiresAt\":null}",
                 objectMapper.writeValueAsString(service.reject(TURN.sessionId(), 29)));
         ArgumentCaptor<String> rejected = ArgumentCaptor.forClass(String.class);
@@ -1454,11 +1588,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 .thenReturn(EnumSet.allOf(Permission.class));
         when(readWorkspace.getMembers(TURN.workspaceId())).thenReturn(members());
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String assignCompany = ownerArguments("company", 52, "grace hopper ");
         String unassignDeal = ownerArguments("deal", 44, "Unassigned");
         String assignedResult = "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
@@ -1468,7 +1604,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"deal\",\"owner\":\"unassigned\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(61, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(62, TURN.userId(), "proposed", "assign_owner",
                         ownerArguments("person", 31, "ghopper"), null),
@@ -1487,11 +1623,11 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"at\":\"2026-03-06T15:00:00Z\"}}"),
                 card(71, TURN.userId(), "failed", "assign_owner", assignCompany, null)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
-        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(readPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(ownedPerson(31, 21)));
-        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+        when(companyMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(52)))
                 .thenReturn(List.of(ownedCompany(52, 11)));
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44)))
                 .thenReturn(List.of(ownedDeal(44, 77)));
@@ -1510,25 +1646,26 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
                 companyMapper,
                 dealMapper,
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1546,7 +1683,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(
                 "[" + String.join(",", List.of(
                         "{\"id\":61,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\"," + company52
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign owner: Grace Hopper\","
                                 + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
                                 + "\"currentValue\":\"Ada Owner\","
@@ -1554,7 +1693,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"proposedValue\":\"Grace Hopper\",\"state\":\"ready\"},"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":62,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\"," + person31
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + person31
                                 + "\"requestSummary\":\"Assign owner: Grace Hopper\","
                                 + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
                                 + "\"currentValue\":\"Grace Hopper\","
@@ -1563,14 +1704,18 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"state\":\"unchanged\"},"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":63,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\"," + deal44
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + deal44
                                 + "\"requestSummary\":\"Remove the current owner\","
                                 + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
                                 + "\"currentValue\":null,\"currentValueUnresolved\":true,"
                                 + "\"proposedValue\":null,\"state\":\"ready\"},"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":64,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\"," + company52
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign an owner\","
                                 + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
                                 + "\"currentValue\":\"Ada Owner\","
@@ -1578,44 +1723,58 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"proposedValue\":null,\"state\":\"unresolved\"},"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":65,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\"," + company52
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign an owner\","
                                 + "\"outcomeSummary\":null,\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":66,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"executed\"," + company52
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign owner: Grace Hopper\","
                                 + "\"outcomeSummary\":\"Owner assigned\",\"change\":null,"
                                 + "\"outcomeValues\":[{\"field\":\"owner\","
                                 + "\"value\":\"Grace Hopper\"}]," + noUndo + TIMES + "}",
                         "{\"id\":67,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"executed\"," + deal44
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + deal44
                                 + "\"requestSummary\":\"Remove the current owner\","
                                 + "\"outcomeSummary\":\"Owner removed\",\"change\":null,"
                                 + "\"outcomeValues\":[{\"field\":\"owner\","
                                 + "\"value\":\"unassigned\"}]," + noUndo + TIMES + "}",
                         "{\"id\":68,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"executed\"," + deal44
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + deal44
                                 + "\"requestSummary\":\"Assign an owner\","
                                 + "\"outcomeSummary\":\"Owner removed\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":69,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"executed\"," + company52
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign an owner\","
                                 + "\"outcomeSummary\":\"Owner assigned\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":70,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"rejected\"," + company52
+                                + "\"status\":\"rejected\","
+                                + "\"reviewState\":\"discarded\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign owner: Grace Hopper\","
                                 + "\"outcomeSummary\":\"Request rejected\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":71,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"failed\"," + company52
+                                + "\"status\":\"failed\","
+                                + "\"reviewState\":\"failed\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign owner: Grace Hopper\","
                                 + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
                 legacyCardJson(readService.list(TURN.sessionId(), false)));
-        verify(pipelineMapper, never()).getAllStages(anyInt());
+        verify(pipelineMapper, never()).getAllStages(anyInt(), org.mockito.ArgumentMatchers.anyString());
     }
 
     /**
@@ -1638,25 +1797,27 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.getMembers(TURN.workspaceId())).thenReturn(List.of(
                 member(11, "Ada Owner", "ada-owner"), member(23, "Christian Weber", "cweber")));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String assignCompany = ownerArguments("company", 52, "christian weber");
         String assignedResult = "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"company\",\"owner\":\"Christian Weber\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(81, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(82, TURN.userId(), "executed", "assign_owner", assignCompany,
                         assignedResult),
                 card(83, 99, "proposed", "assign_owner", assignCompany, null)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
-        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+        when(companyMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(52)))
                 .thenReturn(List.of(ownedCompany(52, 11)));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantToolCallReadService readService = new AiAssistantToolCallReadService(
@@ -1673,25 +1834,26 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 mock(PersonMapper.class),
                 companyMapper,
                 mock(DealMapper.class),
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1707,7 +1869,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertEquals(
                 "[" + String.join(",", List.of(
                         "{\"id\":81,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\"," + company52
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign owner: Christian Weber\","
                                 + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
                                 + "\"currentValue\":\"Ada Owner\","
@@ -1715,12 +1879,16 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"proposedValue\":\"Christian Weber\",\"state\":\"ready\"},"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":82,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"executed\"," + company52
+                                + "\"status\":\"executed\","
+                                + "\"reviewState\":\"applied\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign owner: Christian Weber\","
                                 + "\"outcomeSummary\":\"Owner assigned\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
                         "{\"id\":83,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
-                                + "\"status\":\"proposed\"," + company52
+                                + "\"status\":\"proposed\","
+                                + "\"reviewState\":\"open\","
+                                + "\"reviewExpiresAt\":\"2026-03-09T14:59:00Z\"," + company52
                                 + "\"requestSummary\":\"Assign an owner\","
                                 + "\"outcomeSummary\":null,\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
@@ -1766,7 +1934,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"request\":{\"handle\":\"r1\",\"tag\":\"priority \"}}";
     }
 
-    /** The sole additive drift is changes, exactly [change] or [] for every existing tool. */
+    /** Checks changes separately while retaining the exact review-state and legacy card bytes. */
     private String legacyCardJson(List<ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto> cards) {
         var legacy = objectMapper.createArrayNode();
         for (var card : cards) {
@@ -1809,7 +1977,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
             String kind, int id, Integer currentOwnerId, Integer assignedOwnerId) {
         switch (kind) {
             case "person" -> {
-                when(personService.lockProcessablePersonForUpdate(id))
+                when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(id), org.mockito.ArgumentMatchers.anyString()))
                         .thenReturn(ownedPerson(id, currentOwnerId));
                 when(personService.updateOwner(id, assignedOwnerId))
                         .thenReturn(ownedPerson(id, assignedOwnerId));
@@ -1889,6 +2057,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setId(id);
         toolCall.setWorkspaceId(TURN.workspaceId());
+        toolCall.setOrganizationPrivacyGeneration(1L);
         toolCall.setMessageId(TURN.userMessageId());
         toolCall.setSessionId(TURN.sessionId());
         toolCall.setRequestedByUserId(requestedBy);
@@ -1897,6 +2066,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         toolCall.setArgumentsJson(arguments);
         toolCall.setResultJson(result);
         toolCall.setIdempotencyKey("turn-" + TURN.turnId() + "-step-" + (id - 40));
+        toolCall.setServerProposal(true);
         toolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         toolCall.setUpdatedAt("2026-03-06 15:00:00.000000");
         toolCall.setExecutedAt("2026-03-06 15:00:00.000000");
@@ -1905,8 +2075,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     /** The person is processable and each candidate activity links to it, as the executor requires. */
     private void stubConflictSearch(List<Activity> candidates) {
-        when(executorPersonMapper.getPersonById(TURN.workspaceId(), 31)).thenReturn(person(31));
-        when(executorPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(executorPersonMapper.getPersonById(TURN.workspaceId(), "[7,8,9]", 31)).thenReturn(person(31));
+        when(executorPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         when(activityService.getActivitiesByPersonIdInWindow(
                 eq(31), any(), any(), eq(101))).thenReturn(candidates);
@@ -1956,4 +2126,16 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                 .digest(value.getBytes(StandardCharsets.UTF_8)));
     }
+    private void prepareReadPrivacy(AiChatMapper mapper, AiChatSession session) {
+        session.setWorkspaceId(TURN.workspaceId());
+        session.setOrganizationPrivacyGeneration(1L);
+        var barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1L);
+        when(mapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
+        when(mapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(mapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+    }
+
+
 }

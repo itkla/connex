@@ -31,6 +31,8 @@ public class EmploymentService {
     private final RuleTriggerPublisher ruleTriggers;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final int RECENT_MOVE_DAYS = 90;
     private static final int RECENT_MOVE_LIMIT = 20;
     private static final DateTimeFormatter MYSQL_DATETIME =
@@ -67,7 +69,7 @@ public class EmploymentService {
 
     private void insertCurrent(int workspaceId, int personId, Integer companyId, String title, String startedAt) {
         if (companyId == null || companyId == 0) return;
-        Company company = companyMapper.getCompanyById(workspaceId, companyId);
+        Company company = companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyId);
         PersonEmployment employment = new PersonEmployment();
         employment.setWorkspaceId(workspaceId);
         employment.setPersonId(personId);

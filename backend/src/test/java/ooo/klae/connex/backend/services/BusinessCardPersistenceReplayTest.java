@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -248,7 +249,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
         Tag tag = newTag();
         persistedTagId = tag.getId();
         personService.addTag(personId, tag.getId());
-        Person person = personMapper.getPersonById(workspace.getId(), personId);
+        Person person = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), personId);
         newActivity(currentUser, person, null);
         newTask(currentUser, person, null);
         newNotification(workspace.getId(), currentUser.getId());
@@ -282,7 +283,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
         assertEquals(1, afterFirst.artifacts().tasks());
         assertTrue(afterFirst.artifacts().tags() >= 2);
         assertTrue(afterFirst.artifacts().notifications() >= 1);
-        assertEquals(2, afterFirst.artifacts().relationshipEvidenceEvents());
+        assertEquals(1, afterFirst.artifacts().relationshipEvidenceEvents());
         assertEquals(afterFirst, afterSecond);
         assertEquals(afterFirst, replayState(personId, idempotencyKey));
         assertEquals(
@@ -393,7 +394,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
                 workspace.getId(),
                 personId),
             jdbcTemplate.queryForList(
-                "SELECT id, workspace_id, description, completed, status, position, due_date, "
+                "SELECT id, workspace_id, description, completed, completed_at, status, position, due_date, "
                     + "assigned_to_id, person_id, deal_id, created_at, updated_at FROM task "
                     + "WHERE workspace_id = ? AND person_id = ? ORDER BY id",
                 workspace.getId(),

@@ -179,7 +179,7 @@ class AiReportNarrativeServiceTest {
         Clock fixedClock = Clock.fixed(now, ZoneOffset.UTC);
         AiRestrictionEpoch epoch = new AiRestrictionEpoch();
         AiOutputCacheMapper mapper = mock(AiOutputCacheMapper.class);
-        AiOutputCacheStore guardedStore = new AiOutputCacheStore(
+        AiOutputCacheStore guardedStore = new AiOutputCacheStore(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 mapper, mock(PersonMapper.class), epoch, JsonMapper.builder().build(), workspaceService);
         Admission admission = mock(Admission.class);
         AiReportNarrativeService guardedService = new AiReportNarrativeService(
@@ -214,6 +214,33 @@ class AiReportNarrativeServiceTest {
         verify(mapper, never()).upsert(any());
         verify(admission).completeLeader(LeaderOutcome.FAILED);
         verify(admission, never()).completeLeader(LeaderOutcome.CACHE_READY);
+    }
+
+    @Test
+    void generate_warnedOutputIsNeitherServedNorCached() {
+        var assembly = new AiReportAssembler(clock).assemble(new AiReportContext(
+                "Report", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 31), SOURCES));
+        Admission admission = mock(Admission.class);
+        when(featureGate.generationProfileIfUsable(AiFeature.REPORT_NARRATIVE,
+                AiReportNarrativeService.MAX_TOKENS, AiReportNarrativeService.TEMPERATURE))
+                .thenReturn(Optional.of(PROFILE));
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(1);
+        when(assembler.assemble(any())).thenReturn(assembly);
+        when(cacheStore.contentHash(any(), any(), any())).thenReturn("hash");
+        when(cacheStore.find(anyInt(), anyString(), anyInt(), anyInt())).thenReturn(Optional.empty());
+        when(admissionService.acquire(any(), eq("hash"), eq(false))).thenReturn(admission);
+        when(admission.decision()).thenReturn(Decision.LEADER);
+        when(invocationService.completeStructured(any(AiInvocation.class), eq(AiReportNarrativeContent.class),
+                any(AiRawOutputGuard.class), eq(admission)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(resolvedContent("[unknown reference]"), 1, 3, 2, "stop"));
+
+        var result = service.generate(7, "Report", LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 31), SOURCES, 0);
+
+        assertFalse(result.available());
+        assertEquals("provider_error", result.reason());
+        verify(cacheStore, never()).save(anyInt(), anyString(), anyInt(), anyInt(), anyString(), any(),
+                anyInt(), anyString(), anyLong());
     }
 
     private static AiReportNarrativeContent resolvedContent(String text) {

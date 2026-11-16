@@ -1,0 +1,15 @@
+{
+  "id": "mission_privacy_boundary",
+  "selector": "connex_script_mission_privacy_boundary",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "emit": {
+        "kind": "final",
+        "text": "The selected record was reviewed."
+      }
+    }
+  ]
+}

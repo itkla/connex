@@ -332,6 +332,7 @@ class ProductImportPersistenceTest extends AbstractServiceTest {
         Deal deal = newDeal(pipeline, stage, company);
         persistedDealId = deal.getId();
         DealLineItemRequest line = new DealLineItemRequest();
+        line.setConfirmValueReplacement(true);
         line.setProductId(product.getId());
         line.setQuantity(new BigDecimal("2"));
         dealLineItemService.create(deal.getId(), line);

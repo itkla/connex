@@ -30,9 +30,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import ooo.klae.connex.backend.config.SecurityResponseHeaders;
+import ooo.klae.connex.backend.config.RequestTransactionCommitListener;
 import ooo.klae.connex.backend.controllers.v1.PublicApiIdentityController;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.DatabaseFailureClassifier;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -70,6 +74,12 @@ public class PublicApiErrorAdvice {
         return response(HttpStatus.NOT_FOUND, "not_found", "Resource not found");
     }
 
+    /** Preserves the authentication filter's confinement envelope for refusals under write locks. */
+    @ExceptionHandler({PrivilegedMfaEnrollmentRequiredException.class, PrivilegedMfaAttestationRequiredException.class})
+    public ResponseEntity<ErrorEnvelope> privilegedMfaRequired(ForbiddenException exception) {
+        return response(HttpStatus.UNAUTHORIZED, exception.getCode(), exception.getMessage());
+    }
+
     /** Maps live RBAC or tenant-scope refusals. */
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ErrorEnvelope> forbidden(ForbiddenException exception) {
@@ -88,8 +98,19 @@ public class PublicApiErrorAdvice {
         return response(HttpStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "Request method is not supported");
     }
 
-    /** Maps unexpected public failures without returning exception details. */
+    /** Maps exact lock contention to a retryable conflict, preserving all other internal errors. */
     @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorEnvelope> unexpectedFailure(Exception exception) {
+        if (!DatabaseFailureClassifier.isLockContention(exception)
+                || RequestTransactionCommitListener.committedDuringRequest()) {
+            return internalError(exception);
+        }
+        log.warn("Public API request conflict: exception={}", exception.getClass().getName());
+        return response(HttpStatus.CONFLICT, "conflict",
+            "The request conflicts with another operation; try again");
+    }
+
+    /** Maps unexpected public failures without returning exception details. */
     public ResponseEntity<ErrorEnvelope> internalError(Exception exception) {
         log.error("Public API request failed: exception={}", exception.getClass().getName());
         return response(HttpStatus.INTERNAL_SERVER_ERROR, "internal_error", "An unexpected error occurred");

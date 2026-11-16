@@ -1,14 +1,10 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
 import ooo.klae.connex.backend.beans.DocumentApprovalDecision;
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
-import ooo.klae.connex.backend.beans.DocumentApprovalStepAssignment;
 
 /**
  * Resolves who may currently decide one frozen approval step. This is the single place the frozen
@@ -27,11 +23,7 @@ import ooo.klae.connex.backend.beans.DocumentApprovalStepAssignment;
  * across repeated reads.
  */
 final class ApprovalStepEligibility {
-    private static final String ANY_APPROVER = "any_approver";
     private static final String APPROVED = "approved";
-    private static final String DELEGATION = "delegation";
-    private static final String ESCALATION = "escalation";
-    private static final String REASSIGNMENT = "reassignment";
 
     /**
      * Replays one step's appended approver facts over its frozen snapshot.
@@ -42,28 +34,10 @@ final class ApprovalStepEligibility {
      */
     EffectiveApprovers resolve(DocumentApprovalStep step, DocumentApprovalService.ApproverPool pool,
             Set<Integer> separationExclusions) {
-        List<DocumentApprovalStepAssignment> assignments = step.getAssignments();
-        int round = assignments.stream()
-            .filter(assignment -> REASSIGNMENT.equals(assignment.getAssignmentKind()))
-            .mapToInt(DocumentApprovalStepAssignment::getAssignmentRound)
-            .max()
-            .orElse(0);
-        List<Declared> declaration = declaredApprovers(step, assignments, round);
-        boolean anyApprover = declaration.stream()
-            .anyMatch(declared -> ANY_APPROVER.equals(declared.approverKind()));
-        Set<Integer> candidates = new LinkedHashSet<>();
-        if (anyApprover) {
-            candidates.addAll(pool.approvers());
-        } else {
-            declaration.stream()
-                .map(Declared::userId)
-                .filter(userId -> userId != null && pool.approvers().contains(userId))
-                .forEach(candidates::add);
-        }
-        assignments.stream()
-            .filter(assignment -> DELEGATION.equals(assignment.getAssignmentKind()))
-            .sorted(Comparator.comparingInt(DocumentApprovalStepAssignment::getId))
-            .forEach(assignment -> applyDelegation(candidates, pool, assignment));
+        ApprovalStepRouting.Route route = new ApprovalStepRouting().resolve(
+            step, pool.approvers(), pool.approvers()::contains);
+        boolean anyApprover = route.anyApprover();
+        Set<Integer> candidates = new LinkedHashSet<>(route.named());
         candidates.removeAll(separationExclusions);
         Set<Integer> approvedBy = new LinkedHashSet<>();
         step.getDecisions().stream()
@@ -74,39 +48,6 @@ final class ApprovalStepEligibility {
         undecided.removeAll(approvedBy);
         return new EffectiveApprovers(anyApprover, candidates, undecided,
             Math.max(0, step.getRequiredCount() - approvedBy.size()));
-    }
-
-    private List<Declared> declaredApprovers(DocumentApprovalStep step,
-            List<DocumentApprovalStepAssignment> assignments, int round) {
-        List<Declared> declaration = new ArrayList<>();
-        if (round > 0) {
-            assignments.stream()
-                .filter(assignment -> REASSIGNMENT.equals(assignment.getAssignmentKind())
-                    && assignment.getAssignmentRound() == round)
-                .forEach(assignment -> declaration.add(
-                    new Declared(assignment.getApproverKind(), assignment.getUserId())));
-        } else {
-            step.getApprovers().forEach(approver -> declaration.add(
-                new Declared(approver.getApproverKind(), approver.getUserId())));
-        }
-        assignments.stream()
-            .filter(assignment -> ESCALATION.equals(assignment.getAssignmentKind())
-                && assignment.getAssignmentRound() >= round)
-            .forEach(assignment -> declaration.add(
-                new Declared(assignment.getApproverKind(), assignment.getUserId())));
-        return declaration;
-    }
-
-    private void applyDelegation(Set<Integer> candidates, DocumentApprovalService.ApproverPool pool,
-            DocumentApprovalStepAssignment delegation) {
-        Integer delegator = delegation.getDelegatedByUserId();
-        if (delegator == null || !candidates.remove(delegator)) {
-            return;
-        }
-        Integer delegate = delegation.getUserId();
-        if (delegate != null && pool.approvers().contains(delegate)) {
-            candidates.add(delegate);
-        }
     }
 
     /**
@@ -122,9 +63,5 @@ final class ApprovalStepEligibility {
             Set<Integer> eligible,
             Set<Integer> undecided,
             int remainingNeeded) {
-    }
-
-    /** One entry of the step's current approver declaration, before pool and delegation filtering. */
-    private record Declared(String approverKind, Integer userId) {
     }
 }

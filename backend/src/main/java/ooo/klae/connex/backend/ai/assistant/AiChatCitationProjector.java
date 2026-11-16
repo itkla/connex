@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -53,6 +54,8 @@ public class AiChatCitationProjector {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final AiChatPrivacyGuard privacyGuard;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final AiChatMapper chatMapper;
 
     /** Returns authorized citations and messages withheld by current record visibility. */
@@ -112,7 +115,7 @@ public class AiChatCitationProjector {
         }
         Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
         for (AiChatTurn turn : chatMapper.listTurnsByIds(
-                workspaceId, sessionId, List.copyOf(turnIds))) {
+                workspaceId, sessionId, List.copyOf(turnIds), privacyGuard.currentGeneration(workspaceId))) {
             if (turn.getRequestedByUserId() != null) {
                 requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
             }
@@ -263,7 +266,7 @@ public class AiChatCitationProjector {
             int workspaceId, int sessionId, Set<Integer> turnIds) {
         Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
         for (AiChatTurn turn : chatMapper.listTurnsByIds(
-                workspaceId, sessionId, List.copyOf(turnIds))) {
+                workspaceId, sessionId, List.copyOf(turnIds), privacyGuard.currentGeneration(workspaceId))) {
             if (turn.getRequestedByUserId() != null) {
                 requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
             }
@@ -337,9 +340,11 @@ public class AiChatCitationProjector {
         List<Integer> personIds = ids(requested, "person");
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
+        String orgWorkspaceIdsJson = null;
         Map<RecordKey, VisibleRecord> visible = new LinkedHashMap<>();
         if (!personIds.isEmpty()) {
-            personMapper.getByIds(workspaceId, personIds).stream()
+            orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            personMapper.getByIds(workspaceId, orgWorkspaceIdsJson, personIds).stream()
                     .filter(AiChatCitationProjector::isProcessable)
                     .forEach(person -> visible.put(
                             new RecordKey("person", person.getId()),
@@ -351,7 +356,10 @@ public class AiChatCitationProjector {
                                             : person.getCompany().getName()))));
         }
         if (!companyIds.isEmpty()) {
-            companyMapper.getByIds(workspaceId, companyIds)
+            if (orgWorkspaceIdsJson == null) {
+                orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            }
+            companyMapper.getByIds(workspaceId, orgWorkspaceIdsJson, companyIds)
                     .forEach(company -> visible.put(
                             new RecordKey("company", company.getId()),
                             new VisibleRecord(
@@ -361,9 +369,12 @@ public class AiChatCitationProjector {
         }
         if (!dealIds.isEmpty()) {
             List<Deal> deals = dealMapper.getByIds(workspaceId, dealIds);
+            if (!deals.isEmpty() && orgWorkspaceIdsJson == null) {
+                orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            }
             Map<Integer, String> stageNames = deals.isEmpty()
                     ? Map.of()
-                    : stageNames(workspaceId);
+                    : stageNames(workspaceId, orgWorkspaceIdsJson);
             deals.forEach(deal -> visible.put(
                     new RecordKey("deal", deal.getId()),
                     new VisibleRecord(
@@ -376,9 +387,9 @@ public class AiChatCitationProjector {
         return Map.copyOf(visible);
     }
 
-    private Map<Integer, String> stageNames(int workspaceId) {
+    private Map<Integer, String> stageNames(int workspaceId, String orgWorkspaceIdsJson) {
         Map<Integer, String> names = new LinkedHashMap<>();
-        for (Stage stage : pipelineMapper.getAllStages(workspaceId)) {
+        for (Stage stage : pipelineMapper.getAllStages(workspaceId, orgWorkspaceIdsJson)) {
             if (stage.getName() != null) {
                 names.put(stage.getId(), stage.getName());
             }

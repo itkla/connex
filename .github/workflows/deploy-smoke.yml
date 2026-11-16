@@ -207,6 +207,8 @@ jobs:
         run: bash deploy/staging/tests/run-tests.sh
       - name: Quarantine prune regression tests
         run: bash deploy/staging/tests/prune-tests.sh
+      - name: ClamAV signature refresh regression tests
+        run: bash deploy/staging/tests/clamav-refresh-tests.sh
 
   profile-boot:
     name: Boot every deployment profile

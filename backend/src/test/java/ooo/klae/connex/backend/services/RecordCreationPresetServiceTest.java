@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,12 +35,15 @@ class RecordCreationPresetServiceTest {
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final RecordCreationFieldRegistry registry = new RecordCreationFieldRegistry();
 
+    private final RecordVisibilityScopeControlAccess scopes =
+        unfiltered();
+
     private RecordCreationPresetService service;
 
     @BeforeEach
     void setUp() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        service = new RecordCreationPresetService(mapper, resolver, registry, workspaceService);
+        service = new RecordCreationPresetService(mapper, resolver, registry, workspaceService, scopes);
     }
 
     @Test
@@ -53,22 +57,23 @@ class RecordCreationPresetServiceTest {
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of(first, selected));
         when(mapper.getCurrentVersion(7, 1)).thenReturn(firstVersion);
         when(mapper.getCurrentVersion(7, 2)).thenReturn(selectedVersion);
-        when(resolver.resolveWorkspace(first, firstVersion, context)).thenReturn(
+        when(resolver.resolveWorkspace(first, firstVersion, context, "[7,8,9]")).thenReturn(
             resolved("workspace:1", false, RecordCreationTemplateAvailability.available, List.of()));
-        when(resolver.resolveWorkspace(selected, selectedVersion, context)).thenReturn(
+        when(resolver.resolveWorkspace(selected, selectedVersion, context, "[7,8,9]")).thenReturn(
             resolved("workspace:2", false, RecordCreationTemplateAvailability.available, List.of()));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, context)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, context, "[7,8,9]")).thenReturn(
             resolved("system:person:standard", true, RecordCreationTemplateAvailability.available, List.of()));
 
         var catalog = service.persons(RecordCreationEntryPoint.record_detail, 55);
 
         assertEquals(9, catalog.setRevision());
+        verify(scopes, times(1)).getForWorkspace(7);
         assertEquals("workspace:2", catalog.selectedTemplateId());
         assertEquals(List.of("workspace:1", "workspace:2", "system:person:standard"),
             catalog.templates().stream().map(ResolvedCreationTemplateDto::id).toList());
-        verify(resolver, times(1)).resolveWorkspace(first, firstVersion, context);
-        verify(resolver, times(1)).resolveWorkspace(selected, selectedVersion, context);
-        verify(resolver, times(1)).resolveSystem(RecordCreationRecordType.person, context);
+        verify(resolver, times(1)).resolveWorkspace(first, firstVersion, context, "[7,8,9]");
+        verify(resolver, times(1)).resolveWorkspace(selected, selectedVersion, context, "[7,8,9]");
+        verify(resolver, times(1)).resolveSystem(RecordCreationRecordType.person, context, "[7,8,9]");
     }
 
     @Test
@@ -84,7 +89,7 @@ class RecordCreationPresetServiceTest {
         stub(RecordCreationRecordType.person, available,
             resolved("workspace:3", false, RecordCreationTemplateAvailability.available, List.of()));
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of(disabled, unavailable, available));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, new RecordCreationContextDto(null)))
+        when(resolver.resolveSystem(RecordCreationRecordType.person, new RecordCreationContextDto(null), "[7,8,9]"))
             .thenReturn(resolved(
                 "system:person:standard", true, RecordCreationTemplateAvailability.available, List.of()));
 
@@ -104,13 +109,13 @@ class RecordCreationPresetServiceTest {
         stub(RecordCreationRecordType.person, unavailable,
             resolved("workspace:4", false, RecordCreationTemplateAvailability.unavailable, List.of()));
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of(unavailable));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, context)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, context, "[7,8,9]")).thenReturn(
             resolved("system:person:standard", true, RecordCreationTemplateAvailability.available, List.of()));
 
         assertEquals("system:person:standard",
             service.persons(RecordCreationEntryPoint.record_list, null).selectedTemplateId());
 
-        when(resolver.resolveSystem(RecordCreationRecordType.person, context)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, context, "[7,8,9]")).thenReturn(
             resolved("system:person:standard", true, RecordCreationTemplateAvailability.unavailable, List.of()));
         RecordCreationTemplateException exception = assertThrows(
             RecordCreationTemplateException.class,
@@ -131,7 +136,7 @@ class RecordCreationPresetServiceTest {
         }
         when(mapper.listRoots(7, "company", false)).thenReturn(
             List.of(later, samePositionHigherId, samePositionLowerId));
-        when(resolver.resolveSystem(RecordCreationRecordType.company, context)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.company, context, "[7,8,9]")).thenReturn(
             companyResolved("system:company:standard", true));
 
         var catalog = service.companies(RecordCreationEntryPoint.calendar);
@@ -147,7 +152,7 @@ class RecordCreationPresetServiceTest {
         root.setRecordType(recordType.name());
         RecordCreationTemplateVersion version = version(root.getId());
         when(mapper.getCurrentVersion(7, root.getId())).thenReturn(version);
-        when(resolver.resolveWorkspace(root, version, new RecordCreationContextDto(null)))
+        when(resolver.resolveWorkspace(root, version, new RecordCreationContextDto(null), "[7,8,9]"))
             .thenReturn(resolved.recordType() == recordType
                 ? resolved
                 : new ResolvedCreationTemplateDto(

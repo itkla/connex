@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { useRouter } from "next/navigation";
+import { requestGuardedNavigation } from "@/app/hooks/useUnsavedChangesGuard";
 import {
     BoltIcon,
     BriefcaseIcon,
@@ -226,6 +227,6 @@ export function openResult(router: ReturnType<typeof useRouter>, href: string, e
     if (external) {
         window.open(href, "_blank", "noopener,noreferrer");
     } else {
-        router.push(href);
+        requestGuardedNavigation(() => router.push(href), { destination: href });
     }
 }

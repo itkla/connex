@@ -9,6 +9,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -29,5 +30,23 @@ public class AiBudgetControlAccess {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         return transaction.execute(status -> tenantWorkScope.unrouted(work));
+    }
+
+    /**
+     * Runs one control-plane budget read outside any routed tenant transaction, through the read
+     * entry point that shares no call with budget writes (#1815).
+     *
+     * @param <T> the read's result type
+     * @param read the budget read, which must change no state
+     * @return the read's result
+     */
+    public <T> T executeRead(ControlPlaneRead<T> read) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || tenantContext.getCatalog() == null) {
+            return tenantWorkScope.unroutedRead(read);
+        }
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        return transaction.execute(status -> tenantWorkScope.unroutedRead(read));
     }
 }

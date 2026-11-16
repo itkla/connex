@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,10 +29,12 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedPersonCreateRequestDto;
+import ooo.klae.connex.backend.dto.recordcreation.GuidedDealCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.LocalizedTextDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationPresetCatalogDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationFieldDto;
@@ -87,14 +90,14 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
         ResolvedCreationFieldDto phone = defaultField("phone", "+12025550123");
         when(presetService.persons(RecordCreationEntryPoint.quick_create, 31))
                 .thenReturn(preset(RecordCreationRecordType.person, email, phone));
-        when(duplicatePreflightService.preflightPerson(any()))
-                .thenReturn(new DuplicatePreflightResponse("person", List.of(), false, null));
+        when(duplicatePreflightService.personCandidatesExist(any()))
+                .thenReturn(false);
 
         AiAssistantPreparedWrite prepared = propose(service(), "create_person", PERSON, "company", 31);
 
         ArgumentCaptor<PersonDuplicatePreflightRequest> captured =
                 ArgumentCaptor.forClass(PersonDuplicatePreflightRequest.class);
-        verify(duplicatePreflightService).preflightPerson(captured.capture());
+        verify(duplicatePreflightService).personCandidatesExist(captured.capture());
         assertEquals(List.of("private@example.test"), captured.getValue().emails());
         assertEquals(List.of("+12025550123"), captured.getValue().phones());
         assertFalse(prepared.argumentsJson().contains("private@example.test"));
@@ -105,8 +108,8 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     @Test
     void aTruncatedPersonCheckRefusesBeforeAnyProposalOrCreate() {
         stubPerson();
-        when(duplicatePreflightService.preflightPerson(any()))
-                .thenReturn(new DuplicatePreflightResponse("person", List.of(), true, null));
+        when(duplicatePreflightService.personCandidatesExist(any()))
+                .thenReturn(true);
         AiAssistantWriteToolService service = service();
         assertRefusal("possible_duplicate", () -> propose(service, "create_person", PERSON, "company", 31));
         verifyNoInteractions(creationService);
@@ -116,7 +119,7 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     @Test
     void anUnavailableCheckFailsClosedWithoutCreating() {
         stubPerson();
-        when(duplicatePreflightService.preflightPerson(any()))
+        when(duplicatePreflightService.personCandidatesExist(any()))
                 .thenThrow(new DataAccessResourceFailureException("unavailable"));
         AiAssistantWriteToolService service = service();
         assertRefusal("duplicate_check_unavailable",
@@ -147,7 +150,7 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     @Test
     void aRateLimitedCheckRefusesRecoverablyAndAnUnavailableAnchorIsUnresolved() {
         stubPerson();
-        when(duplicatePreflightService.preflightPerson(any()))
+        when(duplicatePreflightService.personCandidatesExist(any()))
                 .thenThrow(new ooo.klae.connex.backend.exceptions.TooManyRequestsException("limited"));
         AiAssistantWriteToolService service = service();
         assertRefusal("duplicate_check_unavailable",
@@ -212,6 +215,83 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
         assertFalse(result.has("verification"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "missing", "ordinary"})
+    void dealPreparationPropagatesScopeFailuresBeforeDuplicateErrorTranslation(String kind) throws Exception {
+        stubDeal();
+        RuntimeException failure = switch (kind) {
+            case "snapshot" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+            case "missing" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload");
+            case "ordinary" -> new DataAccessResourceFailureException("control unavailable");
+            default -> throw new AssertionError(kind);
+        };
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(TURN.workspaceId())) {
+            when(fixture.control.findOrganizationWorkspacesForShare(TURN.workspaceId())).thenThrow(failure);
+            AiAssistantWriteToolService service = service();
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "recordVisibilityScopeControlAccess", fixture.scopes);
+
+            assertSame(failure, assertThrows(RuntimeException.class,
+                () -> propose(service, "create_deal", DEAL, "company", 31)));
+
+            verify(fixture.control).findOrganizationWorkspacesForShare(TURN.workspaceId());
+            verifyNoInteractions(duplicatePreflightService, creationService);
+        }
+    }
+
+    @Test
+    void aDealDuplicateQueryFailureStillUsesTheDuplicateUnavailableRefusal() throws Exception {
+        stubDeal();
+        when(duplicatePreflightService.dealCandidatesExist(any()))
+            .thenThrow(new DataAccessResourceFailureException("duplicate query unavailable"));
+        AiAssistantWriteToolService service = service();
+
+        assertRefusal("duplicate_check_unavailable",
+            () -> propose(service, "create_deal", DEAL, "company", 31));
+
+        verifyNoInteractions(creationService);
+    }
+
+    @Test
+    void omittedDealCurrencyIsPinnedAtPreparationAndSurvivesReplayAndApproval() throws Exception {
+        stubDeal();
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 31))
+                .thenReturn(preset(RecordCreationRecordType.deal, defaultField("currency", "EUR")));
+        String arguments = """
+                {"handle":"r1","name":"New opportunity","stage":"Proposal","value":"1250.50"}
+                """;
+        AiAssistantWriteToolService service = service();
+
+        AiAssistantPreparedWrite prepared = propose(service, "create_deal", arguments, "company", 31);
+
+        JsonNode stored = objectMapper.readTree(prepared.argumentsJson());
+        assertEquals("EUR", stored.path("pinned").path("currency").asString());
+        assertTrue(stored.path("request").path("currency").isMissingNode()
+                || stored.path("request").path("currency").isNull());
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 31))
+                .thenReturn(preset(RecordCreationRecordType.deal, defaultField("currency", "GBP")));
+        clearInvocations(presetService, duplicatePreflightService);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("company", 31);
+        var replayed = service.prepareReplay("create_deal", objectMapper.readTree(arguments), resources,
+                TURN.restrictionEpoch(), prepared.argumentsJson());
+        assertEquals(stored, objectMapper.readTree(replayed.argumentsJson()));
+        Deal created = new Deal();
+        created.setId(75);
+        created.setName("New opportunity");
+        created.setStageId(6);
+        created.setCurrency("EUR");
+        when(pipelineService.getStageById(6)).thenReturn(stage(6, "Proposal"));
+        when(creationService.createDeal(any(), org.mockito.ArgumentMatchers.eq("Proposal"))).thenReturn(created);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), TOOL_CALL_ID).status());
+
+        ArgumentCaptor<GuidedDealCreateRequestDto> captured = ArgumentCaptor.forClass(GuidedDealCreateRequestDto.class);
+        verify(creationService).createDeal(captured.capture(), org.mockito.ArgumentMatchers.eq("Proposal"));
+        assertEquals("EUR", captured.getValue().record().currency());
+        verifyNoInteractions(presetService, duplicatePreflightService);
+    }
+
     @Test
     void aDealDuplicateRefusesAndADriftedStageCannotCreate() throws Exception {
         stubDeal();
@@ -253,8 +333,8 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     private void stubPerson() {
         when(presetService.persons(RecordCreationEntryPoint.quick_create, 31))
                 .thenReturn(preset(RecordCreationRecordType.person));
-        when(duplicatePreflightService.preflightPerson(any()))
-                .thenReturn(new DuplicatePreflightResponse("person", List.of(), false, null));
+        when(duplicatePreflightService.personCandidatesExist(any()))
+                .thenReturn(false);
     }
 
     private void stubDeal() {

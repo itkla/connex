@@ -29,6 +29,7 @@ class WorkflowRuntimeTenantIsolationTest extends AbstractMapperTest {
     @Autowired private WorkflowMapper workflowMapper;
     @Autowired private WorkflowVersionMapper workflowVersionMapper;
     @Autowired private WorkflowRunMapper workflowRunMapper;
+    @Autowired private WorkflowOperationsMapper operationsMapper;
 
     @Test
     void runAndStepReadsAndMutationsAreRefusedInSiblingAndForeignOrganizationWorkspaces() {
@@ -81,8 +82,22 @@ class WorkflowRuntimeTenantIsolationTest extends AbstractMapperTest {
         execution.setDedupeKey("rule-matrix-" + unique());
         execution.setDetail("{}");
         ruleMapper.insertExecution(execution);
+        Workflow workflow = saveWorkflow(actor);
+        WorkflowVersion version = saveVersion(workflow, actor);
+        assertEquals(1, workflowMapper.assignFirstPublication(workspace.getId(), workflow.getId(),
+            rule.getId(), version.getId(), actor.getId(), 1));
+        assertEquals(1, operationsMapper.getLegacyOperationsRuns(workspace.getId(),
+            "succeeded", null, null, null, null, 25).stream()
+            .filter(run -> run.getWorkflowId() == workflow.getId()).count());
 
         for (Workspace unauthorized : unauthorizedWorkspaces()) {
+            assertEquals(List.of(), operationsMapper.getLegacyOperationsRuns(unauthorized.getId(),
+                null, null, null, null, null, 25));
+            assertEquals(List.of(), operationsMapper.getOperationsRuns(unauthorized.getId(),
+                null, null, null, null, null, 25));
+            assertEquals(0, operationsMapper.getSummary(unauthorized.getId(), false).getWorkflowCount());
+            assertEquals(0, operationsMapper.getBacklog(unauthorized.getId(), workflow.getId())
+                .getRecentFailureCount());
             assertNull(ruleMapper.getById(unauthorized.getId(), rule.getId()));
             assertNull(ruleMapper.getExecutionById(
                     unauthorized.getId(), rule.getId(), execution.getId()));
@@ -95,6 +110,23 @@ class WorkflowRuntimeTenantIsolationTest extends AbstractMapperTest {
         assertTrue(unchangedRule.isEnabled());
         assertNotNull(ruleMapper.getExecutionById(
                 workspace.getId(), rule.getId(), execution.getId()));
+    }
+
+    @Test
+    void newlySeededUnavailableWorkflowIsExcludedFromHealthySummary() {
+        var before = operationsMapper.getSummary(workspace.getId(), false);
+        User actor = newUser();
+        Workflow workflow = saveWorkflow(actor);
+        WorkflowVersion version = saveVersion(workflow, actor);
+        assertEquals(1, workflowMapper.assignFirstCanonicalPublication(workspace.getId(),
+            workflow.getId(), version.getId(), actor.getId(), 1));
+        assertEquals(1, workflowMapper.updateLifecycle(workspace.getId(), workflow.getId(), true, actor.getId()));
+
+        var summary = operationsMapper.getSummary(workspace.getId(), false);
+
+        assertEquals(before.getUnavailableCount() + 1, summary.getUnavailableCount());
+        assertEquals(before.getHealthyCount(), summary.getHealthyCount());
+        assertEquals("canonical", workflowMapper.getById(workspace.getId(), workflow.getId()).getRuntimeOwner());
     }
 
     private Workflow saveWorkflow(User actor) {

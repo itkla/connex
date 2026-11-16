@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, APIResponse } from "@playwright/test";
 import { expect } from "@playwright/test";
 
 import { runFixturePath, type E2ETenantScope } from "../../../playwright.config";
@@ -44,21 +44,34 @@ export type RunFixture = {
 
 type CsrfBootstrap = { token: string; headerName: string };
 
+type RegistrationApi = {
+    get: (...args: Parameters<APIRequestContext["get"]>) => Promise<Pick<APIResponse, "status">>;
+    post: (...args: Parameters<APIRequestContext["post"]>) => Promise<Pick<APIResponse, "status" | "text">>;
+};
+
 /**
  * Registers a throwaway user against the dev backend. Under the dev profile the register
  * endpoint also logs the session in, creates a default workspace, and sets the
  * JSESSIONID + connex_workspace cookies on the response — one call yields a full tenant.
+ * The default workspace is named after the display name, so a spec that registers two users and
+ * must tell their workspaces apart passes distinct display names.
+ * Requires an unauthenticated context: registering through shared project storage state would
+ * replace that session and sign out every other test that inherited it.
  */
 export async function registerUser(
-    api: APIRequestContext,
-    credentials: { username: string; password: string; email: string },
+    api: RegistrationApi,
+    credentials: { username: string; password: string; email: string; displayName?: string },
 ): Promise<void> {
+    const session = await api.get("/api/auth/me", { timeout: 120_000 });
+    if (session.status() !== 401) {
+        throw new Error("Registration requires a fresh unauthenticated context; use empty storageState or a new context");
+    }
     const response = await api.post("/api/auth/register", {
         timeout: 120_000,
         data: {
             username: credentials.username,
             password: credentials.password,
-            displayName: "E2E Harness",
+            displayName: credentials.displayName ?? "E2E Harness",
             email: credentials.email,
             timezone: "UTC",
         },
@@ -182,24 +195,53 @@ export async function configureScriptedAiProvider(
 /** A seeding client bound to one workspace and CSRF token. */
 export type Seeder = {
     post: (path: string, data: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    postEmpty: (path: string, data: Record<string, unknown>) => Promise<void>;
+};
+
+type SeederApi = {
+    post: (...args: Parameters<APIRequestContext["post"]>) => Promise<Pick<APIResponse, "ok" | "status" | "text">>;
 };
 
 /** Builds a write client that stamps every request with the tenant header and CSRF token. */
-export function seeder(api: APIRequestContext, workspaceId: number, csrf: CsrfBootstrap): Seeder {
+export function seeder(api: SeederApi, workspaceId: number, csrf: CsrfBootstrap): Seeder {
+    async function postResponse(path: string, data: Record<string, unknown>) {
+        const response = await api.post(path, {
+            timeout: 120_000,
+            headers: {
+                "X-Workspace-Id": String(workspaceId),
+                [csrf.headerName]: csrf.token,
+            },
+            data,
+        });
+        const body = await response.text();
+        const diagnostic = `POST ${path} returned HTTP ${response.status()}: ${body.slice(0, 500) || "<empty body>"}`;
+        expect(response.ok(), diagnostic).toBe(true);
+        return { body, diagnostic };
+    }
+
     return {
         async post(path, data) {
-            const response = await api.post(path, {
-                timeout: 120_000,
-                headers: {
-                    "X-Workspace-Id": String(workspaceId),
-                    [csrf.headerName]: csrf.token,
-                },
-                data,
-            });
-            expect(response.status(), `POST ${path}: ${await safeBody(response)}`).toBeLessThan(300);
-            return (await response.json()) as Record<string, unknown>;
+            const { body, diagnostic } = await postResponse(path, data);
+            let record: unknown;
+            try {
+                record = JSON.parse(body);
+            } catch {
+                throw new Error(`Expected a JSON object. ${diagnostic}`);
+            }
+            if (!isJsonObject(record)) {
+                throw new Error(`Expected a JSON object. ${diagnostic}`);
+            }
+            return record;
+        },
+        async postEmpty(path, data) {
+            const { body, diagnostic } = await postResponse(path, data);
+            expect(body.trim(), `Expected an empty response. ${diagnostic}`).toBe("");
         },
     };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function safeBody(response: { text: () => Promise<string> }): Promise<string> {

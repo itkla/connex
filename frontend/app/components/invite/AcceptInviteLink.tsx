@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
 import { acceptInviteLink, WorkspaceSelectionUnavailableError } from "@/app/lib/api";
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { Button } from "@/components/ui/button";
 
@@ -18,10 +19,10 @@ export default function AcceptInviteLink({ flowId }: { flowId: string }) {
         setBusy(true);
         try {
             await acceptInviteLink(flowId);
-            window.location.replace("/dashboard");
+            navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));
         } catch (err) {
             if (err instanceof WorkspaceSelectionUnavailableError) {
-                window.location.replace("/dashboard");
+                navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));
                 return;
             }
             showApiError(err, "acceptFailed");

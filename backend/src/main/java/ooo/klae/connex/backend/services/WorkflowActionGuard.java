@@ -74,7 +74,9 @@ public class WorkflowActionGuard {
                 "config.tagId",
                 Map.of());
         }
-        if ("assign_owner".equals(type)
+        if (("assign_owner".equals(type)
+                || (("create_task".equals(type) || "notify".equals(type))
+                    && action.getTargetUserId() != null))
                 && workspaceService.getRole(workspaceId, action.getTargetUserId()) == null) {
             return diagnostic(
                 WorkflowDiagnosticCode.ACTION_TARGET_MEMBER_UNAVAILABLE,

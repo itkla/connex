@@ -10,7 +10,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.webauthn.api.AuthenticatorAssertionResponse;
 import org.springframework.security.web.webauthn.api.AuthenticatorAttestationResponse;
-import org.springframework.security.web.webauthn.api.CredentialRecord;
 import org.springframework.security.web.webauthn.api.PublicKeyCredential;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
@@ -27,15 +26,19 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MfaAttestationRedemptionDto;
+import ooo.klae.connex.backend.dto.MfaAttestationRedemptionRequest;
+import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.dto.PasskeyDto;
+import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationRequirementsDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
-import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
-import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.LastSufficientPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
@@ -45,10 +48,15 @@ import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
+import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
+import ooo.klae.connex.backend.webauthn.RegisteredPasskey;
+import ooo.klae.connex.backend.webauthn.VerifiedPasskey;
 import ooo.klae.connex.backend.webauthn.WebAuthnJsonMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
@@ -77,7 +85,10 @@ public class WebAuthnController {
         new TypeReference<>() {};
     private static final TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>> ASSERTION_TYPE =
         new TypeReference<>() {};
+    private static final TypeReference<MfaAttestationRedemptionRequest> ATTESTATION_REDEMPTION_TYPE =
+            new TypeReference<>() { };
     private final WebAuthnService webAuthnService;
+    private final PrivilegedMfaAttestationRedemption attestationRedemption;
     private final AuthService authService;
     private final WebAuthnJsonMapper json;
     private final PublicKeyCredentialCreationOptionsRepository creationOptions;
@@ -89,9 +100,11 @@ public class WebAuthnController {
     private final AuditService auditService;
     private final MfaRecoveryService mfaRecoveryService;
     private final PasskeyBootstrapConfirmationService bootstrapConfirmationService;
+    private final PrivilegedAccountService privilegedAccountService;
 
     /**
-     * Reports whether the current account must confirm its password for first-passkey enrollment.
+     * Reports whether the current account must confirm its password for first-passkey enrollment,
+     * and its privileged-MFA standing with the approvals its passkeys still lack (#1534).
      */
     @GetMapping("/register/requirements")
     public PasskeyRegistrationRequirementsDto registrationRequirements(HttpServletRequest req) {
@@ -102,7 +115,12 @@ public class WebAuthnController {
         boolean emailConfirmationSatisfied = emailConfirmationRequired
                 && bootstrapConfirmationService.isSatisfiedFor(user, req);
         return new PasskeyRegistrationRequirementsDto(
-                currentPasswordRequired, emailConfirmationRequired, emailConfirmationSatisfied);
+                currentPasswordRequired,
+                emailConfirmationRequired,
+                emailConfirmationSatisfied,
+                privilegedAccountService.enforcedStanding(user.getId()),
+                privilegedAccountService.passkeyApprovalGaps(user.getId()),
+                privilegedAccountService.privilegedMemberships(user.getId()));
     }
 
     /**
@@ -168,12 +186,15 @@ public class WebAuthnController {
             Integer expectedSessionEpoch = sessionSecurityService.sessionEpoch(req.getSession(false));
             boolean bootstrapConfirmationSatisfied =
                 bootstrapConfirmationService.isSatisfiedFor(user, req);
-            CredentialRecord record = webAuthnService.finishRegistration(
-                    user.getId(), expectedSessionEpoch, bootstrapConfirmationSatisfied,
+            EnrollmentEvidence evidence = new EnrollmentEvidence(
+                    sessionSecurityService.sessionPrimaryId(req),
+                    sessionSecurityService.recentStepUpProof(req.getSession(false), user.getId()));
+            RegisteredPasskey registered = webAuthnService.finishRegistration(
+                    user.getId(), expectedSessionEpoch, bootstrapConfirmationSatisfied, evidence,
                     options, credential, label);
-            sessionSecurityService.markStepUp(req, user.getId());
+            sessionSecurityService.markStepUp(req, user.getId(), registered.credentialRowId());
             sessionSecurityService.clearPasskeyBootstrapConfirmation(req);
-            return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
+            return Map.of("credentialId", registered.record().getCredentialId().toBase64UrlString());
         } catch (RequestBodyTooLargeException ex) {
             throw ex;
         } catch (BadRequestException ex) {
@@ -181,6 +202,8 @@ public class WebAuthnController {
         } catch (ForbiddenException ex) {
             throw ex;
         } catch (BadCredentialsException ex) {
+            throw ex;
+        } catch (ConflictException ex) {
             throw ex;
         } catch (RuntimeException ex) {
             throw new BadRequestException("Passkey registration failed");
@@ -224,10 +247,10 @@ public class WebAuthnController {
                     "Passkey login missing challenge", null);
             throw new BadCredentialsException("No passkey login in progress");
         }
-        User user;
+        VerifiedPasskey verified;
         try {
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion = json.read(body, ASSERTION_TYPE);
-            user = webAuthnService.finishLogin(options, assertion);
+            verified = webAuthnService.finishLogin(options, assertion);
         } catch (RequestBodyTooLargeException ex) {
             throw ex;
         } catch (RuntimeException ex) {
@@ -238,6 +261,7 @@ public class WebAuthnController {
         } finally {
             requestOptions.save(req, res, null);
         }
+        User user = verified.user();
         if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
             auditService.recordFailure("auth.login.passkey_sso_enforced", "user", user.getId(),
                     user.getDisplayName(), "Passkey login refused; SSO enforced", null);
@@ -253,7 +277,7 @@ public class WebAuthnController {
                 user.getDisplayName() + " logged in with passkey",
                 null);
         User authenticatedUser = authService.establishAuthenticatedSession(user, req, res);
-        sessionSecurityService.markStepUp(req, authenticatedUser.getId());
+        sessionSecurityService.markStepUp(req, authenticatedUser.getId(), verified.credentialRowId());
         return Map.of("message", "You are now logged in");
     }
 
@@ -281,9 +305,10 @@ public class WebAuthnController {
             throw new BadCredentialsException("No passkey step-up in progress");
         }
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        VerifiedPasskey verified;
         try {
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion = json.read(body, ASSERTION_TYPE);
-            webAuthnService.finishStepUp(auth, options, assertion);
+            verified = webAuthnService.finishStepUp(auth, options, assertion);
         } catch (RequestBodyTooLargeException ex) {
             recordStepUpFailure(user, "request_too_large");
             throw ex;
@@ -302,8 +327,42 @@ public class WebAuthnController {
                 user.getDisplayName(),
                 "Passkey step-up completed",
                 null);
-        sessionSecurityService.markStepUp(req, user.getId());
+        sessionSecurityService.markStepUp(req, user.getId(), verified.credentialRowId());
         return Map.of("message", "Recent authentication refreshed");
+    }
+
+    /**
+     * Issues passkey assertion options for redeeming a privileged MFA attestation code (#1534).
+     */
+    @PostMapping(value = "/attestation/options", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> attestationOptions(HttpServletRequest req, HttpServletResponse res) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        PublicKeyCredentialRequestOptions options = webAuthnService.createAttestationOptions(auth);
+        requestOptions.save(req, res, options);
+        return ResponseEntity.ok(json.write(options));
+    }
+
+    /**
+     * Redeems a privileged MFA attestation code with the passkey that signs the assertion (#1534).
+     * Every reason the code itself cannot be used answers with the same refusal; a failed
+     * assertion fails as the ceremony's own error.
+     */
+    @PostMapping(value = "/attestation", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public MfaAttestationRedemptionDto redeemAttestation(@RequestBody String body, HttpServletRequest req,
+            HttpServletResponse res) {
+        User user = authService.getCurrentUser();
+        PublicKeyCredentialRequestOptions options = requestOptions.load(req);
+        if (options == null) {
+            throw new BadCredentialsException("No passkey attestation in progress");
+        }
+        try {
+            MfaAttestationRedemptionRequest request = readAttestationRedemption(body);
+            return attestationRedemption.redeem(
+                    req, SecurityContextHolder.getContext().getAuthentication(), user, options,
+                    request.credential(), request.code());
+        } finally {
+            requestOptions.save(req, res, null);
+        }
     }
 
     /**
@@ -337,6 +396,12 @@ public class WebAuthnController {
         sessionSecurityService.requireRecentAuthentication(userId);
         try {
             webAuthnService.delete(userId, credentialId);
+        } catch (LastSufficientPasskeyRemovalForbiddenException exception) {
+            auditService.recordFailureScoped(
+                    "auth.passkey.delete_denied", "user", userId, null, null,
+                    user.getDisplayName(), "Last sufficient passkey removal refused for privileged account",
+                    "last_sufficient_credential");
+            throw exception;
         } catch (LastPasskeyRemovalForbiddenException exception) {
             auditService.recordFailureScoped(
                     "auth.passkey.delete_denied", "user", userId, null, null,
@@ -393,6 +458,21 @@ public class WebAuthnController {
                 user.getDisplayName(),
                 "Failed passkey step-up attempt",
                 reason);
+    }
+
+    private MfaAttestationRedemptionRequest readAttestationRedemption(String body) {
+        MfaAttestationRedemptionRequest request;
+        try {
+            request = json.read(body, ATTESTATION_REDEMPTION_TYPE);
+        } catch (RequestBodyTooLargeException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new BadRequestException("The attestation request could not be read");
+        }
+        if (request == null || request.credential() == null) {
+            throw new BadRequestException("A passkey assertion is required");
+        }
+        return request;
     }
 
     private boolean authorizePasskeyRegistrationOptions(User user, PasskeyRegistrationOptionsRequest request,

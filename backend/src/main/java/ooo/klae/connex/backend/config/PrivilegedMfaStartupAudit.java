@@ -27,7 +27,10 @@ import ooo.klae.connex.backend.services.PrivilegedAccountService;
  *
  * <p>The posture also carries a read-only inventory of privileged accounts that hold no passkey
  * (#1533), so an operator can see which accounts confinement holds at enrollment, and how many of
- * those cannot enroll on their own, before they surface as support tickets. The inventory is
+ * those cannot enroll on their own, before they surface as support tickets. It also counts the
+ * privileged accounts whose passkeys are not yet approved in every organization where they are
+ * privileged, which attestation enforcement confines (#1534), and the per-organization coverage
+ * rows grandfathered at the cutover. The inventory is
  * rollout guidance, not a control: a non-empty population, or an inventory query that fails, never
  * prevents startup. The policy audit itself remains strict.
  *
@@ -87,6 +90,8 @@ public class PrivilegedMfaStartupAudit implements ApplicationRunner {
         posture.put("actor", properties.getChangeActor());
         posture.put("configuredValue", properties.configuredEnforcedValue());
         posture.put("enforced", properties.isEnforced());
+        posture.put("configuredAttestationEnforcedValue", properties.configuredAttestationEnforcedValue());
+        posture.put("attestationEnforced", properties.isAttestationEnforced());
         posture.put("bootstrapConfirmationEnabled", bootstrapConfirmationEnabled);
         recordUnenrolledInventory(posture, bootstrapConfirmationEnabled);
         auditService.recordStrictIndependentScoped(
@@ -116,8 +121,12 @@ public class PrivilegedMfaStartupAudit implements ApplicationRunner {
         UnenrolledPrivilegedAccountCounts counts;
         long withoutSelfService;
         List<Integer> sampleIds;
+        long attestationRequired;
+        long grandfatheredCoverage;
         try {
             counts = privilegedAccountService.unenrolledPrivilegedAccountCounts();
+            attestationRequired = privilegedAccountService.attestationRequiredAccountCount();
+            grandfatheredCoverage = privilegedAccountService.grandfatheredCoverageCount();
             withoutSelfService = withoutSelfService(counts, bootstrapConfirmationEnabled,
                     bootstrapConfirmationEnabled && bootstrapConfirmationEmailService.canDeliver());
             sampleIds = counts.total() == 0
@@ -133,10 +142,17 @@ public class PrivilegedMfaStartupAudit implements ApplicationRunner {
         }
         posture.put("unenrolledPrivilegedCount", counts.total());
         posture.put("unenrolledWithoutSelfServiceCount", withoutSelfService);
+        posture.put("attestationRequiredCount", attestationRequired);
+        posture.put("grandfatheredCoverageCount", grandfatheredCoverage);
         if (counts.total() > 0) {
             log.warn("{} privileged accounts have no passkey and {} of them cannot self-enroll; "
                     + "first {} account ids: {}",
                     counts.total(), withoutSelfService, sampleIds.size(), sampleIds);
+        }
+        if (attestationRequired > 0) {
+            log.warn("{} privileged accounts hold passkeys but none approved in every organization "
+                    + "where they are privileged; attestation enforcement {} them",
+                    attestationRequired, properties.isAttestationEnforced() ? "confines" : "would confine");
         }
     }
 

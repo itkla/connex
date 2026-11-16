@@ -12,10 +12,13 @@ import './globals.css';
  * Root error boundary that replaces the entire root layout when it fails.
  * Runs without the i18n and theme providers, so it renders its own html and
  * body with static bilingual copy and design-system tokens from globals.css.
+ *
+ * It recovers with `reset` rather than Next's router-refreshing `retry`, for the
+ * same reason as the root `app/error.tsx`: every one-time-link entry route sits
+ * under it, and a refresh re-publishes whatever canonical URL the router holds,
+ * bearer included if the strip's sync never reached it (#1781).
  */
-export default function GlobalError({ error, reset, unstable_retry }: SegmentErrorProps) {
-    const retry = unstable_retry ?? reset;
-
+export default function GlobalError({ error, reset }: SegmentErrorProps) {
     useEffect(() => {
         reportBoundaryErrorWithConsole(error);
     }, [error]);
@@ -35,7 +38,7 @@ export default function GlobalError({ error, reset, unstable_retry }: SegmentErr
                         <p className="max-w-sm text-sm text-muted-foreground">
                             問題が発生しました。一時的な問題の可能性があります。
                         </p>
-                        <Button className="mt-6" onClick={() => retry()}>
+                        <Button className="mt-6" onClick={() => reset()}>
                             <ArrowPathIcon data-icon="inline-start" />
                             Try again / 再試行
                         </Button>

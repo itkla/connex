@@ -1,8 +1,9 @@
 "use client";
 
+import { parseDatetimeLocalValue, toDatetimeLocalValue } from '@/app/lib/utils';
 import { BellSnoozeIcon } from "@heroicons/react/24/outline";
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTimeZone, useTranslations } from "next-intl";
 
 import { type SnoozePreset, type SnoozeRequest } from "@/app/lib/types";
 import { Button } from "@/components/ui/button";
@@ -35,23 +36,6 @@ const PRESETS: readonly { preset: SnoozePreset; key: string }[] = [
 ];
 
 const MAX_HORIZON_MS = 30 * 24 * 60 * 60 * 1_000;
-
-/**
- * Resolves the caller's IANA timezone, sent alongside every snooze request so
- * the server can anchor presets and the explicit instant to the user's day.
- */
-function resolveTimezone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
-
-/**
- * Formats a {@link Date} as a `datetime-local` input value (`YYYY-MM-DDTHH:mm`)
- * in the browser's local time, matching how the input reads its value back.
- */
-function toDatetimeLocal(date: Date): string {
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 /**
  * Snooze menu for a notification row: three server presets plus a custom
@@ -107,12 +91,13 @@ function SnoozeOptions({
     onCustom: () => void;
 }) {
     const t = useTranslations("Notifications");
+    const timeZone = useTimeZone() ?? "UTC";
     return (
         <>
             {PRESETS.map((option) => (
                 <DropdownMenuItem
                     key={option.preset}
-                    onSelect={() => onSnooze({ preset: option.preset, timezone: resolveTimezone() })}
+                    onSelect={() => onSnooze({ preset: option.preset, timezone: timeZone })}
                 >
                     {t(option.key)}
                 </DropdownMenuItem>
@@ -162,8 +147,9 @@ export function SnoozeCustomDialog({
     onSnooze: (body: SnoozeRequest) => void;
 }) {
     const t = useTranslations("Notifications");
+    const timeZone = useTimeZone() ?? "UTC";
     const [customValue, setCustomValue] = useState("");
-    const parsed = customValue ? new Date(customValue).getTime() : Number.NaN;
+    const parsed = parseDatetimeLocalValue(customValue, timeZone);
     const isEmpty = customValue.length === 0;
     const isUnparseable = !isEmpty && !Number.isFinite(parsed);
     const isPast = Number.isFinite(parsed) && parsed <= now;
@@ -177,7 +163,7 @@ export function SnoozeCustomDialog({
 
     function confirmCustom() {
         if (isInvalid) return;
-        onSnooze({ until: new Date(customValue).toISOString(), timezone: resolveTimezone() });
+        onSnooze({ until: new Date(parsed).toISOString(), timezone: timeZone });
         onOpenChange(false);
     }
 
@@ -194,8 +180,8 @@ export function SnoozeCustomDialog({
                         id="snooze-custom-until"
                         type="datetime-local"
                         value={customValue}
-                        min={toDatetimeLocal(new Date(now + 60_000))}
-                        max={toDatetimeLocal(new Date(now + MAX_HORIZON_MS))}
+                        min={toDatetimeLocalValue(new Date(now + 60_000).toISOString(), timeZone)}
+                        max={toDatetimeLocalValue(new Date(now + MAX_HORIZON_MS).toISOString(), timeZone)}
                         onChange={(event) => setCustomValue(event.target.value)}
                         aria-invalid={!isEmpty && isInvalid}
                     />

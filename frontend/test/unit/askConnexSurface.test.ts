@@ -8,11 +8,13 @@ import {
     ASK_CONNEX_TERMINAL_REASONS,
     ASK_CONNEX_WIDTH_REM,
     askConnexActiveState,
+    askConnexBoundRetryPrompt,
     askConnexRecovery,
     askConnexSessionActivity,
     askConnexSessionReaders,
     askConnexTerminalKind,
     askConnexTimedOutMessage,
+    askConnexTurnWriteState,
     askConnexWidthLength,
     askConnexWidthStorageKey,
     filterAskConnexSessions,
@@ -20,7 +22,8 @@ import {
     isAskConnexAuthorizationWithdrawal,
     parseStoredAskConnexWidth,
 } from "@/app/lib/askConnexSurface";
-import type { AiChatParticipant, AiChatSession } from "@/app/lib/types";
+import { askConnexToolCall } from "@/test/unit/helpers/askConnexToolCards";
+import type { AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession, AiChatTurnToolCall } from "@/app/lib/types";
 
 const NOW = Date.parse("2026-03-10T12:00:00Z");
 
@@ -228,10 +231,271 @@ describe("the active chat's state", () => {
     });
 });
 
+const REPLAY_RISK_REASONS = [
+    "generation_timeout", "turn_deadline_exceeded", "provider_idle_timeout", "no_progress",
+] as const;
+
+const READ_ONLY_PROGRESS: AiChatProgressItem[] = [
+    { seq: 0, source: "scope", status: "complete", count: null, truncated: false },
+    { seq: 1, source: "records", status: "complete", count: 2, truncated: false },
+    { seq: 65, source: "answer", status: "timed_out", count: null, truncated: false },
+];
+
+const WRITE_FREE_TURN = { turnId: 9, progress: READ_ONLY_PROGRESS, toolCalls: [] };
+
+describe("the exact failed question Retry can repeat", () => {
+    const target = {
+        sessionId: 4, turnId: 9, prompt: "Read Sato's tasks", authorUserId: 3, requestMessageSeq: 6,
+    };
+    const question: AiChatMessage = {
+        id: 22, sessionId: 4, seq: 6, authorKind: "user", authorUserId: 3,
+        authorDisplayName: "Aiko", content: target.prompt, createdAt: "2026-10-18 11:59:00",
+    };
+
+    it("uses the captured turn's own question", () => {
+        expect(askConnexBoundRetryPrompt(target, target, [question], [])).toBe(target.prompt);
+    });
+
+    it("refuses a different turn, a different session, or a question it never captured", () => {
+        expect(askConnexBoundRetryPrompt(target, { ...target, turnId: 10 }, [question], [])).toBeNull();
+        expect(askConnexBoundRetryPrompt(target, { ...target, sessionId: 5 }, [question], [])).toBeNull();
+        expect(askConnexBoundRetryPrompt(null, target, [question], [])).toBeNull();
+    });
+
+    it("refuses missing, withheld, optimistic, and ambiguous questions", () => {
+        for (const messages of [
+            [], [{ ...question, contentWithheld: true }], [{ ...question, id: -1 }],
+            [question, { ...question, id: 23, seq: 7 }], [{ ...question, authorUserId: 7 }],
+            [{ ...question, seq: 5 }],
+        ]) {
+            expect(askConnexBoundRetryPrompt(target, target, messages, [])).toBeNull();
+        }
+    });
+
+    it("refuses a newer transcript request even when it has no visible writes", () => {
+        expect(askConnexBoundRetryPrompt(target, target, [question, {
+            ...question, id: 23, seq: 7, content: "Create a follow-up task",
+        }], [])).toBeNull();
+        expect(askConnexBoundRetryPrompt(target, target, [{ ...question, id: 60, seq: 60 }], []))
+            .toBeNull();
+    });
+
+    it("refuses a newer turn's card even before its question arrives", () => {
+        expect(askConnexBoundRetryPrompt(target, target, [question], [
+            askConnexToolCall({ turnId: 10, status: "executed" }),
+        ])).toBeNull();
+    });
+});
+
+describe("current-turn write evidence", () => {
+    const projectedTurn = (toolCalls: AiChatTurnToolCall[]) => ({
+        ...WRITE_FREE_TURN,
+        progress: [...READ_ONLY_PROGRESS, {
+            seq: 2, source: "tasks", status: "complete", count: 1, truncated: false,
+        } satisfies AiChatProgressItem],
+        toolCalls,
+    });
+
+    it("keeps a known commitment even when evidence is missing or reconciliation fails", () => {
+        expect(askConnexTurnWriteState({
+            turnId: 9, progress: [], toolCalls: null, writeCommitted: true, evidenceReconciled: false,
+        }, [], null)).toBe("committed");
+    });
+
+    it("does not trust a cached proposal while its execution evidence is stale", () => {
+        expect(askConnexTurnWriteState({
+            ...projectedTurn([{ toolName: "assign_owner", tier: "CONFIRM", status: "proposed" }]),
+            evidenceReconciled: false,
+        }, [], 9)).toBe("uncertain");
+    });
+
+    it.each(["list_tasks", "list_activities"])("restores Retry for a read-only %s timeout", (toolName) => {
+        const state = askConnexTurnWriteState(projectedTurn([
+            { toolName, tier: "READ", status: "executed" },
+            { toolName, tier: "READ", status: "failed" },
+        ]), [], 9);
+        expect(state).toBe("none");
+        expect(askConnexRecovery("timed_out", "turn_deadline_exceeded", true, true, state).retry).toBe(true);
+    });
+
+    it.each(["AUTO", "CONFIRM"])("blocks Retry for an executed %s write omitted from cards", (tier) => {
+        const turn = projectedTurn([{ toolName: "create_task", tier, status: "executed" }]);
+        const state = askConnexTurnWriteState(turn, [], 9);
+        expect(state).toBe("committed");
+        expect(askConnexTurnWriteState(turn, [], null)).toBe("committed");
+        expect(askConnexRecovery("timed_out", "turn_deadline_exceeded", true, true, state).retry).toBe(false);
+    });
+
+    it.each(["AUTO", "CONFIRM"])("permits Retry only for a terminal non-executable %s proposal", (tier) => {
+        for (const status of ["rejected", "expired"]) {
+            const state = askConnexTurnWriteState(projectedTurn([
+                { toolName: "assign_owner", tier, status },
+            ]), [], 9);
+            expect(state).toBe("none");
+            expect(askConnexRecovery("failed", "provider_error", true, true, state).retry).toBe(true);
+        }
+    });
+
+    it.each(["AUTO", "CONFIRM"])("withholds Retry while a %s proposal can still execute or has an unknown outcome", (tier) => {
+        for (const status of ["proposed", "pending", "failed", "unknown"]) {
+            const state = askConnexTurnWriteState(projectedTurn([
+                { toolName: "assign_owner", tier, status },
+            ]), [], 9);
+            expect(state).toBe("uncertain");
+            expect(askConnexRecovery("failed", "provider_error", true, true, state).retry).toBe(false);
+        }
+    });
+
+    it("keeps a review-expired proposal uncertain while its durable status is still proposed", () => {
+        expect(askConnexTurnWriteState(projectedTurn([
+            { toolName: "assign_owner", tier: "CONFIRM", status: "proposed" },
+        ]), [askConnexToolCall({ reviewState: "expired", reviewExpiresAt: "2026-01-01T00:00:00Z" })], 9))
+            .toBe("uncertain");
+    });
+
+    it("does not infer execution from a rejected proposal's decision timestamp", () => {
+        const state = askConnexTurnWriteState(projectedTurn([
+            { toolName: "assign_owner", tier: "CONFIRM", status: "rejected" },
+        ]), [askConnexToolCall({
+            toolName: "assign_owner", tier: "confirm", status: "rejected", executedAt: "2026-10-18T12:00:00Z",
+        })], 9);
+        expect(state).toBe("none");
+        expect(askConnexRecovery("failed", "provider_error", true, true, state).retry).toBe(true);
+    });
+
+    it.each([
+        { toolName: "future_tool", tier: null, status: "executed" },
+        { toolName: "create_task", tier: "FUTURE", status: "executed" },
+        { toolName: "", tier: "READ", status: "executed" },
+        { toolName: "create_task", tier: "AUTO", status: "future_state" },
+    ])("withholds Retry for unknown execution evidence: %j", (call) => {
+        const state = askConnexTurnWriteState(projectedTurn([call]), [], 9);
+        expect(state).toBe("uncertain");
+        expect(askConnexRecovery("failed", "provider_error", true, true, state).retry).toBe(false);
+    });
+
+    it("requires reconciliation and settled progress even with an empty projection", () => {
+        expect(askConnexTurnWriteState(projectedTurn([]), [], null)).toBe("uncertain");
+        expect(askConnexTurnWriteState({ ...projectedTurn([]), progress: [] }, [], 9)).toBe("uncertain");
+        expect(askConnexTurnWriteState(projectedTurn([]), [], 9)).toBe("none");
+    });
+
+    it("keeps committed cards authoritative over a stale write-free projection", () => {
+        expect(askConnexTurnWriteState(projectedTurn([]), [askConnexToolCall({ status: "executed" })], 9))
+            .toBe("committed");
+        expect(askConnexTurnWriteState(projectedTurn([
+            { toolName: "create_task", tier: "AUTO", status: "undone" },
+        ]), [], 9)).toBe("committed");
+    });
+
+    it("requires a projection even when legacy progress only records reads", () => {
+        const turn = WRITE_FREE_TURN;
+        expect(askConnexTurnWriteState({ ...turn, toolCalls: undefined }, [], 9)).toBe("uncertain");
+        expect(askConnexTurnWriteState({ ...turn, toolCalls: null }, [], 9)).toBe("uncertain");
+    });
+
+    it("treats a missing turn or an unreconciled snapshot as uncertain", () => {
+        expect(askConnexTurnWriteState({ ...WRITE_FREE_TURN, turnId: null }, [], null)).toBe("uncertain");
+        expect(askConnexTurnWriteState(WRITE_FREE_TURN, [], null)).toBe("uncertain");
+        expect(askConnexTurnWriteState(WRITE_FREE_TURN, [], 8)).toBe("uncertain");
+    });
+
+    it("allows a reconciled write-free turn even if a previous turn wrote something", () => {
+        expect(askConnexTurnWriteState(WRITE_FREE_TURN, [], 9)).toBe("none");
+        expect(askConnexTurnWriteState(WRITE_FREE_TURN, [askConnexToolCall({
+            turnId: 8, status: "executed",
+        })], 9)).toBe("none");
+    });
+
+    it.each(["auto", "confirm"] as const)("recognizes committed %s writes before reconciliation", (tier) => {
+        expect(askConnexTurnWriteState(WRITE_FREE_TURN, [askConnexToolCall({
+            status: "executed", tier,
+        })], null)).toBe("committed");
+    });
+
+    it("keeps undone writes and execution timestamps as evidence of a committed write", () => {
+        expect(askConnexTurnWriteState(WRITE_FREE_TURN, [askConnexToolCall({ status: "undone" })], 9))
+            .toBe("committed");
+        expect(askConnexTurnWriteState({ ...WRITE_FREE_TURN, toolCalls: undefined }, [askConnexToolCall({
+            status: "failed", executedAt: "2026-10-18T12:00:00Z",
+        })], 9)).toBe("committed");
+    });
+
+    it("treats an unresolved automatic write as uncertain", () => {
+        expect(askConnexTurnWriteState(projectedTurn([
+            { toolName: "create_task", tier: "AUTO", status: "proposed" },
+        ]), [askConnexToolCall({ tier: "auto" })], 9))
+            .toBe("uncertain");
+    });
+
+    it.each(["activities", "tasks", "notes", "actions", "other"] as const)("does not infer no writes from omitted cards for %s", (source) => {
+        for (const status of ["complete", "failed", "proposed", "running", "skipped"] as const) {
+            const progress: AiChatProgressItem[] = [
+                ...READ_ONLY_PROGRESS,
+                { seq: 2, source, status, count: 1, truncated: false },
+            ];
+            expect(askConnexTurnWriteState({ turnId: 9, progress }, [], 9)).toBe("uncertain");
+            expect(askConnexTurnWriteState({
+                turnId: 9, progress: progress.map((item) => ({ ...item, count: null })),
+            }, [], 9)).toBe("uncertain");
+        }
+    });
+
+    it.each(["records", "deals", "files", "metrics", "schedule"] as const)("preserves retry for write-free %s reads", (source) => {
+        const progress: AiChatProgressItem[] = [
+            ...READ_ONLY_PROGRESS,
+            { seq: 2, source, status: "complete", count: 100, truncated: true },
+        ];
+        const state = askConnexTurnWriteState({ ...WRITE_FREE_TURN, progress }, [], 9);
+        expect(state).toBe("none");
+        for (const reason of REPLAY_RISK_REASONS) {
+            expect(askConnexRecovery("failed", reason, true, true, state).retry).toBe(true);
+        }
+    });
+
+    it("does not treat missing or still-running progress as a write-free settled snapshot", () => {
+        expect(askConnexTurnWriteState({ turnId: 9, progress: [] }, [], 9)).toBe("uncertain");
+        expect(askConnexTurnWriteState({
+            turnId: 9, progress: READ_ONLY_PROGRESS.map((item) => ({ ...item, status: "running" })),
+        }, [], 9)).toBe("uncertain");
+    });
+
+    it.each([
+        { status: "proposed", progressStatus: "proposed" },
+        { status: "rejected", progressStatus: "skipped" },
+        { status: "failed", progressStatus: "failed" },
+    ] as const)("does not mistake a $status proposal for a committed write", ({ status, progressStatus }) => {
+        const progress: AiChatProgressItem[] = [
+            ...READ_ONLY_PROGRESS,
+            { seq: 2, source: "actions", status: progressStatus, count: null, truncated: false },
+        ];
+        expect(askConnexTurnWriteState({ turnId: 9, progress }, [askConnexToolCall({ status })], 9))
+            .toBe("uncertain");
+    });
+});
+
 describe("failed-answer recovery", () => {
+    describe.each(REPLAY_RISK_REASONS)("%s", (reason) => {
+        it.each(["none", "committed", "uncertain"] as const)("offers safe recovery with %s writes", (writeState) => {
+            for (const phase of ["failed", "timed_out"]) {
+                expect(askConnexRecovery(phase, reason, true, true, writeState)).toEqual({
+                    retry: writeState === "none",
+                    continueFromPartial: true,
+                    narrowScope: false,
+                    narrowScopeFirst: false,
+                });
+                expect(askConnexRecovery(phase, reason, true, false, writeState).continueFromPartial)
+                    .toBe(false);
+                expect(askConnexRecovery(phase, reason, false, true, writeState).retry).toBe(false);
+                expect(askConnexRecovery(phase, reason, false, true, writeState).continueFromPartial)
+                    .toBe(false);
+            }
+        });
+    });
+
     it("offers nothing while the answer has not settled badly", () => {
         for (const phase of ["idle", "accepted", "running", "resolved", "cancelled"]) {
-            expect(askConnexRecovery(phase, null, true, true)).toEqual({
+            expect(askConnexRecovery(phase, null, true, true, "none")).toEqual({
                 retry: false,
                 continueFromPartial: false,
                 narrowScope: false,
@@ -241,7 +505,7 @@ describe("failed-answer recovery", () => {
     });
 
     it("offers the same question again, from where it stopped, on an ordinary failure", () => {
-        expect(askConnexRecovery("failed", "request_failed", true, true)).toEqual({
+        expect(askConnexRecovery("failed", "request_failed", true, true, "none")).toEqual({
             retry: true,
             continueFromPartial: true,
             narrowScope: false,
@@ -250,12 +514,12 @@ describe("failed-answer recovery", () => {
     });
 
     it("withholds continuing when nothing was retained to continue from", () => {
-        expect(askConnexRecovery("failed", "request_failed", true, false).continueFromPartial)
+        expect(askConnexRecovery("failed", "request_failed", true, false, "none").continueFromPartial)
             .toBe(false);
     });
 
     it("never advises narrowing for a reason nobody classified", () => {
-        const recovery = askConnexRecovery("failed", "a_reason_from_a_later_release", true, true);
+        const recovery = askConnexRecovery("failed", "a_reason_from_a_later_release", true, true, "none");
         expect(recovery.narrowScope).toBe(false);
         expect(recovery.narrowScopeFirst).toBe(false);
         expect(recovery.retry).toBe(true);
@@ -267,7 +531,7 @@ describe("failed-answer recovery", () => {
             "agent_backstop_exceeded",
             "tool_result_budget_exhausted",
         ]) {
-            expect(askConnexRecovery("failed", reason, true, true)).toEqual({
+            expect(askConnexRecovery("failed", reason, true, true, "none")).toEqual({
                 retry: false,
                 continueFromPartial: false,
                 narrowScope: true,
@@ -284,7 +548,7 @@ describe("failed-answer recovery", () => {
             "invocation_capacity_exhausted",
             "generation_capacity",
         ]) {
-            expect(askConnexRecovery("failed", reason, true, true)).toEqual({
+            expect(askConnexRecovery("failed", reason, true, true, "none")).toEqual({
                 retry: false,
                 continueFromPartial: false,
                 narrowScope: false,
@@ -294,9 +558,9 @@ describe("failed-answer recovery", () => {
     });
 
     it("offers nothing once the member's authority to read the answer was withdrawn", () => {
-        for (const reason of ["access_revoked", "restrictions_changed"]) {
+        for (const reason of ["access_revoked", "restrictions_changed", "privacy_invalidated"]) {
             expect(isAskConnexAuthorizationWithdrawal(reason)).toBe(true);
-            expect(askConnexRecovery("failed", reason, true, true)).toEqual({
+            expect(askConnexRecovery("failed", reason, true, true, "none")).toEqual({
                 retry: false,
                 continueFromPartial: false,
                 narrowScope: false,
@@ -313,7 +577,7 @@ describe("failed-answer recovery", () => {
             "context_window_too_small",
             "image_input_unsupported",
         ]) {
-            expect(askConnexRecovery("failed", reason, true, true)).toEqual({
+            expect(askConnexRecovery("failed", reason, true, true, "none")).toEqual({
                 retry: false,
                 continueFromPartial: false,
                 narrowScope: false,
@@ -329,7 +593,7 @@ describe("failed-answer recovery", () => {
      * up from the retained words only fills the composer, so it survives.
      */
     it("withholds the one-press repeat when the answer stopped part-way through", () => {
-        expect(askConnexRecovery("failed", "owner_lost", true, true)).toEqual({
+        expect(askConnexRecovery("failed", "owner_lost", true, true, "none")).toEqual({
             retry: false,
             continueFromPartial: true,
             narrowScope: false,
@@ -339,7 +603,7 @@ describe("failed-answer recovery", () => {
     });
 
     it("does not tell a synthesis failure to cover less, because retrieval succeeded", () => {
-        expect(askConnexRecovery("failed", "skill_budget_exceeded", true, true)).toEqual({
+        expect(askConnexRecovery("failed", "skill_budget_exceeded", true, true, "none")).toEqual({
             retry: true,
             continueFromPartial: true,
             narrowScope: false,
@@ -348,7 +612,7 @@ describe("failed-answer recovery", () => {
     });
 
     it("offers no route at all when the question can no longer be re-asked", () => {
-        expect(askConnexRecovery("failed", "step_cap_exceeded", false, true)).toEqual({
+        expect(askConnexRecovery("failed", "step_cap_exceeded", false, true, "none")).toEqual({
             retry: false,
             continueFromPartial: false,
             narrowScope: false,
@@ -379,7 +643,7 @@ describe("failed-answer recovery", () => {
             "turn_deadline_exceeded",
             "provider_idle_timeout",
         ]) {
-            const recovery = askConnexRecovery("timed_out", reason, true, false);
+            const recovery = askConnexRecovery("timed_out", reason, true, false, "none");
             expect(recovery.retry).toBe(true);
             expect(recovery.narrowScope).toBe(false);
             expect(recovery.narrowScopeFirst).toBe(false);
@@ -409,6 +673,7 @@ describe("the terminal reason vocabulary", () => {
         "no_progress",
         "org_invocation_quota_exhausted",
         "owner_lost",
+        "privacy_invalidated",
         "provider_error",
         "provider_idle_timeout",
         "quota_exhausted",
@@ -445,6 +710,7 @@ describe("the terminal reason vocabulary", () => {
             ["no_progress", { category: "transient", message: "stalled" }],
             ["org_invocation_quota_exhausted", { category: "capacity", message: "capacity" }],
             ["owner_lost", { category: "interrupted", message: "ownerLost" }],
+            ["privacy_invalidated", { category: "authorization", message: "restrictionsChanged" }],
             ["provider_error", { category: "transient", message: "provider" }],
             ["provider_idle_timeout", { category: "transient", message: "timeout" }],
             ["quota_exhausted", { category: "capacity", message: "capacity" }],
@@ -494,7 +760,7 @@ describe("what a stopped answer says, in both languages", () => {
     }
 
     it.each(["en", "ja"])("never tells a %s reader that asking again is free of consequence", (locale) => {
-        expect(askConnexRecovery("failed", "owner_lost", true, true).retry).toBe(false);
+        expect(askConnexRecovery("failed", "owner_lost", true, true, "none").retry).toBe(false);
         const copy = ownerLostCopy(locale);
         for (const reassurance of RETIRED_REASSURANCE[locale] ?? []) {
             expect(copy).not.toContain(reassurance);

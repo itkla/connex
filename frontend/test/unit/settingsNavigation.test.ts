@@ -285,7 +285,7 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         ).toContain("workspace.general");
     });
 
-    it("never offers a redirect stub as a destination, whatever the viewer holds", () => {
+    it("never offers a forward as a destination, whatever the viewer holds", () => {
         const ids = resolveSettingsNavigation(context("en"))
             .flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
 

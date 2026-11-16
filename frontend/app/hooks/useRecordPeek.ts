@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 
 import type { RecordType } from '@/app/lib/actions/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import { listStateAddress } from '@/app/hooks/listStateUrl';
+import { isCurrentListPath, listStateAddress } from '@/app/hooks/listStateUrl';
 
 /** The record types the Peek drawer can open. The contacts browser uses the `person` type. */
 export type PeekType = Extract<RecordType, 'company' | 'person' | 'deal'>;
@@ -53,6 +53,7 @@ export function useRecordPeek(browserType: PeekType, orderedIds: number[]) {
 
     const write = useCallback(
         (next: PeekTarget | null) => {
+            if (!isCurrentListPath(pathname)) return;
             const params = new URLSearchParams(window.location.search);
             if (next) {
                 params.set(PEEK_PARAM, `${next.type}:${next.id}`);

@@ -26,6 +26,9 @@
     tax_rate, billing_frequency, effective_start, effective_end, created_at, updated_at
   </sql>
 
+  <!-- The facet predicates mirror the products browser's client-side facets: any selected value
+       within a facet matches, and every facet with a selection must match. Selecting both
+       effective-date buckets partitions the catalog, so only a single bucket narrows it. -->
   <select id="getFiltered" resultMap="ProductResult">
     SELECT <include refid="cols"/> FROM product
     WHERE workspace_id = #{workspaceId}
@@ -35,6 +38,24 @@
         OR LOWER(sku) COLLATE utf8mb4_bin LIKE LOWER(#{query}) COLLATE utf8mb4_bin
         OR LOWER(description) COLLATE utf8mb4_bin LIKE LOWER(#{query}) COLLATE utf8mb4_bin
       )
+    </if>
+    <if test="facets.billingFrequencies.size() > 0">
+      AND billing_frequency IN
+      <foreach item="frequency" collection="facets.billingFrequencies" open="(" separator="," close=")">#{frequency}</foreach>
+    </if>
+    <if test="facets.availability.size() > 0">
+      AND active IN
+      <foreach item="state" collection="facets.availability" open="(" separator="," close=")">#{state}</foreach>
+    </if>
+    <if test="facets.effectiveDates.size() == 1">
+      <choose>
+        <when test="facets.effectiveDates.contains('bounded')">
+          AND (effective_start IS NOT NULL OR effective_end IS NOT NULL)
+        </when>
+        <otherwise>
+          AND effective_start IS NULL AND effective_end IS NULL
+        </otherwise>
+      </choose>
     </if>
     ORDER BY name, id
   </select>

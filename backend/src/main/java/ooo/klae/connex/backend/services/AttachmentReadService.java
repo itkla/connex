@@ -79,11 +79,11 @@ public class AttachmentReadService {
         }
         Map<Integer, String> uploaderNames = uploaderIds.isEmpty()
             ? Map.of()
-            : tenantWorkScope.unrouted(
+            : tenantWorkScope.unroutedRead(
                 () -> loadDisplayNames(uploaderIds, userMapper::getDisplayNamesByIds));
         Map<Integer, String> targetNames = targetIds.isEmpty()
             ? Map.of()
-            : tenantWorkScope.unrouted(() -> loadDisplayNames(targetIds, ids ->
+            : tenantWorkScope.unroutedRead(() -> loadDisplayNames(targetIds, ids ->
                 userMapper.getActiveWorkspaceMemberDisplayNamesByIds(workspaceId, ids)));
         applyDisplayNames(attachments, uploaderNames, targetNames);
         return attachments;
@@ -95,7 +95,7 @@ public class AttachmentReadService {
                 "User-target attachment validation must precede the tenant transaction");
         }
         List<UserDisplayNameDto> labels = Objects.requireNonNull(
-            tenantWorkScope.unrouted(() -> userMapper
+            tenantWorkScope.unroutedRead(() -> userMapper
                 .getActiveWorkspaceMemberDisplayNamesByIds(workspaceId, List.of(userId))),
             "active workspace member label result");
         if (labels.isEmpty()) {

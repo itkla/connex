@@ -21,12 +21,17 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.dto.TaskWorkItem;
 import ooo.klae.connex.backend.dto.TaskWorkPage;
@@ -37,6 +42,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.work.WorkItemStateHash;
@@ -53,8 +59,8 @@ import lombok.RequiredArgsConstructor;
  * Business logic for {@code Task} operations.
  * Handles mapping between {@code TaskDto} and {@code Task} bean.
  * Delegates persistence to {@code TaskMapper}, resolves inline @/# references in
- * the task description via {@code ReferenceService}, and dispatches member-mention
- * notifications.
+ * the task description via {@code ReferenceService}, and dispatches assignment and
+ * member-mention notifications.
  */
 
 @Service
@@ -71,9 +77,13 @@ public class TaskService {
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
     private final NotificationDelivery notificationDelivery;
+    private final NotificationMapper notificationMapper;
+    private final NotificationStateVersionService notificationStateVersions;
     private final NotificationPreferenceService notificationPreferenceService;
     private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
+
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final String STATUS_TODO = "todo";
     private static final String STATUS_IN_PROGRESS = "in_progress";
@@ -84,6 +94,7 @@ public class TaskService {
         Set.of("description", "completed", "status", "dueDate");
 
     private static final String MENTION_TYPE = "task.mention";
+    private static final String ASSIGNED_TYPE = "task.assigned";
     private static final String MENTION_CATEGORY = "task";
     private static final String MENTION_SEVERITY = "info";
     private static final String IN_APP = "in_app";
@@ -99,6 +110,18 @@ public class TaskService {
     public List<Task> getTasksPage(int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksPage(workspaceId, limit, offset));
+    }
+
+    /** Reads only one page and its matching count under the same trusted visibility ceiling. */
+    public PageResponse<TaskDto> getListPage(ActivityListFilter filter, PageBounds bounds) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        var today = userCalendarService.today();
+        int actorId = workspaceService.getCurrentUserId();
+        var rows = taskMapper.getListPage(workspaceId, scope, filter, today, actorId, bounds.size(), bounds.offset());
+        var items = referenceService.hydrateTasks(workspaceId, rows).stream().map(TaskDto::from).toList();
+        long total = taskMapper.countList(workspaceId, scope, filter, today, actorId);
+        return new PageResponse<>(items, total);
     }
 
     public long countTasks() {
@@ -176,6 +199,20 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
+        return create(task, MutationAdmission.UNRESTRICTED);
+    }
+
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_CREATE)
+    public Task create(Task task, MutationAdmission admission) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> createWithinVisibilityScope(task, admission, personVisibilityScope.workspaceIdsJson()));
+    }
+
+    private Task createWithinVisibilityScope(Task task, MutationAdmission admission, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
@@ -184,8 +221,9 @@ public class TaskService {
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
         task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         task.setCreatedAt(null);
-        validateLinkedRecords(task, workspaceId);
+        validateLinkedRecords(task, workspaceId, personWorkspaceIdsJson);
         workspaceService.requirePermission(Permission.TASK_CREATE);
+        admission.beforeMutation();
         taskMapper.insert(task);
         auditService.record("task.create", "task", task.getId(), task.getDescription(),
             "Created task " + task.getDescription(),
@@ -195,6 +233,7 @@ public class TaskService {
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, task.getId(), task.getDescription());
         if (actor != null) {
+            notifyAssignment(workspaceId, task, actor);
             notifyMentions(workspaceId, task, mentioned, actor);
         }
         return hydrate(workspaceId, task);
@@ -203,6 +242,12 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> updateWithinVisibilityScope(id, task, personVisibilityScope.workspaceIdsJson()));
+    }
+
+    private Task updateWithinVisibilityScope(int id, Task task, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         lockAssignee(task, workspaceId);
         List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
@@ -224,7 +269,7 @@ public class TaskService {
         task.setPosition(resolved.equals(beforeStatus)
             ? before.getPosition()
             : taskMapper.nextTaskPosition(workspaceId, resolved));
-        validateLinkedRecords(task, workspaceId);
+        validateLinkedRecords(task, workspaceId, personWorkspaceIdsJson);
         workspaceService.requirePermission(Permission.TASK_UPDATE);
         if (taskMapper.update(task) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
@@ -241,7 +286,17 @@ public class TaskService {
         }
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, id, task.getDescription());
+        boolean reassigned = before.getAssignedTo() == null
+            || before.getAssignedTo().getId() != requireAssigneeId(task);
+        if (reassigned && before.getAssignedTo() != null
+                && notificationMapper.resolveTaskAssignment(workspaceId, before.getAssignedTo().getId(), id,
+                    LocalDateTime.now(ZoneOffset.UTC).format(TS)) > 0) {
+            notificationStateVersions.markChanged(before.getAssignedTo().getId());
+        }
         if (actor != null) {
+            if (reassigned) {
+                notifyAssignment(workspaceId, task, actor);
+            }
             notifyMentions(workspaceId, task, mentioned, actor);
         }
         return hydrate(workspaceId, task);
@@ -298,20 +353,42 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id) {
-        return completeLocked(id, null);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> completeWithinVisibilityScope(id));
+    }
+
+    private Task completeWithinVisibilityScope(int id) {
+        return completeWithinVisibilityScope(id, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task complete(int id, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> completeWithinVisibilityScope(id, admission));
+    }
+
+    private Task completeWithinVisibilityScope(int id, MutationAdmission admission) {
+        return completeLocked(id, null, admission);
     }
 
     /** Completes assigned open work only when its board-locked canonical state still matches. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id, String expectedStateHash) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> completeWithinVisibilityScope(id, expectedStateHash));
+    }
+
+    private Task completeWithinVisibilityScope(int id, String expectedStateHash) {
         if (expectedStateHash == null || expectedStateHash.isBlank()) {
             throw new BadRequestException("Expected task state is required");
         }
-        return completeLocked(id, expectedStateHash);
+        return completeLocked(id, expectedStateHash, MutationAdmission.UNRESTRICTED);
     }
 
-    private Task completeLocked(int id, String expectedStateHash) {
+    private Task completeLocked(int id, String expectedStateHash, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User currentUser = authService.getCurrentUser();
         List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
@@ -335,9 +412,11 @@ public class TaskService {
             }
         }
         if (task.isCompleted()) {
+            admission.beforeMutation();
             return hydrate(workspaceId, task);
         }
         int donePosition = taskMapper.nextTaskPosition(workspaceId, STATUS_DONE);
+        admission.beforeMutation();
         if (taskMapper.complete(workspaceId, id, currentUser.getId(), donePosition) == 0) {
             throw new ForbiddenException("Only the task assignee may complete this task");
         }
@@ -408,6 +487,11 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task move(int id, String status, int position) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> moveWithinVisibilityScope(id, status, position));
+    }
+
+    private Task moveWithinVisibilityScope(int id, String status, int position) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (status == null || !VALID_STATUSES.contains(status)) {
             throw new BadRequestException("Invalid task status: " + status);
@@ -558,6 +642,23 @@ public class TaskService {
     @Transactional
     @RequirePermission(Permission.TASK_UPDATE)
     public Task reschedule(int id, String dueDate) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> rescheduleWithinVisibilityScope(id, dueDate));
+    }
+
+    private Task rescheduleWithinVisibilityScope(int id, String dueDate) {
+        return rescheduleWithinVisibilityScope(id, dueDate, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task reschedule(int id, String dueDate, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> rescheduleWithinVisibilityScope(id, dueDate, admission));
+    }
+
+    private Task rescheduleWithinVisibilityScope(int id, String dueDate, MutationAdmission admission) {
         try {
             LocalDate.parse(dueDate);
         } catch (DateTimeParseException e) {
@@ -566,6 +667,7 @@ public class TaskService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        admission.beforeMutation();
         if (taskMapper.updateDueDate(workspaceId, id, dueDate) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
         }
@@ -589,9 +691,9 @@ public class TaskService {
     }
 
     /** Retains the person and its exact visibility grant after the board lock until commit. */
-    private void validateLinkedRecords(Task task, int workspaceId) {
+    private void validateLinkedRecords(Task task, int workspaceId, String personWorkspaceIdsJson) {
         if (task.getPerson() != null) {
-            Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, task.getPerson().getId());
+            Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, personWorkspaceIdsJson, task.getPerson().getId());
             if (person == null || (person.getWorkspaceId() != workspaceId
                     && shareMapper.lockPersonShareForWorkspace(person.getId(), workspaceId) == null)) {
                 throw new ResourceNotFoundException("Contact not found");
@@ -614,7 +716,16 @@ public class TaskService {
         }
     }
 
+    private void notifyAssignment(int workspaceId, Task task, User actor) {
+        notifyTaskRecipients(workspaceId, task, List.of(requireAssigneeId(task)), actor, ASSIGNED_TYPE);
+    }
+
     private void notifyMentions(int workspaceId, Task task, List<Integer> recipientIds, User actor) {
+        notifyTaskRecipients(workspaceId, task, recipientIds, actor, MENTION_TYPE);
+    }
+
+    private void notifyTaskRecipients(
+            int workspaceId, Task task, List<Integer> recipientIds, User actor, String type) {
         if (recipientIds.isEmpty()) {
             return;
         }
@@ -624,11 +735,11 @@ public class TaskService {
         String contextType = null;
         Integer contextId = null;
         String actionUrl = "/activity/tasks" + taskAnchor;
-        if (task.getDeal() != null && task.getDeal().getId() > 0) {
+        if (!ASSIGNED_TYPE.equals(type) && task.getDeal() != null && task.getDeal().getId() > 0) {
             contextType = "deal";
             contextId = task.getDeal().getId();
             actionUrl = "/records/deals/" + contextId + taskAnchor;
-        } else if (task.getPerson() != null && task.getPerson().getId() > 0) {
+        } else if (!ASSIGNED_TYPE.equals(type) && task.getPerson() != null && task.getPerson().getId() > 0) {
             contextType = "person";
             contextId = task.getPerson().getId();
             actionUrl = "/records/contacts/" + contextId + taskAnchor;
@@ -637,19 +748,20 @@ public class TaskService {
             if (recipientId == actor.getId()) {
                 continue;
             }
-            if (!notificationPreferenceService.isEnabled(recipientId, MENTION_TYPE, IN_APP)) {
+            if (!notificationPreferenceService.isEnabled(recipientId, type, IN_APP)) {
                 continue;
             }
             try {
                 Notification notification = new Notification();
                 notification.setWorkspaceId(workspaceId);
                 notification.setRecipientId(recipientId);
-                notification.setType(MENTION_TYPE);
+                notification.setType(type);
                 notification.setCategory(MENTION_CATEGORY);
                 notification.setSeverity(MENTION_SEVERITY);
                 notification.setTemplateVersion(1);
-                notification.setTitle("New mention");
-                notification.setBody(actor.getDisplayName() + " mentioned you in a task");
+                notification.setTitle(ASSIGNED_TYPE.equals(type) ? "Task assigned to you" : "New mention");
+                notification.setBody(actor.getDisplayName()
+                    + (ASSIGNED_TYPE.equals(type) ? " assigned you a task" : " mentioned you in a task"));
                 notification.setActorId(actor.getId());
                 notification.setActorLabel(actor.getDisplayName());
                 notification.setSourceType("task");
@@ -658,9 +770,12 @@ public class TaskService {
                 notification.setContextType(contextType);
                 notification.setContextId(contextId);
                 notification.setActionUrl(actionUrl);
-                notification.setDedupeKey(MENTION_TYPE + ":" + task.getId() + ":" + recipientId);
+                notification.setDedupeKey(type + ":" + task.getId() + ":" + recipientId);
                 notification.setTriggeredAt(triggeredAt);
                 notification.setData(json(Map.of("taskId", task.getId())));
+                if (ASSIGNED_TYPE.equals(type)) {
+                    notificationMapper.resolveTaskAssignment(workspaceId, recipientId, task.getId(), triggeredAt);
+                }
                 notificationDelivery.deliver(notification);
             } catch (RuntimeException ignored) {
             }

@@ -11,7 +11,7 @@ import java.util.OptionalDouble;
  */
 public final class RelationshipWarmthModel {
     private static final RelationshipWarmthModel CURRENT = new RelationshipWarmthModel(
-        "warmth-v1",
+        "warmth-v2",
         2.0,
         30.0,
         0.7,
@@ -107,7 +107,9 @@ public final class RelationshipWarmthModel {
             warmMinimumRawWeight,
             rawWeightForRoundedScore(hotMinimumScore),
             rawWeightForRoundedScore(coolMinimumScore),
-            coldRawWeight
+            coldRawWeight,
+            coolingPriorMinimum,
+            coolingRecentRatio
         );
     }
 
@@ -141,7 +143,7 @@ public final class RelationshipWarmthModel {
         return noteWeight;
     }
 
-    /** Returns the base weight for a task. */
+    /** Returns the base weight for a completed task with a recorded completion instant. */
     public double taskWeight() {
         return taskWeight;
     }
@@ -241,7 +243,9 @@ public final class RelationshipWarmthModel {
         double warmMinimumRawWeight,
         double hotMinimumRawWeight,
         double coolMinimumRawWeight,
-        double coldRawWeight
+        double coldRawWeight,
+        double coolingPriorMinimum,
+        double coolingRecentRatio
     ) {}
 
     private double rawWeightForExactScore(double score) {

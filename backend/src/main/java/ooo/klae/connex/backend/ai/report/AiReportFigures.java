@@ -85,6 +85,7 @@ final class AiReportFigures {
     private static NumberFormat currencyFormat(Currency currency, BigDecimal value, Locale locale) {
         NumberFormat format = NumberFormat.getCurrencyInstance(locale);
         format.setCurrency(currency);
+        format.setRoundingMode(RoundingMode.HALF_UP);
         int fractionDigits = value.stripTrailingZeros().scale() <= 0 ? 0 : currency.getDefaultFractionDigits();
         format.setMinimumFractionDigits(fractionDigits);
         format.setMaximumFractionDigits(Math.max(fractionDigits, currency.getDefaultFractionDigits()));

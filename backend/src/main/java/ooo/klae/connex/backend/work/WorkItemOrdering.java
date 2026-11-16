@@ -41,6 +41,7 @@ public final class WorkItemOrdering {
             case task -> 0;
             case document_approval -> 1;
             case notification -> 2;
+            case ai_mission -> 3;
         };
     }
 }

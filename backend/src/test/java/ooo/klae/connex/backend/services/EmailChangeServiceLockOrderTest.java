@@ -21,7 +21,6 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /** Pins root-before-token ordering for the programmatic confirmation entry point. */
 class EmailChangeServiceLockOrderTest {
@@ -36,7 +35,7 @@ class EmailChangeServiceLockOrderTest {
             mock(NotificationStateVersionService.class), tokenMapper,
             mock(PasswordResetTokenMapper.class), mock(EmailChangeEmailService.class),
             mock(AuthService.class), mock(SessionSecurityService.class), mock(AuditService.class),
-            mock(LoginRateLimiter.class), mock(PrivilegedAccountService.class), mock(WebAuthnService.class));
+            mock(LoginRateLimiter.class), mock(PrivilegedAccountService.class));
         String rawToken = OneTimeTokenDigest.generate();
         String tokenHash = OneTimeTokenDigest.sha256(rawToken);
         User user = new User();
@@ -55,7 +54,7 @@ class EmailChangeServiceLockOrderTest {
         when(tokenMapper.markConsumed(tokenHash)).thenReturn(1);
         when(workspaceMapper.findPendingGrants(user.getId())).thenReturn(List.of());
 
-        assertTrue(service.confirmChange(rawToken).isEmpty());
+        assertTrue(service.confirmChange(rawToken).revokedInvitations().isEmpty());
 
         InOrder order = inOrder(userMapper, tokenMapper);
         order.verify(userMapper).lockById(user.getId());

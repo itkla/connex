@@ -25,7 +25,7 @@ self-registration → #81; hardening grab-bag → #67/#68/#69/#71/#72/#73/#76/#7
 | 6 | **Per-tenant pipelines, optionally shareable** | pipeline/stage = owned-but-shareable (same model as §0.1) |
 | 7 | No hard uniqueness on person.email / company.name | index only |
 | 8 | Session attr + re-validated `X-Workspace-Id` header | no URL segment |
-| 9 | Registration **creates+owns** a workspace **and** invite-join, **with an instance setting to disable self-service creation** | `allow_public_workspace_creation` flag (config-backed); relates to #81 |
+| 9 | Registration normally **creates+owns** a workspace and supports invite-join; invitation entry may defer the optional personal workspace. **An instance setting can disable self-service creation.** | `allow_public_workspace_creation` flag (config-backed); `skipInitialWorkspace` suppresses only self-service provisioning and grants no membership; relates to #81 |
 | 10 | `owner`/`admin`/`member` built-in **+ owner-defined custom roles with chosen privileges** | full RBAC (`workspace_role` + `permission` catalog + `workspace_role_permission`); built-ins first, custom roles a dedicated later phase (§0.2) |
 | 11 | Both invite flows (email-token **and** admin-adds-existing) | new `WorkspaceController` endpoints |
 | 12 | Member removal → owner/assignee `SET NULL`, authored history preserved | (matches plan §2 user-ref hardening) |
@@ -84,7 +84,7 @@ reference a role (built-in or custom). Independent of tenant isolation — seque
 > V13 adds `workspace_role`, `workspace_role_permission`, and an additive nullable `workspace_member.role_id`
 > (custom role wins when set; assigned roles must be explicitly reassigned before deletion so the
 > underlying `ON DELETE SET NULL` cannot expose a broader built-in role). Built-in
-> roles map to fixed permission bundles; `WorkspaceService.requirePermission(...)` is wired into every entity
+> roles map to fixed permission bundles, with per-workspace revocable `EXPORT_DATA` flags from V248; `WorkspaceService.requirePermission(...)` is wired into every entity
 > mutation + structural/member/audit gate (replacing the `requireRole` sites). `RoleController`
 > (`/api/workspaces/{id}/roles` CRUD) + `GET /api/permissions` catalog + custom-role assignment via the
 > member PATCH. Reads stay membership-gated (not in the catalog). Frontend: a Roles tab in `/settings`
@@ -96,6 +96,20 @@ reference a role (built-in or custom). Independent of tenant isolation — seque
 The inbox/bell is **recipient-scoped across every workspace the user belongs to**, not the active one, so
 nothing is missed while viewing another workspace; each notification is labeled with its source
 workspace. Delivery prefs stay per-user-global. (The reminder *generation* jobs still run per-workspace.)
+
+Notification email record links enter the authenticated notifications page with only a notification
+id. The existing recipient-authorized read-state endpoint supplies its current workspace and record
+URL; the client selects that workspace through the same helper as inbox/bell navigation before opening
+the record. Link parameters do not authorize a workspace or supply a record destination.
+
+Task creation and reassignment emit `task.assigned` through the existing preference and delivery
+machinery, only to the locked active assignee in that workspace and never to the acting user.
+Unchanged assignments emit nothing. Like mentions, the dedupe key identifies one task and recipient;
+reassignment resolves the prior notice. Every genuine assignment transition explicitly revives the
+recipient's row unread, even if they restored and dismissed an old notice from History. Assignment
+links always target `/activity/tasks?task=<id>` so later contact/deal changes cannot strand them;
+mention links retain their record context. Secondary-channel delivery retains its first-occurrence behavior. Personal notification
+settings expose a separate task-assignment preference in both languages.
 
 > **✅ Implemented (2026-06-24):** inbox reads/mutations are recipient-scoped across all memberships
 > (`inboxScope`, no `workspace_id` filter); `findPage`/`findById` join `workspace` for a `workspace_name`
@@ -144,6 +158,20 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   single-tenant deployable. Because a silo is Connex-operated, Connex can still reach silo data — the deep-trust
   "Connex-blind" guarantee stays on-prem (`ENCRYPTION_GUARANTEE_MATRIX.md`). This reinstates the silo tier that
   the 2026-07-03 record on #313 had dropped; #100 tracks it.
+- **Post-delete assignment recovery (#1941).** After the control-plane account delete commits and
+  cascades memberships, catalog offboarding sweeps company/person/deal owners, collaborator seats,
+  task assignees, intervention/campaign owners, lifecycle-pass owners, and report-goal owner/creator
+  references. Orphan-owned personal goals are deleted; orphaned creators are cleared (#2069).
+  Membership-locking writers finish before that cascade; campaign owner writes use the same
+  membership barrier with NOWAIT.
+  Numeric discovery and each separate `REQUIRES_NEW` / `READ_COMMITTED` unit are pinned to one catalog;
+  batched account-existence reads are control-only `unroutedRead` calls, with no tenant/control joins.
+  Every lifecycle state in `activeCatalogs()` is covered; catalogs this deployment cannot serve are
+  outside that coverage. Failed cleanup leaves erasure completeness pending and retries through a
+  bounded periodic traversal with a fixed watermark, including complete collaborator key tuples.
+  Existing reserved accounts are preserved. Restarting resets disposable cursors safely. Approvers
+  (#1953), self-only asynchronous writers, and old writers during rolling deployment remain
+  outside the assignment guarantee; see `docs/backend/LOCKING.md` and `docs/DEPLOYMENT.md`.
 - **Phase 3 shipped (2026-07-12, #440 — registry #441, routing #446, control-plane split #463/#479).**
   `org_placement` resolves every org's placement directly from the control plane for each tenant-scope
   installation (`shared` default for row-less orgs, fail-closed 503 for anything this deployment cannot serve —
@@ -167,6 +195,47 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   (`db/migration/control|tenant`; root frozen at V65), the pinned mapper-crossing baseline (= the Phase-4
   hydration work-list), and user-reference index survival. Routing mode defaults to `single-database`
   (the only mode on-prem/silo) and stays off until the flag-enable gate (#485) clears.
+- **Control-only recovery during catalog routing (#485).** The exact `HandlerMethod` allowlist in
+  `ControlOnlyHandlerPolicy` covers workspace listing, pending memberships, switching, member-profile
+  reads, self-profile updates and self-locale updates, plus implicit HEAD for those GET handlers.
+  In `catalog-per-placement` mode an initially valid membership installs a typed validated control
+  selection without resolving its placement. `TenantContext.isResolved()` remains false; the selection
+  preserves the server-validated workspace/organization identity for profile authorization and audit
+  attribution, and never authorizes tenant SQL. A server-owned request capability independently
+  restricts MyBatis execution to `ControlCatalogRoutingInterceptor`'s physical-control registry before
+  ordinary scope exemptions, including when general scope enforcement is disabled. Clearing or
+  replacing the tenant context does not remove that request restriction. Completion and async handoff
+  release both the control selection and capability; an interceptor refusal also removes its capability.
+  The capability belongs only to its request thread. Neither tenant identity nor a restriction is
+  thread-inherited, and no task decorator copies either into pooled async helpers or event listeners.
+  The control selection is never resolved: even copying that typed selection cannot grant a tenant
+  route. Descendants without their own scope are refused by ordinary tenant-scope enforcement.
+  `catalog-per-placement` therefore requires `connex.tenancy.enforce-scope=true`; startup refuses a
+  disabled guard before any datasource initializes, because an unscoped tenant statement could otherwise
+  silently use the default catalog. This invariant does not affect `single-database` deployments.
+  Descendants use their own explicit `TenantWorkScope.inWorkspace`/`AutomationExecutor.runAs` span,
+  which resolves placement fail-closed; an unservable placement still refuses tenant SQL. Scope is
+  restored on exit and never inherited by further children. Cold and pre-warmed pool workers retain
+  no restriction for later unrelated scoped work. The HTTP handler itself remains restricted even
+  inside an explicit workspace span, including when ordinary enforcement is disabled in a unit test.
+  Header parsing, membership refusals, selection-route
+  target authorization and revoked-selection recovery retain their existing behavior; a recovered
+  fallback still resolves its placement. Single-database mode retains eager placement resolution and
+  its existing 503s. `GET /api/auth/me` keeps its existing MVC exclusion. `PATCH /api/users/me` is excluded
+  because `UserService.updateTimezone` publishes a source-change event whose listener reconciles tenant
+  notifications. `PUT /api/users/{id}` may persist timezone through `UserService.update` but does not
+  publish that event; this existing distinction is pinned by tests and remains unchanged. Workspace
+  creation/offboarding and the notification inbox are not allowlisted; the inbox remains 503 when its
+  remembered placement is unservable until recipient-catalog routing is implemented. The handler
+  architecture contract is a pinned-handler and direct-dependency tripwire, including simple local
+  aliases and method references. Reviewed dependency entries and their source-local helpers also
+  reject event publication or async submission. It is not a general transitive containment proof;
+  the request-thread SQL guard and ordinary descendant enforcement, required by the startup invariant,
+  enforce the runtime boundary. Real-handler integration tests keep the normally migrated default
+  catalog as control, including Spring Session JDBC tables, and create only a minimal tenant scratch
+  catalog without control tables. An injected tenant call proves the request guard refuses SQL before
+  execution. Normal Flyway initialization makes the class independent of earlier tests on a fresh
+  CI schema; committed fixture workspaces, organizations, users and scratch catalogs are cleaned up.
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
@@ -185,6 +254,147 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   (`Company`/`Person`/`Pipeline` `visible`) carry the same-org ceiling the write path enforces, so a
   legacy or out-of-band cross-org share row grants no read visibility either. `OrgShareCeilingArchTest`
   pairs every `FROM *_share` read with the ceiling; `ShareReadIsolationMapperTest` proves it.
+- **Record-visibility ceiling separation (#485):** `RecordVisibilityScopeControlAccess` exposes an
+  immutable, unfiltered organization workspace set. Both modes consume matching context-prepared
+  sharing data directly; `ShareWorkspaceControlAccess` remains the lazy fallback with its existing
+  tenant-context checks. Ordinary single-database sharing grants and listings remain lazy.
+  This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
+  tightening requires a separate explicit decision. It deliberately differs from the active-only
+  `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
+  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`,
+  `PipelineMapper`, `CompanyMapper`, `DealMapper` and `PersonMapper` now bind this set through `JSON_TABLE` and read tenant tables only;
+  duplicate counts omit the optional employer-label joins.
+  Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
+  one scope across both bounded candidate streams. Company evidence resolves its scope before the
+  subject lookup, which now needs that ceiling; private counts still follow the subject-visibility
+  refusal. Contact evidence retains its existing subject-first admission. Note assistant history
+  retains its separate active-only organization scope. Segment evaluation reuses one unfiltered scope across nested groups, negation,
+  and bounded keyset pages, including both ordinary and restricted person-company field statements.
+  Its five converted statements preserve the bounded warm-intro engaged-person provision-ceased
+  exception and the unbounded owned-person company-ID projection without a company visibility join.
+  Pipeline's nine visibility statements retain their unfiltered organization ceiling, including
+  `getAllStages`' distinct `stage.workspace_id` anchor. Full visible and owned pipeline reads project
+  the viewer's scope JSON into a private SQL column for the nested ordered `Stage[]` query; its
+  `workspaceId` remains the parent's owning workspace. Empty pipelines retain an empty array and
+  `getAllPipelines` stays lightweight. Import and export keep their per-pipeline stage queries with
+  one scope for the operation; filtering, ordering and search limits remain in tenant SQL.
+  Deal's related-company, person, pipeline and stage ceilings retain their exact owner anchors,
+  archival/processing restrictions and tenant-side share checks. Filtered page/count, metrics,
+  selection, export and risk inputs reuse one operation scope. Empty segments and ineligible risk
+  cohorts retain deferred no-read paths; junction insert/upsert/role-update authorization remains
+  inside tenant SQL. Seeder scopes begin empty for a fresh organization before BATCH work, then
+  append its generated workspace ID without consulting a SIMPLE executor.
+  Bulk stage changes pass the same scope into each independently committed mutation and stage-history
+  write. Workflow traversal and workspace batches explicitly reuse one scope across their independent
+  transactions, restoring the synchronous operation binding on exit; routed reads continue to validate
+  the prepared context on every access. Creation and import history reuse their pre-lock scopes.
+  Company's 23 converted statements retain both the company-share ceiling and the person-share
+  evidence ceiling, including deal-attributed and deal-only evidence, archive/processing restrictions,
+  member scopes, ordering, facets and SQL limits. Page/count and combined-facet service operations
+  share one snapshot. Tag definitions are scalar; `TagService.getTagById` explicitly assembles the
+  original ordered people/company/deal arrays, including empty arrays. Scalar tag mutation checks
+  retain their existing existence and audit behavior without implicit nested record queries.
+  Company validation and reference-hydrating mutation roots resolve scope before their first
+  authorization lock or mutex. Bulk mutations, import previews, signal reconciliation, watch sweeps,
+  workflow deliveries, AI evidence/skill retrieval and history compaction reuse `withWorkspaceScope`
+  across independent transactions; this does not change commits or lock ownership. Read-only and
+  independently handled work may use `withDeferredWorkspaceScope`, the deferred entry to that same
+  synchronous memo: skipped work reads nothing, and each item observes the first ordinary lookup
+  failure through its existing handler without another control query. Mutation delegates still
+  preload before authorization locks; skill steps prime the memo before their first guard/proposal,
+  and actual history compaction preloads before its first ownership guard. Snapshot-invariant
+  refusals use `TenantScopeSnapshotException` (including its existing missing-snapshot subtype)
+  and escape partial-result handlers. Routed reads always revalidate prepared data and destructive
+  fresh reads bypass both memos. The Company
+  parity corpus extends the shared frozen oracle and minimal tenant-catalog fixture without changing
+  existing corpora, and its scratch catalog contains only the ten tenant tables used by these statements.
+  Person's 29 statements retain separate person visibility and employer masking ceilings, including
+  assistant-primary reads, owned archived detail and visible-person locks. Employer filters, facets,
+  counts, evidence aggregation and limits remain in tenant SQL. Compound browser reads and operation
+  loops reuse one unfiltered snapshot; skipped work retains deferred boundaries, while mutations
+  capture before their original authorization and record locks. The Person frozen corpus and minimal
+  eleven-table tenant catalog cover every statement without control tables.
+  These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
+  workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
+  and fail-fast guard required before catalog routing can be enabled. The routing default
+  stays `single-database`; other #485 crossings and the flag-enable gate remain open.
+  Report generation and KPI reads resolve one unfiltered scope for all widgets, current/prior
+  periods, network account values, and reverse-introduction candidates. Historical report populations
+  retain their record/share creation cutoffs inside tenant SQL and use current organization membership,
+  matching the removed workspace joins. Narrative generation consumes the frozen figures without
+  another scope read. Report scope resolution precedes the restriction-epoch read and later snapshot
+  persistence locks; transaction boundaries are unchanged and #2159 remains a flag-enable prerequisite.
+
+  `AiOutputCacheMapper.deleteForPerson` also binds the unfiltered set through `JSON_TABLE` on
+  `ai_output_cache.workspace_id`, with a separate anchor membership check. Its organization ceiling
+  encloses every feature branch, including organization-wide report narrative invalidation; checking
+  only the owned person cannot protect foreign cache rows carrying identical subject IDs. Its
+  crossing baseline entry is removed. In `single-database`, restriction processing obtains
+  `RecordVisibilityScopeControlAccess.getFreshForWorkspace` immediately before the one DELETE,
+  after existing locks and privacy invalidation. This same-connection `READ_COMMITTED` lookup bypasses
+  prepared data, explicit operation scopes and the #2162 transaction memo without replacing them. A dedicated control statement flushes MyBatis's
+  local cache without changing ordinary sharing reads, preserving current committed workspace membership
+  up to the gap between adjacent SELECT/DELETE statements. The active-only privacy workspace list
+  is unchanged and never substitutes for this ceiling. In routed mode the fresh method serves only
+  the exact #2165 prepared snapshot, with no lookup or suspension. Its destructive-operation
+  staleness remains the flag-enable prerequisite **#2172**, including newly created workspaces missed
+  by erasure and deleted workspaces still present in the prepared set. No fence is implemented here.
+  Person visibility/company joins now execute without control tables; the isolated cache
+  restriction/purge transaction retains its own minimal tenant-catalog coverage. Routing remains disabled.
+
+- **Context-installed workspace scopes (#2159 / #2176 / #485 P5b).** In both modes, request
+  resolution, public API authentication and workspace job entries prepare immutable unfiltered and
+  active-only organization snapshots before tenant transactions. A short read-only control transaction
+  releases its session and connection before tenant work. The interceptor passes its already-resolved
+  workspace, organization and catalog to `load`: one unfiltered SELECT supplies sharing data and
+  record visibility, and one active-only SELECT supplies read ceilings. There is no extra organization
+  or placement lookup. Other workspace entries add the same two scope SELECTs beyond their existing
+  route resolution; diagnostics with a known active scope add only the unfiltered SELECT. Same-workspace
+  nested entries and captured prepared routes add none. No selection, unresolved/control-only requests,
+  auth endpoints and static resources prepare none; this is never deferred to first use in a transaction.
+  Boundaries match the exact installed workspace, organization and effective catalog. Single-database
+  record visibility uses explicit operation scope → matching prepared payload → transaction memo → lazy
+  lookup. A trusted supplied operation scope overrides prepared data to keep batch mapper arguments
+  and nested lookups aligned. Routed supplied scopes must equal the prepared payload; memos cannot
+  bypass context validation. Active-only boundaries serve matching prepared data in both modes and
+  retain their independent control-transaction fallback in single-database mode; that fallback does
+  not establish the caller's read view.
+  Preparation inside an actual single-database transaction reuses an exact existing payload or skips
+  loading and retains lazy behavior. Routed mode still refuses a missing payload before suspension,
+  mapper execution or checkout, including on a shared placement. Outside transactions its ordinary
+  boundary fallback remains available. A single-database lazy scope SELECT can establish an InnoDB
+  REPEATABLE READ view before a later lock wait; the rule and retained fallback are documented in
+  [LOCKING.md](backend/LOCKING.md#duplicate-review-record-mutation-and-imports).
+  Fresh-membership entries prepare their target before the `READ_COMMITTED` transaction in both modes,
+  including direct `WorkspaceService.ensureActiveMember` and pending-member calls whose target differs
+  from the request workspace. Invitation, invite-link and SSO wrappers reuse the same target preparation.
+  Request preparation uses the interceptor's existing `WorkspaceService` collaborator. Same-workspace
+  nested `runAs` reuses the payload; different-workspace routes remain independent. Identity-only notice
+  delivery and accepted DSR identity switches never prepare under locks; incompatible bindings are
+  discarded. Seeder identity installation is inside a transaction with uncommitted roots and uses
+  direct mappers, so it prepares none. Control-only selections and catalog-only enumeration have no
+  usable snapshot. Async executors install their own workspace entry.
+  Captured lifecycle routes carry prepared data across root deletion. Inactive or absent anchors are
+  recorded at preparation, with refusal deferred until the corresponding boundary is used, so cleanup
+  does not gain an active-lifecycle requirement. Creation, seeding, user-membership changes and lifecycle
+  transitions currently have no subsequent targeted scope read requiring refresh; post-provision privacy
+  initialization enters the new workspace after commit. No workspace organization-transfer path exists.
+  Prepared data lasts one workspace operation. Structural changes become visible at the next entry;
+  a new same-operation consumer needing those changes must explicitly refresh outside a transaction
+  or use its own fresh inventory. Locked authorization and mutation revalidation never use these scopes.
+  Restriction cache erasure is the sole destructive consumer of these organization allowlists and
+  retains `getFreshForWorkspace`; its active privacy inventory also remains a direct, transaction-fresh
+  read. DSR acceptance/current-set checks, recovery, offboarding, capture erasure, retention and teardown
+  retain their separate explicit inventories. Routed destructive staleness remains #2172, not fixed here.
+  Complete identity/selection/override/payload state is saved and restored on nested scopes;
+  request completion and async handoff clear it, and root job exit discards cached routes.
+  State uses plain `ThreadLocal`, with no inheritance or task decorator. Async jobs install their
+  own scope. Routed provisioning submits initialization without waiting in its `AFTER_COMMIT`
+  callback, which still retains the provisioning connection; scheduled reconciliation recovers
+  failed submissions and initialization. Single-database initialization remains synchronous.
+  An explicit source-inspection architecture test pins reviewed installers and restorers, while
+  pool-size-1 integration coverage exercises boundaries against a tenant catalog with no control
+  tables. Routing remains disabled until the rest of #485's enablement gates are satisfied.
 
 ### 0.6 Organization membership & org-level roles (#316)
 
@@ -236,9 +446,15 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   unverified until they redeem that instance verification mail. **No path lets local authority assert
   global identity:** admin-created
   accounts (`POST /api/users`) start unverified and are emailed their own verification link, and the
-  in-app grant paths — add-existing (`/members`), invite-by-email's existing-account branch,
-  pending-membership activation, and new org-member grants — refuse an account that has not proven its
-  address, routing it to the emailed token invite instead. The org check covers the grant only: a user
+  in-app grant paths — historical pending-membership activation and new org-member grants —
+  refuse an account that has not proven its address. Both workspace email invitation creation and
+  the compatibility `/members` entry point now use token invitations uniformly, without resolving
+  recipient account existence or verification state. Historical pending grants retain their
+  address-only management and acceptance path, with control V247 assigning a thirty-day deadline
+  and recipient listing, invitation inbox access and activation enforcing the fixed cutover deadline
+  even while bounded control-plane backfill pages remain unfinished. Expired grants remain available for administrator
+  resend; see the
+  [invitation disclosure contract](backend/SECURITY_BOUNDARIES.md#workspace-invitation-disclosure). The org check covers the grant only: a user
   who already holds an `org_member` row can still be re-roled or removed.
   Every one of those refusals is conditioned on registration verification being **enabled**, exactly like
   the link gate: with the feature off no account can obtain proof (no token is issued and resend is a
@@ -586,11 +802,13 @@ membership (unlike `register`) — route through `addMember`, gate `admin`+. `re
 **new owned workspace** (or invite/accept) instead of force-joining `default`; `getDefaultWorkspace()`
 becomes the migration-only backfill target.
 
-> **✅ Invite flows implemented (2026-06-24, #11):** both flows ship. Email-token invites
-> (`workspace_invite`, migration V11) via `InviteService` + `WorkspaceController` `POST/GET/DELETE
-> /api/workspaces/{id}/invites` (admin-gated) and token-addressed `GET /api/invites/{token}` +
-> `POST /api/invites/{token}/accept` (email-bound, expiry-checked). Admin-adds-existing via
-> `POST /api/workspaces/{id}/members`. Member management ships too: `GET /api/workspaces/{id}/members`,
+> **Invite flows:** email-token invites (`workspace_invite`, migration V11) are managed through
+> `POST/GET/DELETE /api/workspaces/{id}/invites`. The compatibility
+> `POST /api/workspaces/{id}/members` route now creates the same invitation-only response for every
+> address. A fragment bearer is exchanged through `POST /api/invites/exchange`; `GET /api/invites`
+> and `POST /api/invites/accept` use the purpose-bound browser flow (email-bound, expiry-checked).
+> Historical pending memberships retain their recipient acceptance path and address-only admin
+> management. Member management ships too: `GET /api/workspaces/{id}/members` (active members),
 > `PATCH .../members/{userId}` (role change, owner-protected + last-owner guard), `DELETE
 > .../members/{userId}`. Per the §12 resolution, V12 makes `task.assigned_to_id` nullable (`SET NULL` FK to
 > `app_user`) so removal unassigns tasks while preserving them; deal ownership is nulled too. **Frontend
@@ -608,7 +826,57 @@ becomes the migration-only backfill target.
 **Transport: header + cookie** (aligns with §4.1; no URL segment). `api.ts` funnels ~120 wrappers
 through one `requestJson` (`api.ts:17-43`) → inject the active workspace **once** there.
 
-- **Client components** → `X-Workspace-Id` header from a non-`HttpOnly` `connex_workspace` cookie.
+- **Client components** → `X-Workspace-Id` header from a non-`HttpOnly` `connex_workspace` cookie for
+  reads and for the account, organization and selection writes listed in `UNPINNED_WRITE_ROUTES`.
+  Workspace-bound state-changing requests carry the workspace the app shell *renders* instead
+  (`WorkspaceProvider` publishes it through `app/lib/renderedWorkspace.ts`), because a safe read heals
+  the cookie to another membership after a revocation while the page, and any draft on it, still
+  belongs to the revoked workspace. The pinned write gets the interceptor's 403 instead of following
+  the heal; `api.ts` re-codes that refusal as `WORKSPACE_UNAVAILABLE` and the shared error copy names
+  the workspace and keeps the draft on screen. Surfaces that save after a delay (the note editor's
+  autosave and unmount flush, dashboard layout saves) pin the workspace the content was composed in
+  via `workspacePinnedRequest` (#1732, closing the bound #1649 left). Every multi-step user action
+  captures its origin before awaiting anything, including duplicate/impact preflight, and carries
+  the same request options through parent callbacks, custom-field saves, uploads, stage creation
+  and sequential batches (#2130). Undo callbacks retain their original action's options; chunked API
+  bulk helpers capture before their first chunk and retain that pin through the entire selection.
+  Forwarded origins retain their headers and cancellation signals;
+  business-card preparation refuses a recovery context that differs from that origin before reserving
+  an import. `test/unit/workspaceWriteChainGuard.test.ts` derives workspace-bound write helpers from
+  the API client and checks component/page chains. Its shrinking exception ledger covers only the
+  dashboard worker's two writes: each queued job already carries the workspace of its separate action.
+  Note-image workspace refusals retain the editor content and its own draft; the toolbar reports
+  an inline creation refusal once, and quietly stops if an autosave already reported it. All navigation
+  after a workspace selection decision uses `navigateAfterWorkspaceSelection`: switch/create,
+  notifications, invitation acceptance, saved views, organization navigation, exits and recovery. It
+  increments a version before routing or refreshing, including a selection cleared to null; an older editor's first
+  save may adopt its note id but cannot overwrite that navigation's URL, even before unmount.
+  Once a new note receives an id, its kept-draft identity moves from `new` to `note:{id}` within
+  the original user and workspace, so later refused edits resume from that note's editor.
+- The inbox's seven `/api/notifications` mutations (read, unread, dismiss, restore, snooze,
+  unsnooze, read-all) follow the cookie: `NotificationController` delegates to `NotificationService`,
+  which authorizes the current recipient across memberships rather than the rendered workspace.
+  The allowlist names these exact routes and is checked against the API-surface ledger. My Work
+  notification dismiss/snooze remain workspace-bound and pinned to the rendered workspace.
+- Workspace creation from the shell explicitly pins the rendered origin and preflights membership
+  even when the cookie still matches. The server refuses an unavailable explicit origin with
+  `403 FORBIDDEN "Not a member of workspace {id}"`, including revoked or foreign pins when no other
+  membership remains. Provisioning revalidates the origin under its existing shared account lock,
+  which membership removal acquires exclusively, before choosing an organization. Administrators
+  create in that origin's organization; ordinary members retain the fresh-organization rule.
+  Onboarding explicitly omits the workspace header even when the browser retains a revoked selection
+  cookie, preserving the unresolved recovery path. The client preflight keeps
+  the entered name locally, while the server check enforces the boundary after the preflight.
+  Creation registers with the pinned-write identity guard before the preflight and rechecks identity
+  afterward. Cancellation remains active through final CSRF preparation and every retry; immediately
+  before each POST, the client checks the transition epoch and the preflight's opaque server identity,
+  so an account or workspace transition abandons the creation before sending it under another account.
+  Pinned creation also refuses when the preflight cannot establish that authenticated identity.
+- Explicit workspace headers contain exactly one parseable integer. Malformed, comma-combined or
+  repeated headers are refused without cookie or remembered-selection fallback; the frontend
+  rejects malformed pins before sending and merges XHR headers case-insensitively before setting
+  each name once. Personal native pairing POST/DELETE controls remain in the account allowlist:
+  `NativeConnectService` authorizes them by the current user, independently of the rendered workspace.
 - **SSR pages** (`records/deals/page.tsx`, `me`, `notes`, `search`) → already forward
   `headers: { cookie }` via `safeWithCookie` (`api.ts:80-90`); the `connex_workspace` cookie rides along.
   Resolver precedence: header > cookie > user's default membership.
@@ -730,3 +998,30 @@ behavior-changing flip.
 Highest-leverage, lowest-risk: it hits the most-reachable leak (#1/#5), exercises the resolver every
 later phase depends on, needs no DDL/backfill/FK-swaps, is independently revertable, and forces the
 transport decision (§8.4) to surface early on a small surface.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Assistant privacy coordination ownership (V236/V237)
+
+The control fence, operation and operation-workspace tables contain organization coordination
+metadata only. The workspace ledger retains placement evidence without a workspace FK; ordinary
+workspace deletion must not silently remove pending accepted-operation evidence. Explicit
+organization cleanup owns these tables. Missing workspace evidence still refuses DSR completion.
+The tenant object-obligation table participates in lifecycle/export/residual registries and is
+deleted before its privacy-work parent. No tenant query joins control privacy tables; services pass
+server-resolved organization generations between separately routed statements.
+
+### Export role policy (V248)
+
+Workspace custom roles store explicit `EXPORT_DATA` grants. Built-in workspace roles retain their
+code bundles with export-only owner/admin/member flags on `workspace`. Organization owner/admin
+exports use separate flags on `organization`; workspace privileges confer no organization export
+authority. V248 backfills existing custom roles and defaults all built-in flags to true. New custom
+roles start without an export grant. The authority and endpoint inventory are in
+[SECURITY_BOUNDARIES.md](backend/SECURITY_BOUNDARIES.md#export-authority); drain and rollback rules
+are in [UPGRADING.md](UPGRADING.md#export-data-permission-control-v248).
+The current release-wide rollback floor is control V250. Retain the
+[invitation-expiry cutover](UPGRADING.md#historical-pending-invitation-expiry-control-v247), then apply the
+[export-permission cutover](UPGRADING.md#export-data-permission-control-v248).

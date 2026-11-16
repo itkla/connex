@@ -124,6 +124,9 @@
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a
     WHERE a.workspace_id = #{workspaceId}
+      AND EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+        WHERE privacy_session.workspace_id = a.workspace_id AND privacy_session.id = a.entity_id
+          AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration})
       AND a.entity_type = 'ai_chat_session'
       AND a.entity_id = #{sessionId}
     ORDER BY a.created_at ASC, a.id ASC
@@ -133,6 +136,9 @@
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a
     WHERE a.workspace_id = #{workspaceId}
+      AND EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+        WHERE privacy_session.workspace_id = a.workspace_id AND privacy_session.id = a.entity_id
+          AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration})
       AND a.entity_type = 'ai_chat_session'
       AND a.entity_id = #{sessionId}
       AND a.id IN
@@ -146,6 +152,9 @@
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a
     WHERE a.workspace_id = #{workspaceId}
+      AND EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+        WHERE privacy_session.workspace_id = a.workspace_id AND privacy_session.id = a.entity_id
+          AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration})
       AND a.entity_type = 'ai_chat_session'
       AND a.entity_id = #{sessionId}
       AND a.id = #{id}
@@ -155,6 +164,9 @@
     SELECT COUNT(*)
     FROM attachment a
     WHERE a.workspace_id = #{workspaceId}
+      AND EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+        WHERE privacy_session.workspace_id = a.workspace_id AND privacy_session.id = a.entity_id
+          AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration})
       AND a.entity_type = 'ai_chat_session'
       AND a.entity_id = #{sessionId}
   </select>

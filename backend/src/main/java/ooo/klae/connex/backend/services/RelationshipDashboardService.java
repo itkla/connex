@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -41,11 +43,19 @@ public class RelationshipDashboardService {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final int DASHBOARD_LIMIT = 6;
 
     /** Computes and hydrates the bounded dashboard relationship snapshot. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public RelationshipDashboardDto getDashboard(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> getDashboardWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
+    }
+
+    private RelationshipDashboardDto getDashboardWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         List<RelationshipTemperatureDto> contactScores = scores.contacts();
         List<RelationshipTemperatureDto> companyScores = scores.companies();
@@ -57,14 +67,14 @@ public class RelationshipDashboardService {
             workspaceId, warmth, DASHBOARD_LIMIT);
         List<DealRiskDto> risks = riskResult.items();
 
-        Map<Integer, Person> people = peopleById(workspaceId, coolingContacts);
+        Map<Integer, Person> people = peopleById(workspaceId, coolingContacts, operationVisibilityScope.workspaceIdsJson());
         Map<Integer, Deal> deals = dealsById(workspaceId, risks);
         Set<Integer> companyIds = new LinkedHashSet<>();
         for (RelationshipTemperatureDto score : coolingCompanies) companyIds.add(score.getId());
         for (Deal deal : deals.values()) {
             if (deal.getCompanyId() != null) companyIds.add(deal.getCompanyId());
         }
-        Map<Integer, Company> companies = companiesById(workspaceId, companyIds);
+        Map<Integer, Company> companies = companiesById(workspaceId, companyIds, operationVisibilityScope);
 
         List<DashboardContactTemperatureDto> contactItems = coolingContacts.stream()
             .filter(score -> people.containsKey(score.getId()))
@@ -114,11 +124,11 @@ public class RelationshipDashboardService {
     }
 
     private Map<Integer, Person> peopleById(
-            int workspaceId, List<RelationshipTemperatureDto> temperatures) {
+            int workspaceId, List<RelationshipTemperatureDto> temperatures, String personWorkspaceIdsJson) {
         List<Integer> ids = temperatures.stream().map(RelationshipTemperatureDto::getId).toList();
         if (ids.isEmpty()) return Map.of();
         Map<Integer, Person> result = new HashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, ids)) result.put(person.getId(), person);
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids)) result.put(person.getId(), person);
         return result;
     }
 
@@ -130,10 +140,10 @@ public class RelationshipDashboardService {
         return result;
     }
 
-    private Map<Integer, Company> companiesById(int workspaceId, Set<Integer> ids) {
+    private Map<Integer, Company> companiesById(int workspaceId, Set<Integer> ids, RecordVisibilityScope operationVisibilityScope) {
         if (ids.isEmpty()) return Map.of();
         Map<Integer, Company> result = new HashMap<>();
-        for (Company company : companyMapper.getByIds(workspaceId, List.copyOf(ids))) {
+        for (Company company : companyMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), List.copyOf(ids))) {
             result.put(company.getId(), company);
         }
         return result;

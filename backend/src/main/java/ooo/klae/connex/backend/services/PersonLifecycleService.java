@@ -53,6 +53,7 @@ public class PersonLifecycleService {
     private final PersonMapper personMapper;
     private final PersonLifecycleHistoryMapper historyMapper;
     private final DealMapper dealMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
@@ -98,7 +99,8 @@ public class PersonLifecycleService {
         if (request == null || request.getStage() == null) {
             throw new BadRequestException("A lifecycle stage is required");
         }
-        return applyStage(personId, request.getStage(), request.getReason(), request.getNote());
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return applyStage(personId, request.getStage(), request.getReason(), request.getNote(), personWorkspaceIdsJson);
     }
 
     /**
@@ -113,7 +115,8 @@ public class PersonLifecycleService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person withdrawFromLifecycle(int personId, String note) {
-        return applyStage(personId, null, null, note);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return applyStage(personId, null, null, note, personWorkspaceIdsJson);
     }
 
     /**
@@ -125,7 +128,8 @@ public class PersonLifecycleService {
      */
     public PersonLifecycleDto getLifecycle(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return project(workspaceId, requireOwnedPerson(workspaceId, personId));
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        return project(workspaceId, requireOwnedPerson(workspaceId, personId, personWorkspaceIdsJson));
     }
 
     /**
@@ -136,7 +140,8 @@ public class PersonLifecycleService {
      */
     public List<PersonLifecycleHistoryDto> getHistory(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireOwnedPerson(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requireOwnedPerson(workspaceId, personId, personWorkspaceIdsJson);
         Map<String, String> labels = new LinkedHashMap<>();
         for (DisqualificationReasonDto reason
                 : disqualificationReasonService.resolved(workspaceId)) {
@@ -154,7 +159,7 @@ public class PersonLifecycleService {
             int personId,
             PersonLifecycleStage requested,
             String reason,
-            String note) {
+            String note, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         DisqualificationReasonDto lockedReason = requested == PersonLifecycleStage.DISQUALIFIED
             ? disqualificationReasonService.lockForLifecycle(workspaceId, reason)
@@ -179,7 +184,7 @@ public class PersonLifecycleService {
             requireQualificationCriteriaMet(workspaceId, personId);
         }
         if (transitioning && requested == PersonLifecycleStage.CONVERTED) {
-            requireLinkedDeal(workspaceId, personId);
+            requireLinkedDeal(workspaceId, personId, personWorkspaceIdsJson);
         }
         String acceptedNote = trimToNull(note);
         if (accepted.requiresNote() && acceptedNote == null) {
@@ -197,7 +202,7 @@ public class PersonLifecycleService {
                 leadResponseSla.clearFirstResponseClock(workspaceId, personId);
             }
         }
-        Person after = requireOwnedPerson(workspaceId, personId);
+        Person after = requireOwnedPerson(workspaceId, personId, personWorkspaceIdsJson);
         recordAudit(before, after, transitioning, acceptedReason, retainedNote);
         if (transitioning) {
             notificationChanges.publish(workspaceId, "person", personId);
@@ -332,8 +337,9 @@ public class PersonLifecycleService {
         }
     }
 
-    private void requireLinkedDeal(int workspaceId, int personId) {
-        if (dealMapper.getDealsByPersonId(workspaceId, personId).isEmpty()) {
+    private void requireLinkedDeal(int workspaceId, int personId, String personWorkspaceIdsJson) {
+        if (dealMapper.getDealsByPersonId(workspaceId,
+                personWorkspaceIdsJson, personId).isEmpty()) {
             throw new BadRequestException(
                 "A contact can only be marked converted once a deal is linked to it");
         }
@@ -389,8 +395,8 @@ public class PersonLifecycleService {
      * 404 here: the lifecycle, its reasons, and its notes are the owning workspace's own pipeline
      * assessment, and a grantee must not be able to read or move them.
      */
-    private Person requireOwnedPerson(int workspaceId, int personId) {
-        Person person = personMapper.getPersonById(workspaceId, personId);
+    private Person requireOwnedPerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
         if (person == null || person.getWorkspaceId() != workspaceId) {
             throw new ResourceNotFoundException("Contact not found");
         }

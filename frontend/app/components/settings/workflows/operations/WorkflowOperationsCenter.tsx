@@ -10,7 +10,7 @@ import {
     ExclamationTriangleIcon,
     PauseCircleIcon,
 } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import AccessDenied from "@/app/components/AccessDenied";
 import { EmptyState } from "@/app/components/EmptyState";
@@ -20,7 +20,7 @@ import { ApiError, getWorkflowOperationsRuns, getWorkflowOperationsSummary } fro
 import type {
     WorkflowOperationsRunItem,
     WorkflowOperationsSummary,
-    WorkflowRunStatus,
+    WorkflowRunWireStatus,
     WorkflowTriggerDiagnostic,
 } from "@/app/lib/types";
 import {
@@ -43,12 +43,13 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const RUN_STATUSES: WorkflowRunStatus[] = [
+const RUN_STATUSES: WorkflowRunWireStatus[] = [
     "queued",
     "running",
     "waiting",
     "succeeded",
     "failed",
+    "partial",
     "skipped",
     "cancelled",
     "intervention_required",
@@ -84,6 +85,7 @@ export default function WorkflowOperationsCenter() {
         failureCategory: failureCategory === "all" ? undefined : failureCategory,
         limit: 50,
     }), [failureCategory, status]);
+    const filtered = status !== "all" || failureCategory !== "all";
 
     useEffect(() => {
         if (!activeWorkspaceId || switching || !requestHeaders) return;
@@ -168,6 +170,16 @@ export default function WorkflowOperationsCenter() {
                         </Alert>
                     ) : null}
                     <SummaryStrip summary={data.summary} />
+                    {data.summary.unavailableCount > 0 ? (
+                        <Alert variant="destructive">
+                            <ExclamationTriangleIcon />
+                            <AlertTitle>{t("summary.unavailable")}</AlertTitle>
+                            <AlertDescription>
+                                <p>{t("summary.unavailableBody")}</p>
+                                <Link href="/workflows" className="underline underline-offset-4">{t("workflowsAction")}</Link>
+                            </AlertDescription>
+                        </Alert>
+                    ) : null}
                     {data.summary.triggerDiagnostics.length > 0 ? (
                         <TriggerDiagnostics
                             diagnostics={data.summary.triggerDiagnostics}
@@ -191,7 +203,9 @@ export default function WorkflowOperationsCenter() {
                                     <SelectContent>
                                         <SelectItem value="all">{t("filters.allStatuses")}</SelectItem>
                                         {RUN_STATUSES.map((value) => (
-                                            <SelectItem key={value} value={value}>{tw(`runs.status.${value}`)}</SelectItem>
+                                            <SelectItem key={value} value={value}>
+                                                {value === "partial" ? tw("runs.legacyPartial") : tw(`runs.status.${value}`)}
+                                            </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
@@ -212,9 +226,19 @@ export default function WorkflowOperationsCenter() {
                         {data.runs.length === 0 ? (
                             <EmptyState
                                 icon={ClockIcon}
-                                title={t("runs.emptyTitle")}
-                                body={t("runs.emptyBody")}
-                                tone="muted"
+                                title={t(filtered ? "runs.emptyTitle" : "runs.firstRunTitle")}
+                                body={t(filtered ? "runs.emptyBody" : "runs.firstRunBody")}
+                                tone={filtered ? "muted" : "brand"}
+                                action={filtered ? (
+                                    <Button variant="outline" onClick={() => {
+                                        setStatus("all");
+                                        setFailureCategory("all");
+                                    }}>{t("filters.clear")}</Button>
+                                ) : (
+                                    <Button asChild variant="outline">
+                                        <Link href="/workflows">{t("workflowsAction")}</Link>
+                                    </Button>
+                                )}
                             />
                         ) : (
                             <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
@@ -242,6 +266,7 @@ function TriggerDiagnostics({
     diagnostics: WorkflowTriggerDiagnostic[];
     locale: string;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     return (
         <section className="space-y-3" aria-labelledby="trigger-diagnostics-heading">
@@ -278,7 +303,7 @@ function TriggerDiagnostics({
                             className="text-xs text-muted-foreground"
                             dateTime={normalizeWorkflowRunDateTime(diagnostic.failedAt)}
                         >
-                            {formatWorkflowRunDateTime(diagnostic.failedAt, locale)}
+                            {formatWorkflowRunDateTime(diagnostic.failedAt, locale, timeZone)}
                         </time>
                     </li>
                 ))}
@@ -292,6 +317,7 @@ function SummaryStrip({ summary }: { summary: WorkflowOperationsSummary }) {
     const metrics = [
         { key: "workflows", value: summary.workflowCount, icon: BoltIcon },
         { key: "healthy", value: summary.healthyCount, icon: CheckCircleIcon },
+        { key: "unavailable", value: summary.unavailableCount, icon: ExclamationTriangleIcon },
         { key: "attention", value: summary.interventionRequiredCount, icon: ExclamationTriangleIcon },
         { key: "paused", value: summary.pausedCount, icon: PauseCircleIcon },
         { key: "queued", value: summary.queuedCount, icon: ClockIcon },
@@ -300,7 +326,7 @@ function SummaryStrip({ summary }: { summary: WorkflowOperationsSummary }) {
     return (
         <section aria-labelledby="operations-summary-heading" className="space-y-3">
             <h2 id="operations-summary-heading" className="text-sm font-semibold text-foreground">{t("summary.title")}</h2>
-            <dl className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3 xl:grid-cols-6">
+            <dl className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3 xl:grid-cols-7">
                 {metrics.map((metric) => {
                     const Icon = metric.icon;
                     return (
@@ -319,10 +345,11 @@ function SummaryStrip({ summary }: { summary: WorkflowOperationsSummary }) {
 }
 
 function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: string }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
     const status = normalizeWorkflowRunStatus(item.run.status);
-    const { earlier, number } = workflowRunReferenceParts(item.run.runKey);
+    const { number } = workflowRunReferenceParts(item.run.runKey);
     return (
         <li>
             <Link
@@ -345,10 +372,9 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
                         {item.recipeKey ? <Badge variant="outline">{t("runs.recipeOrigin")}</Badge> : null}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        {t(earlier ? "runs.legacyRunMeta" : "runs.runMeta", {
-                            run: number,
-                            version: item.run.version?.number ?? 0,
-                        })}
+                        {item.run.version == null
+                            ? t("runs.runReference", { run: number })
+                            : t("runs.runMeta", { run: number, version: item.run.version.number })}
                     </p>
                     {item.failureCategory ? (
                         <p className="text-xs text-muted-foreground">
@@ -360,7 +386,7 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
                     className="text-xs text-muted-foreground"
                     dateTime={normalizeWorkflowRunDateTime(item.run.startedAt)}
                 >
-                    {formatWorkflowRunDateTime(item.run.startedAt, locale)}
+                    {formatWorkflowRunDateTime(item.run.startedAt, locale, timeZone)}
                 </time>
             </Link>
         </li>
@@ -370,8 +396,8 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
 function OperationsSkeleton() {
     return (
         <div className="space-y-8" aria-busy="true">
-            <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3 xl:grid-cols-6">
-                {Array.from({ length: 6 }, (_, index) => (
+            <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3 xl:grid-cols-7">
+                {Array.from({ length: 7 }, (_, index) => (
                     <div key={index} className="space-y-3 bg-card p-4">
                         <Skeleton className="h-3 w-20" />
                         <Skeleton className="h-7 w-12" />

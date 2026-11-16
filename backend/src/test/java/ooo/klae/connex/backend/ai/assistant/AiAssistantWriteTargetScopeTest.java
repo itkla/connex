@@ -53,7 +53,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
                 () -> service.executeAuto(TURN, TOOL_CALL_ID, result -> { }));
 
         assertEquals("Person not found", refused.getMessage());
-        verify(personService).lockProcessablePersonForShare(31);
+        verify(personService).lockProcessablePersonForShare(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         verify(taskService, never()).create(any(Task.class));
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
@@ -113,7 +113,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
                 ResourceNotFoundException.class,
                 () -> service.executeAuto(TURN, TOOL_CALL_ID, result -> { }));
 
-        verify(personService).lockProcessablePersonForUpdate(31);
+        verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         verify(activityService, never()).getActivitiesByPersonIdInWindow(
                 anyInt(), any(), any(), anyInt());
         verify(activityService, never()).create(any(Activity.class));
@@ -140,9 +140,13 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
     }
 
     @Test
-    void anImmediateTagOnACompanyOutsideTheActorsScopeIsNeverResolvedOrAdded() throws Exception {
+    void anImmediateTagOnACompanyOutsideTheActorsScopeIsNeverAdded() throws Exception {
         when(companyService.getCompanyById(52))
                 .thenThrow(new ResourceNotFoundException("Company not found"));
+        Tag tag = new Tag();
+        tag.setId(9);
+        tag.setName("Priority");
+        when(tagService.getAllTags()).thenReturn(List.of(tag));
         AiAssistantWriteToolService service = service();
         propose(service, "add_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
                 "company", 52);
@@ -153,7 +157,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
 
         assertEquals("Company not found", refused.getMessage());
         verify(companyService).lockOwnedCompanyForUpdate(52);
-        verify(tagService, never()).getAllTags();
+        verify(tagService).lockDefinitionForShare(9);
         verify(companyService, never()).addTag(anyInt(), anyInt());
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
@@ -196,7 +200,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
                 () -> service.approve(TURN.sessionId(), TOOL_CALL_ID));
 
         assertEquals("Person not found", refused.getMessage());
-        verify(personService).lockProcessablePersonForUpdate(31);
+        verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
@@ -257,7 +261,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
 
         assertEquals("Assistant schedule read is bound to a person target", refused.getMessage());
         verify(dealService).getDealById(44);
-        verify(executorPersonMapper, never()).getPersonById(anyInt(), anyInt());
+        verify(executorPersonMapper, never()).getPersonById(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
         verify(activityService, never()).getActivitiesByPersonIdInWindow(
                 anyInt(), any(), any(), anyInt());
         verify(activityService, never()).create(any(Activity.class));

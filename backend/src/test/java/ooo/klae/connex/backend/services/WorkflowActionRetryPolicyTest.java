@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.List;
 
@@ -16,6 +17,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.TransactionSystemException;
 
@@ -56,6 +59,12 @@ class WorkflowActionRetryPolicyTest {
             new DuplicateKeyException("business conflict")));
         assertFalse(policy.transientDatabaseFailure(
             new IllegalStateException("unexpected")));
+        assertTrue(policy.transientDatabaseFailure(new QueryTimeoutException("query")));
+        assertFalse(policy.transientDatabaseFailure(new PessimisticLockingFailureException("lock")));
+        for (int code : List.of(1213, 1205, 3572)) {
+            assertFalse(policy.transientDatabaseFailure(
+                new SQLException("SQL", code == 1213 ? "40001" : "HY000", code)));
+        }
     }
 
     /**

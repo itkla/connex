@@ -119,7 +119,7 @@ class PersonProvenanceTest extends AbstractServiceTest {
         workspaceMapper.addMember(grantee.getId(), outsider.getId(), "owner");
         authenticateAs(outsider, grantee.getId());
 
-        Person shared = personMapper.getPersonById(grantee.getId(), person.getId());
+        Person shared = personMapper.getPersonById(grantee.getId(), orgWorkspaceIdsJson(workspaceMapper, grantee.getId()), person.getId());
         assertNotNull(shared, "the share itself must still be visible");
         assertNull(shared.getLeadSource());
         assertNull(shared.getLeadSourceDetail());

@@ -17,59 +17,48 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
- * Confines unenrolled privileged accounts and applies WebAuthn step-up to uncovered export paths.
+ * Confines privileged accounts that hold no passkey or, once attestation is enforced, no approved
+ * one (#1534), and applies WebAuthn step-up to uncovered export paths.
  *
  * <p>Emailed-link recipient surfaces are exempt from the enrollment confinement: their authority is
  * the purpose-bound grant cookie, the session only supplies exchange lineage, and a signed-in
  * signer who has not yet enrolled a passkey must still be able to countersign or opt out.
  *
- * <p>Each denial is audited at most once per window for a user, action and client address, through
- * {@link DenialAuditRateLimiter}; every denied request is still refused.
+ * <p>Each denial is audited at most once per address window for a user, action, reason and User-Agent
+ * fingerprint, through {@link DenialAuditRateLimiter}: eight addresses each admit four fingerprints.
+ * Without releases, every address-only admission remains admitted while windows are retained.
+ * Releases preserve other fingerprints' evidence and their address slot until its original expiry.
+ * Every denied request is still refused.
  */
 public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
-    public static final String ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+    public static final String ENROLLMENT_REQUIRED_CODE = PrivilegedMfaEnrollmentRequiredException.CODE;
+    public static final String ATTESTATION_REQUIRED_CODE = PrivilegedMfaAttestationRequiredException.CODE;
     private static final Logger log = LoggerFactory.getLogger(PrivilegedMfaEnforcementFilter.class);
     private static final String ENROLLMENT_DENIED_ACTION = "auth.mfa.policy.denied";
     private static final String RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
-    private static final Set<String> ENROLLMENT_GET_PATHS = Set.of(
-            "/api/auth/me",
-            "/api/auth/csrf",
-            "/api/auth/webauthn/register/requirements",
-            "/api/auth/webauthn/credentials",
-            "/api/capabilities",
-            "/api/workspaces");
-    private static final Set<String> ENROLLMENT_POST_PATHS = Set.of(
-            "/api/auth/logout",
-            "/api/auth/webauthn/register/options",
-            "/api/auth/webauthn/register",
-            "/api/auth/webauthn/register/confirmation",
-            "/api/auth/webauthn/register/confirmation/exchange",
-            "/api/auth/webauthn/recover");
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
-    private static final Set<String> LINK_FLOW_PATHS = Set.of(
-            "/api/document-acceptance",
-            "/api/delivery/unsubscribe");
     private static final String IDENTIFIER_SEGMENT = "[^/]+";
     private static final Pattern ORG_AUDIT_EXPORT = Pattern.compile(
             "/api/orgs/" + IDENTIFIER_SEGMENT + "/audit/export");
     private static final Pattern CAMPAIGN_EXPORT = Pattern.compile(
             "/api/campaigns/" + IDENTIFIER_SEGMENT + "/exports");
     private static final Pattern REPORT_EXPORT = Pattern.compile(
-            "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|snapshots/"
+            "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|export-completion|snapshots/"
                     + IDENTIFIER_SEGMENT + "/export\\.csv)");
 
     private final PrivilegedMfaProperties properties;
     private final PrivilegedAccountService privilegedAccountService;
-    private final WebAuthnService webAuthnService;
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final DenialAuditRateLimiter denialAuditRateLimiter;
@@ -78,14 +67,12 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     public PrivilegedMfaEnforcementFilter(
             PrivilegedMfaProperties properties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
             SessionSecurityService sessionSecurityService,
             AuditService auditService,
             DenialAuditRateLimiter denialAuditRateLimiter,
             ClientIpResolver clientIpResolver) {
         this.properties = properties;
         this.privilegedAccountService = privilegedAccountService;
-        this.webAuthnService = webAuthnService;
         this.sessionSecurityService = sessionSecurityService;
         this.auditService = auditService;
         this.denialAuditRateLimiter = denialAuditRateLimiter;
@@ -101,16 +88,24 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             return;
         }
         String path = RequestPathNormalizer.apiPath(request);
+        boolean exempt = PrivilegedMfaRequestPolicy.bindBrowser(request, user.getId(), path);
         if (properties.isEnforced()
-                && privilegedAccountService.isPrivileged(user.getId())
-                && !webAuthnService.hasPasskey(user.getId())
-                && !isEnrollmentPath(request.getMethod(), path)
-                && !isLinkFlowPath(path)) {
-            recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
-                    "Privileged account confined pending MFA enrollment", "enrollment_required");
-            deny(response, ENROLLMENT_REQUIRED_CODE,
-                    "A passkey must be enrolled before this privileged account can continue");
-            return;
+                && !exempt) {
+            PrivilegedMfaStanding standing = privilegedAccountService.enforcedStanding(user.getId());
+            if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
+                recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
+                        "Privileged account confined pending MFA enrollment", "enrollment_required");
+                deny(response, ENROLLMENT_REQUIRED_CODE,
+                        "A passkey must be enrolled before this privileged account can continue");
+                return;
+            }
+            if (standing == PrivilegedMfaStanding.ATTESTATION_REQUIRED) {
+                recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
+                        "Privileged account confined pending passkey approval", "attestation_required");
+                deny(response, ATTESTATION_REQUIRED_CODE,
+                        "A passkey must be approved before this privileged account can continue");
+                return;
+            }
         }
         if (requiresExportStepUp(request.getMethod(), path)
                 && !sessionSecurityService.isExportStepUpSatisfied(request.getSession(false), user.getId())) {
@@ -124,25 +119,29 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Records a denial at most once per window for this user, action and client address.
+     * Records a denial at most once per address window for this user, action, reason and fingerprint.
      *
      * <p>Both denials can be written by a {@code GET}, so another site can trigger them: with a
      * top-level navigation under the {@code SameSite=Lax} session cookie, and with any subresource load
      * under the {@code SameSite=None} that SAML deployments use. Unbounded, every visit appended a row
-     * attributed to the victim (#1850). The write is strict so that a failure hands the window
-     * back instead of suppressing the next denial's evidence; the request is refused either way.
+     * attributed to the victim (#1850). The write is strict so that a failure returns only its
+     * fingerprint admission, allowing it to retry while preserving other fingerprints' evidence;
+     * the request is refused either way.
+     * Fetch metadata is recorded only as advisory context: non-browser clients can forge it, so
+     * it never affects admission or the rate-limit key (#1936).
      */
     private void recordDenial(HttpServletRequest request, User user, String action, String summary,
             String reason) {
+        String clientIp = clientIpResolver.resolveForDenialAudit(request);
         Optional<DenialAuditRateLimiter.Admission> admission =
-                denialAuditRateLimiter.acquire(user.getId(), action, clientIpResolver.resolve(request));
+                denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIp, request);
         if (admission.isEmpty()) {
             return;
         }
         boolean written = false;
         try {
             auditService.recordStrictFailureIndependentScoped(action, "user", user.getId(), null, null,
-                    user.getDisplayName(), summary, reason);
+                    user.getDisplayName(), summary, reason, request, clientIp);
             written = true;
         } catch (RuntimeException e) {
             log.error("Failed to record access denial action={} userId={}", action, user.getId(), e);
@@ -189,13 +188,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
 
     /** Whether the request is a grant-cookie recipient surface rather than a session-authorized one. */
     static boolean isLinkFlowPath(String path) {
-        return LINK_FLOW_PATHS.stream()
-                .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
-    }
-
-    private static boolean isEnrollmentPath(String method, String path) {
-        return ("GET".equals(method) && ENROLLMENT_GET_PATHS.contains(path))
-                || ("POST".equals(method) && ENROLLMENT_POST_PATHS.contains(path));
+        return PrivilegedMfaRequestPolicy.isLinkFlowPath(path);
     }
 
     private static void deny(HttpServletResponse response, String code, String message) throws IOException {

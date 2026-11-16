@@ -37,6 +37,8 @@
     FROM workspace_invite_link l
     LEFT JOIN app_user u ON u.id = l.created_by_id
     WHERE l.workspace_id = #{workspaceId} AND l.revoked = 0
+      AND (l.expires_at IS NULL OR l.expires_at &gt; UTC_TIMESTAMP())
+      AND (l.max_uses IS NULL OR l.used_count &lt; l.max_uses)
     ORDER BY l.created_at DESC, l.id DESC
   </select>
 

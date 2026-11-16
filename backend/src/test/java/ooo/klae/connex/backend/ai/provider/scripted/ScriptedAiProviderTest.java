@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +17,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +32,9 @@ import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
+import ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody;
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
@@ -595,6 +603,67 @@ class ScriptedAiProviderTest {
                 "the prompt material the assertions are about is retained verbatim");
     }
 
+    @Test
+    void virtualTransportUsesDecodedFinalBodyEvidenceAndPromotesBeforeDeltas(@TempDir Path directory)
+            throws IOException {
+        var provider = provider(directory, streamingScript());
+        var executor = new RecordingExecutor();
+        var segments = List.of(new OutboundSegment(SELECTOR + " {{M1}}", OutboundSegment.Origin.TENANT_DATA),
+                new OutboundSegment("{{M9}}", OutboundSegment.Origin.SERVER_STATIC),
+                new OutboundSegment("{{M8}}", OutboundSegment.Origin.PROVIDER_AUTHORED));
+        var request = new AiCompletionRequest(target("scripted-native-stream"), AiCredentials.of(Map.of()),
+                "{{M7}}", List.of(new AiMessage("user", SELECTOR + " {{M1}}{{M9}}{{M8}}", segments)),
+                List.of(), AiOutputMode.JSON, new AiResponseSchema("answer", objectMapper.createObjectNode()),
+                null, AiReasoningMode.NONE, executor, 256, 0.1);
+        List<AiProviderDispatch> bodies = new ArrayList<>();
+        try (var serializer = mockStatic(OpenAiRequestBody.class, CALLS_REAL_METHODS)) {
+            serializer.when(() -> OpenAiRequestBody.prepare(any(), any(), anyBoolean(), any()))
+                    .thenAnswer(call -> {
+                        AiProviderDispatch dispatch = (AiProviderDispatch) call.callRealMethod();
+                        bodies.add(dispatch);
+                        return dispatch;
+                    });
+            provider.completeStreaming(request, delta -> {
+                assertEquals(List.of(Set.of("{{M1}}")), executor.promotions);
+                assertEquals(SELECTOR + " {{M1}}{{M9}}{{M8}}",
+                        objectMapper.readTree(bodies.getFirst().body()).at("/messages/1/content").asString());
+            });
+        }
+        assertEquals(1, bodies.size());
+        assertEquals(Set.of("{{M1}}"), bodies.getFirst().dispatchedTokens());
+    }
+
+    @Test
+    void scriptedProviderRefusesFinalBodyMismatch(@TempDir Path directory) throws IOException {
+        var provider = provider(directory, nativeScript());
+        var executor = new RecordingExecutor();
+        try (var serializer = mockStatic(OpenAiRequestBody.class)) {
+            serializer.when(() -> OpenAiRequestBody.prepare(any(), any(), anyBoolean(), any()))
+                    .thenThrow(new AiProviderException("AI provider body provenance mismatch"));
+            assertThrows(AiProviderException.class,
+                    () -> provider.complete(nativeRequest(executor, List.of(), null)));
+        }
+        assertEquals(0, executor.beforeSends);
+        assertTrue(executor.promotions.isEmpty());
+    }
+
+    @Test
+    void journalDropsRawMemberScanContextsFromMessageProvenance() {
+        var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        context.registerMemberCandidate("Private Member");
+        var live = new AiCompletionRequest(target("scripted-native"), AiCredentials.of(Map.of()), "system",
+                List.of(new AiMessage("user", SELECTOR,
+                        List.of(OutboundSegment.admittedProviderField(SELECTOR, context)))),
+                List.of(), AiOutputMode.TEXT, 64, 0.1);
+
+        var recorded = new ScriptedAiRequestJournal().record(live).request();
+
+        var segment = recorded.messages().getFirst().segments().getFirst();
+        org.junit.jupiter.api.Assertions.assertNull(segment.memberScanContext());
+        assertEquals(OutboundSegment.Origin.PROVIDER_AUTHORED, segment.origin());
+        assertEquals(SELECTOR, segment.text());
+    }
+
     private void assertFailureDispatches(
             Path directory, String failureKind, Class<? extends RuntimeException> expected)
             throws IOException {
@@ -615,6 +684,7 @@ class ScriptedAiProviderTest {
 
         assertEquals(1, executor.executes, failureKind);
         assertEquals(1, executor.beforeSends, failureKind);
+        assertEquals(failureKind.equals("rejected") ? 1 : 0, executor.promotions.size(), failureKind);
     }
 
     private ScriptedAiProvider provider(Path directory, String script) throws IOException {
@@ -817,6 +887,7 @@ class ScriptedAiProviderTest {
         private int executes;
         private int streamExecutes;
         private int beforeSends;
+        private final List<Set<String>> promotions = new ArrayList<>();
 
         private RecordingExecutor() {
             this(new ArrayList<>());
@@ -849,6 +920,11 @@ class ScriptedAiProviderTest {
         public void beforeSend() {
             beforeSends++;
             events.add("beforeSend");
+        }
+
+        @Override
+        public void onResponse(Set<String> tokens) {
+            promotions.add(tokens);
         }
     }
 

@@ -87,9 +87,25 @@
     FROM audit_log al
     LEFT JOIN app_user u ON u.id = al.actor_id
     WHERE al.workspace_id = #{workspaceId}
+    <include refid="exportSelection"/>
+    <if test="entityType != null and entityId != null">
+      AND al.entity_type = #{entityType} AND al.entity_id = #{entityId}
+    </if>
     ORDER BY al.chain_index IS NULL, al.chain_index ASC, al.created_at ASC, al.id ASC
     LIMIT #{limit} OFFSET #{offset}
   </select>
+
+  <sql id="exportSelection">
+    <if test="ids != null">
+      <choose>
+        <when test="ids.size() &gt; 0">
+          AND al.id IN
+          <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        </when>
+        <otherwise>AND 1 = 0</otherwise>
+      </choose>
+    </if>
+  </sql>
 
   <sql id="supportColumns">
     al.id, al.workspace_id, al.org_id, al.action, al.entity_type, al.entity_id,
@@ -150,6 +166,7 @@
     LEFT JOIN app_user u ON u.id = al.actor_id
     WHERE al.org_id = #{orgId}
       AND al.workspace_id IS NULL
+      <include refid="exportSelection"/>
       AND (
         (al.chain_scope_type = 'organization' AND al.chain_scope_id = #{orgId})
         OR (al.chain_scope_type IS NULL AND al.integrity_workspace_id IS NULL)

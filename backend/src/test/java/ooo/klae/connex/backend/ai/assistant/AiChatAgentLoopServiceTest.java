@@ -5,8 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -42,11 +44,21 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
+import ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec;
+import ooo.klae.connex.backend.ai.mission.AiAgentPlanService;
+import ooo.klae.connex.backend.ai.mission.AiAgentContentScreen;
+import ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService;
+import ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentMemory;
+import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
@@ -101,7 +113,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AiChatAgentLoopServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 1, null, 1, 1L));
     private static final Instant NOW = Instant.parse("2026-08-11T00:00:00Z");
     private static final AiRunLease LEASE = new AiRunLease(
             new AiRunLeaseKey(TURN.workspaceId(), AiRunLeaseSubject.CHAT_TURN, TURN.turnId()),
@@ -147,6 +159,10 @@ class AiChatAgentLoopServiceTest {
         memoryService = mock(AiChatMemoryService.class);
         attachmentContextService = mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
+        when(persistenceService.withPrivacyToken(any(), any())).thenAnswer(invocation -> {
+            Supplier<?> work = invocation.getArgument(1);
+            return work.get();
+        });
         runLeaseHeartbeat = mock(AiRunLeaseHeartbeat.class);
         runLeaseService = mock(AiRunLeaseService.class);
         heartbeatStops = new AtomicInteger();
@@ -224,6 +240,179 @@ class AiChatAgentLoopServiceTest {
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(6);
         when(clock.instant()).thenReturn(NOW);
+    }
+
+    @Test
+    void missionPlanResultBudgetRefusalCannotCommitATruncatedCanonicalPlan() {
+        var missionPersistence = mock(ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService.class);
+        var plans = mock(ooo.klae.connex.backend.ai.mission.AiAgentPlanService.class);
+        var content = mock(ooo.klae.connex.backend.ai.mission.AiAgentContentScreen.class);
+        var evidence = mock(ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService.class);
+        var snapshot = mock(ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec.Snapshot.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionPlanService", plans);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionContentScreen", content);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionEvidenceService", evidence);
+        AiChatMessage goal = new AiChatMessage();
+        goal.setId(TURN.userMessageId());
+        goal.setAuthorKind("user");
+        goal.setContent("Review the selected record");
+        var policy = new ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy(31, 37, 1,
+                TURN, goal, new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("person", 41),
+                4, NOW.plusSeconds(180), LEASE, new AiRunLeaseGuard(java.time.Duration.ofSeconds(60)),
+                missionPersistence, null, 2, 1, 1, snapshot, true, 65536);
+        when(missionPersistence.remainingDispatches(policy)).thenReturn(4);
+        when(missionPersistence.snapshot(policy)).thenReturn(snapshot);
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any(), any()))
+                .thenReturn(new AiChatMemory(List.of(goal), new AiAssistantPromptBudget(
+                        64, 64000, 16000, 16000, 512, 112000), 0, 0, false, 1,
+                        new AiAssistantToolResult(Map.of("missionContext", Map.of()), List.of())));
+        var arguments = objectMapper.readTree("""
+                {"expectedPlanRevision":"1","expectedCheckpointRevision":"1","items":[
+                {"key":null,"label":"Review","status":"active","completion":null}]}
+                """);
+        var canonical = objectMapper.createObjectNode().put("screened", "request");
+        var result = objectMapper.createObjectNode().put("planRevision", "2")
+                .put("checkpointRevision", "2");
+        var items = result.putObject("plan").putArray("items");
+        for (int index = 0; index < 20; index++) {
+            items.addObject().put("key", String.format(java.util.Locale.ROOT, "p%04d", index + 1))
+                    .put("label", "A screened canonical label ".repeat(12)).put("status", "pending");
+        }
+        when(plans.providerResult(any(), any())).thenAnswer(call -> call.getArgument(0));
+        when(plans.canonicalArgumentsWithProvenance(eq("set_todos"), any(), any(), any())).thenReturn(canonical);
+        when(plans.prepare(eq(snapshot), any(), eq(1), any(), any(), any()))
+                .thenReturn(new ooo.klae.connex.backend.ai.mission.AiAgentPlanService.Prepared(
+                        snapshot, canonical, result));
+        when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(new AiAssistantStep(new AiAssistantStep.Tool("set_todos", arguments), null)));
+
+        var outcome = policy.execute(() -> service.run(TURN));
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, outcome.outcome());
+        assertEquals("tool_result_budget_exhausted", outcome.reason());
+        verify(missionPersistence, never()).commitPlan(any(), anyInt(), anyInt(), any(), any(), any());
+        verify(missionPersistence, never()).commitCheckpoint(any(), anyInt(), anyInt(), any(), any(), any());
+        verify(persistenceService, never()).proposeTool(any(), anyInt(), anyInt(), any(), any());
+        verify(toolExecutor, never()).execute(any(), any(), any(), anyBoolean(), any());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "0,さん,false", "0,様,false", "0,氏,false", "1,さん,false", "1,様,false", "1,氏,false",
+            "2,さん,false", "2,様,false", "2,氏,false", "0,さん,true", "0,様,true", "0,氏,true",
+            "1,さん,true", "1,様,true", "1,氏,true", "2,さん,true", "2,様,true", "2,氏,true"})
+    void missionMemberSuffixNeverReachesJsonOrNativeProviderRequests(int nativeCalls, String suffix, boolean closing) {
+        String name = "Former Member";
+        var codec = new AiAgentContinuationCodec();
+        var plans = new AiAgentPlanService(codec);
+        var missionPersistence = mock(AiAgentRunPersistenceService.class);
+        var evidence = mock(AiAgentEvidenceService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionPlanService", plans);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionContentScreen", new AiAgentContentScreen(workspaceService));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionEvidenceService", evidence);
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setId(883742);
+        member.setDisplayName(name);
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        var run = new AiAgentRun();
+        run.setId(31);
+        run.setWorkspaceId(TURN.workspaceId());
+        run.setMissionType("record_review_v1");
+        run.setDefinitionVersion(1);
+        run.setRuntimeContractVersion(2);
+        run.setPrivacyGeneration(1);
+        run.setScopeFingerprint(new byte[32]);
+        run.setScopeJson("{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":41}");
+        var stored = new java.util.concurrent.atomic.AtomicReference<>(codec.initialize(run));
+        var goal = message(TURN.userMessageId(), "Review with " + name);
+        var policy = new AiAgentExecutionPolicy(31, 37, 1, TURN, goal, new AiAgentScopePolicy("person", 41),
+                4, NOW.plusSeconds(180), LEASE, new AiRunLeaseGuard(java.time.Duration.ofSeconds(60)),
+                missionPersistence, null, 2, 1, 1, stored.get(), true, 65536);
+        when(missionPersistence.remainingDispatches(policy)).thenReturn(closing ? 2 : 4, closing ? 1 : 4);
+        when(missionPersistence.resolve(eq(policy), any(), any())).thenReturn(true);
+        when(missionPersistence.snapshot(policy)).thenAnswer(call -> stored.get());
+        var reference = new AiAgentMemory.EvidenceReference("person", 41,
+                new AiAgentMemory.EvidenceVersion("record", 0, "a".repeat(64)));
+        when(evidence.observed(policy)).thenReturn(List.of(reference));
+        when(missionPersistence.commitPlan(eq(policy), anyInt(), anyInt(), any(), any(), any())).thenAnswer(call -> {
+            var snapshot = (AiAgentContinuationCodec.Snapshot) call.getArgument(5);
+            codec.apply(run, snapshot);
+            stored.set(codec.decode(run));
+            return call.getArgument(4);
+        });
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any(), any())).thenReturn(
+                new AiChatMemory(List.of(goal), new AiAssistantPromptBudget(64, 64000, 16000, 16000, 30000, 112000),
+                        0, 0, nativeCalls > 0, Math.max(1, nativeCalls),
+                        new AiAssistantToolResult(Map.of("missionContext", Map.of()), List.of())));
+        var requests = new ArrayList<String>();
+        java.util.function.Consumer<AiInvocation> inspect = invocation -> {
+            String outbound = invocation.prompt().getSystemPrompt() + invocation.prompt().getMessages().stream()
+                    .map(value -> value.getContent()).collect(java.util.stream.Collectors.joining());
+            requests.add(outbound);
+            assertFalse(outbound.contains(name));
+            assertFalse(outbound.contains("883742"));
+            String token = invocation.context().tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, name);
+            invocation.context().exposeDispatchedTokens(java.util.Set.of(token));
+        };
+        var answer = new AiAssistantStep.FinalAnswer("Review complete", List.of(), List.of(), null);
+        if (nativeCalls > 0) {
+            when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                AiInvocation invocation = call.getArgument(0);
+                inspect.accept(invocation);
+                AiNativeToolRequest nativeRequest = call.getArgument(5);
+                String replay = nativeRequest.exchanges().stream().map(value -> value.maskedResult())
+                        .collect(java.util.stream.Collectors.joining());
+                assertFalse(replay.contains(name));
+                assertFalse(replay.contains("883742"));
+                requests.set(requests.size() - 1, requests.getLast() + replay);
+                if (requests.size() > 1) {
+                    return nativeFinal(answer);
+                }
+                var calls = new ArrayList<AiToolCall>();
+                var args = new ArrayList<JsonNode>();
+                for (int index = 0; index < nativeCalls; index++) {
+                    var arguments = missionSuffixArguments(index + 1, "Confirm with {{M1}}" + suffix);
+                    calls.add(new AiToolCall("mission_" + index, "set_todos", objectMapper.writeValueAsString(arguments)));
+                    ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(arguments, invocation.context());
+                    args.add(arguments);
+                }
+                return new AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer>(calls, args, 0, 3, 5,
+                        "tool_calls", Optional.empty(), Optional.empty());
+            });
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                AiInvocation invocation = call.getArgument(0);
+                inspect.accept(invocation);
+                if (requests.size() > 1) {
+                    return parsed(new AiAssistantStep(null, answer));
+                }
+                var args = missionSuffixArguments(1, "Confirm with {{M1}}" + suffix);
+                Map<String, List<String>> members = new java.util.LinkedHashMap<>();
+                ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(args, invocation.context(),
+                        (path, label) -> members.put("/tool/args" + path, List.of(label)));
+                return new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                        new AiAssistantStep(new AiAssistantStep.Tool("set_todos", args), null), 0, 3, 5, "stop", members), Optional.empty());
+            });
+        }
+        var outcome = policy.execute(() -> service.run(TURN));
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, outcome.outcome());
+        assertEquals(2, requests.size());
+        assertTrue(requests.getLast().contains(suffix));
+        assertTrue(requests.getLast().contains("{{M"));
+        assertEquals(List.of(new AiAgentMemory.MemberProvenance(883742, name)),
+                stored.get().plan().items().getLast().label().memberProvenance());
+        verify(missionPersistence, times(Math.max(1, nativeCalls))).commitPlan(eq(policy), anyInt(), anyInt(), any(), any(), any());
+    }
+
+    private JsonNode missionSuffixArguments(int revision, String label) {
+        var args = objectMapper.createObjectNode().put("expectedPlanRevision", Integer.toString(revision))
+                .put("expectedCheckpointRevision", Integer.toString(revision));
+        args.putArray("items").addObject().putNull("key").put("label", label).put("status", "pending").putNull("completion");
+        return args;
     }
 
     /** A closing attempt that still calls a tool preserves the original no-progress reason. */
@@ -934,8 +1123,9 @@ class AiChatAgentLoopServiceTest {
 
     /**
      * A write whose name resolves to no single row when it is prepared is refused recoverably:
-     * no proposal is stored, the call is recorded as failed with the fixed reason, the model is
-     * answered with that reason, and the turn goes on to answer.
+     * no proposal is stored, the call is recorded as failed with the fixed reason and with the
+     * model's arguments wrapped so they can never read back as a proposal envelope (#1867), the
+     * model is answered with that reason, and the turn goes on to answer.
      */
     @Test
     void aWriteWhoseNameDoesNotResolveAtProposalIsRefusedWithoutAProposal() throws Exception {
@@ -962,8 +1152,12 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
         verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        ArgumentCaptor<String> stored = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).proposeTool(
-                eq(TURN), anyInt(), anyInt(), eq("assign_owner"), any());
+                eq(TURN), anyInt(), anyInt(), eq("assign_owner"), stored.capture());
+        assertEquals(
+                objectMapper.createObjectNode().set("refusedArguments", args),
+                objectMapper.readTree(stored.getValue()));
         verify(persistenceService).failTool(
                 eq(TURN), anyInt(), contains("unresolved_reference"));
         verify(writeToolService, never()).proposalResult(any(), any());
@@ -1928,7 +2122,7 @@ class AiChatAgentLoopServiceTest {
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
                 TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
-                AiPrivacyMode.UNMASKED, true);
+                AiPrivacyMode.UNMASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null, 1, 1L));
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(streamedTurn.userMessageId());
         userMessage.setAuthorKind("user");
@@ -2010,7 +2204,10 @@ class AiChatAgentLoopServiceTest {
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
-                .thenReturn(malformed)
+                .thenAnswer(invocation -> {
+                    ((AiInvocation) invocation.getArgument(0)).context().exposeDispatchedPayload("{{P1}}");
+                    return malformed;
+                })
                 .thenAnswer(invocation -> {
                     AiInvocation repairedInvocation = invocation.getArgument(0);
                     String repairPrompt = repairedInvocation.prompt().getMessages().getLast().getContent();
@@ -2047,7 +2244,10 @@ class AiChatAgentLoopServiceTest {
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
-                .thenReturn(malformed)
+                .thenAnswer(invocation -> {
+                    ((AiInvocation) invocation.getArgument(0)).context().exposeDispatchedPayload("{{P1}}");
+                    return malformed;
+                })
                 .thenAnswer(invocation -> {
                     AiRawOutputGuard outputGuard = invocation.getArgument(2);
                     assertEquals("bare_placeholder", outputGuard.rejectionReason(objectMapper.readTree(
@@ -2725,6 +2925,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
                 .thenAnswer(invocation -> {
                     AiInvocation request = invocation.getArgument(0);
+                    request.context().exposeDispatchedPayload("{{P1}} {{P2}}");
                     String suggestion = Demasker.demask(
                             "Show recent activity for {{P1}}", request.context()).text();
                     String title = Demasker.demask(
@@ -2775,6 +2976,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
                 .thenAnswer(invocation -> {
                     AiInvocation request = invocation.getArgument(0);
+                    request.context().exposeDispatchedPayload("{{P1}} {{P2}}");
                     String overLength = Demasker.demask(
                             "Review {{P1}}", request.context()).text();
                     String controlPhrase = Demasker.demask(
@@ -3173,7 +3375,7 @@ class AiChatAgentLoopServiceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 mock(AiAssistantDateResolver.class),
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,
@@ -4306,6 +4508,64 @@ class AiChatAgentLoopServiceTest {
      * Releasing the lease here instead would leave the turn running and unleased, which is the
      * window the lease exists to close.
      */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "prepare,snapshot", "prepare,missing", "read,snapshot", "read,missing",
+        "native,snapshot", "native,missing", "batch,snapshot", "batch,missing",
+        "write,snapshot", "write,missing"
+    })
+    void snapshotRefusalsEscapePreparationReadsAndWritesWithLeaseCleanup(String path, String kind) throws Exception {
+        var refusal = kind.equals("missing")
+                ? new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload")
+                : new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+        if (path.equals("prepare")) {
+            when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenThrow(refusal);
+        } else if (path.equals("write")) {
+            JsonNode args = objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"Follow up\"}");
+            var write = new AiAssistantPreparedWrite("create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                    "person", 41, "{\"resolved\":true}");
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                    .thenReturn(parsed(loadStep("write_content")), parsed(new AiAssistantStep(
+                            new AiAssistantStep.Tool("create_note", args), null)));
+            when(writeToolService.prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch())))
+                    .thenReturn(write);
+            when(persistenceService.proposeWriteTool(TURN, 2, write))
+                    .thenReturn(new AiAssistantToolProposal(29, "proposed", null, true));
+            when(writeToolService.executeAuto(eq(TURN), eq(29), any())).thenThrow(refusal);
+        } else {
+            when(toolExecutor.execute(any(), any(), any(), eq(true), any())).thenThrow(refusal);
+            String args = "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}";
+            if (path.equals("read")) {
+                when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                        any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                        .thenReturn(parsed(new AiAssistantStep(new AiAssistantStep.Tool(
+                                "search_records", objectMapper.readTree(args)), null)));
+            } else {
+                useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 2);
+                var calls = path.equals("batch")
+                        ? List.of(new AiToolCall("call_1", "search_records", args),
+                                new AiToolCall("call_2", "search_records", args.replace("pipeline", "people")))
+                        : List.of(new AiToolCall("call_1", "search_records", args));
+                when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                        any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                        any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class)))
+                        .thenReturn(nativeToolBatch(calls, 0));
+            }
+        }
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> service.run(TURN)));
+
+        assertEquals(1, heartbeatStops.get());
+        verify(runLeaseService).forgetLocalToken(LEASE);
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+        verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+        if (!path.equals("prepare")) {
+            verify(persistenceService).failTool(eq(TURN), eq(29), anyString());
+        }
+    }
+
     @Test
     void aTurnThatEndsExceptionallyDropsItsTokenWithoutReleasingItsLease() {
         when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any()))
@@ -4974,6 +5234,431 @@ class AiChatAgentLoopServiceTest {
         var result = service.run(TURN);
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void exactDemaskedWriteArgumentPathsReachPreparationOnBothProtocols(boolean nativeProtocol) throws Exception {
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        }
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenAnswer(call -> {
+            var context = (ooo.klae.connex.backend.ai.masking.MaskingContext) call.getArgument(1);
+            context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Bob");
+            context.exposeDispatchedPayload("{{M1}}");
+            return new AiChatMemory(List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
+                    new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 0, 0, nativeProtocol);
+        });
+        JsonNode args = objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"xBob\"}");
+        var write = new AiAssistantPreparedWrite("create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        when(writeToolService.prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch()),
+                eq(Map.of("/content", List.of("Bob"))))).thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 2, write))
+                .thenReturn(new AiAssistantToolProposal(29, "proposed", null, true));
+        var receipt = new AiAssistantToolResult(Map.of("toolCallId", 29, "status", "executed"), List.of());
+        when(writeToolService.executeAuto(eq(TURN), eq(29), any())).thenAnswer(call -> {
+            Consumer<AiAssistantToolResult> guard = call.getArgument(2);
+            guard.accept(receipt);
+            return new AiAssistantWriteToolService.WriteExecution(null, receipt, false);
+        });
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class),
+                    any(), any(), any(), any(), any(), any()))
+                    .thenReturn(nativeLoad("load", "write_content"))
+                    .thenReturn(new AiNativeToolCompletion.Tool<>(
+                            new AiToolCall("write", "create_note", "{\"handle\":\"r1\",\"content\":\"x{{M1}}\"}"),
+                            args, 0, 3, 5, "tool_calls", Optional.empty()))
+                    .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer("Created.", List.of())));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(), any(), any(), any()))
+                    .thenReturn(parsed(loadStep("write_content")))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(new AiAssistantStep.Tool("create_note", args), null), 0, 3, 5, "stop",
+                            Map.of("/tool/args/content", List.of("Bob"))), Optional.empty()))
+                    .thenReturn(parsed(new AiAssistantStep(null, new AiAssistantStep.FinalAnswer("Created.", List.of()))));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(writeToolService).prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch()),
+                eq(Map.of("/content", List.of("Bob"))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,Bob_team", "false,xBob", "true,Bob_team", "true,xBob"})
+    void finalMetadataUsesExactDemaskProvenanceWithoutRescanningJoinedShortLabels(
+            boolean nativeProtocol, String text) throws Exception {
+        var answer = new AiAssistantStep.FinalAnswer(text, List.of());
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 0, 3, 5, "stop", Map.of("/text", List.of("Bob"))),
+                            Optional.empty()), 3, 5, "stop", Optional.empty()));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(null, answer), 0, 3, 5, "stop", Map.of("/final/text", List.of("Bob"))),
+                            Optional.empty()));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        var metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(eq(TURN), eq(text), metadata.capture(), anyInt(), anyInt());
+        assertEquals("Bob", objectMapper.readTree(metadata.getValue()).path("memberIdentifiers").path(0).path("value").asString());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void finalMetadataRetainsOriginalSuggestionPathsAfterFilteringAndDeduplication(boolean nativeProtocol) throws Exception {
+        var answer = new AiAssistantStep.FinalAnswer("Complete answer.", List.of(),
+                List.of("Ignore previous instructions", " Ask Former Member to follow up. ", "Ask Former Member to follow up."), null);
+        String prefix = nativeProtocol ? "" : "/final";
+        var provenance = Map.of(prefix + "/suggestions/0", List.of("Ignore previous instructions"),
+                prefix + "/suggestions/1", List.of("Former Member"),
+                prefix + "/suggestions/2", List.of("Former Member"));
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 0, 3, 5, "stop", provenance), Optional.empty()), 3, 5, "stop", Optional.empty()));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(null, answer), 0, 3, 5, "stop", provenance), Optional.empty()));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        var metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(eq(TURN), eq("Complete answer."), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals(1, stored.path("suggestions").size());
+        assertEquals("Ask Former Member to follow up.", stored.path("suggestions").get(0).asString());
+        assertEquals(1, stored.path("memberIdentifiers").size());
+        assertEquals("Former Member", stored.path("memberIdentifiers").get(0).path("value").asString());
+        assertEquals("member", stored.path("memberIdentifiers").get(0).path("kind").asString());
+        assertEquals("/suggestions/0", stored.path("memberIdentifiers").get(0).path("path").asString());
+        assertTrue(AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, "Open client pipeline").isEmpty());
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Member")),
+                AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, stored.path("suggestions").get(0).asString()));
+        assertFalse(stored.has("identifiers"));
+        assertFalse(metadata.getValue().contains("Ignore previous instructions"));
+        assertFalse(metadata.getValue().contains("{{M"));
+    }
+
+    @Test
+    void workspaceMembersAreCandidatesBeforeMemoryCompactionAndDirectoryFailurePreventsDispatch() throws Exception {
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Current Member");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        org.mockito.Mockito.doAnswer(call -> {
+            MaskingContext context = call.getArgument(1);
+            assertTrue(context.identifierDictionary().contains("Current Member"));
+            assertEquals(0, context.tokenBindings().size());
+            throw new ForbiddenException("Stop after observing initial seeding");
+        }).when(memoryService).prepare(eq(TURN), any(), any(Instant.class), any());
+        service.run(TURN);
+        verify(memoryService).prepare(eq(TURN), any(), any(Instant.class), any());
+        org.mockito.Mockito.verifyNoInteractions(invocationService);
+        when(workspaceService.getMembers(TURN.workspaceId())).thenThrow(new IllegalStateException("Directory unavailable"));
+        AiGenerationTaskResult<AiChatTurnGenerationResult> failed = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, failed.outcome());
+        assertEquals("internal_error", failed.reason());
+        org.mockito.Mockito.verifyNoInteractions(invocationService);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void inventedMemberWarningsEndTheTurnBeforeAnyOwnerProposal(boolean nativeProtocol, boolean assignment) throws Exception {
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Unused Member");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        var answer = new AiAssistantStep.FinalAnswer("[unknown reference]", List.of());
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> outcome = assignment
+                    ? new AiNativeToolCompletion.Tool<>(new AiToolCall("guess", "assign_owner", "{\"handle\":\"r1\",\"owner\":\"{{M1}}\"}"),
+                            objectMapper.readTree("{\"handle\":\"r1\",\"owner\":\"[unknown reference]\"}"), 1, 3, 5, "tool_calls", Optional.empty())
+                    : new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 1, 3, 5, "stop"), Optional.empty()), 3, 5, "stop", Optional.empty());
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(outcome);
+        } else {
+            AiAssistantStep step = assignment
+                    ? toolStep("assign_owner", "{\"handle\":\"r1\",\"owner\":\"[unknown reference]\"}")
+                    : new AiAssistantStep(null, answer);
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(step, 1, 3, 5, "stop"), Optional.empty()));
+        }
+        assertTerminal("malformed_output");
+        verify(writeToolService, never()).prepare(anyString(), any(), any(), anyLong());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService, never()).resolve(any(), anyString(), anyString(), anyInt(), anyInt());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void inventedMemberInAStreamAutomaticallyClearsPartialFramesWithoutRepair(boolean nativeProtocol) {
+        AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
+                TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
+                AiPrivacyMode.MASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null, 1, 1L));
+        AiChatMessage userMessage = new AiChatMessage();
+        userMessage.setId(streamedTurn.userMessageId());
+        userMessage.setAuthorKind("user");
+        userMessage.setContent("Summarize my pipeline");
+        when(persistenceService.markRunning(eq(streamedTurn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(streamedTurn), any(), any(Instant.class), any()))
+                .thenReturn(new AiChatMemory(
+                        List.of(userMessage),
+                        new AiAssistantPromptBudget(
+                                64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                        0,
+                        0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any(), any()))
+                .thenReturn(AiChatAttachmentContext.empty());
+        when(persistenceService.appendPartialBatch(
+                eq(streamedTurn), eq(0), any()))
+                .thenAnswer(invocation -> ((String) invocation.getArgument(2)).length());
+        when(persistenceService.resolve(
+                eq(streamedTurn), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        java.util.function.Consumer<AiInvocation> stream = invocation -> {
+            String prefix = "Visible partial answer. ".repeat(20);
+            String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix + "{{M1}}");
+            int token = output.indexOf("{{M1}}");
+            invocation.streamObserver().onContentDelta(output.substring(0, token));
+            invocation.streamObserver().onContentDelta(output.substring(token));
+        };
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        return new AiNativeToolCompletion.Content<AiAssistantStep.FinalAnswer>(
+                                new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Malformed<>("invented_placeholder", 2, 3, "stop"),
+                                        Optional.empty()), 2, 3, "stop", Optional.empty());
+                    });
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                    .thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        return new AiStructuredRepairAttempt<>(
+                                new AiStructuredOutcome.Malformed<AiAssistantStep>("invented_placeholder", 2, 3, "stop"), Optional.empty());
+                    });
+        }
+        var result = service.run(streamedTurn);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
+        verify(persistenceService, never()).resolve(eq(streamedTurn), any(), any(), anyInt(), anyInt());
+        verify(writeToolService, never()).prepare(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(persistenceService, never()).proposeWriteTool(eq(streamedTurn), anyInt(), any());
+        if (nativeProtocol) {
+            verify(invocationService, times(1)).completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class));
+        } else {
+            verify(invocationService, times(1)).completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
+        }
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> streamFailureCases() {
+        return java.util.stream.Stream.of(false, true).flatMap(nativeProtocol -> java.util.stream.Stream.of("timeout", "disconnect")
+                .flatMap(failure -> java.util.stream.Stream.of(ooo.klae.connex.backend.ai.masking.EntityKind.values())
+                        .flatMap(kind -> java.util.stream.Stream.of("canonical", "newline", "tab")
+                                .flatMap(spelling -> java.util.stream.Stream.of(false, true)
+                                        .map(hidden -> org.junit.jupiter.params.provider.Arguments.of(
+                                                nativeProtocol, failure, kind, spelling, hidden))))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("streamFailureCases")
+    void inventedReferenceWithdrawsDurablePartialsBeforeTransportFailure(boolean nativeProtocol, String failure, ooo.klae.connex.backend.ai.masking.EntityKind kind, String spelling, boolean hiddenField) {
+        assertReferenceWithdrawal(nativeProtocol, failure, kind, spelling, hiddenField ? "reasoning" : "public", "ordinary");
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> postTruncationFailureCases() {
+        return java.util.stream.Stream.of("public", "reasoning", "tool:0:arguments")
+                .flatMap(field -> java.util.stream.Stream.of("after", "crossing", "overlong")
+                        .flatMap(scenario -> java.util.stream.Stream.of("timeout", "disconnect")
+                                .map(failure -> org.junit.jupiter.params.provider.Arguments.of(field, scenario, failure))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("postTruncationFailureCases")
+    void referencesAfterLongStreamsWithdrawBeforeTransportFailure(String field, String scenario, String failure) {
+        assertReferenceWithdrawal(field.startsWith("tool:"), failure,
+                ooo.klae.connex.backend.ai.masking.EntityKind.PERSON, "canonical", field, scenario);
+    }
+
+    private void assertReferenceWithdrawal(boolean nativeProtocol, String failure,
+            ooo.klae.connex.backend.ai.masking.EntityKind kind, String spelling, String field, String scenario) {
+        boolean hiddenField = !field.equals("public");
+        AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
+                TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
+                AiPrivacyMode.MASKED, true, AiChatQueryScope.none(),
+                new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null, 1, 1L));
+        AiChatMessage userMessage = new AiChatMessage();
+        userMessage.setId(streamedTurn.userMessageId());
+        userMessage.setAuthorKind("user");
+        userMessage.setContent("Summarize my pipeline");
+        when(persistenceService.markRunning(eq(streamedTurn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(streamedTurn), any(), any(Instant.class), any()))
+                .thenReturn(new AiChatMemory(
+                        List.of(userMessage),
+                        new AiAssistantPromptBudget(
+                                64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                        0,
+                        0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any(), any()))
+                .thenReturn(AiChatAttachmentContext.empty());
+        when(persistenceService.appendPartialBatch(
+                eq(streamedTurn), eq(0), any()))
+                .thenAnswer(invocation -> ((String) invocation.getArgument(2)).length());
+        when(persistenceService.resolve(
+                eq(streamedTurn), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var partial = new java.util.concurrent.atomic.AtomicReference<>("");
+        when(persistenceService.appendPartialBatch(eq(streamedTurn), anyInt(), any())).thenAnswer(call -> {
+            partial.updateAndGet(value -> value + (String) call.getArgument(2));
+            return partial.get().length();
+        });
+        org.mockito.Mockito.doAnswer(call -> {
+            partial.set("");
+            return null;
+        }).when(persistenceService).resetPartialContent(eq(streamedTurn), anyInt());
+        java.util.function.Consumer<AiInvocation> stream = invocation -> {
+            String prefix = "Visible partial answer. ".repeat(20);
+            String reference = invocation.context().tokenFor(kind, "Unsent label");
+            String guess = spelling.equals("newline") ? "{{\n" + kind.tokenPrefix() + "1}}"
+                    : spelling.equals("tab") ? "{{" + kind.tokenPrefix() + "1\t}}" : reference;
+            if (!scenario.equals("ordinary")) {
+                String opening = nativeProtocol ? "{\"text\":\"" : "{\"tool\":null,\"final\":{\"text\":\"";
+                invocation.streamObserver().onContentDelta(nativeProtocol
+                        ? AiAssistantMaskingTestSupport.finalOutput(true, prefix) : opening + prefix);
+                assertTrue(!partial.get().isEmpty());
+                java.util.function.Consumer<String> append = hiddenField
+                        ? delta -> invocation.streamObserver().onProviderField(field, delta)
+                        : invocation.streamObserver()::onContentDelta;
+                if (scenario.equals("crossing")) {
+                    String filler = "x".repeat(15_998 - opening.length() - prefix.length());
+                    if (!nativeProtocol) {
+                        invocation.streamObserver().onContentDelta(filler + (hiddenField ? "" : "{{"));
+                    }
+                    if (hiddenField) {
+                        append.accept("x".repeat(15_998) + "{{");
+                    }
+                    if (hiddenField) {
+                        invocation.streamObserver().onContentDelta("x".repeat(1_000));
+                    } else {
+                        append.accept(" ".repeat(1_000));
+                    }
+                    append.accept("P99}}");
+                } else {
+                    if (nativeProtocol) {
+                        invocation.streamObserver().onProviderField("reasoning", "x".repeat(17_000));
+                    } else {
+                        invocation.streamObserver().onContentDelta("x".repeat(17_000));
+                    }
+                    append.accept(scenario.equals("overlong") ? "{{" + " ".repeat(16_385) : "{{P99}}");
+                }
+                assertEquals("", partial.get());
+            } else if (hiddenField) {
+                invocation.streamObserver().onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix));
+                invocation.streamObserver().onProviderField(field, guess);
+            } else {
+                String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix + guess);
+                int token = output.indexOf("{{");
+                invocation.streamObserver().onContentDelta(output.substring(0, token));
+                invocation.streamObserver().onContentDelta(output.substring(token));
+            }
+        };
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        if ("timeout".equals(failure)) {
+                            throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException("fixture");
+                        }
+                        throw new ooo.klae.connex.backend.ai.provider.AiProviderException("fixture");
+                    });
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                    .thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        if ("timeout".equals(failure)) {
+                            throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException("fixture");
+                        }
+                        throw new ooo.klae.connex.backend.ai.provider.AiProviderException("fixture");
+                    });
+        }
+        var result = service.run(streamedTurn);
+        assertEquals("timeout".equals(failure) ? AiGenerationTaskResult.Outcome.TIMED_OUT
+                : AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("timeout".equals(failure) ? "provider_idle_timeout" : "provider_error", result.reason());
+        assertEquals("", partial.get());
+        verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> hiddenField || !nativeProtocol || !scenario.equals("ordinary") ? offset > 0 : offset == 0));
+        verify(persistenceService, never()).resolve(eq(streamedTurn), any(), any(), anyInt(), anyInt());
+        verify(writeToolService, never()).prepare(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(persistenceService, never()).proposeWriteTool(eq(streamedTurn), anyInt(), any());
+        if (nativeProtocol) {
+            verify(invocationService, times(1)).completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class));
+        } else {
+            verify(invocationService, times(1)).completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void unmaskedUnknownPlaceholderWarningsNeverPersistOrExecute(boolean nativeProtocol, boolean tool) throws Exception {
+        var turn = new AiChatQueuedTurn(TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(), TURN.includePrivateNotes(),
+                TURN.pageContext(), TURN.attachmentIds(), AiPrivacyMode.UNMASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null, 1, 1L));
+        var user = new AiChatMessage();
+        user.setId(turn.userMessageId());
+        user.setAuthorKind("user");
+        user.setContent("Follow up");
+        when(persistenceService.markRunning(eq(turn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(turn), any(), any(Instant.class), any())).thenReturn(new AiChatMemory(
+                List.of(user), new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 0, 0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(turn), any(Instant.class), any(), any())).thenReturn(AiChatAttachmentContext.empty());
+        var answer = new AiAssistantStep.FinalAnswer("[unknown reference]", List.of());
+        var arguments = objectMapper.readTree("{\"handle\":\"r1\",\"description\":\"[unknown reference]\"}");
+        if (nativeProtocol) {
+            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion = tool
+                    ? new AiNativeToolCompletion.Tool<>(new AiToolCall("guess", "create_task",
+                            "{\"handle\":\"r1\",\"description\":\"{{P1}}\"}"), arguments, 1, 3, 5, "tool_calls", Optional.empty())
+                    : new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 1, 3, 5, "stop"), Optional.empty()), 3, 5, "stop", Optional.empty());
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(completion);
+        } else {
+            var step = tool ? new AiAssistantStep(new AiAssistantStep.Tool("create_task", arguments), null)
+                    : new AiAssistantStep(null, answer);
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(step, 1, 3, 5, "stop"), Optional.empty()));
+        }
+        var result = service.run(turn);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(writeToolService, never()).prepare(anyString(), any(), any(), anyLong());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService, never()).resolve(any(), anyString(), anyString(), anyInt(), anyInt());
     }
 
 }

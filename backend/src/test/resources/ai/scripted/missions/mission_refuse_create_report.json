@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_create_report",
+  "selector": "connex_script_mission_refuse_create_report",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_report",
+        "arguments": "{\"template\":\"pipeline-health\",\"name\":\"Review report\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

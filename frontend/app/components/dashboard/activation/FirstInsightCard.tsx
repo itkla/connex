@@ -2,7 +2,7 @@
 
 import type { ComponentType, SVGProps } from 'react';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import {
     ArrowTrendingDownIcon,
@@ -51,6 +51,7 @@ export default function FirstInsightCard({
     insight: ActivationInsight;
     canCreateFollowUp: boolean;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DashboardActivation');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
@@ -62,11 +63,11 @@ export default function FirstInsightCard({
             case 'riskFactor':
                 return factorText(evidence.factor);
             case 'lastTouch':
-                return t('evidence.lastTouch', { date: formatShortDate(evidence.at, locale) });
+                return t('evidence.lastTouch', { date: formatShortDate(evidence.at, locale, timeZone) });
             case 'touchCount':
                 return t('evidence.touchCount', { count: evidence.count });
             case 'goesCold':
-                return t('evidence.goesCold', { date: formatShortDate(evidence.at, locale) });
+                return t('evidence.goesCold', { date: formatShortDate(evidence.at, locale, timeZone) });
             case 'mutualConnections':
                 return t('evidence.mutualConnections', { count: evidence.count });
             case 'sharedCompany':

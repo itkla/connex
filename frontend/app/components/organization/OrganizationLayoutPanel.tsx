@@ -137,7 +137,7 @@ function StructureView({
                     <Collapsible defaultOpen={index === 0 || workspace.id === activeWorkspaceId}>
                         <div className="overflow-hidden rounded-xl border border-border bg-background">
                             <div className="flex items-start gap-3 p-4">
-                                <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-light text-brand-dark">
+                                <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-light text-brand-text">
                                     <BuildingOffice2Icon className="size-5" />
                                 </span>
                                 <div className="min-w-0 flex-1">
@@ -225,7 +225,7 @@ function MemberLinks({
                         <button
                             type="button"
                             disabled={switching}
-                            className="inline-flex items-center gap-2 rounded-md text-left text-sm font-medium text-foreground outline-none hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
+                            className="inline-flex items-center gap-2 rounded-md text-left text-sm font-medium text-foreground outline-none hover:text-brand-text focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
                             onClick={() => onNavigate(workspace.id, `/users/${member.userId}`)}
                         >
                             <MemberAvatar member={member} />
@@ -328,7 +328,7 @@ function TableView({
                                         <button
                                             type="button"
                                             disabled={switching}
-                                            className="rounded-md text-left font-semibold text-foreground outline-none hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
+                                            className="rounded-md text-left font-semibold text-foreground outline-none hover:text-brand-text focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-50"
                                             onClick={() => onNavigate(workspace.id, "/dashboard")}
                                         >
                                             {workspace.name}

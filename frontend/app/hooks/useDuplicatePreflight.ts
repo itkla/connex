@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import {
+    type ApiError,
+    isWorkspaceUnavailableError,
     preflightCompanyDuplicates,
     preflightDealDuplicates,
     preflightPersonDuplicates,
@@ -33,9 +35,16 @@ type CompletedCheck = {
     requestKey: string;
     status: 'checking' | 'ready' | 'error';
     response: DuplicatePreflightResponse | null;
+    workspaceRefusal?: ApiError;
 };
 
 const DEBOUNCE_MS = 400;
+
+/** Allows explicit person creation from a bounded name-only review when the server permits it. */
+export function canAcknowledgeDuplicatePreflight(response: DuplicatePreflightResponse): boolean {
+    return !response.truncated
+        || response.recordType === 'person' && response.allowSeparateCreation === true;
+}
 
 function candidateList(value?: string): string[] {
     const trimmed = value?.trim();
@@ -77,6 +86,7 @@ export function duplicatePreflightResponseSignature(
     return JSON.stringify([
         response.reviewToken,
         response.truncated,
+        response.allowSeparateCreation === true,
         response.candidates.map((candidate) => [
             candidate.recordType,
             candidate.recordId,
@@ -98,6 +108,9 @@ export function duplicatePreflightResponseSignature(
 
 /**
  * Debounces the canonical server duplicate check and binds acknowledgement to the exact checked values.
+ * A check its workspace refused because the viewer is no longer a member fails like any other check,
+ * keeping creation blocked, and also reports that refusal as `workspaceRefusal` so the form can say
+ * why instead of offering a retry that cannot succeed (#1732).
  */
 export function useDuplicatePreflight(
     kind: DuplicatePreflightKind,
@@ -126,7 +139,7 @@ export function useDuplicatePreflight(
         setAcknowledgedResponse(null);
     }, [requestKey]);
 
-    const runCheck = useCallback(async (dealReviewToken?: string) => {
+    const runCheck = useCallback(async (dealReviewToken?: string, init = requestInit) => {
         if (!requestEligible) return null;
         const sequence = requestSequenceRef.current + 1;
         requestSequenceRef.current = sequence;
@@ -138,19 +151,20 @@ export function useDuplicatePreflight(
                     name: values.name,
                     emails: candidateList(values.email),
                     phones: candidateList(values.phone),
-                }, requestInit);
+                    reviewToken: dealReviewToken,
+                }, init);
             } else if (kind === 'company') {
                 response = await preflightCompanyDuplicates({
                     name: values.name,
                     websites: candidateList(values.website),
                     phones: candidateList(values.phone),
-                }, requestInit);
+                }, init);
             } else {
                 response = await preflightDealDuplicates({
                     name: values.name,
                     companyId: values.companyId,
                     reviewToken: dealReviewToken,
-                }, requestInit);
+                }, init);
             }
             if (requestSequenceRef.current === sequence
                     && currentRequestKeyRef.current === requestKey) {
@@ -158,10 +172,15 @@ export function useDuplicatePreflight(
                 return response;
             }
             return null;
-        } catch {
+        } catch (error) {
             if (requestSequenceRef.current === sequence
                     && currentRequestKeyRef.current === requestKey) {
-                setCompleted({ requestKey, status: 'error', response: null });
+                setCompleted({
+                    requestKey,
+                    status: 'error',
+                    response: null,
+                    workspaceRefusal: isWorkspaceUnavailableError(error) ? error : undefined,
+                });
             }
             return null;
         }
@@ -192,6 +211,7 @@ export function useDuplicatePreflight(
         ? 'idle'
         : current?.status ?? 'checking';
     const response = current?.response ?? null;
+    const workspaceRefusal = status === 'error' ? current?.workspaceRefusal ?? null : null;
     const hasCandidates = (response?.candidates.length ?? 0) > 0 || response?.truncated === true;
     const acknowledgementKey = response
         ? `${requestKey}:${duplicatePreflightResponseSignature(response)}`
@@ -201,7 +221,7 @@ export function useDuplicatePreflight(
     const blocked = status === 'checking'
         || status === 'error'
         || status === 'ready' && (
-            response?.truncated === true
+            response !== null && !canAcknowledgeDuplicatePreflight(response)
             || hasCandidates && !acknowledged
         );
     const setAcknowledged = useCallback((checked: boolean) => {
@@ -210,7 +230,7 @@ export function useDuplicatePreflight(
     const retry = useCallback(() => {
         setRetryGeneration((generation) => generation + 1);
     }, []);
-    const reviewNow = useCallback(async (): Promise<DuplicatePreflightDecision> => {
+    const reviewNow = useCallback(async (init?: RequestInit): Promise<DuplicatePreflightDecision> => {
         if (!requestEligible) {
             return {
                 allowed: true,
@@ -220,9 +240,10 @@ export function useDuplicatePreflight(
             };
         }
         const checked = await runCheck(
-            kind === 'deal' ? response?.reviewToken : undefined,
+            kind === 'deal' || kind === 'person' ? response?.reviewToken : undefined,
+            init,
         );
-        if (!checked || checked.truncated) {
+        if (!checked || !canAcknowledgeDuplicatePreflight(checked)) {
             return {
                 allowed: false,
                 duplicateReviewToken: null,
@@ -233,7 +254,7 @@ export function useDuplicatePreflight(
             };
         }
         const reviewSignature = duplicatePreflightResponseSignature(checked);
-        if (checked.candidates.length === 0) {
+        if (checked.candidates.length === 0 && !checked.truncated) {
             return {
                 allowed: true,
                 duplicateReviewToken: kind === 'deal' ? checked.reviewToken : null,
@@ -262,6 +283,7 @@ export function useDuplicatePreflight(
     return {
         status,
         response,
+        workspaceRefusal,
         blocked,
         acknowledged,
         setAcknowledged,

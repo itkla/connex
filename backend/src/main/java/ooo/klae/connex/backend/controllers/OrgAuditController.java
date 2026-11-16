@@ -45,9 +45,13 @@ public class OrgAuditController {
     @GetMapping("/export")
     public ResponseEntity<byte[]> exportOrgAudit(@PathVariable int orgId,
             @RequestParam(defaultValue = "10000") int limit,
-            @RequestParam(defaultValue = "0") int offset) {
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(required = false) List<Integer> ids) {
         orgMemberService.requireOrgAdmin(orgId, authService.getCurrentUser().getId());
-        return csv("org-audit-log.csv", auditService.exportRecentForOrg(orgId, limit, offset));
+        orgMemberService.requireExportData(orgId, authService.getCurrentUser().getId());
+        return csv("org-audit-log.csv", ids == null
+            ? auditService.exportRecentForOrg(orgId, limit, offset)
+            : auditService.exportSelectedForOrg(orgId, ids, limit, offset));
     }
 
     private static ResponseEntity<byte[]> csv(String filename, String body) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type Ref } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     CheckCircleIcon,
     FaceSmileIcon,
@@ -55,7 +55,7 @@ type Props = {
     onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;
     onCopyLink: (comment: RecordComment) => void;
     onSubmitEdit: (comment: RecordComment, content: string) => Promise<boolean>;
-    onAttachImage: (file: File) => Promise<string | null>;
+    onAttachImage: (file: File, init?: RequestInit) => Promise<string | null>;
     onResolve?: () => void;
 };
 
@@ -85,6 +85,7 @@ export default function CommentRow({
     onAttachImage,
     onResolve,
 }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Comments');
     const locale = useLocale();
     const now = useLiveNow();
@@ -143,14 +144,14 @@ export default function CommentRow({
                     <span className="truncate font-medium text-foreground">{authorName}</span>
                     <time
                         dateTime={comment.createdAt}
-                        title={formatUtcDateTime(comment.createdAt, locale)}
+                        title={formatUtcDateTime(comment.createdAt, locale, undefined, timeZone)}
                         className="shrink-0 text-xs text-muted-foreground"
                     >
-                        {formatRelativeTime(comment.createdAt, locale, now)}
+                        {formatRelativeTime(comment.createdAt, locale, now, timeZone)}
                     </time>
                     {comment.editedAt != null && !deleted && (
                         <span
-                            title={formatUtcDateTime(comment.editedAt, locale)}
+                            title={formatUtcDateTime(comment.editedAt, locale, undefined, timeZone)}
                             className="shrink-0 text-xs text-muted-foreground/80"
                         >
                             {t('editedMarker')}

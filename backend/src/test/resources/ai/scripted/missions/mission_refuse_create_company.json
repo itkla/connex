@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_create_company",
+  "selector": "connex_script_mission_refuse_create_company",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_company",
+        "arguments": "{\"name\":\"Review Company\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

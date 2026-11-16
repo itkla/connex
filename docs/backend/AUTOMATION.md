@@ -13,6 +13,25 @@ Smart-segment evaluation is the shared state-matching language used by automatio
 
 Evaluation returns workspace- and current-user-scoped record ids through `SegmentService`/`SegmentMapper`. Segments describe current state; automation adds a trigger/transition plus actions. Do not create a second condition language for workflows, campaigns, or adjacent features.
 
+Each evaluation resolves one unfiltered organization workspace scope through
+`RecordVisibilityScopeControlAccess` for Segment SQL's shared-person and related-company ceilings
+(#485). Nested groups, condition/group negation, and every bounded keyset page reuse that snapshot.
+In `single-database` mode only, an actual transaction also memoizes that scope per workspace: every
+record in one durable outbox page, repeated entity-delivery condition checks, and all simulated
+condition nodes share one lazy control read. Suspension removes the memo until the same transaction
+resumes; commit and rollback discard it. Independent transactions and nontransactional evaluations
+read fresh scopes. In `catalog-per-placement` mode, every call bypasses the memo; routed reads are
+served by the memory-only prepared snapshot (#2165), validated against the current workspace,
+organization, and catalog on every boundary call.
+The existing candidate universe, upper watermark, result limit, and per-context signal caching remain
+unchanged. Campaign/workflow callers that already hold locks retain their transaction shape; #2159
+owns the context-installed snapshot and fail-fast guard required before enabling catalog routing.
+
+The bounded warm-intro query keeps its legacy engaged-person archived/suspended filters without a
+`provision_ceased_at` filter. The unbounded warm-intro company projection still returns an owned
+person's `company_id` without a company visibility join, so it can differ from bounded owned-company
+candidates and label projection. Changing either behavior requires a separate decision.
+
 ## Catalog is the vocabulary
 
 `SegmentCatalog` declares the supported record types, field kinds/value sources/operators, predicate applicability/bounds, enum options, and definition shape limits.
@@ -41,6 +60,12 @@ A rule/workflow runs as either:
 - the seeded non-login `SystemActor` (`system` mode), authorable only through the established admin gate and limited to its fixed narrow permission set.
 
 Off-request execution installs explicit SecurityContext and TenantContext through the automation executor. Actor permission failure is an execution failure; do not bypass existing tenant/RBAC-enforcing services in an action implementation.
+
+Rule actions pass the persisted rule and execution IDs to `AutomationExecutor.runAs`; canonical nodes
+pass the workflow and run IDs. `AuditService` records those IDs and the execution mode under
+`context.executionOrigin`, including deferred secret-use audits. Other background callers name their
+own source, and pure observers remain untagged. Mutating observers such as the SLA sweep supply their
+source without suppressing rule triggers. The context-key and export contract is in [AUDIT.md](AUDIT.md).
 
 ## Adding trigger sources
 
@@ -100,6 +125,7 @@ Add a new action to the closed validated vocabulary and `RuleActionExecutor`, de
 
 - Map the action to its required permission in the validator/guard.
 - Extend `SystemActor`'s permission set only when system mode must legitimately perform the action.
+- Add its key to `RuleExecutionEvidence`'s closed action allowlist so failure history can identify it safely.
 - Classify retry behavior explicitly; unknown actions default to no automatic retry.
 - Preserve the existing transactional/deduplicated effect semantics.
 
@@ -136,14 +162,22 @@ before any delivery row is written. An excluded contact creates neither a send n
 exclusion reason is strict-audited. An unsubscribe or other mandatory-stop signal skips that delivery
 but does not cancel later workflow nodes in this increment.
 
-Triggered sends remain `triggered` after their pending queue drains so later contacts can enroll. Dormant
-triggered sends are excluded from worker workspace/send scans until another pending delivery exists.
+Ordinary triggered sends remain `triggered` after their pending queue drains so later contacts can enroll.
+A content-refused send is terminal: it retains that schema-required stored status but records completion
+and a trusted refusal marker; the API presents `failed` with the localized refusal reason. Its pending
+work is settled atomically, and no new enrollment, claim, release-to-pending or replay may reopen it.
+Already in-flight results remain authoritative, with expired attempts retained for reconciliation.
+Corrected content uses a new revision and send. See [saved campaign content](../DELIVERABILITY.md).
+Dormant and content-refused triggered sends are excluded from normal worker scans; expired in-flight
+attempts remain discoverable for recovery.
 Their recipient total is refreshed from delivery rows. The campaign API returns them with the
 synthetic `snapshotId` and `origin=triggered`; the campaign UI labels them as workflow-managed and exposes no
 queue, pause, or cancel controls. The lifecycle service also rejects those mutations for triggered
 sends.
 
-Concurrent get-or-create calls are serialized by the campaign mutex. The unique triggered-send key and
+Concurrent get-or-create calls are serialized by the campaign mutex. Enrollment then locks and rechecks
+the send before inserting a recipient, so content refusal cannot commit between admission and insertion.
+The unique triggered-send key and
 the delivery's generated active `(workspace_id, send_id, person_id, dedupe_active)` key remain final
 defenses:
 duplicate-key collisions are caught and re-read, while unrelated uniqueness failures still propagate.
@@ -237,6 +271,41 @@ A `document` workflow subject is a `deal_document` id, not its parent deal.
 
 Future fenced record types use the same centralized gate instead of scattered checks.
 
+## Follow-up recipients and notification sources
+
+Schema-v1 `create_task` and `notify` actions use the existing optional `targetUserId` for a
+specific active member of the same workspace. An absent target retains the run-as attribution member.
+Authoring and execution refuse invalid or unavailable explicit members rather than redirecting work
+to the actor. Task effects retain the exact assignee through a transactional NOWAIT fence before
+delegating to `TaskService` and its locked assignment checks. Membership contention propagates as a
+retryable lock failure, so an earlier action's audit head cannot close a cycle with a direct task
+create holding that assignee. Missing active membership requires intervention;
+notification effects retain attribution and recipient memberships through the write using the existing
+actor/workspace prefix and ordered NOWAIT membership union. Missing or contended membership refuses
+the action instead of completing an invisible notification. Recipient/source access filters remain in place.
+No action field or persisted definition shape is added, so canonical bytes and hashes stay stable.
+Dynamic record-owner, launch-input, and action-output recipient bindings require schema-v2 in #1604;
+schema-v1 authoring refuses those configurations through its strict unknown-field/type validation.
+
+For task actions, an absent `dueInDays` retains the three-day default; zero means today, and explicit
+values must be integers from 0 through 365. Today uses `UserCalendarService`, the same persisted
+execution-profile calendar used by Tasks, with UTC as the existing fallback. Recipe parameters and
+the builder use the same range.
+
+Workflow notifications snapshot the permitted source name into `sourceLabel` and the message body,
+retain the configured title/message, and link contacts, companies, deals, and tasks to their existing
+record destinations. Document triggers use the `deal_document` notification source and the existing
+deal-scoped document print route. Names are resolved through workspace-scoped reads; a missing
+source fails the action instead of producing a dead link. Inbox and realtime reads retain their
+current source-access checks, and opening a notification selects its workspace before navigating.
+
+Notification emails enter `/notifications?open=<notificationId>`. The authenticated page marks and
+resolves that notification through the existing recipient-authorized endpoint, then reuses the same
+workspace-selection navigation as the bell and inbox before opening the returned record URL.
+Workspace and destination are taken from the authorized notification, not link parameters. An invalid
+id, inaccessible notification, or refused workspace selection offers the inbox without navigating to
+an unrelated record. Existing direct record URLs remain the in-app notification destination.
+
 ## Legacy rules are a compatibility projection
 
 The legacy `/api/rules` surface is not an independent aggregate.
@@ -248,6 +317,67 @@ The legacy `/api/rules` surface is not an independent aggregate.
 - Startup backfill follows the documented deterministic discovery/lock/completeness-verification protocol.
 
 `runtime_owner` on the locked workflow is the database-authoritative predicate for which runtime may claim work. Both runtimes check the opposite ledger under the same root lock.
+
+## Publication and execution availability
+
+Recipe installation uses the same first-publication owner decision as the builder. With the runtime
+flag off, a new representable recipe is published with a legacy rule projection and remains disabled
+until explicitly enabled. This does not attach a projection to existing canonical history or change
+an existing workflow's owner. Job-change follow-up and won-deal handoff retain their ordered task
+and activity effects. Cooling-company review is currently unavailable: `create_task` cannot target a
+company. Preview returns `action_record_type_unsupported`, and installation creates nothing.
+
+An existing canonical-owned workflow cannot be enabled with the flag off. Workflow list/detail
+responses expose execution availability; Operations reports enabled unavailable workflows separately
+from healthy ones. Operations merges `workflow_run` and linked `rule_execution` history with source
+identity in cursor ordering, and includes failed/partial rule executions in recent-failure metrics.
+Health and attention use the newest completed outcome across both histories, ordered by start time
+and then source/id (canonical wins equal timestamps), independently of the 24-hour recent-failure
+window. Failed or partly finished outcomes remain unhealthy until a newer completed outcome
+supersedes them; queued, running and waiting runs do not clear that failure. Existing open
+interventions and unavailable execution remain separate reasons for attention. Tenant V239 adds the
+`(workspace_id, executed_at DESC, id DESC)` index for workspace-wide execution history. Rule executions retain their summary-only
+history and cannot acquire canonical intervention controls through this read projection.
+
+New rule executions preserve bounded failure evidence in the existing `rule_execution.detail` JSON:
+`workflowVersionId` and the first failed action's one-based `actionNumber`, closed `actionType`, and
+allowlisted `code`. The claim records a published version only when the rule being executed still
+matches the persisted projection under the existing workflow lock; a publication race leaves the
+version unknown. All failed actions produce `failed`; a mix of completed and failed actions produces
+`partial`. Exception messages and action payloads never enter this evidence or its read DTO. Older
+summary-only failures remain unknown rather than having steps or versions inferred from today's draft.
+
+Run history and Operations expose the safe first-failure evidence and link to workflow review as the
+owner investigation path. They do not offer summary-only runs a step retry: completed actions may
+already have changed records. History resolves contact, company, deal, and task names through the
+viewer's existing workspace-pinned record APIs, with no name/link when access is refused. Target
+lookups retain settled results only within the current workspace, fetch each new distinct target
+once, and run at most four requests concurrently. Each result appears independently; switching
+workspaces aborts pending reads and discards the cache. Documents use
+`GET /api/documents/targets?ids=…`, accepting one to fifty positive ids (the cap applies before
+deduplication) and returning only `{id, dealId, title}`. The service reuses the per-deal document
+read's parent-deal gate in the resolved workspace. Empty, non-positive and over-cap numeric batches
+return HTTP 400 with the existing `BAD_REQUEST` code/message envelope before service invocation;
+the service repeats the validation for non-HTTP callers. Deleted, unreadable-parent and other-workspace
+documents are all absent from the response. It returns no document body, deal name, or diagnostic.
+Read authorization remains active workspace membership, as for the existing per-deal document
+GETs; `DEAL_UPDATE` continues to gate document mutations. The mapper statement is covered by the
+existing tenant-scoped `DealDocumentMapper` namespace in `TenantScopeInterceptor`.
+History groups new document ids into batches of at most fifty within the same four-request queue,
+caches absent results too, and links returned titles through the canonical parent deal's documents
+panel. Missing titles and absent entries show the same neutral EN/JA unavailable label without a
+link or a claim about deletion or permission. Unsupported target types retain the explicit
+name-unavailable-in-history state. Run-number sequences identify the execution ledger, never
+whether a run was migrated; unknown versions are labelled as unrecorded.
+
+Publication validation uses the same projection boundary as Publish. A single initial condition may
+terminate its two branches at separate End steps. Delays, multiple conditions, actions on the No
+branch, conditions after actions, and action counts over 16 return a focused
+`legacy_projection_unsupported` diagnostic with a bounded reason code. Frontend readiness requires
+validity, publication capability, and an empty diagnostic list.
+Pan and zoom changes, including the initial canvas fit, remain saveable canvas preferences but do
+not require a save before Validate, Preview or Publish, and do not invalidate their evidence.
+Other draft edits retain the save-before-validation requirement.
 
 ## Dedupe and rolling compatibility
 

@@ -1,54 +1,31 @@
-export type PermissionItem = { permission: string; action: string };
+export type PermissionItem = { permission: string; action: string; description: string };
 export type PermissionGroup = { group: string; label: string; items: PermissionItem[] };
-export type PermissionLabel = { group: string; action: string };
 
-const OVERRIDES: Record<string, string> = {
-    MANAGE: 'Manage',
-    SETTINGS: 'Settings',
+type PermissionTranslator = {
+    (key: string): string;
+    has(key: string): boolean;
 };
 
-/** Title-case a single SCREAMING_CASE token, e.g. COMPANY -> Company. */
-function humanizeToken(token: string): string {
-    return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
-}
-
-/** Humanize the action portion of a permission key, e.g. CREATE -> Create. */
-function humanizeAction(action: string): string {
-    return action
-        .split('_')
-        .map((part) => OVERRIDES[part] ?? humanizeToken(part))
-        .join(' ');
-}
-
-/** Split COMPANY_CREATE into its entity group and humanized action. */
-function split(permission: string): { group: string; label: string; action: string } {
-    const idx = permission.indexOf('_');
-    const groupKey = idx >= 0 ? permission.slice(0, idx) : permission;
-    const actionKey = idx >= 0 ? permission.slice(idx + 1) : permission;
-    return { group: groupKey, label: humanizeToken(groupKey), action: humanizeAction(actionKey) };
-}
-
-/**
- * Group a flat permission catalog by entity (the part before the first `_`)
- * into humanized sections, preserving catalog order and applying localized overrides.
- */
-export function groupPermissions(
-    catalog: string[],
-    labels: Partial<Record<string, PermissionLabel>> = {},
-): PermissionGroup[] {
-    const order: string[] = [];
-    const map = new Map<string, PermissionGroup>();
+/** Groups the server catalog using business labels; unknown permissions never expose raw codes. */
+export function groupPermissions(catalog: string[], t: PermissionTranslator): PermissionGroup[] {
+    const groups = new Map<string, PermissionGroup>();
     for (const permission of catalog) {
-        const parsed = split(permission);
-        const localized = labels[permission];
-        const { group } = parsed;
-        const label = localized?.group ?? parsed.label;
-        const action = localized?.action ?? parsed.action;
-        if (!map.has(group)) {
-            map.set(group, { group, label, items: [] });
-            order.push(group);
-        }
-        map.get(group)!.items.push({ permission, action });
+        const group = permission.split('_')[0];
+        const labelKey = `permissionGroups.${group}`;
+        const actionKey = `permissionLabels.${permission}.action`;
+        const descriptionKey = `permissionLabels.${permission}.description`;
+        const existing = groups.get(group);
+        const item = {
+            permission,
+            action: t.has(actionKey) ? t(actionKey) : t('unknownPermission'),
+            description: t.has(descriptionKey) ? t(descriptionKey) : t('unknownPermissionDescription'),
+        };
+        if (existing) existing.items.push(item);
+        else groups.set(group, {
+            group,
+            label: t.has(labelKey) ? t(labelKey) : t('unknownPermissionGroup'),
+            items: [item],
+        });
     }
-    return order.map((g) => map.get(g)!);
+    return [...groups.values()];
 }

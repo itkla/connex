@@ -17,6 +17,15 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
  * Mapper for notification inbox lifecycle and reminder reconciliation.
  */
 public interface NotificationMapper {
+    /** Locked notification keys and recipients for one bounded teardown transaction. */
+    record DeletionCandidate(int id, int recipientId) { }
+
+    /** Locks the next workspace-owned notification keys in primary-key order. */
+    List<DeletionCandidate> lockTeardownBatch(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+
+    /** Deletes only the exact notification keys retained by the workspace's teardown transaction. */
+    int deleteTeardownBatch(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+
     default List<Notification> findPage(
         int recipientId,
         String status,
@@ -53,6 +62,23 @@ public interface NotificationMapper {
         @Param("asOf") String asOf,
         @Param("limit") int limit,
         @Param("offset") int offset
+    );
+
+    /** Traverses a bounded inbox snapshot by ID without depending on mutation success. */
+    List<Notification> findPage(
+        @Param("recipientId") int recipientId,
+        @Param("status") String status,
+        @Param("types") List<String> types,
+        @Param("categories") List<String> categories,
+        @Param("severities") List<String> severities,
+        @Param("workspaceId") Integer workspaceId,
+        @Param("contextType") String contextType,
+        @Param("contextId") Integer contextId,
+        @Param("asOf") String asOf,
+        @Param("limit") int limit,
+        @Param("offset") int offset,
+        @Param("afterId") long afterId,
+        @Param("cutoffId") long cutoffId
     );
 
     default List<Notification> findPage(
@@ -264,6 +290,14 @@ public interface NotificationMapper {
 
     int upsert(Notification notification);
 
+    /** Confirms a generated key belongs to this durable delivery, including rows hidden from the inbox. */
+    boolean existsDelivery(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("id") int id,
+        @Param("dedupeKey") String dedupeKey
+    );
+
     int claimEmailDelivery(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
@@ -279,6 +313,14 @@ public interface NotificationMapper {
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("dedupeKey") String dedupeKey
+    );
+
+    /** Marks a task recipient's existing assignment notice resolved within its workspace. */
+    int resolveTaskAssignment(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("taskId") int taskId,
+        @Param("resolvedAt") String resolvedAt
     );
 
     List<Notification> findReminderNotifications(
@@ -397,4 +439,21 @@ public interface NotificationMapper {
      * SET NULL (#440 increment 3).
      */
     int clearActorAnywhere(@Param("userId") int userId);
+    /** Resolves an ownership notice under its offer X lock in the same routed transaction. */
+    int resolveOwnershipOffer(@Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId, @Param("offerId") String offerId);
+
+    /** Erases an offer notice under its offer X lock, including already resolved history. */
+    int deleteOwnershipOffer(@Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId, @Param("offerId") String offerId);
+
+    /** Returns the last successful warmth notification model for this workspace. */
+    String getWarmthModelVersion(@Param("workspaceId") int workspaceId);
+
+    /** Records a successful model baseline under the existing organization reconciliation mutex. */
+    int setWarmthModelVersion(@Param("workspaceId") int workspaceId, @Param("modelVersion") String modelVersion);
+
+    /** Removes only obsolete relationship-derived baselines during the model cutover. */
+    int deletePreviousWarmthBaselines(@Param("workspaceId") int workspaceId, @Param("modelVersion") String modelVersion);
+
 }

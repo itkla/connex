@@ -3,7 +3,7 @@
 ARG BUILD_TIME
 ARG SOURCE_DATE_EPOCH
 
-FROM eclipse-temurin:26-jdk-noble@sha256:e198c796c8b49353f02deb9d7ca82952abc634395c575ca03385c467d223f6e3 AS build
+FROM eclipse-temurin:26-jdk-noble@sha256:9c0e8eddecccc0d5679b317b0c90fa7103ad25cae33df1c00280675eb681c7f8 AS build
 WORKDIR /workspace
 ARG VERSION=0.0.0-dev
 ARG BUILD_TIME
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.gradle \
     && ./gradlew bootWar -Pversion=${VERSION} "$@" --no-daemon --stacktrace \
     && find build/libs -name '*.war' ! -name '*-plain.war' -exec cp {} /workspace/app.war \;
 
-FROM eclipse-temurin:26-jre-noble@sha256:d095323f078a68e0663f7bb7ff103f6275227a929c3ecc6f6fb626ebe6e4d51a AS runtime
+FROM eclipse-temurin:26-jre-noble@sha256:adfd44c114916dc79fa9a24087fbac34252096edb9892d1c2d9d82db3f8947b3 AS runtime
 WORKDIR /app
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-backend" \
@@ -25,6 +25,10 @@ LABEL org.opencontainers.image.title="connex-backend" \
       org.opencontainers.image.version="${VERSION}"
 ENV JAVA_OPTS="" \
     CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT="/var/lib/connex/objects"
+# Pick up OS security fixes published after the base image; the release scan fails on any fixable High.
+RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
+    && rm -rf /var/lib/apt/lists/*
 RUN groupadd --system --gid 10001 connex \
     && useradd --system --uid 10001 --gid connex --home-dir /app connex \
     && install -d -o connex -g connex -m 0700 /var/lib/connex/objects

@@ -168,6 +168,12 @@ public class ReportComposerService {
                             ? joined
                             : ReportComposerPreviewDto.unavailable("provider_error");
                 }
+                ReportComposerPreviewDto rechecked = cached(
+                        workspaceId, actorId, cacheFeature, contentHash, today);
+                if (rechecked != null) {
+                    admission.completeLeader(LeaderOutcome.CACHE_READY);
+                    return rechecked;
+                }
                 try {
                     AiStructuredOutcome<AiReportComposerContent> outcome = invocationService.completeStructured(
                             new AiInvocation(
@@ -179,7 +185,8 @@ public class ReportComposerService {
                             AiReportComposerContent.class,
                             AiRawOutputGuard.PERMIT_ALL,
                             admission);
-                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportComposerContent> parsed)) {
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportComposerContent> parsed)
+                            || parsed.demaskWarnings() != 0) {
                         return ReportComposerPreviewDto.unavailable("provider_error");
                     }
                     ReportComposerPreviewDto preview = validatedPreview(

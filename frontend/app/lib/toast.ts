@@ -4,10 +4,10 @@ import { type ExternalToast, toast } from 'sonner';
 export type ToastOptions = ExternalToast;
 export type ToastId = string | number;
 
-const successStyle = { backgroundColor: 'var(--color-brand)', color: 'white' };
-const errorStyle = { backgroundColor: 'var(--color-destructive)', color: 'white' };
-const warnStyle = { backgroundColor: 'var(--color-warning)', color: 'white' };
-const infoStyle = { backgroundColor: 'var(--color-info)', color: 'white' };
+const successStyle = { backgroundColor: 'var(--color-brand)', color: 'var(--color-brand-foreground)' };
+const errorStyle = { backgroundColor: 'var(--color-destructive)', color: 'var(--color-destructive-foreground)' };
+const warnStyle = { backgroundColor: 'var(--color-warning)', color: 'var(--color-warning-foreground)' };
+const infoStyle = { backgroundColor: 'var(--color-info)', color: 'var(--color-info-foreground)' };
 
 export function toastSuccess(message: ReactNode, options?: ToastOptions) {
     return toast.success(message, { ...options, style: { ...successStyle, ...options?.style } });

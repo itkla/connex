@@ -67,6 +67,12 @@ class DealAnalyticsIntegrationTest {
                 .param("currency", " ")
                 .param("range", "30d")
                 .session(session))
+            .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/deals/kpis")
+                .header("X-Workspace-Id", workspace.getId())
+                .param("range", "30d")
+                .session(session))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.wonRevenue").value(0.0))
             .andExpect(jsonPath("$.newPipeline").value(0.0))

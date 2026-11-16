@@ -319,6 +319,15 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("person", 430));
         raw.add(direct("company_share", 440));
         raw.add(direct("company", 450));
+        raw.add(direct("ai_chat_tool_call", 452));
+        raw.add(direct("ai_chat_message", 453));
+        raw.add(direct("ai_chat_turn", 454));
+        raw.add(direct("ai_agent_action", 451));
+        raw.add(direct("ai_agent_segment", 455, nullify("turn_id")));
+        raw.add(direct("ai_agent_run", 456, nullify("report_message_id"), nullify("active_segment_id")));
+        raw.add(direct("ai_agent_privacy_object", 457));
+        raw.add(direct("ai_agent_privacy_work", 458));
+        raw.add(direct("ai_agent_privacy_barrier", 459, nullify("latest_operation_key")));
         raw.add(direct("attachment", 460));
         raw.add(direct("ai_chat_session", 465));
         raw.add(direct("ai_workspace_governance", 466));
@@ -335,6 +344,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("document_template", 520));
         raw.add(direct("entity_reference", 530));
         raw.add(direct("historical_notification_baseline", 535));
+        raw.add(direct("warmth_notification_model_state", 536));
         raw.add(direct("notification", 540));
         raw.add(direct("relationship_signal_family_state", 541));
         raw.add(direct("relationship_signal", 542));
@@ -347,6 +357,9 @@ public final class TenantLifecycleRegistry {
         raw.add(storage("managed_object_usage", 600));
         raw.add(storage("object_deletion_queue", 610));
         raw.add(storage("object_storage_quota", 620));
+        raw.add(cascade("campaign_delivery_unsubscribe_token", "campaign_delivery",
+            "fk_campaign_unsubscribe_delivery",
+            link("workspace_id", "workspace_id"), link("delivery_id", "id")));
         raw.add(cascade("attachment_tag", "attachment",
             "fk_attachment_tag_attachment", link("attachment_id", "id")));
         raw.add(cascade("company_tag", "company",
@@ -375,15 +388,10 @@ public final class TenantLifecycleRegistry {
         raw.add(cascade("ai_chat_session_participant", "ai_chat_session",
             "fk_ai_chat_session_participant_session",
             link("workspace_id", "workspace_id"), link("session_id", "id")));
-        raw.add(cascade("ai_chat_message", "ai_chat_session",
-            "fk_ai_chat_message_session",
-            link("workspace_id", "workspace_id"), link("session_id", "id")));
-        raw.add(cascade("ai_chat_tool_call", "ai_chat_message",
-            "fk_ai_chat_tool_call_message",
-            link("workspace_id", "workspace_id"), link("message_id", "id")));
-        raw.add(cascade("ai_chat_turn", "ai_chat_session",
-            "fk_ai_chat_turn_session",
-            link("workspace_id", "workspace_id"), link("session_id", "id")));
+        raw.add(cascade("ai_assistant_proposal_set", "ai_chat_message",
+            "fk_ai_assistant_proposal_set_message",
+            link("workspace_id", "workspace_id"), link("session_id", "session_id"),
+            link("message_id", "id")));
         raw.add(direct("sequence_version_publisher", 621));
         raw.add(direct("sequence_version", 622));
         raw.add(direct("sequence_step_content", 623));

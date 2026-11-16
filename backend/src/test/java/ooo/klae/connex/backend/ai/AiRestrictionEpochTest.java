@@ -3,7 +3,11 @@ package ooo.klae.connex.backend.ai;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -19,6 +23,8 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronizationUtils;
@@ -116,6 +122,56 @@ class AiRestrictionEpochTest {
 
             assertEquals(epoch.current(7), blockedRead.get(5, TimeUnit.SECONDS));
         }
+    }
+
+    @Test
+    void retainedWriteFencesPreserveEpochsAndReleaseReentrantStripeAcquisitions() throws Exception {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch(3);
+        long before = epoch.current(7);
+        ReentrantReadWriteLock[] locks = workspaceLocks(epoch);
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            epoch.retainWriteFencesUntilTransactionCompletion(List.of(7, 3, 4, 7));
+
+            assertEquals(before, epoch.current(7));
+            assertEquals(1, locks[0].getWriteHoldCount());
+            assertEquals(2, locks[1].getWriteHoldCount());
+            assertEquals(3, TransactionSynchronizationManager.getSynchronizations().size());
+        } finally {
+            completeTransaction();
+        }
+        assertFalse(locks[0].isWriteLocked());
+        assertFalse(locks[1].isWriteLocked());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void writeFenceRegistrationFailureReleasesOnlyTheUnregisteredAcquisition(boolean alreadyRetained)
+            throws Exception {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        ReentrantReadWriteLock lock = workspaceLocks(epoch)[7];
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            if (alreadyRetained) {
+                epoch.bump(7);
+            }
+            try (var manager = mockStatic(TransactionSynchronizationManager.class, CALLS_REAL_METHODS)) {
+                manager.when(() -> TransactionSynchronizationManager.registerSynchronization(any()))
+                        .thenThrow(new IllegalStateException("Registration failed"));
+
+                assertThrows(IllegalStateException.class,
+                        () -> epoch.retainWriteFencesUntilTransactionCompletion(List.of(7)));
+
+                assertEquals(alreadyRetained ? 1 : 0, lock.getWriteHoldCount());
+                assertEquals(alreadyRetained ? 1 : 0,
+                        TransactionSynchronizationManager.getSynchronizations().size());
+            }
+        } finally {
+            completeTransaction();
+        }
+        assertFalse(lock.isWriteLocked());
     }
 
     @Test
@@ -290,9 +346,7 @@ class AiRestrictionEpochTest {
     private static void awaitFenceContention(
             AiRestrictionEpoch epoch, AtomicReference<Thread> contender, CompletableFuture<?> result)
             throws ReflectiveOperationException {
-        Field field = AiRestrictionEpoch.class.getDeclaredField("workspaceLocks");
-        field.setAccessible(true);
-        ReentrantReadWriteLock[] locks = ReentrantReadWriteLock[].class.cast(field.get(epoch));
+        ReentrantReadWriteLock[] locks = workspaceLocks(epoch);
         ReentrantReadWriteLock fence = locks[Math.floorMod(7, locks.length)];
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (System.nanoTime() < deadline) {
@@ -304,6 +358,13 @@ class AiRestrictionEpochTest {
             LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
         }
         throw new AssertionError("Contender never queued on the workspace epoch fence");
+    }
+
+    private static ReentrantReadWriteLock[] workspaceLocks(AiRestrictionEpoch epoch)
+            throws ReflectiveOperationException {
+        Field field = AiRestrictionEpoch.class.getDeclaredField("workspaceLocks");
+        field.setAccessible(true);
+        return ReentrantReadWriteLock[].class.cast(field.get(epoch));
     }
 
     private static void completeTransaction() {

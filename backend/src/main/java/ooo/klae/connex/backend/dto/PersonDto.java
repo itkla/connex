@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonIdentityReference;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -69,6 +70,14 @@ public class PersonDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
     private String updatedAt;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Long version;
+
+    /** Optional compare-and-set token from the snapshot that seeded the edit form. */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Min(0)
+    private Long expectedVersion;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String imageUrl;
@@ -139,6 +148,7 @@ public class PersonDto {
         dto.setNoteIds(p.getNotes() == null ? null : Arrays.stream(p.getNotes()).mapToInt(Note::getId).toArray());
         dto.setCreatedAt(p.getCreatedAt());
         dto.setUpdatedAt(p.getUpdatedAt());
+        dto.setVersion(p.getVersion());
         dto.setImageUrl(p.getImageUrl());
         dto.setRiskExcluded(p.isRiskExcluded());
         dto.setIntroExcluded(p.isIntroExcluded());
@@ -178,6 +188,7 @@ public class PersonDto {
         p.setReferrerPersonId(referrerPersonId);
         p.setCreatedAt(createdAt);
         p.setUpdatedAt(updatedAt);
+        p.setExpectedVersion(expectedVersion);
         p.setImageUrl(imageUrl);
         return p;
     }

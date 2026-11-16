@@ -9,9 +9,12 @@ import java.util.Map;
 import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
+import ooo.klae.connex.backend.util.RecordInsertBatches;
+import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyInitializer.WorkspaceProvisioned;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
@@ -44,11 +47,13 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.seeder.SeedDataGenerator.PipelineSeed;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /**
  * Persists one workspace through application mapper SQL using a MyBatis batch executor.
  *
- * <p>Dependency boundaries and every 500 single-row statements are flushed explicitly.
+ * <p>Dependency boundaries and every 500 auxiliary statements are flushed explicitly.
+ * Name writes use at most 100 rows and a conservative 1 MiB payload per flush.
  * Mapper return values are deliberately ignored because the batch executor returns
  * sentinels until flush; the summary is derived from the deterministic generation plan.
  * Only single-row insert statements are issued: MyBatis cannot assign generated keys for
@@ -68,6 +73,7 @@ public class SeederBatchWriter {
 
     private final SeedDataGenerator generator;
     private final TenantContext tenantContext;
+    private final ApplicationEventPublisher applicationEvents;
     private final SqlSessionTemplate batchSession;
     private final OrganizationMapper organizationMapper;
     private final WorkspaceMapper workspaceMapper;
@@ -88,9 +94,11 @@ public class SeederBatchWriter {
     public SeederBatchWriter(
             SqlSessionFactory sqlSessionFactory,
             SeedDataGenerator generator,
-            TenantContext tenantContext) {
+            TenantContext tenantContext,
+            ApplicationEventPublisher applicationEvents) {
         this.generator = generator;
         this.tenantContext = tenantContext;
+        this.applicationEvents = applicationEvents;
         this.batchSession = new SqlSessionTemplate(sqlSessionFactory, ExecutorType.BATCH);
         this.organizationMapper = batchSession.getMapper(OrganizationMapper.class);
         this.workspaceMapper = batchSession.getMapper(WorkspaceMapper.class);
@@ -113,16 +121,27 @@ public class SeederBatchWriter {
             SeederProperties.Profile profile,
             long workspaceSeed,
             int workspaceIndex,
-            LocalDate anchorDate) {
+            LocalDate anchorDate,
+            List<Integer> existingOrganizationWorkspaceIds) {
+        if (!existingOrganizationWorkspaceIds.isEmpty()) {
+            throw new IllegalArgumentException("A seeded organization must begin without workspaces");
+        }
         Organization organization = generator.organization(workspaceSeed, workspaceIndex);
         organizationMapper.insert(organization);
         flush();
         requireGeneratedId("organization", organization.getId());
+        var privacyMapper = batchSession.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class);
+        ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.provisionControl(privacyMapper, organization.getId());
+        flush();
 
         Workspace workspace = generator.workspace(workspaceSeed, workspaceIndex, organization.getId());
         workspaceMapper.insert(workspace);
         flush();
         requireGeneratedId("workspace", workspace.getId());
+        List<Integer> organizationWorkspaceIds = new ArrayList<>(existingOrganizationWorkspaceIds);
+        organizationWorkspaceIds.add(workspace.getId());
+        RecordVisibilityScope scope = new RecordVisibilityScope(organization.getId(), organizationWorkspaceIds);
+        applicationEvents.publishEvent(new WorkspaceProvisioned(workspace.getId()));
 
         List<User> users = generator.users(workspaceSeed, workspaceIndex);
         for (User user : users) {
@@ -146,7 +165,7 @@ public class SeederBatchWriter {
         }
         flush();
 
-        TenantScope previous = captureTenantScope();
+        TenantContext.State previous = tenantContext.snapshot();
         tenantContext.set(
             workspace.getId(),
             organization.getId(),
@@ -162,10 +181,11 @@ public class SeederBatchWriter {
                 anchorDate,
                 organization,
                 workspace,
-                users
+                users,
+                scope
             );
         } finally {
-            restoreTenantScope(previous);
+            tenantContext.restore(previous);
         }
     }
 
@@ -176,7 +196,8 @@ public class SeederBatchWriter {
             LocalDate anchorDate,
             Organization organization,
             Workspace workspace,
-            List<User> users) {
+            List<User> users,
+            RecordVisibilityScope scope) {
         List<PipelineSeed> pipelines = writePipelines(workspace.getId());
         List<Tag> tags = writeTags(workspace.getId());
         List<Company> companies = writeCompanies(
@@ -192,7 +213,8 @@ public class SeederBatchWriter {
             personResult.persons(),
             pipelines,
             tags,
-            anchorDate
+            anchorDate,
+            scope
         );
         writeActivities(
             profile, workspaceSeed, workspace.getId(), users, personResult.persons(), dealResult.deals(), anchorDate);
@@ -293,11 +315,12 @@ public class SeederBatchWriter {
         for (int index = 0; index < profile.companies(); index++) {
             Company company = generator.company(
                 workspaceId, workspaceSeed, workspaceIndex, index, users, anchorDate);
-            companyMapper.insert(company);
             companies.add(company);
-            flushEvery(index);
         }
-        flush();
+        for (var batch : RecordInsertBatches.companies(companies)) {
+            batch.forEach(companyMapper::insert);
+            flush();
+        }
         companies.forEach(company -> requireGeneratedId("company", company.getId()));
         for (int index = 0; index < companies.size(); index++) {
             companyMapper.insertTags(
@@ -324,11 +347,12 @@ public class SeederBatchWriter {
         for (int index = 0; index < profile.persons(); index++) {
             Person person = generator.person(
                 workspaceId, workspaceSeed, workspaceIndex, index, users, companies, anchorDate);
-            personMapper.insert(person);
             persons.add(person);
-            flushEvery(index);
         }
-        flush();
+        for (var batch : RecordInsertBatches.people(persons)) {
+            batch.forEach(personMapper::insert);
+            flush();
+        }
         persons.forEach(person -> requireGeneratedId("person", person.getId()));
 
         int employmentCount = 0;
@@ -360,7 +384,8 @@ public class SeederBatchWriter {
             List<Person> persons,
             List<PipelineSeed> pipelines,
             List<Tag> tags,
-            LocalDate anchorDate) {
+            LocalDate anchorDate,
+            RecordVisibilityScope scope) {
         List<Deal> deals = new ArrayList<>(profile.deals());
         Map<Integer, Integer> nextStagePositions = new LinkedHashMap<>();
         for (int index = 0; index < profile.deals(); index++) {
@@ -369,11 +394,12 @@ public class SeederBatchWriter {
             int position = nextStagePositions.getOrDefault(deal.getStageId(), 0);
             deal.setPosition(position);
             nextStagePositions.put(deal.getStageId(), position + 1);
-            dealMapper.insert(deal);
             deals.add(deal);
-            flushEvery(index);
         }
-        flush();
+        for (var batch : RecordInsertBatches.deals(deals)) {
+            batch.forEach(dealMapper::insert);
+            flush();
+        }
         deals.forEach(deal -> requireGeneratedId("deal", deal.getId()));
 
         int personLinkCount = 0;
@@ -385,7 +411,7 @@ public class SeederBatchWriter {
                 generator.dealPersonIndexes(workspaceSeed, index, persons.size());
             for (int roleIndex = 0; roleIndex < personIndexes.size(); roleIndex++) {
                 dealMapper.addPerson(
-                    workspaceId,
+                    workspaceId, scope.workspaceIdsJson(),
                     deal.getId(),
                     persons.get(personIndexes.get(roleIndex)).getId(),
                     DEAL_PERSON_ROLES[roleIndex]
@@ -518,32 +544,6 @@ public class SeederBatchWriter {
         }
     }
 
-    private TenantScope captureTenantScope() {
-        if (!tenantContext.isResolved()) {
-            return null;
-        }
-        return new TenantScope(
-            tenantContext.getWorkspaceId(),
-            tenantContext.getOrgId(),
-            tenantContext.getUserId(),
-            tenantContext.getRole(),
-            tenantContext.getScopeCatalog()
-        );
-    }
-
-    private void restoreTenantScope(TenantScope previous) {
-        tenantContext.clear();
-        if (previous != null) {
-            tenantContext.set(
-                previous.workspaceId(),
-                previous.orgId(),
-                previous.userId(),
-                previous.role(),
-                previous.catalog()
-            );
-        }
-    }
-
     private void flushEvery(int zeroBasedIndex) {
         if ((zeroBasedIndex + 1) % BATCH_SIZE == 0) {
             flush();
@@ -566,11 +566,4 @@ public class SeederBatchWriter {
     private record DealWriteResult(List<Deal> deals, int personLinkCount, int stageHistoryCount) {
     }
 
-    private record TenantScope(
-            int workspaceId,
-            int orgId,
-            int userId,
-            String role,
-            String catalog) {
-    }
 }

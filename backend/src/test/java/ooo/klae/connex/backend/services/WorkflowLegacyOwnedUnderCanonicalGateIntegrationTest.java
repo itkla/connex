@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -157,7 +159,7 @@ class WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest extends AbstractServi
         drainSchedulerWork();
 
         List<Integer> actual = companyMapper.getCompaniesByTagId(
-                workspace.getId(), tag.getId()).stream()
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tag.getId()).stream()
             .map(Company::getId)
             .filter(expected::contains)
             .sorted()
@@ -182,7 +184,7 @@ class WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest extends AbstractServi
 
         assertNull(workflowMapper.getByLegacyRuleId(workspace.getId(), rule.getId()));
         assertEquals(0, matchedExecutionCount(rule.getId()));
-        assertTrue(companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId()).isEmpty());
+        assertTrue(companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tag.getId()).isEmpty());
         verifyNoInteractions(actionExecutor);
         assertEquals(
             0,
@@ -300,7 +302,7 @@ class WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest extends AbstractServi
         assertNotNull(workflow);
         assertEquals(1, matchedExecutionCount(rule.getId()));
         assertEquals(0, workflowRunCount(rule.getId()));
-        assertTrue(companyMapper.getCompaniesByTagId(workspace.getId(), tagId).stream()
+        assertTrue(companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tagId).stream()
             .anyMatch(company -> company.getId() == companyId));
         assertEquals(1, actionInvocationCount("company", companyId));
     }

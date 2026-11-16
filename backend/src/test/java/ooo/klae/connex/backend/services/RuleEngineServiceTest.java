@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,8 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
@@ -39,6 +44,9 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     @Autowired RuleEngineService ruleEngineService;
     @Autowired RuleService ruleService;
     @Autowired RuleMapper ruleMapper;
+    @Autowired WorkflowRunReadService runReadService;
+    @Autowired WorkflowOperationsService operationsService;
+    @Autowired ooo.klae.connex.backend.mappers.WorkflowMapper workflowMapper;
     @Autowired DealDocumentService documentService;
     @Autowired DocumentTemplateService templateService;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -103,7 +111,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     }
 
     private boolean tagged(int companyId, int tagId) {
-        return companyMapper.getCompaniesByTagId(workspace.getId(), tagId).stream()
+        return companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tagId).stream()
             .anyMatch(company -> company.getId() == companyId);
     }
 
@@ -375,6 +383,21 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         List<Task> created = taskMapper.getTasksByDealId(workspace.getId(), deal.getId());
         assertTrue(created.stream()
             .anyMatch(task -> createTask.getTitle().equals(task.getDescription())));
+        Task automatedTask = created.stream()
+            .filter(task -> createTask.getTitle().equals(task.getDescription())).findFirst().orElseThrow();
+        Map<String, Object> origin = jdbcTemplate.queryForMap("""
+                SELECT JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.source')) AS source,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.executionMode')) AS execution_mode,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.ruleId')) AS rule_id,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.ruleExecutionId')) AS execution_id
+                FROM audit_log
+                WHERE workspace_id = ? AND action = 'task.create' AND entity_id = ?
+                """, workspace.getId(), automatedTask.getId());
+        assertEquals("rule", origin.get("source"));
+        assertEquals("user", origin.get("execution_mode"));
+        assertEquals(String.valueOf(rule.getId()), origin.get("rule_id"));
+        assertEquals(String.valueOf(ruleMapper.getExecutionsByRule(
+            workspace.getId(), rule.getId(), 50).getFirst().getId()), origin.get("execution_id"));
     }
 
     @Test
@@ -394,7 +417,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertEquals(0, matchedExecutions(rule.getId()));
         assertTrue(ruleMapper.getExecutionsByRule(workspace.getId(), rule.getId(), 50).stream()
-            .anyMatch(execution -> "partial".equals(execution.getStatus())));
+            .anyMatch(execution -> "failed".equals(execution.getStatus())));
         assertTrue(taskMapper.getTasksByDealId(workspace.getId(), deal.getId()).stream()
             .noneMatch(task -> createTask.getTitle().equals(task.getDescription())));
     }
@@ -444,7 +467,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     @Test
     void assignOwner_action_routesContact() {
         Person person = newPerson(newCompany());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
         User router = newUser();
         RuleAction assign = new RuleAction();
         assign.setType("assign_owner");
@@ -456,13 +479,13 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertEquals(1, matchedExecutions(rule.getId()));
         assertEquals(router.getId(),
-            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
     }
 
     @Test
     void setResponseDue_action_startsTheFirstResponseClock() {
         Person person = newPerson(newCompany());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseDueAt());
         RuleAction sla = new RuleAction();
         sla.setType("set_response_due");
@@ -473,7 +496,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
             workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
 
         assertEquals(1, matchedExecutions(rule.getId()));
-        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseDueAt());
     }
 
@@ -536,12 +559,13 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         assertFalse(tagged(company.getId(), tag.getId()));
     }
 
-    @Test
-    void removeTag_actionFailsClosedWhenThePublishedTagWasDeleted() {
+    @ParameterizedTest
+    @ValueSource(strings = {"add_tag", "remove_tag"})
+    void tagActionFailsClosedWhenThePublishedTagWasDeleted(String actionType) {
         Company company = newCompany();
         Tag tag = newTag();
         RuleAction remove = new RuleAction();
-        remove.setType("remove_tag");
+        remove.setType(actionType);
         remove.setTagId(tag.getId());
         RuleDto rule = entityChangeRule("company", remove, null, "company.updated");
         tagMapper.delete(workspace.getId(), tag.getId());
@@ -550,8 +574,19 @@ class RuleEngineServiceTest extends AbstractServiceTest {
             workspace.getId(), "company", company.getId(), "company.updated");
 
         assertEquals(0, matchedExecutions(rule.getId()));
-        assertTrue(ruleMapper.getExecutionsByRule(
-            workspace.getId(), rule.getId(), 50).stream()
-            .anyMatch(execution -> "partial".equals(execution.getStatus())));
+        var execution = ruleMapper.getExecutionsByRule(workspace.getId(), rule.getId(), 50).getFirst();
+        assertEquals("failed", execution.getStatus());
+        var workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), rule.getId());
+        var summary = runReadService.listRuns(workflow.getId(), 50, null).items().getFirst();
+        assertEquals("failed", summary.status());
+        assertEquals("action_tag_unavailable", summary.failure().code());
+        assertEquals(1, summary.failure().actionNumber());
+        assertEquals(actionType, summary.failure().actionType());
+        assertNotNull(summary.version());
+        assertEquals("degraded", operationsService.workflow(workflow.getId()).health().state());
+        assertTrue(operationsService.workflow(workflow.getId()).health().signals().contains("latest_run_failed"));
+        assertTrue(operationsService.runs("failed", null, null, 100, null).items().stream()
+            .anyMatch(run -> run.workflowId() == workflow.getId()
+                && "action_tag_unavailable".equals(run.run().failure().code())));
     }
 }

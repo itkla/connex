@@ -1,6 +1,7 @@
 const ACCOUNT_KEY = "connex:browser-account";
 const DATA_PREFIXES = [
     "connex:recents:",
+    "connex:mission-purge:",
     "connex:view:",
     "connex:business-card-import-recovery:",
     "connex:columns:",

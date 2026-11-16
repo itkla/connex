@@ -297,12 +297,16 @@ class AttachmentQuarantineIntegrationTest {
             jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?",
                 new AccountSessionIndex(admin.getId()).getName());
             for (Workspace fixture : List.of(owning, foreign)) {
+                ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, fixture.getId());
                 jdbc.update("DELETE FROM object_deletion_queue WHERE workspace_id = ?", fixture.getId());
                 jdbc.update("DELETE FROM attachment WHERE workspace_id = ?", fixture.getId());
                 jdbc.update("DELETE FROM workspace_member WHERE workspace_id = ?", fixture.getId());
                 jdbc.update("DELETE FROM workspace WHERE id = ?", fixture.getId());
             }
             jdbc.update("DELETE FROM app_user WHERE id = ?", admin.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_fence WHERE organization_id=?", organization.getId());
             jdbc.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
     }
@@ -464,12 +468,16 @@ class AttachmentQuarantineIntegrationTest {
             assertEquals(0, deletionQueueCount(workspace));
         } finally {
             clearContext();
+            ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, workspace.getId());
             jdbc.update("DELETE FROM object_deletion_queue WHERE workspace_id = ?", workspace.getId());
             jdbc.update("DELETE FROM attachment WHERE workspace_id = ?", workspace.getId());
             jdbc.update("DELETE FROM ai_chat_session WHERE workspace_id = ?", workspace.getId());
             jdbc.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
             jdbc.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
             jdbc.update("DELETE FROM app_user WHERE id = ?", admin.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_fence WHERE organization_id=?", organization.getId());
             jdbc.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
     }
@@ -563,6 +571,7 @@ class AttachmentQuarantineIntegrationTest {
     private AiChatSession chatSession(Workspace workspace, User owner) {
         AiChatSession chat = new AiChatSession();
         chat.setWorkspaceId(workspace.getId());
+        chat.setOrganizationPrivacyGeneration(1L);
         chat.setCreatedByUserId(owner.getId());
         chat.setTitle("Quarantine assistant");
         chat.setVisibility("private");
@@ -606,6 +615,7 @@ class AttachmentQuarantineIntegrationTest {
         workspace.setSlug("quarantine-" + unique());
         workspace.setOrgId(organization.getId());
         workspaceMapper.insert(workspace);
+        ooo.klae.connex.backend.support.TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, workspace.getId());
         return workspace;
     }
 

@@ -10,10 +10,14 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 WIDTH = 1_200
 HEIGHT = 700
+CONTENT_RIGHT = 1_080
+SPLIT_PANEL_RIGHT = 520
+SPLIT_PANEL_TEXT_RIGHT = 496
+MINIMUM_FONT_SIZE = 24
 CANONICAL_MANIFEST_SHA256 = "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e960adc07fd84d87"
 CANONICAL_FONT_SHA256 = "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
 CANONICAL_FONT_REVISION = "f8d157532fbfaeda587e826d4cd5b21a49186f7c"
-CANONICAL_FIXTURES_SHA256 = "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5"
+CANONICAL_FIXTURES_SHA256 = "effb8a94a19695298e14c8651f515a6eb1fee0f50f4e472a2456a56316130fc2"
 
 
 def main() -> None:
@@ -89,9 +93,9 @@ def render(case: dict[str, object], seed: int, font_path: Path) -> Image.Image:
 
 
 def classic(draw: ImageDraw.ImageDraw, fields: dict[str, object], display, medium, regular) -> None:
-    draw.text((92, 76), str(fields["company"]), font=medium, fill="#1e5448")
-    draw.text((92, 194), str(fields["name"]), font=display, fill="#17241f")
-    draw.text((96, 300), str(fields["title"]), font=medium, fill="#4c5d56")
+    fitted_text(draw, (92, 76), str(fields["company"]), medium, "#1e5448", CONTENT_RIGHT)
+    fitted_text(draw, (92, 194), str(fields["name"]), display, "#17241f", CONTENT_RIGHT)
+    fitted_text(draw, (96, 300), str(fields["title"]), medium, "#4c5d56", CONTENT_RIGHT)
     contact(draw, fields, 96, 468, regular)
 
 
@@ -104,30 +108,60 @@ def centered(draw: ImageDraw.ImageDraw, fields: dict[str, object], display, medi
 
 
 def split(draw: ImageDraw.ImageDraw, fields: dict[str, object], display, medium, regular) -> None:
-    draw.rectangle((58, 54, 520, 646), fill="#1e5448")
-    draw.multiline_text((98, 120), str(fields["company"]), font=medium, fill="#f7f4ec", spacing=12)
-    draw.text((584, 124), str(fields["name"]), font=display, fill="#17241f")
-    draw.text((590, 256), str(fields["title"]), font=medium, fill="#4c5d56")
+    draw.rectangle((58, 54, SPLIT_PANEL_RIGHT, 646), fill="#1e5448")
+    fitted_text(draw, (98, 120), str(fields["company"]), medium, "#f7f4ec", SPLIT_PANEL_TEXT_RIGHT)
+    fitted_text(draw, (584, 124), str(fields["name"]), display, "#17241f", CONTENT_RIGHT)
+    fitted_text(draw, (590, 256), str(fields["title"]), medium, "#4c5d56", CONTENT_RIGHT)
     contact(draw, fields, 590, 442, regular)
 
 
 def minimal(draw: ImageDraw.ImageDraw, fields: dict[str, object], display, medium, regular) -> None:
-    draw.text((84, 82), str(fields["name"]), font=display, fill="#17241f")
-    draw.text((90, 202), str(fields["title"]), font=medium, fill="#4c5d56")
+    fitted_text(draw, (84, 82), str(fields["name"]), display, "#17241f", CONTENT_RIGHT)
+    fitted_text(draw, (90, 202), str(fields["title"]), medium, "#4c5d56", CONTENT_RIGHT)
     draw.line((90, 312, 1_100, 312), fill="#d6a64f", width=4)
-    draw.text((90, 374), str(fields["company"]), font=medium, fill="#1e5448")
+    fitted_text(draw, (90, 374), str(fields["company"]), medium, "#1e5448", CONTENT_RIGHT)
     contact(draw, fields, 90, 522, regular)
 
 
 def contact(draw: ImageDraw.ImageDraw, fields: dict[str, object], x: int, y: int, regular) -> None:
-    draw.text((x, y), "EMAIL " + str(fields["email"]), font=regular, fill="#17241f")
-    draw.text((x, y + 62), "TEL " + str(fields["phone"]), font=regular, fill="#17241f")
+    fitted_text(draw, (x, y), "EMAIL " + str(fields["email"]), regular, "#17241f", CONTENT_RIGHT)
+    fitted_text(draw, (x, y + 62), "TEL " + str(fields["phone"]), regular, "#17241f", CONTENT_RIGHT)
 
 
 def center(draw: ImageDraw.ImageDraw, text: str, y: int, selected_font, color: str) -> None:
+    margin = WIDTH - CONTENT_RIGHT
+    selected_font = fitting_font(draw, text, selected_font, WIDTH - 2 * margin)
     box = draw.textbbox((0, 0), text, font=selected_font)
     width = box[2] - box[0]
     draw.text(((WIDTH - width) / 2, y), text, font=selected_font, fill=color)
+
+
+def fitted_text(
+    draw: ImageDraw.ImageDraw,
+    origin: tuple[int, int],
+    text: str,
+    selected_font,
+    color: str,
+    right: int,
+) -> None:
+    selected_font = fitting_font(draw, text, selected_font, right - origin[0])
+    draw.text(origin, text, font=selected_font, fill=color)
+
+
+def fitting_font(draw: ImageDraw.ImageDraw, text: str, selected_font, maximum_width: int):
+    size = int(selected_font.size)
+    candidate = selected_font
+    while text_width(draw, text, candidate) > maximum_width:
+        size -= 2
+        if size < MINIMUM_FONT_SIZE:
+            raise ValueError(f"Benchmark text cannot fit inside its card region: {text}")
+        candidate = selected_font.font_variant(size=size)
+    return candidate
+
+
+def text_width(draw: ImageDraw.ImageDraw, text: str, selected_font) -> int:
+    box = draw.textbbox((0, 0), text, font=selected_font)
+    return box[2]
 
 
 def benchmark_font() -> Path:

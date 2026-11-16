@@ -1,9 +1,12 @@
+import { authSwitchHref } from "@/app/lib/authReturnPath";
+import { publishAiAvailabilityChange } from "@/app/lib/aiAvailabilityEvents";
 const API_BASE =
     typeof window === "undefined"
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import { auditExportSelection, AUDIT_EXPORT_SELECTION_LIMIT } from "@/app/lib/auditExport";
 import {
     adoptBrowserAccount,
     invalidateAccountStorage,
@@ -13,7 +16,13 @@ import {
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
+import { observeProposalReviewClock } from "@/app/lib/proposalReviewClock";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
+import {
+    pinsToRenderedWorkspace,
+    rememberedWorkspaceName,
+    renderedWorkspaceId,
+} from "@/app/lib/renderedWorkspace";
 
 import type {
     AuthenticationResponseJSON,
@@ -23,17 +32,11 @@ import type {
 } from '@simplewebauthn/browser';
 
 import * as Types from '@/app/lib/types';
-import { localeFromCookieHeader } from '@/i18n/config';
+import type { Locale } from '@/i18n/config';
+import { apiRequestLocale as requestLocale, browserApiLocale } from '@/app/lib/apiLocale';
 export { subscribeToLaunch, type LaunchSignupResult } from "@/app/lib/launchSignup";
 
 // Types
-
-function requestLocale(init: RequestInit): string {
-    const cookieHeader = typeof document === "undefined"
-        ? new Headers(init.headers).get("cookie")
-        : document.cookie;
-    return localeFromCookieHeader(cookieHeader);
-}
 
 // The active workspace, read from the non-HttpOnly connex_workspace cookie and sent as a
 // header on every client request. SSR callers forward the cookie itself (see safeReadWithCookie).
@@ -47,8 +50,12 @@ function clientWorkspaceId(): string | null {
 
 function workspaceIdFromCookieHeader(cookie: string): number | null {
     const match = cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
-    if (!match) return null;
-    const value = match[1].trim();
+    return match ? parseWorkspaceId(match[1]) : null;
+}
+
+/** Parses a workspace id the way the backend reads its header and cookie: a trimmed decimal integer. */
+function parseWorkspaceId(raw: string): number | null {
+    const value = raw.trim();
     if (!/^[+-]?\d+$/.test(value)) return null;
     const workspaceId = Number(value);
     return Number.isInteger(workspaceId) && workspaceId > 0 && workspaceId <= 2_147_483_647
@@ -56,15 +63,130 @@ function workspaceIdFromCookieHeader(cookie: string): number | null {
         : null;
 }
 
+/**
+ * Whether a request is a workspace-bound write: it changes state on a route outside the account,
+ * organization and selection routes that `UNPINNED_WRITE_ROUTES` keeps on the cookie (#1732).
+ * @param path the request path
+ * @param mutating whether the request changes state
+ */
+function isWorkspaceBoundWrite(path: string, mutating: boolean): boolean {
+    return mutating && pinsToRenderedWorkspace(path);
+}
+
+/**
+ * The workspace a browser request is sent for. Reads, and writes to account, organization and
+ * selection routes, follow the `connex_workspace` cookie as before, so the first safe read after a
+ * revocation can heal the selection (#1108). Workspace-bound writes follow the workspace the app
+ * shell renders instead, so content composed in one workspace can never ride a healed cookie into
+ * another; the server refuses the pinned write when that workspace is gone (#1732). An explicit
+ * `X-Workspace-Id` in the caller's init overrides both.
+ * @param path the request path
+ * @param mutating whether the request changes state
+ * @returns the header value to send, or null to send none
+ */
+function requestWorkspaceId(path: string, mutating: boolean): string | null {
+    const rendered = isWorkspaceBoundWrite(path, mutating) ? renderedWorkspaceId() : null;
+    return rendered === null ? clientWorkspaceId() : String(rendered);
+}
+
+/**
+ * The `X-Workspace-Id` a request actually carries: the caller's explicit header, or else the one
+ * {@link requestWorkspaceId} chose.
+ */
+function outgoingWorkspaceId(init: RequestInit, chosen: string | null): string | null {
+    const workspace = new Headers(init.headers).get("X-Workspace-Id") ?? chosen;
+    if (workspace !== null && parseWorkspaceId(workspace) === null) {
+        throw new TypeError("X-Workspace-Id must contain one valid workspace id");
+    }
+    return workspace;
+}
+
+/**
+ * Fixes the workspace a write will carry at the moment it is requested. `requestJson` reads the pin
+ * synchronously, but a helper that first awaits something (an identity, a CSRF token) would reach it
+ * only after the wait, when a workspace switch may already have published another workspace. Such
+ * helpers call this before their first await (#1732). Account, organization and selection writes, an
+ * explicit caller header, and a page with no app shell are left as they are.
+ * @param path the request path
+ * @param init the caller's request options
+ * @returns the options with the rendered workspace's `X-Workspace-Id` added where it applies
+ */
+function pinWriteNow(path: string, init: RequestInit = {}): RequestInit {
+    const rendered = renderedWorkspaceId();
+    if (rendered === null
+            || !isWorkspaceBoundWrite(path, true)
+            || new Headers(init.headers).has("X-Workspace-Id")) {
+        return init;
+    }
+    const headers = new Headers(init.headers);
+    headers.set("X-Workspace-Id", String(rendered));
+    return { ...init, headers };
+}
+
+/**
+ * Re-codes a failed workspace-bound write as {@link WORKSPACE_UNAVAILABLE_CODE} when the workspace
+ * it carried refused it, and returns every other failure unchanged.
+ * @param error the failure the response produced
+ * @param path the request path
+ * @param mutating whether the request changed state
+ * @param pinnedWorkspace the `X-Workspace-Id` value the request carried
+ */
+function refusalFor(
+    error: ApiError,
+    path: string,
+    mutating: boolean,
+    pinnedWorkspace: string | null,
+): ApiError {
+    return isWorkspaceBoundWrite(path, mutating) ? workspaceRefusal(error, pinnedWorkspace) : error;
+}
+
+/**
+ * Recognizes the backend's refusal of a request pinned to a workspace the caller no longer belongs
+ * to — `TenantResolutionInterceptor` answers `403 FORBIDDEN "Not a member of workspace {id}"` — and
+ * re-codes it as {@link WORKSPACE_UNAVAILABLE_CODE}, carrying the workspace and the name the viewer
+ * last saw for it. Any other failure is returned unchanged.
+ * @param error the failure the response produced
+ * @param pinnedWorkspace the `X-Workspace-Id` value the request carried
+ */
+function workspaceRefusal(error: ApiError, pinnedWorkspace: string | null): ApiError {
+    const workspaceId = pinnedWorkspace === null ? null : parseWorkspaceId(pinnedWorkspace);
+    if (workspaceId === null
+            || error.status !== 403
+            || error.code !== "FORBIDDEN"
+            || error.message !== `Not a member of workspace ${workspaceId}`) {
+        return error;
+    }
+    return workspaceUnavailableError(workspaceId, error.message, error.correlationId);
+}
+
+/**
+ * Builds the {@link WORKSPACE_UNAVAILABLE_CODE} refusal for a workspace, naming it as the viewer last
+ * saw it.
+ * @param workspaceId the workspace that is no longer available
+ * @param message the diagnostic message, never shown to the viewer
+ * @param correlationId the server correlation id, when a response carried one
+ */
+function workspaceUnavailableError(workspaceId: number, message: string, correlationId?: string): ApiError {
+    const refusal = new ApiError(message, 403, WORKSPACE_UNAVAILABLE_CODE, undefined, correlationId);
+    refusal.workspaceId = workspaceId;
+    refusal.workspaceName = rememberedWorkspaceName(workspaceId) ?? undefined;
+    return refusal;
+}
+
+/**
+ * The workspace a business-card capture is scoped to and later submitted under. It follows the
+ * rendered workspace like every other write, so a capture started after a safe read healed the
+ * cookie is still pinned to the workspace on screen (#1732).
+ */
 function clientRecoveryWorkspaceId(): string | null {
     if (typeof document === "undefined") return null;
+    const rendered = renderedWorkspaceId();
+    if (rendered !== null) return String(rendered);
     const workspaceId = workspaceIdFromCookieHeader(document.cookie);
     return workspaceId == null ? null : String(workspaceId);
 }
 
-// CSRF token, fetched once from the backend and echoed in a header on state-changing requests.
-// The frontend and backend can be different origins, so the token is delivered via this endpoint
-// rather than a cookie the JS would otherwise be unable to read cross-origin.
+/** The backend delivers the CSRF token and session identity without requiring a same-origin cookie. */
 type CsrfBootstrap = {
     token: string;
     headerName: string;
@@ -82,6 +204,7 @@ type ResolvedClientRequestIdentity = {
 
 const CLIENT_IDENTITY_EVENT_KEY = "connex:client-request-identity";
 let csrfTokenCache: CsrfBootstrap | null = null;
+let csrfTokenRequest: Promise<CsrfBootstrap | null> | null = null;
 let clientRequestIdentityEpoch = 0;
 const inFlightAiMutations = new Map<string, InFlightAiMutation>();
 const inFlightReportGenerations = new Map<string, {
@@ -94,6 +217,17 @@ const inFlightAssistantTurns = new Map<string, {
     request: Promise<Types.AiChatTurnAccepted>;
 }>();
 const clientRequestIdentityInvalidationListeners = new Set<() => void>();
+const pendingPinnedWriteIdentities = new Set<AbortController>();
+
+/**
+ * Abandons every pinned write still preparing its request identity or CSRF retry, because a workspace or
+ * account transition has begun or landed (#1732). A write prepared under the previous selection must
+ * not be sent once the shell may already render another workspace.
+ */
+function abandonPendingPinnedWrites() {
+    for (const waiting of pendingPinnedWriteIdentities) waiting.abort();
+    pendingPinnedWriteIdentities.clear();
+}
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
@@ -102,6 +236,9 @@ if (typeof window !== "undefined") {
         if (action === "logout") resetBrowserAccount();
         else if (action === "account") invalidateAccountStorage();
         else if (action === "refresh") reconcileBrowserAccount();
+        if (action === "logout" || action === "account") resetPrivilegedMfaState();
+        else if (action === "refresh") resetPrivilegedMfaReadiness();
+        abandonPendingPinnedWrites();
         invalidateClientRequestIdentity();
         if (action === "logout") {
             clearAllDrafts();
@@ -118,9 +255,22 @@ if (typeof window !== "undefined") {
     });
 }
 
-async function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
+/** Shares CSRF bootstrap work across header callers and fresh identity checks in this generation. */
+function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
+    if (csrfTokenRequest) return csrfTokenRequest;
+    const request = readCsrfToken().finally(() => {
+        if (csrfTokenRequest === request) csrfTokenRequest = null;
+    });
+    csrfTokenRequest = request;
+    return request;
+}
+
+async function readCsrfToken(): Promise<CsrfBootstrap | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include", cache: "no-store" });
+        const res = await fetch(`${API_BASE}/api/auth/csrf`, {
+            credentials: "include", cache: "no-store",
+            headers: { "Accept-Language": browserApiLocale() },
+        });
         if (!res.ok) return null;
         const text = await res.text();
         if (!text) return null;
@@ -147,19 +297,29 @@ async function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
  * Resolves the CSRF header the backend expects on state-changing requests,
  * as a single-entry `{ [headerName]: token }` map (empty during SSR). Shared
  * with the realtime client, which echoes the same token on the STOMP CONNECT.
+ * Concurrent callers share a bootstrap; identity transitions discard its result.
  * @param forceRefresh when true, discards the cached token and refetches it
  * @returns the CSRF header map, or an empty map when unavailable
  */
 export async function csrfHeader(forceRefresh = false): Promise<Record<string, string>> {
-    if (typeof window === "undefined") return {}; // SSR issues GETs only; CSRF does not apply
+    if (typeof window === "undefined") return {};
     if (forceRefresh) csrfTokenCache = null;
-    if (!csrfTokenCache) csrfTokenCache = await fetchCsrfToken();
+    if (!csrfTokenCache) {
+        const identityEpoch = clientRequestIdentityEpoch;
+        const token = await fetchCsrfToken();
+        if (clientRequestIdentityEpoch !== identityEpoch) return {};
+        csrfTokenCache = token;
+    }
     return csrfTokenCache ? { [csrfTokenCache.headerName]: csrfTokenCache.token } : {};
 }
 
+/** Invalidates request caches while retaining account policy during workspace/CSRF revalidation. */
 function invalidateClientRequestIdentity() {
     csrfTokenCache = null;
+    csrfTokenRequest = null;
     clientRequestIdentityEpoch += 1;
+    privilegedMfaEventEpoch += 1;
+    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
     for (const mutation of inFlightAiMutations.values()) {
         mutation.controller.abort();
     }
@@ -206,7 +366,7 @@ export function fetchProtectedMediaResponse(
     return fetch(`${API_BASE}${path}`, {
         credentials: "same-origin",
         cache: "no-store",
-        headers: { "X-Workspace-Id": String(workspaceId) },
+        headers: { "X-Workspace-Id": String(workspaceId), "Accept-Language": browserApiLocale() },
         mode: "same-origin",
         redirect: "error",
         signal,
@@ -230,6 +390,9 @@ function broadcastClientRequestIdentityTransition(action: ClientIdentityTransiti
 function signalClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (action === "account") invalidateAccountStorage();
     if (action === "logout") resetBrowserAccount();
+    if (action === "account" || action === "logout") resetPrivilegedMfaState();
+    else if (action === "refresh") resetPrivilegedMfaReadiness();
+    abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
 }
@@ -242,14 +405,18 @@ function signalClientRequestIdentityTransition(action: ClientIdentityTransition)
 export function synchronizeBrowserAccount(userId: number): void {
     if (adoptBrowserAccount(userId) !== "replaced") return;
     clearAllDrafts();
+    resetPrivilegedMfaState();
+    abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition("refresh");
 }
 
 async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
     const workspaceId = clientWorkspaceId();
+    const identityEpoch = clientRequestIdentityEpoch;
     const currentCsrf = await fetchCsrfToken();
-    if (workspaceId == null || currentCsrf == null || currentCsrf.requestIdentity == null) {
+    if (clientRequestIdentityEpoch !== identityEpoch
+        || workspaceId == null || currentCsrf == null || currentCsrf.requestIdentity == null) {
         return null;
     }
     const previousCsrf = csrfTokenCache;
@@ -259,13 +426,14 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
         || previousCsrf.requestIdentity !== currentCsrf.requestIdentity
     )) {
         const serverIdentityChanged = previousCsrf.requestIdentity !== currentCsrf.requestIdentity;
+        if (serverIdentityChanged) resetPrivilegedMfaReadiness();
         invalidateClientRequestIdentity();
         if (serverIdentityChanged) {
             broadcastClientRequestIdentityTransition("refresh");
         }
     }
     csrfTokenCache = currentCsrf;
-    const locale = localeFromCookieHeader(document.cookie);
+    const locale = browserApiLocale();
     return {
         request: [
             clientRequestIdentityEpoch,
@@ -282,6 +450,33 @@ async function currentClientRequestIdentity(): Promise<string | null> {
     return (await resolveClientRequestIdentity())?.request ?? null;
 }
 
+/**
+ * Resolves the request identity for a write that has already fixed its workspace with
+ * {@link pinWriteNow}. The wait is registered before it starts, so a workspace or account transition
+ * that begins while it is pending abandons the write rather than sending it after the shell may
+ * have moved to another workspace (#1732).
+ * @param preflight optional preparation guarded by the same transition and identity checks
+ * @returns the identity, or null when none can be proven
+ * @throws Error when a transition abandoned the write while it waited
+ */
+async function identityBeforePinnedWrite(preflight?: () => Promise<void>): Promise<string | null> {
+    const waiting = new AbortController();
+    pendingPinnedWriteIdentities.add(waiting);
+    const identityEpoch = clientRequestIdentityEpoch;
+    try {
+        if (preflight) {
+            await preflight();
+        }
+        const identity = await currentClientRequestIdentity();
+        if (waiting.signal.aborted || (preflight && clientRequestIdentityEpoch !== identityEpoch)) {
+            throw new Error("The workspace changed before this request was sent");
+        }
+        return identity;
+    } finally {
+        pendingPinnedWriteIdentities.delete(waiting);
+    }
+}
+
 /** Returns a non-reversible browser-storage context for the active user and workspace. */
 export async function clientRecoveryContext(
     init: RequestInit = {},
@@ -290,6 +485,7 @@ export async function clientRecoveryContext(
     if (workspaceId == null || typeof window === "undefined" || !window.crypto.subtle) return null;
     const headers = new Headers(init.headers);
     headers.set("X-Workspace-Id", workspaceId);
+    if (!headers.has("Accept-Language")) headers.set("Accept-Language", browserApiLocale());
     let body: unknown;
     try {
         body = await withBusinessCardRequestTimeout(
@@ -385,11 +581,20 @@ const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
 const RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
 export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
 export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+/** A privileged account that holds passkeys, none of them approved where it is privileged (#1534). */
+export const PRIVILEGED_MFA_ATTESTATION_REQUIRED_CODE = "PRIVILEGED_MFA_ATTESTATION_REQUIRED";
 export const MAIL_TRANSPORT_UNAVAILABLE_CODE = "MAIL_TRANSPORT_UNAVAILABLE";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
-const PRIVILEGED_MFA_ENROLLMENT_ROUTE = settingsDestination("personal.security").href;
-const PRIVILEGED_MFA_ENROLLMENT_DESTINATION = `${PRIVILEGED_MFA_ENROLLMENT_ROUTE}?mfa=enroll`;
+/** The one refusal for every reason a passkey approval code cannot be used (#1534). */
+export const MFA_ATTESTATION_REFUSED_CODE = "MFA_ATTESTATION_REFUSED";
+/**
+ * A role change that would leave members privileged in an organization without a passkey approved
+ * there (#1534). The `409` carries how many; resending with `acknowledgeConfinement` proceeds.
+ */
+export const PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE = "PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED";
+const PRIVILEGED_MFA_ROUTE = settingsDestination("personal.security").href;
+const ONBOARDING_ROUTE = "/onboarding";
 const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
     "/api/auth/me",
     "/api/auth/csrf",
@@ -397,6 +602,7 @@ const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
     "/api/auth/webauthn/credentials",
     "/api/capabilities",
     "/api/workspaces",
+    "/api/ownership-offers",
 ]);
 const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/logout",
@@ -405,77 +611,413 @@ const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/webauthn/register/confirmation",
     "/api/auth/webauthn/register/confirmation/exchange",
     "/api/auth/webauthn/recover",
+    "/api/auth/webauthn/attestation/options",
+    "/api/auth/webauthn/attestation",
 ]);
+/**
+ * The safe actions (#1534): leaving a workspace or organization and declining ownership.
+ * Mirrors the server filter's `SAFE_EXIT_PATH`, so a confined client can always send them.
+ */
+const PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = /^(?:\/api\/(?:workspaces|orgs)\/\d+\/leave|\/api\/ownership-offers\/\d+\/decline)$/;
 const PASSKEY_STEP_UP_PATHS = new Set([
     "/api/auth/webauthn/step-up/options",
     "/api/auth/webauthn/step-up",
 ]);
 let passkeyStepUpPromise: Promise<void> | null = null;
 let passkeyStepUpGeneration = 0;
-let privilegedMfaEnrollmentRequired = false;
-let privilegedMfaEnrollmentCompleted = false;
-const privilegedMfaEnrollmentListeners = new Set<(active: boolean) => void>();
+/** Why a privileged account is confined (#1534): it holds no passkey yet, or none approved yet. */
+export type PrivilegedMfaConfinementReason = "enrollment" | "attestation";
 
-/** Returns whether the browser is on the privileged-account passkey enrolment destination. */
-export function isPrivilegedMfaEnrollmentDestination(): boolean {
-    if (typeof window === "undefined") return false;
-    return window.location.pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
-        && new URLSearchParams(window.location.search).get("mfa") === "enroll";
+/** What prompted a standing check. Only a ceremony the server accepted may use the legacy release. */
+export type PrivilegedMfaSettlement = "ceremony" | "exit" | "check";
+
+const PRIVILEGED_MFA_STEP_PARAMS: Record<PrivilegedMfaConfinementReason, string> = {
+    enrollment: "enroll",
+    attestation: "approve",
+};
+const PRIVILEGED_MFA_CONFINEMENT_CODES: Record<PrivilegedMfaConfinementReason, string> = {
+    enrollment: PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
+    attestation: PRIVILEGED_MFA_ATTESTATION_REQUIRED_CODE,
+};
+const PRIVILEGED_MFA_CONFINEMENT_MESSAGES: Record<PrivilegedMfaConfinementReason, string> = {
+    enrollment: "A passkey must be enrolled before this privileged account can continue",
+    attestation: "A passkey must be approved before this privileged account can continue",
+};
+/** How a standing check ended: it decided confinement, a newer read already had, or it failed. */
+export type PrivilegedMfaSettleOutcome = "applied" | "superseded" | "failed";
+
+/** Whether ordinary client reads can rely on a resolved privileged-MFA policy. */
+export type PrivilegedMfaReadiness = "loading" | "ready" | "failed";
+
+const PRIVILEGED_MFA_READ_ATTEMPTS = 3;
+const PRIVILEGED_MFA_STANDINGS: ReadonlySet<unknown> = new Set<Types.PrivilegedMfaStanding>([
+    "UNPRIVILEGED",
+    "SATISFIED",
+    "ENROLLMENT_REQUIRED",
+    "ATTESTATION_REQUIRED",
+]);
+let privilegedMfaConfinement: PrivilegedMfaConfinementReason | null = null;
+let privilegedMfaConfinementReleased = false;
+let privilegedMfaAttestationObserved = false;
+let privilegedMfaCeremonyEpoch: number | null = null;
+let privilegedMfaEventEpoch = 0;
+let privilegedMfaReadSequence = 0;
+let privilegedMfaAppliedSequence = 0;
+let privilegedMfaRequirements: Types.PasskeyRegistrationRequirements | null = null;
+let privilegedMfaReadiness: PrivilegedMfaReadiness = "loading";
+let privilegedMfaReadinessSequence = 0;
+let privilegedMfaPolicyEnforced: boolean | null = null;
+const privilegedMfaListeners = new Set<() => void>();
+
+function privilegedMfaReasonForStep(mfaParam: string | null): PrivilegedMfaConfinementReason | null {
+    if (mfaParam === PRIVILEGED_MFA_STEP_PARAMS.enrollment) return "enrollment";
+    if (mfaParam === PRIVILEGED_MFA_STEP_PARAMS.attestation) return "attestation";
+    return null;
 }
 
-/** Returns whether the browser must suppress requests outside the privileged MFA enrolment flow. */
-export function isPrivilegedMfaEnrollmentConfinementActive(): boolean {
-    return typeof window !== "undefined"
-        && (privilegedMfaEnrollmentRequired
-            || (!privilegedMfaEnrollmentCompleted && isPrivilegedMfaEnrollmentDestination()));
+function privilegedMfaDestinationReason(): PrivilegedMfaConfinementReason | null {
+    if (typeof window === "undefined" || window.location.pathname !== PRIVILEGED_MFA_ROUTE) return null;
+    return privilegedMfaReasonForStep(new URLSearchParams(window.location.search).get("mfa"));
+}
+
+function activePrivilegedMfaConfinement(): PrivilegedMfaConfinementReason | null {
+    if (typeof window === "undefined") return null;
+    return privilegedMfaConfinement
+        ?? (privilegedMfaConfinementReleased ? null : privilegedMfaDestinationReason());
+}
+
+/** Returns whether the browser is on a privileged-MFA step of Security: `?mfa=enroll` or `?mfa=approve`. */
+export function isPrivilegedMfaConfinementDestination(): boolean {
+    return privilegedMfaDestinationReason() !== null;
 }
 
 /**
- * The same answer as {@link isPrivilegedMfaEnrollmentConfinementActive}, for a route the caller
- * observed rather than the one `window.location` currently holds.
+ * Returns why the browser must suppress requests outside the privileged-MFA allowlist, or null when
+ * it need not. The server's refusal decides; a step URL implies the same until a check releases it.
+ */
+export function privilegedMfaConfinementReason(): PrivilegedMfaConfinementReason | null {
+    return activePrivilegedMfaConfinement();
+}
+
+/** Keeps a step URL's known confinement across navigation until a decisive standing releases it. */
+export function observePrivilegedMfaConfinementDestination(): void {
+    if (privilegedMfaConfinement !== null || privilegedMfaConfinementReleased) return;
+    const reason = privilegedMfaDestinationReason();
+    if (reason === null) return;
+    confinePrivilegedMfa(reason);
+    notifyPrivilegedMfaListeners();
+}
+
+/**
+ * Whether privileged-MFA confinement is in force, for a route the caller observed rather than the
+ * one `window.location` currently holds.
  *
  * A React surface that lives in a persistent layout re-renders on client navigation but does not
  * re-read `window.location`, so reading the live URL would strand confinement inferred from a
- * bookmarked `?mfa=enroll` link long after the reader navigated away. Passing the rendered route
- * makes the answer change when the route does.
+ * bookmarked step link long after the reader navigated away. Passing the rendered route makes the
+ * answer change when the route does.
  *
  * @param pathname the route currently rendered
  * @param mfaParam the value of the `mfa` search parameter, or null when absent
  */
-export function privilegedMfaEnrollmentConfinementFor(
-    pathname: string,
-    mfaParam: string | null,
-): boolean {
-    return privilegedMfaEnrollmentRequired
-        || (!privilegedMfaEnrollmentCompleted
-            && pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
-            && mfaParam === "enroll");
+export function privilegedMfaConfinementFor(pathname: string, mfaParam: string | null): boolean {
+    return privilegedMfaConfinement !== null
+        || (!privilegedMfaConfinementReleased
+            && pathname === PRIVILEGED_MFA_ROUTE
+            && privilegedMfaReasonForStep(mfaParam) !== null);
 }
 
-/** Subscribes to browser-local privileged MFA confinement state changes. */
-export function subscribePrivilegedMfaEnrollmentConfinement(
-    listener: (active: boolean) => void,
-): () => void {
-    privilegedMfaEnrollmentListeners.add(listener);
-    return () => privilegedMfaEnrollmentListeners.delete(listener);
+/**
+ * The account's own standing as the newest decisive check read it (#1534), shared by every surface
+ * in the page, or null before any check has decided. A check that a newer one overtook never
+ * replaces it, and signing out or changing account clears it.
+ */
+export function currentPrivilegedMfaRequirements(): Types.PasskeyRegistrationRequirements | null {
+    return privilegedMfaRequirements;
 }
 
-/** Releases browser-local confinement after the server accepts passkey enrolment. */
-export function completePrivilegedMfaEnrollment(): void {
-    if (isPrivilegedMfaEnrollmentDestination()) {
-        window.history.replaceState(null, "", PRIVILEGED_MFA_ENROLLMENT_ROUTE);
+/** Shared policy readiness; unresolved policy never establishes permission for background reads. */
+export function currentPrivilegedMfaReadiness(): PrivilegedMfaReadiness {
+    return privilegedMfaReadiness;
+}
+
+/** Subscribes to browser-local privileged MFA confinement and standing changes. */
+export function subscribePrivilegedMfaConfinement(listener: () => void): () => void {
+    privilegedMfaListeners.add(listener);
+    return () => privilegedMfaListeners.delete(listener);
+}
+
+function notifyPrivilegedMfaListeners() {
+    for (const listener of [...privilegedMfaListeners]) listener();
+}
+
+function publishPrivilegedMfaReadiness(status: PrivilegedMfaReadiness, sequence: number, epoch: number, enforced?: boolean) {
+    if (epoch !== privilegedMfaEventEpoch || sequence < privilegedMfaReadinessSequence) return;
+    privilegedMfaReadinessSequence = sequence;
+    privilegedMfaReadiness = status;
+    if (enforced !== undefined) privilegedMfaPolicyEnforced = enforced;
+    notifyPrivilegedMfaListeners();
+}
+
+/** Moves the Security step parameter to the reason in force, without navigating. */
+function showPrivilegedMfaStep(reason: PrivilegedMfaConfinementReason) {
+    if (window.location.pathname !== PRIVILEGED_MFA_ROUTE) return;
+    const step = PRIVILEGED_MFA_STEP_PARAMS[reason];
+    if (new URLSearchParams(window.location.search).get("mfa") === step) return;
+    window.history.replaceState(null, "", `${PRIVILEGED_MFA_ROUTE}?mfa=${step}`);
+}
+
+function confinePrivilegedMfa(reason: PrivilegedMfaConfinementReason) {
+    privilegedMfaConfinement = reason;
+    privilegedMfaConfinementReleased = false;
+    if (reason === "attestation") privilegedMfaAttestationObserved = true;
+    showPrivilegedMfaStep(reason);
+}
+
+function releasePrivilegedMfaConfinement() {
+    if (isPrivilegedMfaConfinementDestination()) {
+        window.history.replaceState(null, "", PRIVILEGED_MFA_ROUTE);
     }
-    privilegedMfaEnrollmentRequired = false;
-    privilegedMfaEnrollmentCompleted = true;
-    for (const listener of privilegedMfaEnrollmentListeners) listener(false);
+    privilegedMfaConfinement = null;
+    privilegedMfaConfinementReleased = true;
 }
 
-function shouldSuppressDuringPrivilegedMfaEnrollment(path: string, method?: string): boolean {
-    if (!isPrivilegedMfaEnrollmentConfinementActive()) return false;
+/** Records the server refusing a request for a confinement reason, which overtakes reads in flight. */
+function notePrivilegedMfaRefusal(reason: PrivilegedMfaConfinementReason) {
+    privilegedMfaEventEpoch += 1;
+    privilegedMfaReadiness = "loading";
+    privilegedMfaPolicyEnforced = null;
+    confinePrivilegedMfa(reason);
+    notifyPrivilegedMfaListeners();
+}
+
+/** Rechecks session policy without discarding a known confinement or approval requirement. */
+function resetPrivilegedMfaReadiness() {
+    privilegedMfaReadiness = "loading";
+    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
+    privilegedMfaPolicyEnforced = null;
+    notifyPrivilegedMfaListeners();
+}
+
+/** Forgets the previous account's standing when the browser signs out or changes account. */
+function resetPrivilegedMfaState() {
+    privilegedMfaConfinement = null;
+    privilegedMfaConfinementReleased = false;
+    privilegedMfaAttestationObserved = false;
+    privilegedMfaCeremonyEpoch = null;
+    privilegedMfaEventEpoch += 1;
+    privilegedMfaAppliedSequence = privilegedMfaReadSequence;
+    privilegedMfaRequirements = null;
+    resetPrivilegedMfaReadiness();
+}
+
+/**
+ * Whether a requirements body has the shape this client reads, with a standing it knows, so a
+ * malformed body or a standing introduced after this client counts as a failed read.
+ */
+function isPasskeyRegistrationRequirements(value: unknown): value is Types.PasskeyRegistrationRequirements {
+    if (typeof value !== "object" || value === null) return false;
+    if (!("currentPasswordRequired" in value) || typeof value.currentPasswordRequired !== "boolean") return false;
+    if (!("emailConfirmationRequired" in value) || typeof value.emailConfirmationRequired !== "boolean") return false;
+    if (!("emailConfirmationSatisfied" in value) || typeof value.emailConfirmationSatisfied !== "boolean") return false;
+    if ("standing" in value && value.standing !== undefined && !PRIVILEGED_MFA_STANDINGS.has(value.standing)) return false;
+    if ("approvalGaps" in value && value.approvalGaps !== undefined && !(Array.isArray(value.approvalGaps)
+            && value.approvalGaps.every((gap: unknown) =>
+                typeof gap === "object" && gap !== null
+                && "credentialId" in gap && typeof gap.credentialId === "string"
+                && "orgId" in gap && isPositiveId(gap.orgId)
+                && "orgName" in gap && typeof gap.orgName === "string"))) {
+        return false;
+    }
+    if (!("privilegedMemberships" in value) || value.privilegedMemberships === undefined) return true;
+    return Array.isArray(value.privilegedMemberships)
+        && value.privilegedMemberships.every(isPrivilegedMembership);
+}
+
+/** Whether a value is a database id: a positive safe integer. */
+function isPositiveId(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/** Whether one exit entry has the shape this client reads. */
+function isPrivilegedMembership(value: unknown): value is Types.PrivilegedMembership {
+    return typeof value === "object" && value !== null
+        && "orgId" in value && isPositiveId(value.orgId)
+        && "orgName" in value && typeof value.orgName === "string"
+        && "orgRole" in value && (value.orgRole === null || value.orgRole === "owner" || value.orgRole === "admin")
+        && (!("lastOwner" in value) || typeof value.lastOwner === "boolean")
+        && "workspaces" in value && Array.isArray(value.workspaces)
+        && value.workspaces.every((workspace: unknown) =>
+            typeof workspace === "object" && workspace !== null
+            && "workspaceId" in workspace && isPositiveId(workspace.workspaceId)
+            && (!("lastOwner" in workspace) || typeof workspace.lastOwner === "boolean")
+            && "workspaceName" in workspace && typeof workspace.workspaceName === "string");
+}
+
+function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequirements, sequence: number, enforced: boolean) {
+    privilegedMfaAppliedSequence = sequence;
+    privilegedMfaRequirements = requirements;
+    const standing = requirements.standing;
+    if (standing !== undefined) privilegedMfaCeremonyEpoch = null;
+    if (!enforced || standing === "SATISFIED" || standing === "UNPRIVILEGED") {
+        releasePrivilegedMfaConfinement();
+    } else if (standing === "ENROLLMENT_REQUIRED") {
+        confinePrivilegedMfa("enrollment");
+    } else if (standing === "ATTESTATION_REQUIRED") {
+        confinePrivilegedMfa("attestation");
+    } else if (standing === undefined
+            && privilegedMfaCeremonyEpoch === privilegedMfaEventEpoch
+            && !privilegedMfaAttestationObserved
+            && privilegedMfaDestinationReason() !== "attestation") {
+        privilegedMfaCeremonyEpoch = null;
+        releasePrivilegedMfaConfinement();
+    }
+    notifyPrivilegedMfaListeners();
+}
+
+/**
+ * Re-reads the account's own standing from the allowlisted requirements endpoint and settles
+ * browser-local confinement on it (#1534). With master enforcement enabled, SATISFIED and
+ * UNPRIVILEGED release it; ENROLLMENT_REQUIRED and ATTESTATION_REQUIRED confine for that reason
+ * and move the Security step to match.
+ *
+ * Reads are ordered: one that started before the newest decisive read ends superseded and changes
+ * nothing, and one that a server refusal, an identity change or an accepted ceremony overtook is
+ * read again, up to three attempts before it is reported as failed. A read that fails after a newer
+ * one has already decided the standing ends superseded too, since the newer read is the fresher
+ * answer. A failed or malformed read keeps any confinement, and a
+ * standing this client does not know counts as malformed. A backend too old to report standing releases only
+ * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
+ * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
+ * been required in this page. The decisive requirements are available from
+ * {@link currentPrivilegedMfaRequirements}. The public master-enforcement flag is read alongside
+ * requirements: when it is false, enrollment/approval metadata does not confine the account. An
+ * unknown enforcement posture fails the read and preserves any already-known confinement.
+ * A validated master-off response releases ordinary reads before requirements finish. Readiness
+ * failures have their own publication order, so a newer failed check still holds readers even if
+ * an older standing later settles. Pending background checks retain a valid readiness snapshot.
+ *
+ * @param settlement what prompted the check; a ceremony is one the server has just accepted
+ * @returns whether this read decided the standing, a newer one had, or the read failed
+ */
+export async function settlePrivilegedMfaStanding(
+    settlement: PrivilegedMfaSettlement,
+): Promise<PrivilegedMfaSettleOutcome> {
+    if (typeof window === "undefined") return "failed";
+    if (settlement === "ceremony") {
+        privilegedMfaEventEpoch += 1;
+        privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
+    }
+    const failedUnlessOvertaken = (sequence: number, epoch: number, disabled = false): PrivilegedMfaSettleOutcome => {
+        if (sequence < privilegedMfaAppliedSequence) return "superseded";
+        if (!disabled) publishPrivilegedMfaReadiness("failed", sequence, epoch);
+        return "failed";
+    };
+    let sequence = privilegedMfaReadSequence;
+    let readEpoch = privilegedMfaEventEpoch;
+    for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
+        const epoch = privilegedMfaEventEpoch;
+        privilegedMfaReadSequence += 1;
+        sequence = privilegedMfaReadSequence;
+        const readSequence = sequence;
+        readEpoch = epoch;
+        if (privilegedMfaReadiness !== "ready") publishPrivilegedMfaReadiness("loading", sequence, epoch);
+        let response: unknown;
+        let enforced: boolean;
+        let disabled = false;
+        let readFailed = false;
+        try {
+            const [requirements, capabilities] = await Promise.all([
+                getPasskeyRegistrationRequirements(),
+                getCapabilities().then((capabilities) => {
+                    if (typeof capabilities.privilegedMfaEnforced !== "boolean") throw new Error("Unknown MFA policy");
+                    if (epoch === privilegedMfaEventEpoch && readSequence >= privilegedMfaAppliedSequence) {
+                        if (!capabilities.privilegedMfaEnforced) {
+                            disabled = true;
+                            privilegedMfaAppliedSequence = readSequence;
+                            releasePrivilegedMfaConfinement();
+                            publishPrivilegedMfaReadiness("ready", readSequence, epoch, false);
+                        } else if (!readFailed && privilegedMfaPolicyEnforced === false) {
+                            publishPrivilegedMfaReadiness("loading", readSequence, epoch, true);
+                        }
+                    }
+                    return capabilities;
+                }),
+            ]);
+            response = requirements;
+            enforced = capabilities.privilegedMfaEnforced;
+        } catch {
+            readFailed = true;
+            return failedUnlessOvertaken(sequence, epoch, disabled);
+        }
+        if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence, epoch, disabled);
+        if (sequence < privilegedMfaAppliedSequence) return "superseded";
+        if (epoch !== privilegedMfaEventEpoch) continue;
+        const legacyRelease = response.standing === undefined
+            && privilegedMfaCeremonyEpoch === privilegedMfaEventEpoch
+            && !privilegedMfaAttestationObserved
+            && privilegedMfaDestinationReason() !== "attestation";
+        applyPrivilegedMfaStanding(response, sequence, enforced);
+        publishPrivilegedMfaReadiness(
+            !enforced || response.standing !== undefined || activePrivilegedMfaConfinement() !== null
+                || legacyRelease ? "ready" : "failed",
+            sequence, epoch, enforced,
+        );
+        return "applied";
+    }
+    return failedUnlessOvertaken(sequence, readEpoch);
+}
+
+/**
+ * The Security step for the confinement in force, or null when the browser is not confined, so a
+ * caller about to navigate can send a still-confined account where it can act.
+ */
+export function privilegedMfaConfinementDestination(): string | null {
+    const reason = activePrivilegedMfaConfinement();
+    return reason === null ? null : `${PRIVILEGED_MFA_ROUTE}?mfa=${PRIVILEGED_MFA_STEP_PARAMS[reason]}`;
+}
+
+/**
+ * Forgets the browser's privileged-MFA state where the server has confirmed there is no session, so
+ * an expired session's confinement never blocks signing in again. Call it only on such a surface.
+ */
+export function forgetPrivilegedMfaStanding(): void {
+    resetPrivilegedMfaState();
+}
+
+/**
+ * Reads the standing again after a safe exit, only when the browser was confined.
+ * @returns how the read settled, or null when the browser was not confined and nothing was read
+ */
+async function settleAfterSafeExit(): Promise<PrivilegedMfaSettleOutcome | null> {
+    if (activePrivilegedMfaConfinement() === null) return null;
+    return settlePrivilegedMfaStanding("exit");
+}
+
+function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaConfinementReason | null {
+    const reason = activePrivilegedMfaConfinement();
+    if (reason === null) return null;
     const pathname = path.split("?")[0];
     const normalizedMethod = (method ?? "GET").toUpperCase();
-    return !(normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
-        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname));
+    if (normalizedMethod === "POST" && isCsrfRetryExemptMutation(pathname)) return null;
+    const allowed = (normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
+        || (normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname))
+        || (normalizedMethod === "POST" && PRIVILEGED_MFA_SAFE_EXIT_POST_PATH.test(pathname));
+    return allowed ? null : reason;
+}
+
+/** The refusal a confined browser raises itself instead of sending a request the server would refuse. */
+function privilegedMfaConfinementError(reason: PrivilegedMfaConfinementReason): ApiError {
+    return new ApiError(
+        PRIVILEGED_MFA_CONFINEMENT_MESSAGES[reason],
+        403,
+        PRIVILEGED_MFA_CONFINEMENT_CODES[reason],
+    );
+}
+
+/** Adds the confinement acknowledgement to a role-change body only once the actor has confirmed it. */
+function withConfinementAcknowledgement<T extends object>(body: T, acknowledgeConfinement: boolean) {
+    return acknowledgeConfinement ? { ...body, acknowledgeConfinement: true } : body;
 }
 
 function isCsrfRetryExemptMutation(path: string): boolean {
@@ -488,19 +1030,20 @@ async function requestJson<T>(
     path: string,
     init: RequestInit = {},
     workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
+    workspaceHeader: "auto" | "omit" = "auto",
+    beforeSend?: (headers: Headers) => void,
 ): Promise<T> {
-    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, init.method)) {
-        throw new ApiError(
-            "A passkey must be enrolled before this privileged account can continue",
-            403,
-            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
-        );
+    const suppression = privilegedMfaSuppression(path, init.method);
+    if (suppression !== null) {
+        throw privilegedMfaConfinementError(suppression);
     }
-    const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
+    const workspaceId = workspaceHeader === "omit" ? null : requestWorkspaceId(path, mutating);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
     const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
+    const pendingLocale = requestLocale(init);
+    const locale = typeof pendingLocale === "string" ? pendingLocale : await pendingLocale;
 
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
@@ -510,6 +1053,7 @@ async function requestJson<T>(
             ...csrf,
         });
         new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        beforeSend?.(headers);
         return fetch(`${API_BASE}${path}`, {
             ...init,
             credentials: "include",
@@ -533,8 +1077,12 @@ async function requestJson<T>(
         res = await sendWithCsrfRetry();
     }
 
+    if (typeof window !== 'undefined' && path.startsWith('/api/ai/assistant/')) {
+        observeProposalReviewClock(res.headers);
+    }
+
     if (!res.ok) {
-        throw await getAuthenticatedApiError(res);
+        throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
     }
 
     try {
@@ -622,16 +1170,15 @@ async function requestMultipart<T>(
     body: FormData,
     init: RequestInit = {},
 ): Promise<T> {
-    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, method)) {
-        throw new ApiError(
-            "A passkey must be enrolled before this privileged account can continue",
-            403,
-            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
-        );
+    const suppression = privilegedMfaSuppression(path, method);
+    if (suppression !== null) {
+        throw privilegedMfaConfinementError(suppression);
     }
-    const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
+    const workspaceId = requestWorkspaceId(path, true);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
+    const pendingLocale = requestLocale(init);
+    const locale = typeof pendingLocale === "string" ? pendingLocale : await pendingLocale;
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
             "Accept-Language": locale,
@@ -662,7 +1209,7 @@ async function requestMultipart<T>(
         response = await sendWithCsrfRetry();
     }
     if (!response.ok) {
-        throw await getAuthenticatedApiError(response);
+        throw refusalFor(await getAuthenticatedApiError(response), path, true, pinnedWorkspace);
     }
     const text = await response.text();
     return text ? JSON.parse(text) as T : undefined as T;
@@ -766,11 +1313,15 @@ async function postWorkspaceSelectionJson<T>(
     path: string,
     body: unknown = {},
     bodyRequired = true,
+    init: RequestInit = {},
+    workspaceHeader: "auto" | "omit" = "auto",
+    beforeSend?: (headers: Headers) => void,
 ): Promise<T> {
     return requestJson<T>(path, {
+        ...init,
         method: "POST",
         body: JSON.stringify(body),
-    }, bodyRequired ? "required" : "optional");
+    }, bodyRequired ? "required" : "optional", workspaceHeader, beforeSend);
 }
 
 async function postFormData<T>(path: string, body: FormData, init: RequestInit = {}): Promise<T> {
@@ -811,13 +1362,14 @@ async function pollAiGeneration<T>(
  * generation, active workspace, and locale. Requests without a provable identity bypass de-duplication.
  */
 async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const pinned = pinWriteNow(path, init);
     if (typeof window === "undefined" || Object.keys(init).length > 0) {
-        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, pinned);
         return pollAiGeneration(accepted, init);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
-        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, pinned);
         return pollAiGeneration(accepted, init);
     }
     const key = `${identity}\u0000${path}`;
@@ -830,7 +1382,7 @@ async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T
         const accepted = await postJson<Types.AiGenerationStatus<T>>(
             path,
             {},
-            { signal: controller.signal },
+            { ...pinned, signal: controller.signal },
         );
         const response = await pollAiGeneration<T>(accepted, { signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
@@ -1111,20 +1663,51 @@ export function getDealsCappedResultFromCookie(cookie: string | null, cap = CALE
     );
 }
 
-/** Complete, explicitly capped inputs for the relationship graph. */
-export async function getRelationshipMapData(init: RequestInit = {}) {
+/** The workspace exceeds the relationship map's rendering capacity. */
+export class RelationshipMapCapacityError extends Error {
+    constructor() {
+        super('The relationship map exceeds its safe rendering limit');
+        this.name = 'RelationshipMapCapacityError';
+    }
+}
+
+async function getRelationshipMapFirstPages(size: number, init: RequestInit) {
     const [companies, contacts, deals, activities, tasks, notes] = await Promise.all([
-        getCompaniesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getContactsPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getDealsPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getActivitiesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getTasksPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getNotesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE, workspaceOnly: true }, init),
+        getCompaniesPage({ page: 1, size }, init),
+        getContactsPage({ page: 1, size }, init),
+        getDealsPage({ page: 1, size }, init),
+        getActivitiesPage({ page: 1, size }, init),
+        getTasksPage({ page: 1, size }, init),
+        getNotesPage({ page: 1, size, workspaceOnly: true }, init),
     ]);
+    return { companies, contacts, deals, activities, tasks, notes };
+}
+
+function assertRelationshipMapCapacity({ companies, contacts, deals, activities, tasks, notes }: Awaited<ReturnType<typeof getRelationshipMapFirstPages>>) {
     if (companies.total + contacts.total + deals.total > RELATIONSHIP_MAP_RECORD_LIMIT
         || activities.total + tasks.total + notes.total > RELATIONSHIP_MAP_TOUCH_LIMIT) {
-        throw new Error('The relationship map exceeds its safe rendering limit');
+        throw new RelationshipMapCapacityError();
     }
+}
+
+/** A failed capacity check remains distinct from a confirmed rendering limit. */
+export type RelationshipMapAvailability = 'available' | 'overCapacity' | 'unknown';
+
+/** Checks map capacity with one item per source; failed reads leave navigation available for retry. */
+export async function getRelationshipMapAvailability(init: RequestInit = {}): Promise<RelationshipMapAvailability> {
+    try {
+        assertRelationshipMapCapacity(await getRelationshipMapFirstPages(1, init));
+        return 'available';
+    } catch (error: unknown) {
+        return error instanceof RelationshipMapCapacityError ? 'overCapacity' : 'unknown';
+    }
+}
+
+/** Complete, explicitly capped inputs for the relationship graph. */
+export async function getRelationshipMapData(init: RequestInit = {}) {
+    const pages = await getRelationshipMapFirstPages(WORKSPACE_LIST_PAGE_SIZE, init);
+    assertRelationshipMapCapacity(pages);
+    const { companies, contacts, deals, activities, tasks, notes } = pages;
     const [allCompanies, allContacts, allDeals, allActivities, allTasks, allNotes] = await Promise.all([
         getCompleteKnownPage(companies, getCompaniesPage, init),
         getCompleteKnownPage(contacts, getContactsPage, init),
@@ -1159,11 +1742,22 @@ export class ApiError extends Error {
     fieldErrors?: ApiFieldErrors;
     correlationId?: string;
     /**
+     * For {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} only: how many members the
+     * change would leave without a passkey approved in the organization.
+     */
+    affectedCount?: number;
+    /** Current database version when a conditional edit returns STALE_RECORD. */
+    currentVersion?: number;
+    /**
      * True when the response carried no body. A bodyless 401/403 is how Spring Security signals an
      * unauthenticated caller (expired or missing session), as opposed to a genuine authorization
      * denial, which the backend answers with an explanatory body.
      */
     emptyBody?: boolean;
+    /** For {@link WORKSPACE_UNAVAILABLE_CODE} only: the workspace the refused request was pinned to. */
+    workspaceId?: number;
+    /** For {@link WORKSPACE_UNAVAILABLE_CODE} only: that workspace's name, when the shell ever listed it. */
+    workspaceName?: string;
 
     constructor(
         message: string,
@@ -1181,6 +1775,21 @@ export class ApiError extends Error {
         this.correlationId = correlationId;
         this.emptyBody = emptyBody;
     }
+}
+
+/**
+ * A state-changing request refused because the workspace it was pinned to no longer includes the
+ * caller (#1732). Nothing was written anywhere; whatever the user composed is still on screen and
+ * belongs to that workspace, so it must be reported rather than resubmitted elsewhere. Assigned by
+ * the client from the backend's membership refusal, never sent by the backend itself.
+ */
+export const WORKSPACE_UNAVAILABLE_CODE = "WORKSPACE_UNAVAILABLE";
+
+/** Whether a rejection is the {@link WORKSPACE_UNAVAILABLE_CODE} refusal of a pinned write. */
+export function isWorkspaceUnavailableError(error: unknown): error is ApiError & { workspaceId: number } {
+    return error instanceof ApiError
+        && error.code === WORKSPACE_UNAVAILABLE_CODE
+        && typeof error.workspaceId === "number";
 }
 
 export function isFieldError(err: unknown): err is ApiError & { fieldErrors: ApiFieldErrors } {
@@ -1292,20 +1901,31 @@ async function getApiError(res: Response): Promise<ApiError> {
         const data = JSON.parse(text) as unknown;
 
         if (isErrorRecord(data)) {
-            const { message, error, code, correlationId, fieldErrors, ...rest } = data;
+            const { message, error, code, correlationId, fieldErrors, affectedCount, currentVersion, ...rest } = data;
             const flat = Object.fromEntries(
                 Object.entries(rest).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
             );
             const enveloped = isStringRecord(fieldErrors) ? fieldErrors : undefined;
             const fields = enveloped ?? (Object.keys(flat).length > 0 ? flat : undefined);
 
-            return new ApiError(
+            const apiError = new ApiError(
                 asString(message) ?? asString(error) ?? "Please fix the highlighted fields.",
                 res.status,
                 asString(code),
                 fields,
                 asString(correlationId),
             );
+            if (apiError.code === PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE
+                    && typeof affectedCount === "number"
+                    && Number.isSafeInteger(affectedCount)
+                    && affectedCount >= 0) {
+                apiError.affectedCount = affectedCount;
+            }
+            if (apiError.code === "STALE_RECORD" && typeof currentVersion === "number"
+                    && Number.isSafeInteger(currentVersion) && currentVersion >= 0) {
+                apiError.currentVersion = currentVersion;
+            }
+            return apiError;
         }
 
         return new ApiError(text, res.status);
@@ -1316,15 +1936,16 @@ async function getApiError(res: Response): Promise<ApiError> {
 
 async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
     const error = await getApiError(res);
-    if (error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE
-            && typeof window !== "undefined") {
-        const shouldNavigate = !privilegedMfaEnrollmentRequired
-            && !isPrivilegedMfaEnrollmentDestination();
-        privilegedMfaEnrollmentRequired = true;
-        privilegedMfaEnrollmentCompleted = false;
-        for (const listener of privilegedMfaEnrollmentListeners) listener(true);
+    const reason = error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE
+        ? "enrollment"
+        : error.code === PRIVILEGED_MFA_ATTESTATION_REQUIRED_CODE ? "attestation" : null;
+    if (reason !== null && typeof window !== "undefined") {
+        const shouldNavigate = privilegedMfaConfinement === null
+            && !isPrivilegedMfaConfinementDestination()
+            && window.location.pathname !== ONBOARDING_ROUTE;
+        notePrivilegedMfaRefusal(reason);
         if (shouldNavigate) {
-            window.location.replace(PRIVILEGED_MFA_ENROLLMENT_DESTINATION);
+            window.location.replace(`${PRIVILEGED_MFA_ROUTE}?mfa=${PRIVILEGED_MFA_STEP_PARAMS[reason]}`);
         }
     }
     return error;
@@ -1351,7 +1972,7 @@ async function linkFlowJson<T>(
     const send = async (forceRefresh: boolean) => {
         const headers = new Headers({
             Accept: "application/json",
-            "Accept-Language": requestLocale(init),
+            "Accept-Language": await requestLocale(init),
             ...(method === "POST" ? await csrfHeader(forceRefresh) : {}),
         });
         new Headers(init.headers).forEach((value, key) => headers.set(key, value));
@@ -1699,10 +2320,12 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
  * an unavailable authentication check. The backend reports expired sessions with HTTP 401; every
  * other failed response remains unavailable rather than becoming a logged-out decision.
  * @param cookie the incoming request's cookie header, or null
+ * @param bootstrapLocale preliminary language while this profile read establishes the request locale
  * @returns a resolved user or null authentication decision, or an unavailable result
  */
 export async function getCurrentUserResultFromCookie(
     cookie: string | null,
+    bootstrapLocale?: Locale,
 ): Promise<CookieResult<Types.User | null>> {
     if (!cookie) {
         return { ok: true, data: null };
@@ -1710,7 +2333,7 @@ export async function getCurrentUserResultFromCookie(
 
     try {
         const user = await me({
-            headers: { cookie },
+            headers: { cookie, ...(bootstrapLocale ? { "Accept-Language": bootstrapLocale } : {}) },
             cache: "no-store",
         });
         return { ok: true, data: user };
@@ -1774,6 +2397,7 @@ async function exchangeOneTimeLink(path: string, token: string): Promise<void> {
         redirect: "manual",
         headers: {
             "Content-Type": "application/json",
+            "Accept-Language": await requestLocale({}),
             ...await csrfHeader(forceRefresh),
         },
         body: JSON.stringify({ token }),
@@ -1924,6 +2548,19 @@ export function beginPasskeyStepUp() {
 
 export function finishPasskeyStepUp(credential: AuthenticationResponseJSON) {
     return postJson<Types.AuthResponse>("/api/auth/webauthn/step-up", credential);
+}
+
+/** Starts redeeming a passkey approval code: assertion options for the passkey to approve (#1534). */
+export function beginMfaAttestation() {
+    return postJson<PublicKeyCredentialRequestOptionsJSON>("/api/auth/webauthn/attestation/options");
+}
+
+/**
+ * Redeems a passkey approval code with the assertion of the passkey it approves (#1534). Every
+ * reason the code itself cannot be used is refused alike, with {@link MFA_ATTESTATION_REFUSED_CODE}.
+ */
+export function redeemMfaAttestation(code: string, credential: AuthenticationResponseJSON) {
+    return postJson<Types.MfaAttestationRedemption>("/api/auth/webauthn/attestation", { code, credential });
 }
 
 export function renamePasskey(credentialId: string, label: string) {
@@ -2207,11 +2844,13 @@ export function validateSsoLink() {
  * Spring's {@code /saml2} authenticate endpoint (proxied to the backend by the frontend runtime).
  * @param registrationId the {@code org-<id>} registration from discovery
  * @param protocol the connection protocol
+ * @param redirect the local return destination; malformed or absolute values are omitted
  * @returns the absolute path to navigate the browser to
  */
-export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol) {
+export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol, redirect: string | null = null) {
     const id = encodeURIComponent(registrationId);
-    return protocol === "saml" ? `/saml2/authenticate/${id}` : `/api/oauth2/authorization/${id}`;
+    const path = protocol === "saml" ? `/saml2/authenticate/${id}` : `/api/oauth2/authorization/${id}`;
+    return authSwitchHref(path, redirect);
 }
 
 /*
@@ -2223,10 +2862,11 @@ export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol
  * social login. Mirrors {@link ssoStartPath}; the provider's OAuth2 flow starts under the
  * proxied {@code /api} prefix.
  * @param provider the social provider to authenticate with
+ * @param redirect the local return destination; malformed or absolute values are omitted
  * @returns the absolute path to navigate the browser to
  */
-export function socialLoginStartPath(provider: "google" | "microsoft") {
-    return `/api/oauth2/authorization/${provider}`;
+export function socialLoginStartPath(provider: "google" | "microsoft", redirect: string | null = null) {
+    return authSwitchHref(`/api/oauth2/authorization/${provider}`, redirect);
 }
 
 /*
@@ -2276,6 +2916,11 @@ export async function getUserReferences(ids: number[], init: RequestInit = {}) {
         getJson<Types.UserReference[]>(`/api/users/references${buildQuery({ ids: batch })}`, init),
     ));
     return references.flat();
+}
+
+/** Bounded active-member search for activity and task pickers. */
+export function getUserOptions(q = '', init: RequestInit = {}) {
+    return getJson<Types.User[]>(`/api/users/options${buildQuery({ q })}`, init);
 }
 
 export function getUsers(init: RequestInit = {}) {
@@ -2336,7 +2981,7 @@ export function getTasks(init: RequestInit = {}) {
     return getCompletePageItems<Types.Task>(getTasksPage, init);
 }
 
-export function getTasksPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+export function getTasksPage(params: Types.TasksPageParams = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.Task>>(`/api/tasks/page${buildQuery(params)}`, init);
 }
 
@@ -2350,7 +2995,7 @@ export function getTasksFromCookie(cookie: string | null) {
 
 export function getTasksPageResultFromCookie(
     cookie: string | null,
-    params: Types.PageParams = {},
+    params: Types.TasksPageParams = {},
 ) {
     return resultWithCookie<Types.Page<Types.Task>>((init) => getTasksPage(params, init), cookie);
 }
@@ -2584,8 +3229,8 @@ export function preflightCompanyDuplicates(
     );
 }
 
-export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
-    return putJson<Types.Company>(`/api/companies/${id}`, payload);
+export function updateCompany(id: number, payload: Types.UpdateCompanyPayload, init: RequestInit = {}) {
+    return putJson<Types.Company>(`/api/companies/${id}`, payload, init);
 }
 
 export async function uploadCompanyLogo(companyId: number, file: File, init: RequestInit = {}) {
@@ -2707,9 +3352,10 @@ export function commitInteractionHistoryImport(
  * operation that must remain bound to its invocation scope.
  */
 export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
-    const locale = localeFromCookieHeader(document.cookie);
-    const workspaceId = clientWorkspaceId();
+    const locale = browserApiLocale();
     const mutating = isMutating(init.method);
+    const workspaceId = requestWorkspaceId(path, mutating);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
             ...(init.body ? { "Content-Type": "application/json" } : {}),
@@ -2733,7 +3379,7 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
         res = await send(mutating ? await csrfHeader() : {});
     }
     if (!res.ok) {
-        throw await getAuthenticatedApiError(res);
+        throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -2748,7 +3394,7 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
 
 export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
-        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany, tagIds: params.tagIds,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
@@ -2777,8 +3423,13 @@ export function exportDealsCsv(params: Types.DealFilterParams = {}, init: Reques
     return downloadCsv(`/api/exports/deals${query}`, "deals.csv", init);
 }
 
-export function exportProductsCsv(params: Types.ProductSearchParams = {}, init: RequestInit = {}) {
-    return downloadCsv(`/api/exports/products${buildQuery({ q: params.q })}`, "products.csv", init);
+/** Downloads the products CSV narrowed by the catalog search and the products browser's facets. */
+export function exportProductsCsv(params: Types.ProductExportParams = {}, init: RequestInit = {}) {
+    const query = buildQuery({
+        q: params.q, billingFrequency: params.billingFrequency, active: params.active,
+        effectiveDates: params.effectiveDates,
+    });
+    return downloadCsv(`/api/exports/products${query}`, "products.csv", init);
 }
 
 export function exportDealSegmentCsv(params: Types.DealSegmentPageParams, init: RequestInit = {}) {
@@ -2831,44 +3482,64 @@ async function runBulk(
     return merged;
 }
 
-export function bulkAddTagToContacts(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToContacts(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromContacts(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromContacts(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkArchiveContacts(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/archive`, { ids: chunk }));
+export function bulkArchiveContacts(ids: number[], init: RequestInit = {}) {
+    const path = "/api/persons/bulk/archive";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkRestoreContacts(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/restore`, { ids: chunk }));
+export function bulkRestoreContacts(ids: number[], init: RequestInit = {}) {
+    const path = "/api/persons/bulk/restore";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAddTagToCompanies(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToCompanies(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromCompanies(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromCompanies(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkArchiveCompanies(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/archive`, { ids: chunk }));
+export function bulkArchiveCompanies(ids: number[], init: RequestInit = {}) {
+    const path = "/api/companies/bulk/archive";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkRestoreCompanies(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/restore`, { ids: chunk }));
+export function bulkRestoreCompanies(ids: number[], init: RequestInit = {}) {
+    const path = "/api/companies/bulk/restore";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
-export function bulkAssignPersonOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignPersonOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
 export function updateCompanyOwner(id: number, ownerId: number | null) {
@@ -2879,30 +3550,40 @@ export function updatePersonOwner(id: number, ownerId: number | null) {
     return putJson<Types.Contact>(`/api/persons/${id}/owner`, { ownerId });
 }
 
-export function bulkAddTagToDeals(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToDeals(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromDeals(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromDeals(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkDeleteDeals(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/delete`, { ids: chunk }));
+export function bulkDeleteDeals(ids: number[], init: RequestInit = {}) {
+    const path = "/api/deals/bulk/delete";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAssignDealOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignDealOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
-export function bulkChangeDealStage(ids: number[], stageId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/stage`, { ids: chunk, stageId }));
+export function bulkChangeDealStage(ids: number[], stageId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/stage";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, stageId }, origin));
 }
 
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
-        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
+        q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany, tagIds: params.tagIds,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
@@ -2915,6 +3596,19 @@ export function getContactIds(params: Types.ContactsPageParams = {}, init: Reque
 
 export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
+}
+
+/** Hydrates visible contact selections in capped batches without relationship history. */
+export async function getContactReferences(ids: number[], init: RequestInit = {}) {
+    const uniqueIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+    const batches = Array.from(
+        { length: Math.ceil(uniqueIds.length / WORKSPACE_LIST_PAGE_SIZE) },
+        (_, index) => uniqueIds.slice(index * WORKSPACE_LIST_PAGE_SIZE, (index + 1) * WORKSPACE_LIST_PAGE_SIZE),
+    );
+    const references = await Promise.all(batches.map((batch) =>
+        getJson<Types.ContactReference[]>(`/api/persons/references${buildQuery({ ids: batch })}`, init),
+    ));
+    return references.flat();
 }
 
 export function getContactEmployment(id: number, init: RequestInit = {}) {
@@ -3328,15 +4022,19 @@ export function restoreContact(id: number, init: RequestInit = {}) {
     return postJson<Types.Contact>(`/api/persons/${id}/restore`, {}, init);
 }
 
-export function updateContact(id: number, payload: Types.UpdateContactPayload) {
-    return putJson<Types.Contact>(`/api/persons/${id}`, payload);
+export function updateContact(id: number, payload: Types.UpdateContactPayload, init: RequestInit = {}) {
+    return putJson<Types.Contact>(`/api/persons/${id}`, payload, init);
 }
 
 export async function uploadContactPicture(contactId: number, file: File, init: RequestInit = {}) {
+    return (await uploadContactPictureRecord(contactId, file, init)).imageUrl;
+}
+
+/** Returns the complete post-upload snapshot, including the database-owned edit version. */
+export function uploadContactPictureRecord(contactId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData, init);
-    return contact.imageUrl;
+    return requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData, init);
 }
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
@@ -3578,14 +4276,16 @@ export function getDealFacets(init: RequestInit = {}) {
 
 /**
  * Server-computed monthly revenue trend (realized won revenue by scheduled close month, projected
- * by expected-close month) over ALL deals, optionally scoped to a currency. The IANA timezone
- * applies the viewer's historical offset rules when bucketing realized revenue.
+ * by expected-close month). openOnly restricts the projected series to open deals; the realized
+ * series is unchanged. Currency is optional. The IANA timezone applies historical offset rules
+ * when bucketing realized revenue.
  */
 export function getDealRevenueTimeseries(
     currency?: string, timezone?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+    openOnly = false,
 ) {
     return getJson<Types.DealRevenueSeries>(
-        `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope })}`, init);
+        `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope, openOnly })}`, init);
 }
 
 /**
@@ -3855,11 +4555,16 @@ export function getAiProviderConfig(workspaceId: number, init: RequestInit = {})
 }
 
 export function saveAiProviderConfig(workspaceId: number, request: Types.AiProviderConfigRequest) {
-    return putJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, request);
+    return putJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, request).then((result) => {
+        publishAiAvailabilityChange();
+        return result;
+    });
 }
 
 export function revokeAiProviderConfig(workspaceId: number) {
-    return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`);
+    return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`).then(() => {
+        publishAiAvailabilityChange();
+    });
 }
 
 export function createDeal(payload: Types.CreateDealPayload, init: RequestInit = {}) {
@@ -3878,8 +4583,8 @@ export function preflightDealDuplicates(
     );
 }
 
-export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
-    return putJson<Types.Deal>(`/api/deals/${id}`, payload);
+export function updateDeal(id: number, payload: Types.UpdateDealPayload, init: RequestInit = {}) {
+    return putJson<Types.Deal>(`/api/deals/${id}`, payload, init);
 }
 
 /** Renames a deal without touching any other field (safe against concurrent edits). */
@@ -3906,16 +4611,16 @@ export function closeDeal(id: number, payload: { won: boolean; reason?: string |
 }
 
 /** Reopens a closed deal: clears the outcome/close date and moves it off any terminal stage. */
-export function reopenDeal(id: number) {
-    return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {});
+export function reopenDeal(id: number, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {}, init);
 }
 
 /**
  * Moves a deal to a target stage and 0-based position on the Kanban board. The server renumbers
  * the affected stage column(s) so positions stay contiguous.
  */
-export function moveDeal(id: number, stageId: number, position: number) {
-    return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position });
+export function moveDeal(id: number, stageId: number, position: number, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position }, init);
 }
 
 /**
@@ -3923,12 +4628,12 @@ export function moveDeal(id: number, stageId: number, position: number) {
  * other field. Unlike `updateDeal` this cannot clobber a concurrent edit or reopen a closed deal,
  * so it is used for optimistic reschedule.
  */
-export function rescheduleDeal(id: number, expectedCloseDate: string) {
-    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate });
+export function rescheduleDeal(id: number, expectedCloseDate: string, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate }, init);
 }
 
-export function updateDealOwner(id: number, ownerId: number | null) {
-    return putJson<Types.Deal>(`/api/deals/${id}/owner`, { ownerId });
+export function updateDealOwner(id: number, ownerId: number | null, init: RequestInit = {}) {
+    return putJson<Types.Deal>(`/api/deals/${id}/owner`, { ownerId }, init);
 }
 
 export function updateDealEvaluation(id: number, payload: Types.UpdateDealEvaluationPayload) {
@@ -3939,8 +4644,8 @@ export function getDealCollaborators(id: number, init: RequestInit = {}) {
     return getJson<Types.User[]>(`/api/deals/${id}/collaborators`, init);
 }
 
-export function replaceDealCollaborators(id: number, userIds: number[]) {
-    return putJson<Types.User[]>(`/api/deals/${id}/collaborators`, { userIds });
+export function replaceDealCollaborators(id: number, userIds: number[], init: RequestInit = {}) {
+    return putJson<Types.User[]>(`/api/deals/${id}/collaborators`, { userIds }, init);
 }
 
 export function getDealPeople(id: number, init: RequestInit = {}) {
@@ -4121,12 +4826,12 @@ export function getStagesByPipelineId(pipelineId: number, init: RequestInit = {}
     return getJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, init);
 }
 
-export function createStage(pipelineId: number, payload: Types.CreateStagePayload) {
-    return postJson<Types.Stage>(`/api/pipelines/${pipelineId}/stages`, payload);
+export function createStage(pipelineId: number, payload: Types.CreateStagePayload, init: RequestInit = {}) {
+    return postJson<Types.Stage>(`/api/pipelines/${pipelineId}/stages`, payload, init);
 }
 
-export function updateStage(id: number, payload: Types.UpdateStagePayload) {
-    return putJson<Types.Stage>(`/api/pipelines/stages/${id}`, payload);
+export function updateStage(id: number, payload: Types.UpdateStagePayload, init: RequestInit = {}) {
+    return putJson<Types.Stage>(`/api/pipelines/stages/${id}`, payload, init);
 }
 
 /**
@@ -4140,20 +4845,21 @@ export function replacePipelineStages(
     pipelineId: number,
     knownStageIds: number[],
     stages: Types.PipelineStageInput[],
+    init: RequestInit = {},
 ) {
-    return putJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, { knownStageIds, stages });
+    return putJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, { knownStageIds, stages }, init);
 }
 
 export function deleteStage(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/pipelines/stages/${id}`, init);
 }
 
-export function createPipeline(payload: Types.CreatePipelinePayload) {
-    return postJson<Types.Pipeline>(`/api/pipelines`, payload);
+export function createPipeline(payload: Types.CreatePipelinePayload, init: RequestInit = {}) {
+    return postJson<Types.Pipeline>(`/api/pipelines`, payload, init);
 }
 
-export function updatePipeline(id: number, payload: Types.UpdatePipelinePayload) {
-    return putJson<Types.Pipeline>(`/api/pipelines/${id}`, payload);
+export function updatePipeline(id: number, payload: Types.UpdatePipelinePayload, init: RequestInit = {}) {
+    return putJson<Types.Pipeline>(`/api/pipelines/${id}`, payload, init);
 }
 
 export function getPipelineById(id: number, init: RequestInit = {}) {
@@ -4252,6 +4958,11 @@ export function getGeneratedDocuments(params: Types.GeneratedDocumentsPageParams
     return getJson<Types.Page<Types.GeneratedDocumentSummary>>(`/api/documents${buildQuery(params)}`, init);
 }
 
+/** Resolves at most fifty document ids; unavailable documents are absent from the response. */
+export function getGeneratedDocumentTargets(ids: number[], init: RequestInit = {}) {
+    return getJson<Types.GeneratedDocumentTarget[]>(`/api/documents/targets${buildQuery({ ids })}`, { cache: "no-store", ...init });
+}
+
 export function getDealDocuments(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
 }
@@ -4285,12 +4996,12 @@ export function getApprovalPoliciesFromCookie(cookie: string | null) {
     return safeReadWithCookie<Types.ApprovalPolicy>((init) => getApprovalPolicies(init), cookie);
 }
 
-export function createApprovalPolicy(payload: Types.CreateApprovalPolicyPayload) {
-    return postJson<Types.ApprovalPolicy>(`/api/approval-policies`, payload);
+export function createApprovalPolicy(payload: Types.CreateApprovalPolicyPayload, init: RequestInit = {}) {
+    return postJson<Types.ApprovalPolicy>(`/api/approval-policies`, payload, init);
 }
 
-export function updateApprovalPolicy(id: number, payload: Types.UpdateApprovalPolicyPayload) {
-    return putJson<Types.ApprovalPolicy>(`/api/approval-policies/${id}`, payload);
+export function updateApprovalPolicy(id: number, payload: Types.UpdateApprovalPolicyPayload, init: RequestInit = {}) {
+    return putJson<Types.ApprovalPolicy>(`/api/approval-policies/${id}`, payload, init);
 }
 
 export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
@@ -4302,8 +5013,8 @@ export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
  * Read-only: the server runs the same classification the save enforces, so the disclosed count
  * matches what a confirmed write invalidates.
  */
-export function previewApprovalPolicyImpact(id: number, payload: Types.UpdateApprovalPolicyPayload) {
-    return postJson<Types.ApprovalPolicyImpact>(`/api/approval-policies/${id}/impact`, payload);
+export function previewApprovalPolicyImpact(id: number, payload: Types.UpdateApprovalPolicyPayload, init: RequestInit = {}) {
+    return postJson<Types.ApprovalPolicyImpact>(`/api/approval-policies/${id}/impact`, payload, init);
 }
 
 export function requestDocumentApproval(dealId: number, documentId: number, comment?: string | null) {
@@ -4348,6 +5059,19 @@ export function getDocumentApprovalDelegateCandidates(
 ) {
     return getJson<Types.ApprovalDelegate[]>(
         `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate-candidates`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+/** Reads the server-authorized management candidates for one active approval step. */
+export function getDocumentApprovalApproverCandidates(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ApprovalStepCandidates>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/approver-candidates`,
         { cache: 'no-store', ...init },
     );
 }
@@ -4400,6 +5124,23 @@ export function getMyWorkResultFromCookie(cookie: string | null) {
     return resultWithCookie<Types.WorkItemPage>((init) => getMyWork({}, init), cookie);
 }
 
+/** A personal section refuses failures distinctly, including expired sessions and access denial. */
+export type MyWorkReadResult<T> = { ok: true; data: T } | { ok: false; status: number };
+
+/** Reads a fixed-size self-only projection; no workspace or user id can widen its scope. */
+export async function getMyWorkReadResultFromCookie<K extends keyof Types.MyWorkReadSections>(
+    section: K, cookie: string | null, currency?: string,
+): Promise<MyWorkReadResult<Types.MyWorkReadSections[K]>> {
+    if (!cookie) return { ok: false, status: 401 };
+    try {
+        const data = await getJson<Types.MyWorkReadSections[K]>(
+            `/api/my-work/${section}${buildQuery({ currency })}`, withCookie(cookie));
+        return { ok: true, data };
+    } catch (error) {
+        return { ok: false, status: error instanceof ApiError ? error.status : 0 };
+    }
+}
+
 export function getMyWorkSummary(init: RequestInit = {}) {
     return getJson<Types.WorkItemSummary>(`/api/my-work/summary`, { cache: 'no-store', ...init });
 }
@@ -4443,12 +5184,12 @@ export function getDealLineItemsFromCookie(dealId: number, cookie: string | null
     );
 }
 
-export function createDealLineItem(dealId: number, payload: Types.DealLineItemPayload) {
-    return postJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, payload);
+export function createDealLineItem(dealId: number, payload: Types.DealLineItemPayload, init: RequestInit = {}) {
+    return postJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, payload, init);
 }
 
-export function updateDealLineItem(dealId: number, itemId: number, payload: Types.DealLineItemPayload) {
-    return putJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, payload);
+export function updateDealLineItem(dealId: number, itemId: number, payload: Types.DealLineItemPayload, init: RequestInit = {}) {
+    return putJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, payload, init);
 }
 
 export function deleteDealLineItem(dealId: number, itemId: number, init: RequestInit = {}) {
@@ -4461,6 +5202,11 @@ export function getPeopleForTag(id: number, init: RequestInit = {}) {
 
 export function getCompaniesForTag(id: number, init: RequestInit = {}) {
     return getJson<Types.Company[]>(`/api/tags/${id}/companies`, init);
+}
+
+/** Lists the visible deals carrying this workspace's tag. */
+export function getDealsForTag(id: number, init: RequestInit = {}) {
+    return getJson<Types.Deal[]>(`/api/tags/${id}/deals`, init);
 }
 /*
 * == Global search
@@ -4689,12 +5435,12 @@ export function uploadAttachment(entityType: string, entityId: number, file: Fil
     return requestMultipart<Types.Attachment>("/api/attachments/upload", "POST", formData);
 }
 
-export function uploadAttachmentImage(entityType: string, entityId: number, file: File) {
+export function uploadAttachmentImage(entityType: string, entityId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("entityType", entityType);
     formData.append("entityId", String(entityId));
     formData.append("file", file);
-    return requestMultipart<Types.Attachment>("/api/attachments/upload-image", "POST", formData);
+    return requestMultipart<Types.Attachment>("/api/attachments/upload-image", "POST", formData, init);
 }
 
 export function getAttachment(id: number, init: RequestInit = {}) {
@@ -4729,9 +5475,27 @@ export function getAuditLogs(params: Types.AuditLogParams = {}, init: RequestIni
     return getJson<Types.AuditLogEntry[]>(`/api/audit${buildQuery(params)}`, init);
 }
 
+/** Downloads only the selected loaded rows, under the existing audit authority and passkey gate. */
+export function exportAuditRowsCsv(ids: readonly number[], orgId?: number, init: RequestInit = {}) {
+    const selection = auditExportSelection(ids);
+    const path = orgId === undefined ? "/api/audit/export" : `/api/orgs/${orgId}/audit/export`;
+    return downloadCsv(`${path}${buildQuery({ ids: selection, limit: AUDIT_EXPORT_SELECTION_LIMIT, offset: 0 })}`,
+        orgId === undefined ? "audit-log.csv" : "org-audit-log.csv", init);
+}
+
 /*
 * == Organization admin (org control plane)
 */
+
+/** Reads organization export grants independently of the active workspace role. */
+export function getOrgExportPermissions(orgId: number, init: RequestInit = {}) {
+    return getJson<Types.ExportPermissions>(`/api/orgs/${orgId}/export-permissions`, { cache: "no-store", ...init });
+}
+
+/** Changes one organization role's export grant. */
+export function updateOrgExportPermission(orgId: number, role: Types.OrgRole, enabled: boolean) {
+    return putJson<Types.ExportPermissions>(`/api/orgs/${orgId}/export-permissions/${role}`, { enabled });
+}
 
 export function getOrgMembers(orgId: number, init: RequestInit = {}) {
     return getJson<Types.OrgMember[]>(`/api/orgs/${orgId}/members`, { cache: "no-store", ...init });
@@ -4804,16 +5568,66 @@ export function teardownOrganization(orgId: number, confirmation: string) {
     );
 }
 
-export function addOrgMemberByEmail(orgId: number, email: string, orgRole: Types.OrgRole) {
-    return postJson<void>(`/api/orgs/${orgId}/members`, { email, orgRole });
+/**
+ * Adds an organization member by email. Making someone an owner returns an ownership offer they must
+ * accept (202) instead of changing their role; any other role returns nothing (204). A `409`
+ * {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
+ */
+export function addOrgMemberByEmail(
+    orgId: number,
+    email: string,
+    orgRole: Types.OrgRole,
+    acknowledgeConfinement = false,
+) {
+    return postJson<Types.OwnershipOfferCreated<Types.OrgMember> | undefined>(
+        `/api/orgs/${orgId}/members`,
+        withConfinementAcknowledgement({ email, orgRole }, acknowledgeConfinement),
+    );
 }
 
-export function setOrgMemberRole(orgId: number, userId: number, orgRole: Types.OrgRole) {
-    return putJson<void>(`/api/orgs/${orgId}/members/${userId}`, { orgRole });
+/**
+ * Changes an organization member's role. Promoting to owner returns an ownership offer they must
+ * accept (202) instead of changing their role; any other change returns nothing (204). A `409`
+ * {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
+ */
+export function setOrgMemberRole(
+    orgId: number,
+    userId: number,
+    orgRole: Types.OrgRole,
+    acknowledgeConfinement = false,
+) {
+    return putJson<Types.OwnershipOfferCreated<Types.OrgMember> | undefined>(
+        `/api/orgs/${orgId}/members/${userId}`,
+        withConfinementAcknowledgement({ orgRole }, acknowledgeConfinement),
+    );
 }
 
 export function removeOrgMember(orgId: number, userId: number) {
     return deleteJson<void>(`/api/orgs/${orgId}/members/${userId}`);
+}
+
+/**
+ * Leaves the organization, removing the caller's own org membership (#1534). It stays available
+ * while privileged MFA confines the caller; the last owner cannot leave.
+ */
+/**
+ * Leaves an organization (#1534). A confined account may always send it; once it succeeds, the
+ * account's standing is read again so a departure that ended the privilege also ends confinement.
+ * @returns how that read settled, or null when the browser was not confined
+ */
+export async function leaveOrganization(orgId: number): Promise<PrivilegedMfaSettleOutcome | null> {
+    await postJson<void>(`/api/orgs/${orgId}/leave`);
+    return settleAfterSafeExit();
+}
+
+/** Creates a passkey approval code for an organization administrator, replacing any open one (#1534). */
+export function issueOrgMfaAttestation(orgId: number, userId: number) {
+    return postJson<Types.MfaAttestationCode>(`/api/orgs/${orgId}/members/${userId}/mfa-attestations`);
+}
+
+/** Turns off an organization administrator's open passkey approval code, if there is one (#1534). */
+export function revokeOrgMfaAttestation(orgId: number, userId: number) {
+    return deleteJson<void>(`/api/orgs/${orgId}/members/${userId}/mfa-attestations`);
 }
 
 export function getOrgAllowedDomains(orgId: number, init: RequestInit = {}) {
@@ -4851,23 +5665,45 @@ export function createDataSubjectRequest(orgId: number, body: Types.DataSubjectR
     return postJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests`, body);
 }
 
+/** Explicit erasure acceptance; editing a request never initiates this operation. */
+export function purgeAiAgentHoldings(
+    orgId: number,
+    requestId: number,
+    payload: Types.AiAgentHoldingsPurgeRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAgentHoldingsPurge>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/mission-holdings-purge`, payload, init,
+    );
+}
+
+export function getAiAgentHoldingsPurge(orgId: number, requestId: number, operationId: string, init: RequestInit = {}) {
+    return getJson<Types.AiAgentHoldingsPurge>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/mission-holdings-purges/${encodeURIComponent(operationId)}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
 export function updateDataSubjectRequest(orgId: number, requestId: number, body: Types.DataSubjectRequestBody) {
     return putJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests/${requestId}`, body);
 }
 
 /**
- * Assembles the subject-scoped disclosure for a verified disclosure request. The payload is the
- * operator-facing raw material (Art. 33 assembly); callers save it as a file rather than render it.
+ * Assembles the subject-scoped disclosure for a verified disclosure request. Every assembly is
+ * recorded as an access audit, so it is a CSRF-protected POST rather than a GET a cross-site page
+ * could trigger (#2004). The payload is the operator-facing raw material (Art. 33 assembly);
+ * callers save it as a file rather than render it.
  */
-export function getDataSubjectDisclosure(orgId: number, requestId: number) {
-    return getJson<Record<string, unknown>>(
+export function assembleDataSubjectDisclosure(orgId: number, requestId: number) {
+    return postJson<Record<string, unknown>>(
         `/api/orgs/${orgId}/data-subject-requests/${requestId}/disclosure`,
+        {},
         { cache: "no-store" },
     );
 }
 
 /** Sets or clears a contact's APPI processing restrictions (suspend / cease provision). */
-export function updateContactRestrictions(contactId: number, body: { suspended: boolean; provisionCeased: boolean }) {
+export function updateContactRestrictions(contactId: number, body: { suspended?: boolean; provisionCeased?: boolean }) {
     return putJson<Types.Contact>(`/api/persons/${contactId}/restrictions`, body);
 }
 
@@ -4955,23 +5791,97 @@ function workspaceSnapshotForForwardedCookie(
  * Reads the server-rendered workspace snapshot and publishes an accessible forwarded cookie as
  * active because it defines this request's tenant. The endpoint's active ID remains the fallback
  * for a missing or revoked cookie, preserving the backend's stale-pin healing path (#1109).
+ * @param cookie the incoming request's cookie header, or null
+ * @param bootstrapLocale language established before workspace-based preference resolution completes
  */
 export async function getMyWorkspacesResultFromCookie(
     cookie: string | null,
+    bootstrapLocale?: Locale,
 ): Promise<CookieResult<Types.MyWorkspaces>> {
-    const result = await resultWithCookie<Types.MyWorkspaces>((init) => getMyWorkspaces(init), cookie);
+    const result = await resultWithCookie<Types.MyWorkspaces>((init) => {
+        const headers = new Headers(init.headers);
+        if (bootstrapLocale) headers.set("Accept-Language", bootstrapLocale);
+        return getMyWorkspaces({ ...init, headers });
+    }, cookie);
     if (!result.ok || cookie === null) return result;
     return { ok: true, data: workspaceSnapshotForForwardedCookie(result.data, cookie) };
 }
 
-export function createWorkspace(name: string) {
-    return withClientRequestIdentityReset(
-        () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }),
-            activeWorkspaceFromSelection,
-        ),
-        "workspace",
-    );
+/**
+ * The options that create a workspace from the organization of the workspace on screen (#1732).
+ * The backend takes a new workspace's organization from the resolved workspace, so a creation that
+ * followed a healed cookie could place a name typed under one organization inside another. When the
+ * shell renders a workspace, the viewer's memberships are read again: a
+ * workspace they still belong to is pinned explicitly, and a revoked one refuses the creation as
+ * {@link WORKSPACE_UNAVAILABLE_CODE} before anything is sent, so the form keeps the typed name. A
+ * page with no app shell, such as onboarding, omits the workspace header even when a revoked
+ * selection remains in the browser cookie, leaving recovery to the server.
+ * @returns the pinned options, or null for header-free onboarding creation
+ * @throws ApiError coded {@link WORKSPACE_UNAVAILABLE_CODE} when the rendered workspace is gone
+ * @throws Error when the authenticated creation identity cannot be established
+ */
+async function workspaceCreationOrigin(): Promise<RequestInit | null> {
+    const rendered = renderedWorkspaceId();
+    if (rendered === null || typeof document === "undefined") return null;
+    const pinned: RequestInit = { headers: { "X-Workspace-Id": String(rendered) } };
+    const identity = await identityBeforePinnedWrite(async () => {
+        const snapshot = await getMyWorkspaces();
+        if (!snapshot.workspaces.some((workspace) => workspace.id === rendered)) {
+            throw workspaceUnavailableError(rendered, `Not a member of workspace ${rendered}`);
+        }
+    });
+    if (identity === null) {
+        throw new Error("Unable to establish the authenticated workspace creation identity");
+    }
+    return pinned;
+}
+
+/** Creates under the origin's account identity, including final CSRF preparation and every retry. */
+export async function createWorkspace(name: string) {
+    const preflightEpoch = clientRequestIdentityEpoch;
+    const origin = await workspaceCreationOrigin();
+    if (clientRequestIdentityEpoch !== preflightEpoch) {
+        throw new Error("The workspace changed before this request was sent");
+    }
+    const requestIdentity = origin === null ? null : csrfTokenCache?.requestIdentity;
+    if (origin !== null && requestIdentity == null) {
+        throw new Error("Unable to establish the authenticated workspace creation identity");
+    }
+    try {
+        return await withClientRequestIdentityReset(
+            async () => {
+                const waiting = new AbortController();
+                pendingPinnedWriteIdentities.add(waiting);
+                const identityEpoch = clientRequestIdentityEpoch;
+                const beforeSend = (headers: Headers) => {
+                    const currentCsrf = csrfTokenCache;
+                    if (waiting.signal.aborted
+                        || clientRequestIdentityEpoch !== identityEpoch
+                        || (requestIdentity != null && (currentCsrf === null
+                            || currentCsrf.requestIdentity !== requestIdentity
+                            || headers.get(currentCsrf.headerName) !== currentCsrf.token))) {
+                        throw new Error("The workspace changed before this request was sent");
+                    }
+                };
+                try {
+                    return await recoverWorkspaceSelectionResponse(
+                        () => postWorkspaceSelectionJson<Types.Workspace>(
+                            `/api/workspaces`, { name }, true, origin ?? {},
+                            origin === null ? "omit" : "auto", beforeSend,
+                        ),
+                        activeWorkspaceFromSelection,
+                    );
+                } finally {
+                    pendingPinnedWriteIdentities.delete(waiting);
+                }
+            },
+            "workspace",
+        );
+    } catch (error) {
+        throw error instanceof ApiError
+            ? workspaceRefusal(error, new Headers(origin?.headers).get("X-Workspace-Id"))
+            : error;
+    }
 }
 
 export function updateWorkspaceIdentity(
@@ -4987,6 +5897,13 @@ export function updateWorkspaceIdentity(
         timezone,
         expectedName,
         expectedTimezone,
+        expectedIdentityVersion,
+    });
+}
+
+export function updateWorkspaceDefaultCurrency(id: number, defaultCurrency: string, expectedIdentityVersion: number) {
+    return patchJson<Types.WorkspaceIdentity>(`/api/workspaces/${id}/default-currency`, {
+        defaultCurrency,
         expectedIdentityVersion,
     });
 }
@@ -5028,8 +5945,19 @@ export function declineWorkspace(id: number) {
     return postJson<void>(`/api/workspaces/${id}/decline`, {});
 }
 
-export function leaveWorkspace(id: number) {
-    return withClientRequestIdentityReset(
+/** The workspace selection after leaving one, and how the standing read that followed settled. */
+export type LeftWorkspaceSelection = Types.WorkspaceSelection & {
+    /** How the standing read settled, or null when the browser was not confined. */
+    standing: PrivilegedMfaSettleOutcome | null;
+};
+
+/**
+ * Leaves a workspace and returns the server's new selection. A confined account may always send it;
+ * once it succeeds, the account's standing is read again so a departure that ended the privilege
+ * also ends confinement before the caller navigates.
+ */
+export async function leaveWorkspace(id: number): Promise<LeftWorkspaceSelection> {
+    const selection = await withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
             () => postWorkspaceSelectionJson<Types.WorkspaceSelection>(`/api/workspaces/${id}/leave`, {}),
             (snapshot) => {
@@ -5041,6 +5969,8 @@ export function leaveWorkspace(id: number) {
         ),
         "workspace",
     );
+    const standing = await settleAfterSafeExit();
+    return { ...selection, standing };
 }
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
@@ -5073,15 +6003,111 @@ export function getActiveWorkspaceMembers(init: RequestInit = {}): Promise<Types
 }
 
 export function addWorkspaceMember(workspaceId: number, email: string, role: Types.WorkspaceRole) {
-    return postJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members`, { email, role });
+    return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/members`, { email, role });
 }
 
-export function updateMemberRole(workspaceId: number, userId: number, role: Types.WorkspaceRole) {
-    return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { role });
+/**
+ * Changes a workspace member's built-in role. Promoting to owner returns an ownership offer the
+ * member must accept (202) and leaves their role unchanged; any other change returns the member. A
+ * `409` {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
+ */
+export function updateMemberRole(
+    workspaceId: number,
+    userId: number,
+    role: Types.WorkspaceRole,
+    acknowledgeConfinement = false,
+) {
+    return patchJson<Types.WorkspaceMember | Types.OwnershipOfferCreated<Types.WorkspaceMember>>(
+        `/api/workspaces/${workspaceId}/members/${userId}`,
+        withConfinementAcknowledgement({ role }, acknowledgeConfinement),
+    );
 }
 
-export function assignMemberCustomRole(workspaceId: number, userId: number, roleId: number) {
-    return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { roleId });
+/** Whether a role-change response is an ownership offer rather than the changed member. */
+export function isOwnershipOfferCreated<T>(value: unknown): value is Types.OwnershipOfferCreated<T> {
+    return typeof value === "object" && value !== null && "outcome" in value && value.outcome === "ownership_offer";
+}
+
+/** Lists the signed-in account's own pending ownership offers. Reachable while confined. */
+export function getMyOwnershipOffers(init: RequestInit = {}) {
+    return getJson<Types.OwnershipOffer[]>("/api/ownership-offers", { cache: "no-store", ...init });
+}
+
+/** Lists a workspace's pending ownership offers. Only the workspace's owners may read them. */
+export function getWorkspaceOwnershipOffers(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.OwnershipOffer[]>(`/api/workspaces/${workspaceId}/ownership-offers`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+/** Lists an organization's pending ownership offers. Only the organization's owners may read them. */
+export function getOrgOwnershipOffers(orgId: number, init: RequestInit = {}) {
+    return getJson<Types.OwnershipOffer[]>(`/api/orgs/${orgId}/ownership-offers`, { cache: "no-store", ...init });
+}
+
+/**
+ * Accepts an ownership offer. Acceptance needs recent passkey authentication, which the shared
+ * request path obtains. When accepting would confine the account until another owner approves its
+ * passkey, the server answers 409 `PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED`; the caller
+ * explains that and retries with `acknowledgeConfinement`. Ownership can newly confine the account:
+ * the standing the acceptance reports confines the browser at once, and the full standing is then
+ * read again, so a failed read still leaves a newly confined owner confined.
+ */
+export async function acceptOwnershipOffer(offerId: string, acknowledgeConfinement = false) {
+    const acceptance = await postJson<Types.OwnershipOfferAcceptance>(
+        `/api/ownership-offers/${encodeURIComponent(offerId)}/accept`,
+        acknowledgeConfinement ? { acknowledgeConfinement: true } : {},
+    );
+    if (typeof window !== "undefined") {
+        if (acceptance.enforcedStanding === "ENROLLMENT_REQUIRED") notePrivilegedMfaRefusal("enrollment");
+        if (acceptance.enforcedStanding === "ATTESTATION_REQUIRED") notePrivilegedMfaRefusal("attestation");
+    }
+    await settlePrivilegedMfaStanding("check");
+    return acceptance;
+}
+
+/** Declines an ownership offer. Reachable while confined, because declining grants nothing. */
+export function declineOwnershipOffer(offerId: string) {
+    return postJson<void>(`/api/ownership-offers/${encodeURIComponent(offerId)}/decline`);
+}
+
+/** Withdraws a pending workspace ownership offer. Any current owner of the workspace may. */
+export function revokeWorkspaceOwnershipOffer(workspaceId: number, offerId: string) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/ownership-offers/${encodeURIComponent(offerId)}`);
+}
+
+/** Withdraws a pending organization ownership offer. Any current owner of the organization may. */
+export function revokeOrgOwnershipOffer(orgId: number, offerId: string) {
+    return deleteJson<void>(`/api/orgs/${orgId}/ownership-offers/${encodeURIComponent(offerId)}`);
+}
+
+/**
+ * Assigns a workspace member a custom role. A `409`
+ * {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
+ */
+export function assignMemberCustomRole(
+    workspaceId: number,
+    userId: number,
+    roleId: number,
+    acknowledgeConfinement = false,
+) {
+    return patchJson<Types.WorkspaceMember>(
+        `/api/workspaces/${workspaceId}/members/${userId}`,
+        withConfinementAcknowledgement({ roleId }, acknowledgeConfinement),
+    );
+}
+
+/** Creates a passkey approval code for a workspace member, replacing any open one (#1534). */
+export function issueWorkspaceMfaAttestation(workspaceId: number, userId: number) {
+    return postJson<Types.MfaAttestationCode>(
+        `/api/workspaces/${workspaceId}/members/${userId}/mfa-attestations`,
+    );
+}
+
+/** Turns off a workspace member's open passkey approval code, if there is one (#1534). */
+export function revokeWorkspaceMfaAttestation(workspaceId: number, userId: number) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/members/${userId}/mfa-attestations`);
 }
 
 export function getWorkspaceRoles(workspaceId: number, init: RequestInit = {}) {
@@ -5092,12 +6118,30 @@ export function getBuiltInRoles(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.CustomRole[]>(`/api/workspaces/${workspaceId}/roles/built-in`, { cache: "no-store", ...init });
 }
 
+/** Changes only export access for one built-in workspace role. */
+export function updateBuiltInRoleExportPermission(workspaceId: number, role: string, enabled: boolean) {
+    return putJson<Types.CustomRole[]>(`/api/workspaces/${workspaceId}/roles/built-in/${role}/export-permission`, { enabled });
+}
+
 export function createWorkspaceRole(workspaceId: number, name: string, permissions: string[]) {
     return postJson<Types.CustomRole>(`/api/workspaces/${workspaceId}/roles`, { name, permissions });
 }
 
-export function updateWorkspaceRole(workspaceId: number, roleId: number, name: string, permissions: string[]) {
-    return putJson<Types.CustomRole>(`/api/workspaces/${workspaceId}/roles/${roleId}`, { name, permissions });
+/**
+ * Updates a custom role. Granting management permissions can make its assignees privileged, so a
+ * `409` {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
+ */
+export function updateWorkspaceRole(
+    workspaceId: number,
+    roleId: number,
+    name: string,
+    permissions: string[],
+    acknowledgeConfinement = false,
+) {
+    return putJson<Types.CustomRole>(
+        `/api/workspaces/${workspaceId}/roles/${roleId}`,
+        withConfinementAcknowledgement({ name, permissions }, acknowledgeConfinement),
+    );
 }
 
 export function deleteWorkspaceRole(workspaceId: number, roleId: number) {
@@ -5452,8 +6496,9 @@ export function updateEntityCustomFields(
     entityType: Types.CustomFieldEntityType,
     id: number,
     values: Record<number, unknown>,
+    init: RequestInit = {},
 ) {
-    return putJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { values });
+    return putJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { values }, init);
 }
 
 export function updateEntityCustomField(
@@ -5698,7 +6743,10 @@ export function saveAiWorkspaceGovernance(
         `/api/ai/governance?workspaceId=${workspaceId}`,
         governance,
         init,
-    );
+    ).then((result) => {
+        publishAiAvailabilityChange();
+        return result;
+    });
 }
 
 export function getAiChatInvitations(
@@ -5790,10 +6838,18 @@ export async function uploadAiChatAttachment(
     init: RequestInit = {},
 ): Promise<Types.AiChatAttachment> {
     const path = `/api/ai/assistant/sessions/${sessionId}/attachments`;
-    const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
+    const workspaceId = requestWorkspaceId(path, true);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
+    const pendingLocale = requestLocale(init);
+    const locale = typeof pendingLocale === "string" ? pendingLocale : await pendingLocale;
     const send = async (forceRefresh: boolean): Promise<Response> => {
         const csrf = await csrfHeader(forceRefresh);
+        const headers = new Headers({
+            'Accept-Language': locale,
+            ...(pinnedWorkspace ? { 'X-Workspace-Id': pinnedWorkspace } : {}),
+            ...csrf,
+        });
+        new Headers(init.headers).forEach((value, name) => headers.set(name, value));
         const formData = new FormData();
         formData.append('file', file);
         return new Promise<Response>((resolve, reject) => {
@@ -5801,10 +6857,7 @@ export async function uploadAiChatAttachment(
             const abort = () => request.abort();
             request.open('POST', `${API_BASE}${path}`);
             request.withCredentials = true;
-            request.setRequestHeader('Accept-Language', locale);
-            if (workspaceId) request.setRequestHeader('X-Workspace-Id', workspaceId);
-            Object.entries(csrf).forEach(([name, value]) => request.setRequestHeader(name, value));
-            new Headers(init.headers).forEach((value, name) => request.setRequestHeader(name, value));
+            headers.forEach((value, name) => request.setRequestHeader(name, value));
             request.upload.addEventListener('progress', (event) => {
                 if (!event.lengthComputable || event.total <= 0) return;
                 onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
@@ -5836,7 +6889,9 @@ export async function uploadAiChatAttachment(
     if (await shouldRetryWithFreshCsrf(path, response, true)) {
         response = await send(true);
     }
-    if (!response.ok) throw await getAuthenticatedApiError(response);
+    if (!response.ok) {
+        throw refusalFor(await getAuthenticatedApiError(response), path, true, pinnedWorkspace);
+    }
     const text = await response.text();
     if (!text) throw new TypeError('Assistant attachment response was empty');
     const attachment: unknown = JSON.parse(text);
@@ -5940,17 +6995,27 @@ export function previewAiChatScope(
     );
 }
 
+/**
+ * Starts one assistant turn. The workspace the turn is sent to is fixed when this is called, before
+ * the request identity is resolved, and a workspace transition during that wait abandons the turn,
+ * so a question asked in one workspace is never sent into another (#1732).
+ * @param sessionId the chat the turn belongs to
+ * @param payload the question and its context
+ * @param init request options; a caller that captured the workspace earlier pins it here
+ */
 export async function startAiChatTurn(
     sessionId: number,
     payload: Types.AiChatTurnCreateRequest,
+    init: RequestInit = {},
 ): Promise<Types.AiChatTurnAccepted> {
     const path = `/api/ai/assistant/sessions/${sessionId}/turns`;
+    const pinned = pinWriteNow(path, init);
     if (typeof window === 'undefined') {
-        return postJson<Types.AiChatTurnAccepted>(path, payload);
+        return postJson<Types.AiChatTurnAccepted>(path, payload, pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
-        return postJson<Types.AiChatTurnAccepted>(path, payload);
+        return postJson<Types.AiChatTurnAccepted>(path, payload, pinned);
     }
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightAssistantTurns.get(key);
@@ -5958,7 +7023,8 @@ export async function startAiChatTurn(
     const controller = new AbortController();
     const request = (async () => {
         const response = await postJson<Types.AiChatTurnAccepted>(path, payload, {
-            signal: controller.signal,
+            ...pinned,
+            signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
         });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error('AI request identity changed before turn acceptance');
@@ -5995,6 +7061,35 @@ export function cancelAiChatTurn(
         {},
         init,
     );
+}
+
+/** Creates one bounded mission with a caller-stable idempotency key. */
+export function createAiAgentRun(sessionId: number, payload: Types.AiAgentRunCreateRequest, init: RequestInit = {}) {
+    return postJson<Types.AiAgentRun>(`/api/ai/assistant/sessions/${sessionId}/missions`, payload, init);
+}
+
+export function getAiAgentRuns(
+    params: { limit?: number; sessionId?: number; state?: Types.AiAgentRunState; cursor?: string } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.AiAgentRunPage>(`/api/ai/assistant/missions${buildQuery(params)}`, { cache: 'no-store', ...init });
+}
+
+export function getAiAgentRun(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiAgentRun>(`/api/ai/assistant/missions/${id}`, { cache: 'no-store', ...init });
+}
+
+export function getAiAgentOutput(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiAgentOutput>(`/api/ai/assistant/missions/${id}/output`, { cache: 'no-store', ...init });
+}
+
+export function controlAiAgentRun(
+    id: number,
+    action: Types.AiAgentRunControl,
+    expectedStateVersion: string,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAgentRun>(`/api/ai/assistant/missions/${id}/${action}`, { expectedStateVersion }, init);
 }
 
 export function getAiAssistantToolCalls(
@@ -6065,6 +7160,17 @@ export function getAiGenerationStatus<T>(handle: string, init: RequestInit = {})
     );
 }
 
+/** Reads one exact mission member under current requester and source authorization. */
+export function getAiAgentProposal(id: number, actionSlot: string, init: RequestInit = {}) {
+    return getJson<Types.AiAgentProposalItem>(`/api/ai/assistant/missions/${id}/proposals/${encodeURIComponent(actionSlot)}`, { cache: 'no-store', ...init });
+}
+
+/** Pins the rendered workspace before the shared JSON helper awaits identity or CSRF. */
+export function decideAiAgentProposals(id: number, payload: Types.AiAgentProposalDecisionRequest, init: RequestInit = {}) {
+    const path = `/api/ai/assistant/missions/${id}/proposal-decisions`;
+    return postJson<Types.AiAgentProposalDecisionResult>(path, payload, pinWriteNow(path, init));
+}
+
 /**
  * SSR-safe fetch of the current user's dashboard layout, forwarding the request cookie.
  * Returns `null` on any failure or missing cookie so the caller falls back to the default layout.
@@ -6080,8 +7186,8 @@ export async function getDashboardLayoutFromCookie(
     }
 }
 
-export function saveDashboardLayout(layout: Types.DashboardLayout) {
-    return putJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { layout });
+export function saveDashboardLayout(layout: Types.DashboardLayout, init: RequestInit = {}) {
+    return putJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { layout }, init);
 }
 
 export function resetDashboardLayout(init: RequestInit = {}) {
@@ -6123,8 +7229,11 @@ export function getReportComposerAvailabilityResultFromCookie(cookie: string | n
 }
 
 export function previewReportComposer(prompt: string) {
-    return withReportRequestIdentity((signal) =>
-        postJson<Types.ReportComposerPreview>(`/api/reports/composer/preview`, { prompt }, { signal }));
+    const path = `/api/reports/composer/preview`;
+    return withReportRequestIdentity(
+        (init) => postJson<Types.ReportComposerPreview>(path, { prompt }, init),
+        pinWriteNow(path),
+    );
 }
 
 export function createReport(payload: Types.ReportDefinitionInput) {
@@ -6162,7 +7271,7 @@ export function getReportSchedule(
     init: RequestInit = {},
 ): Promise<Types.ReportSchedule | null> {
     if (Object.keys(init).length > 0) return requestReportSchedule(reportId, init);
-    return withReportRequestIdentity((signal) => requestReportSchedule(reportId, { signal }));
+    return withReportRequestIdentity((requestInit) => requestReportSchedule(reportId, requestInit));
 }
 
 export function getReportScheduleFromCookie(reportId: number, cookie: string | null) {
@@ -6175,17 +7284,18 @@ export function saveReportSchedule(
     body: Types.ReportScheduleRequest,
     scheduleExists: boolean,
 ) {
-    return withReportRequestIdentity((signal) => {
-        const path = `/api/reports/${reportId}/schedule`;
-        return scheduleExists
-            ? putJson<Types.ReportSchedule>(path, body, { signal })
-            : postJson<Types.ReportSchedule>(path, body, { signal });
-    });
+    const path = `/api/reports/${reportId}/schedule`;
+    return withReportRequestIdentity(
+        (init) => scheduleExists
+            ? putJson<Types.ReportSchedule>(path, body, init)
+            : postJson<Types.ReportSchedule>(path, body, init),
+        pinWriteNow(path),
+    );
 }
 
 export function deleteReportSchedule(reportId: number) {
-    return withReportRequestIdentity((signal) =>
-        deleteJson<void>(`/api/reports/${reportId}/schedule`, { signal }));
+    const path = `/api/reports/${reportId}/schedule`;
+    return withReportRequestIdentity((init) => deleteJson<void>(path, init), pinWriteNow(path));
 }
 
 export function getGoals(init: RequestInit = {}) {
@@ -6217,14 +7327,15 @@ export async function generateReport(
     payload: Types.ReportGenerateInput = {},
     mode: Types.ReportNarrativeMode = "cached",
 ) {
+    const path = `/api/reports/${id}/generate?narrative=${mode}`;
+    const pinned = pinWriteNow(path);
     if (typeof window === "undefined") {
-        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate?narrative=${mode}`, payload);
+        return postJson<Types.ReportDocument>(path, payload, pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
-    const path = `/api/reports/${id}/generate?narrative=${mode}`;
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightReportGenerations.get(key);
     if (existing) {
@@ -6232,7 +7343,7 @@ export async function generateReport(
     }
     const controller = new AbortController();
     const request = (async () => {
-        const response = await postJson<Types.ReportDocument>(path, payload, { signal: controller.signal });
+        const response = await postJson<Types.ReportDocument>(path, payload, { ...pinned, signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error("AI request identity changed before completion");
         }
@@ -6251,8 +7362,11 @@ export function getReportSnapshots(id: number, init: RequestInit = {}) {
 }
 
 export function createReportSnapshot(id: number, payload: Types.ReportGenerateInput = {}) {
-    return withReportRequestIdentity((signal) =>
-        postJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots`, payload, { signal }));
+    const path = `/api/reports/${id}/snapshots`;
+    return withReportRequestIdentity(
+        (init) => postJson<Types.ReportSnapshot>(path, payload, init),
+        pinWriteNow(path),
+    );
 }
 
 export function getReportSnapshot(id: number, snapshotId: number, init: RequestInit = {}) {
@@ -6262,30 +7376,40 @@ export function getReportSnapshot(id: number, snapshotId: number, init: RequestI
             ...init,
         });
     }
-    return withReportRequestIdentity((signal) =>
+    return withReportRequestIdentity((requestInit) =>
         getJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots/${snapshotId}`, {
             cache: "no-store",
-            signal,
+            ...requestInit,
         }));
 }
 
 export function deleteReportSnapshot(id: number, snapshotId: number) {
-    return withReportRequestIdentity((signal) =>
-        deleteJson<void>(`/api/reports/${id}/snapshots/${snapshotId}`, { signal }));
+    const path = `/api/reports/${id}/snapshots/${snapshotId}`;
+    return withReportRequestIdentity((init) => deleteJson<void>(path, init), pinWriteNow(path));
 }
 
-async function withReportRequestIdentity<T>(request: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+/**
+ * Runs a report request under a proven request identity and aborts it on an identity change. A
+ * write passes the options {@link pinWriteNow} fixed before this was called, because the identity is
+ * resolved first and a workspace switch during that wait must not move the write (#1732).
+ * @param request the request, given the options to send with
+ * @param pinned options fixed when the request was made, such as its workspace pin
+ */
+async function withReportRequestIdentity<T>(
+    request: (init: RequestInit) => Promise<T>,
+    pinned: RequestInit = {},
+): Promise<T> {
     if (typeof window === "undefined") {
-        return request();
+        return request(pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
     const controller = new AbortController();
     inFlightReportRequests.add(controller);
     try {
-        const result = await request(controller.signal);
+        const result = await request({ ...pinned, signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error("Report request identity changed before completion");
         }
@@ -6307,21 +7431,25 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
-    return withReportRequestIdentity(async (signal) => {
-        const locale = localeFromCookieHeader(document.cookie);
-        const workspaceId = clientWorkspaceId();
-        const mutating = isMutating(init.method);
-        const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
-                ...init,
-                signal,
-                credentials: "include",
-                headers: {
-                    "Accept-Language": locale,
-                    ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-                    ...csrf,
-                    ...init.headers,
-                },
+    const mutating = isMutating(init.method);
+    const pinnedInit = mutating ? pinWriteNow(path, init) : init;
+    return withReportRequestIdentity(async (requestInit) => {
+        const locale = browserApiLocale();
+        const workspaceId = requestWorkspaceId(path, mutating);
+        const pinnedWorkspace = outgoingWorkspaceId(requestInit, workspaceId);
+        const send = (csrf: Record<string, string>) => {
+            const headers = new Headers({
+                "Accept-Language": locale,
+                ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+                ...csrf,
             });
+            new Headers(requestInit.headers).forEach((value, key) => headers.set(key, value));
+            return fetch(`${API_BASE}${path}`, {
+                ...requestInit,
+                credentials: "include",
+                headers,
+            });
+        };
         let res = await send(mutating ? await csrfHeader() : {});
         if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
             res = await send(await csrfHeader(true));
@@ -6331,10 +7459,10 @@ async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
             res = await send(mutating ? await csrfHeader() : {});
         }
         if (!res.ok) {
-            throw await getAuthenticatedApiError(res);
+            throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
         }
         return res.blob();
-    });
+    }, pinnedInit);
 }
 
 export async function exportReportCsv(
@@ -6353,8 +7481,26 @@ export async function exportReportCsv(
 }
 
 export async function exportReportSnapshotCsv(id: number, snapshotId: number): Promise<void> {
-    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, {});
+    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, { method: "POST" });
     downloadBlob(blob, `report-${id}-snapshot-${snapshotId}.csv`);
+}
+
+/** Assembles a PNG, records authorized release, then downloads it under the original request identity. */
+export async function exportReportPng(
+    id: number,
+    prepare: () => Promise<Blob>,
+    filename = `report-${id}.png`,
+): Promise<void> {
+    const path = `/api/reports/${id}/export-completion`;
+    const pinned = pinWriteNow(path);
+    const blob = await withReportRequestIdentity(async (init) => {
+        const image = await prepare();
+        init.signal?.throwIfAborted();
+        await postJson<void>(path, { format: "png" }, init);
+        init.signal?.throwIfAborted();
+        return image;
+    }, pinned);
+    downloadBlob(blob, filename);
 }
 
 /*
@@ -6397,7 +7543,7 @@ export function createWorkspaceInvite(workspaceId: number, email: string, role: 
     return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/invites`, { email, role });
 }
 
-export function revokeWorkspaceInvite(workspaceId: number, inviteId: number) {
+export function revokeWorkspaceInvite(workspaceId: number, inviteId: string) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/invites/${inviteId}`);
 }
 
@@ -6785,6 +7931,11 @@ export function setPersonConsent(personId: number, payload: Types.ContactChannel
 
 export function getSuppressions(init: RequestInit = {}) {
     return getJson<Types.SuppressionEntry[]>(`/api/suppressions`, init);
+}
+
+/** Reads one bounded page of this contact's matching restrictions, without operator metadata. */
+export function getPersonSuppressions(personId: number, afterId = 0, init: RequestInit = {}) {
+    return getJson<Types.ContactSuppressionPage>(`/api/suppressions/persons/${personId}?afterId=${afterId}`, init);
 }
 
 export function getSuppressionsFromCookie(cookie: string | null) {

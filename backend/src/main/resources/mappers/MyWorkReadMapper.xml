@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.MyWorkReadMapper">
+  <!-- Nested includes resolve in the importing namespace, so forward the shared activity vocabulary. -->
+  <sql id="activityInteractionType">
+    <include refid="ooo.klae.connex.backend.mappers.PersonMapper.activityInteractionType"/>
+  </sql>
+  <sql id="activityBaseWeight">
+    <include refid="ooo.klae.connex.backend.mappers.PersonMapper.activityBaseWeight"/>
+  </sql>
+
+  <select id="recentTasks" timeout="10" resultMap="ooo.klae.connex.backend.mappers.TaskMapper.TaskResult">
+    SELECT <include refid="ooo.klae.connex.backend.mappers.TaskMapper.taskColumns"/>
+    FROM task WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{userId}
+    ORDER BY COALESCE(updated_at, created_at) DESC, id DESC LIMIT 25
+  </select>
+
+  <select id="recentActivities" timeout="10" resultMap="ooo.klae.connex.backend.mappers.ActivityMapper.ActivityResult">
+    SELECT <include refid="ooo.klae.connex.backend.mappers.ActivityMapper.activityColumns"/>
+    FROM activity WHERE workspace_id = #{workspaceId} AND created_by_id = #{userId}
+    ORDER BY timestamp DESC, id DESC LIMIT 25
+  </select>
+
+  <select id="activityPulse" timeout="10" resultType="ooo.klae.connex.backend.dto.NoteActivityDayDto">
+    SELECT DATE(touched_at) AS date, COUNT(*) AS count FROM (
+      SELECT timestamp AS touched_at FROM activity
+      WHERE workspace_id = #{workspaceId} AND created_by_id = #{userId}
+        AND timestamp &gt;= #{from} AND timestamp &lt; #{to}
+      UNION ALL
+      SELECT updated_at AS touched_at FROM task
+      WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{userId} AND completed = TRUE
+        AND updated_at &gt;= #{from} AND updated_at &lt; #{to}
+    ) touches GROUP BY DATE(touched_at) ORDER BY date
+  </select>
+
+  <sql id="personalScores">
+    WITH personal AS (
+      SELECT p.id FROM person p
+      WHERE (p.workspace_id = #{workspaceId}
+        OR EXISTS (SELECT 1 FROM person_share ps
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = p.workspace_id
+          WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+        AND p.owner_id = #{userId}
+        AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
+    ), scores AS (
+      SELECT p.id,
+        COALESCE(SUM(touch.weight * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0) AS raw_weight,
+        COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays} THEN touch.weight ELSE 0 END), 0) AS recent_weight,
+        COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+          AND touch.age_days &lt;= #{model.priorWindowDays} THEN touch.weight ELSE 0 END), 0) AS prior_weight,
+        MAX(touch.touched_at) AS last_touch_at
+      FROM personal p LEFT JOIN (
+        SELECT source.entity_id, source.touched_at, source.weight,
+          TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference}) / #{model.microsecondsPerDay} AS age_days
+        FROM (<include refid="ooo.klae.connex.backend.mappers.PersonMapper.relationshipTouchSources"/>) source
+        JOIN personal owned ON owned.id = source.entity_id
+        WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+      ) touch ON touch.entity_id = p.id GROUP BY p.id
+    ), classified AS (
+      SELECT scores.*,
+        CASE WHEN raw_weight &gt;= #{model.hotMinimumRawWeight} THEN 'hot'
+          WHEN raw_weight &gt;= #{model.warmMinimumRawWeight} THEN 'warm'
+          WHEN raw_weight &gt;= #{model.coolMinimumRawWeight} THEN 'cool' ELSE 'cold' END AS band,
+        (prior_weight &gt;= #{model.coolingPriorMinimum}
+          AND recent_weight &lt; prior_weight * #{model.coolingRecentRatio}
+          AND TIMESTAMPDIFF(DAY, last_touch_at, #{reference}) &gt;= #{model.recentWindowDays}) AS cooling
+      FROM scores
+    )
+  </sql>
+
+  <select id="relationshipCounts" timeout="10" resultType="ooo.klae.connex.backend.dto.MyWorkRelationshipsDto$Counts">
+    <include refid="personalScores"/>
+    SELECT COALESCE(SUM(band = 'hot'), 0) AS hot, COALESCE(SUM(band = 'warm'), 0) AS warm,
+      COALESCE(SUM(band = 'cool'), 0) AS cool, COALESCE(SUM(band = 'cold'), 0) AS cold,
+      COALESCE(SUM(cooling), 0) AS cooling FROM classified
+  </select>
+
+  <select id="relationshipIds" timeout="10" resultType="int">
+    <include refid="personalScores"/>
+    SELECT id FROM classified
+    <choose>
+      <when test="coolingOnly">
+        WHERE cooling = TRUE
+        ORDER BY raw_weight &lt;= #{model.coldRawWeight}, raw_weight, id
+      </when>
+      <otherwise>ORDER BY raw_weight DESC, id</otherwise>
+    </choose>
+    LIMIT #{limit}
+  </select>
+</mapper>

@@ -23,6 +23,7 @@ public class WorkflowTraversalService {
 
     private static final int MAX_STEPS = 50;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final WorkflowRunMapper workflowRunMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
     private final WorkflowDraftCanonicalizer canonicalizer;
@@ -33,6 +34,11 @@ public class WorkflowTraversalService {
     private final WorkflowRunFailureService failureService;
 
     public WorkflowResumeResult resume(WorkflowRunResumeCommand command) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            command.workspaceId(), () -> resumeWithinScope(command));
+    }
+
+    private WorkflowResumeResult resumeWithinScope(WorkflowRunResumeCommand command) {
         WorkflowRun initial = workflowRunMapper.getByIdInWorkspace(
             command.workspaceId(), command.runId());
         if (initial == null) {
@@ -125,6 +131,12 @@ public class WorkflowTraversalService {
             long runId,
             String leaseOwner,
             int stepBudget) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> resumeClaimedWithinScope(workspaceId, runId, leaseOwner, stepBudget));
+    }
+
+    private WorkflowResumeResult resumeClaimedWithinScope(
+            int workspaceId, long runId, String leaseOwner, int stepBudget) {
         WorkflowRun initial = workflowRunMapper.getByIdInWorkspace(workspaceId, runId);
         if (initial == null || !"running".equals(initial.getStatus())) {
             return initial == null

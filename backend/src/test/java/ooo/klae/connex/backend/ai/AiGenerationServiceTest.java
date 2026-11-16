@@ -137,6 +137,30 @@ class AiGenerationServiceTest {
         assertEquals("ready", resolved.result().asString());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"snapshot", "missing"})
+    void snapshotRefusalRemainsTheWorkerFailureAfterGenerationSettlement(String kind) throws Exception {
+        var refusal = kind.equals("missing")
+                ? new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload")
+                : new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+        CountDownLatch release = new CountDownLatch(1);
+        var accepted = service.start(AiFeature.DEAL_BRIEF, "deal-scope", Set.of(Permission.AI_USE),
+                "unavailable", () -> {
+                    await(release);
+                    throw refusal;
+                });
+        var states = (java.util.Map<?, ?>) org.springframework.test.util.ReflectionTestUtils.getField(service, "generations");
+        var state = states.get(accepted.handle());
+        var future = (java.util.concurrent.Future<?>) org.springframework.test.util.ReflectionTestUtils.getField(state, "future");
+        release.countDown();
+
+        var failure = assertThrows(ExecutionException.class, () -> future.get(2, TimeUnit.SECONDS));
+
+        org.junit.jupiter.api.Assertions.assertSame(refusal, failure.getCause());
+        assertEquals("failed", service.status(accepted.handle()).status());
+        assertEquals("generation_failed", service.status(accepted.handle()).reason());
+    }
+
     @Test
     void providerFailureIsSurfacedAsFailed() {
         AiGenerationStatusDto accepted = service.start(

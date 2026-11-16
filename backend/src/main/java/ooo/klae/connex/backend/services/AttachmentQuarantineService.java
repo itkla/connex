@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
@@ -64,6 +65,9 @@ public class AttachmentQuarantineService {
     @RequirePermission(Permission.ATTACHMENT_QUARANTINE_MANAGE)
     public void delete(int id) {
         LockedAttachment locked = lock(id);
+        if ("ai_chat_session".equals(locked.attachment().getEntityType())) {
+            throw new ConflictException("assistant_privacy_cleanup_required");
+        }
         if ("clean".equals(locked.attachment().getScanState())) {
             throw new BadRequestException("Attachment must be quarantined before deletion");
         }

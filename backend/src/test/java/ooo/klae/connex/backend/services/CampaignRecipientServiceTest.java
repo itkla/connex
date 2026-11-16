@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
-import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.CampaignAudienceSnapshot;
@@ -34,16 +34,17 @@ import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
-import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /** Recipient lists behind campaign engagement counters: filters, gating, and isolation. */
 class CampaignRecipientServiceTest extends AbstractServiceTest {
+    private static final long AUDIENCE_LEASE_MICROS = 48_000_000L;
 
     @Autowired private CampaignRecipientService recipientService;
     @Autowired private CampaignMapper campaignMapper;
     @Autowired private CampaignMessageMapper campaignMessageMapper;
     @Autowired private CampaignSendMapper campaignSendMapper;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private CampaignTriggeredSendService triggeredSendService;
     @Autowired private ContactMarketingService contactMarketingService;
     @Autowired private RoleMapper roleMapper;
@@ -56,7 +57,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         CampaignDelivery delivery = newDelivery(send, person, "dispatched", null);
 
         PageResponse<CampaignRecipientDto> page =
-                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0);
+                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0, false);
 
         assertEquals(1, page.total());
         CampaignRecipientDto row = page.items().getFirst();
@@ -77,7 +78,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newDelivery(send, newPerson(newCompany()), "skipped", "suppressed");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, List.of("dispatched"), null, 25, 0);
+                campaign.getId(), null, List.of("dispatched"), null, 25, 0, false);
 
         assertEquals(1, page.total());
         assertEquals(dispatched.getId(), page.items().getFirst().deliveryId());
@@ -90,7 +91,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newDelivery(send, newPerson(newCompany()), "skipped", "suppressed");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, List.of("skipped"), null, 25, 0);
+                campaign.getId(), null, List.of("skipped"), null, 25, 0, false);
 
         assertEquals("suppressed", page.items().getFirst().skipReason());
     }
@@ -100,7 +101,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         Campaign campaign = newCampaign();
         CampaignSend send = newSend(campaign);
         CampaignDelivery delivery = newDelivery(send, newPerson(newCompany()), "pending", null);
-        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId(), AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markAmbiguous(
                 workspace.getId(),
                 delivery.getId(),
@@ -108,7 +109,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
                 "deadline_ambiguous");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, List.of("failed"), null, 25, 0);
+                campaign.getId(), null, List.of("failed"), null, 25, 0, false);
 
         CampaignRecipientDto row = page.items().getFirst();
         assertTrue(row.reconciliationRequired());
@@ -121,7 +122,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         CampaignSend send = newSend(campaign);
         CampaignDelivery delivery = newDelivery(
                 send, newPerson(newCompany()), "pending", null);
-        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId(), AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markAmbiguous(
                 workspace.getId(), delivery.getId(),
                 "AMBIGUOUS: provider result unknown", "relay_error");
@@ -142,7 +143,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         Campaign campaign = newCampaign();
         CampaignSend send = newSend(campaign);
         CampaignDelivery delivery = newDelivery(send, newPerson(newCompany()), "pending", null);
-        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId(), AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markAmbiguous(
                 workspace.getId(), delivery.getId(),
                 "AMBIGUOUS: provider result unknown", "relay_error");
@@ -167,7 +168,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newEvent(unsubscribed, "unsubscribed");
 
         PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
-                campaign.getId(), null, null, "unsubscribed", 25, 0);
+                campaign.getId(), null, null, "unsubscribed", 25, 0, false);
 
         assertEquals(1, page.total());
         assertEquals(unsubscribed.getId(), page.items().getFirst().deliveryId());
@@ -177,7 +178,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
     void unknownEventIsRejected() {
         Campaign campaign = newCampaign();
         assertThrows(BadRequestException.class, () -> recipientService.getRecipients(
-                campaign.getId(), null, null, "opened", 25, 0));
+                campaign.getId(), null, null, "opened", 25, 0, false));
     }
 
     @Test
@@ -186,7 +187,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         Campaign other = newCampaign();
         CampaignSend send = newSend(other);
         assertThrows(ResourceNotFoundException.class, () -> recipientService.getRecipients(
-                campaign.getId(), send.getId(), null, null, 25, 0));
+                campaign.getId(), send.getId(), null, null, 25, 0, false));
     }
 
     @Test
@@ -197,7 +198,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, workspace.getId());
 
         assertThrows(ForbiddenException.class, () -> recipientService.getRecipients(
-                campaign.getId(), null, null, null, 25, 0));
+                campaign.getId(), null, null, null, 25, 0, false));
     }
 
     @Test
@@ -210,7 +211,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, sibling.getId());
 
         assertThrows(ResourceNotFoundException.class, () -> recipientService.getRecipients(
-                campaign.getId(), null, null, null, 25, 0));
+                campaign.getId(), null, null, null, 25, 0, false));
     }
 
     @Test
@@ -220,7 +221,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         newDelivery(send, null, "dispatched", null);
 
         PageResponse<CampaignRecipientDto> page =
-                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0);
+                recipientService.getRecipients(campaign.getId(), null, null, null, 25, 0, false);
 
         assertEquals(1, page.total());
         assertNull(page.items().getFirst().personId());
@@ -350,13 +351,13 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         delivery.setPersonId(person == null ? null : person.getId());
         delivery.setAddress(person == null ? unique() + "@example.com" : person.getEmail());
         delivery.setStatus("pending");
-        delivery.setUnsubscribeToken(
-                UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", ""));
         campaignDeliveryMapper.insertDeliveries(workspace.getId(), List.of(delivery));
-        CampaignDelivery stored = campaignDeliveryMapper.getByTokenHash(
-                OneTimeTokenDigest.sha256(delivery.getUnsubscribeToken()));
+        int deliveryId = jdbcTemplate.queryForObject(
+                "SELECT MAX(id) FROM campaign_delivery WHERE workspace_id = ? AND send_id = ? AND person_id <=> ?",
+                Integer.class, workspace.getId(), send.getId(), delivery.getPersonId());
+        CampaignDelivery stored = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
         if (!"pending".equals(status)) {
-            campaignDeliveryMapper.claim(workspace.getId(), stored.getId());
+            campaignDeliveryMapper.claim(workspace.getId(), stored.getId(), AUDIENCE_LEASE_MICROS);
             if ("skipped".equals(status)) {
                 campaignDeliveryMapper.markSkipped(workspace.getId(), stored.getId(), skipReason);
             } else if ("failed".equals(status)) {

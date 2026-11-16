@@ -24,6 +24,9 @@ export const ACTIVITY_URL_KEY = 'activity';
 /** URL query key that deep-links one record comment, read by the record comments section. */
 export const COMMENT_URL_KEY = 'comment';
 
+/** URL query key that opens an authorized notification in its workspace. */
+export const NOTIFICATION_OPEN_URL_KEY = 'open';
+
 /** URL query key that opens one pipeline in the pipelines browser's edit sheet. */
 export const PIPELINE_EDIT_URL_KEY = 'edit';
 
@@ -35,6 +38,7 @@ export const PIPELINE_EDIT_URL_KEY = 'edit';
  * fail loudly when a producer and its consumer drift apart (#1338).
  */
 export const DEEP_LINK_URL_KEYS = {
+    notification: NOTIFICATION_OPEN_URL_KEY,
     task: TASK_URL_KEY,
     note: NOTE_URL_KEY,
     activity: ACTIVITY_URL_KEY,
@@ -65,6 +69,14 @@ export function listStateAddress(pathname: string, search: string): string {
 }
 
 /**
+ * Native traversal changes location before React unmounts the outgoing list. Its pending effects
+ * must not replace the destination entry with a URL assembled from the list's captured pathname.
+ */
+export function isCurrentListPath(pathname: string): boolean {
+    return window.location.pathname === pathname;
+}
+
+/**
  * Reflects the active saved-view pointer into the URL via shallow `history.replaceState`, following the
  * same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
  * `window.location.search` and only ever set/deletes its own {@link SAVED_VIEW_URL_KEY}, so the
@@ -75,12 +87,53 @@ export function listStateAddress(pathname: string, search: string): string {
  * @param sv - the `<workspaceId>:<id>` pointer, or null to remove it
  */
 export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     if (sv) params.set(SAVED_VIEW_URL_KEY, sv);
     else params.delete(SAVED_VIEW_URL_KEY);
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
     window.history.replaceState(null, '', listStateAddress(pathname, next));
+}
+
+/**
+ * The `history.state` an owned-params write hands `replaceState`, chosen so the write keeps the app's
+ * own marker on the entry, keeps the entry owned by the app router, and lets the router hear the write.
+ *
+ * Next's app router installs a patched `history.replaceState` from its root mount effect. The patch
+ * hands a call straight to the native method whenever the state it is given already carries `__NA` or
+ * `_N`, on the assumption that the router made the call itself; only otherwise does it copy `__NA` and
+ * the internals tree onto the state and dispatch the `ACTION_RESTORE` that moves the router's
+ * `canonicalUrl` to the written URL. A stale `canonicalUrl` is what `useSearchParams` keeps reading and
+ * what the next router action — the refresh behind an app-shell error boundary's retry among them —
+ * writes back over the address bar, erasing the param (#1781). So once the patch is installed the
+ * writer hands it a copy of the state without those markers: the patch puts `__NA` back before the
+ * native write, and the restore commits with `preserveCustomHistoryState`, so a record-return marker
+ * stamped on the entry survives both writes.
+ *
+ * Before the patch is installed — a write from a mount effect in the hydration commit, which React
+ * runs ahead of `AppRouter`'s own — the call reaches the native method directly, which would write the
+ * copy through and drop `__NA`, leaving an entry a later back navigation cannot restore. There the
+ * state is carried through untouched. The router does not hear that write, but a mount effect can
+ * only canonicalize the deep link the page hydrated from, which the router already holds in an
+ * equivalent form: the next owned write brings `canonicalUrl` back in step, and a refresh before it
+ * republishes nothing but that equivalent deep link.
+ *
+ * The patch is an own property assigned on `window.history`, while the native method is inherited
+ * from `History.prototype`; `test/unit/listStateUrl.test.ts` pins both facts against the installed Next.
+ * Next's cleanup leaves a bound native method behind as an own property, but it runs only when the
+ * router itself unmounts, which takes every owned-param browser with it.
+ *
+ * @returns the state to hand `history.replaceState`
+ */
+function ownedWriteHistoryState(): unknown {
+    const state: unknown = window.history.state;
+    if (!Object.hasOwn(window.history, 'replaceState')) return state;
+    if (state === null || typeof state !== 'object') return null;
+    const custom: Record<string, unknown> = { ...state };
+    delete custom.__NA;
+    delete custom._N;
+    return custom;
 }
 
 /**
@@ -91,8 +144,8 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
  * untouched. An `undefined` or empty value deletes its key, which is how a closed deep-linked record
  * clears itself without disturbing the surrounding query, sort, and filter state.
  *
- * The existing `history.state` is carried through rather than overwritten with null, so the router's own
- * bookkeeping and the record-return marker stamped on a list entry both survive a URL write.
+ * The record-return marker stamped on a list entry is carried through rather than overwritten with
+ * null, in the shape {@link ownedWriteHistoryState} picks so that the app router still hears the write.
  *
  * @param pathname - the current path, used to rebuild the URL without a full navigation
  * @param owned - the complete set of keys this writer owns, mapped to their current values
@@ -101,6 +154,7 @@ export function writeOwnedParamsToUrl(
     pathname: string,
     owned: Readonly<Record<string, string | undefined>>,
 ): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(owned)) {
         if (value) params.set(key, value);
@@ -108,11 +162,12 @@ export function writeOwnedParamsToUrl(
     }
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(window.history.state, '', listStateAddress(pathname, next));
+    window.history.replaceState(ownedWriteHistoryState(), '', listStateAddress(pathname, next));
 }
 
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
 export function writeListQueryToUrl(pathname: string, query: string): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     if (query) params.set('q', query);
     else params.delete('q');
@@ -130,6 +185,7 @@ export function writeListQueryToUrl(pathname: string, query: string): void {
  * @param sv - the target workspace's saved-view pointer
  */
 export function writeWorkspaceSavedViewToUrl(pathname: string, sv: string): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams({ [SAVED_VIEW_URL_KEY]: sv });
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
@@ -178,6 +234,7 @@ export type ListUrlState = {
  * @param defaultSize - the page size that is considered the default (and so omitted from the URL)
  */
 export function writeListStateToUrl(pathname: string, state: ListUrlState, defaultSize: number): void {
+    if (!isCurrentListPath(pathname)) return;
     const params = new URLSearchParams(window.location.search);
     const set = (key: string, value: string) => (value ? params.set(key, value) : params.delete(key));
     if (state.q !== undefined) set('q', state.q);

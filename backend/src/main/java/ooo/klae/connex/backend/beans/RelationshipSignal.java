@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.beans;
 import java.time.LocalDateTime;
 
 import lombok.Data;
+
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 import lombok.NoArgsConstructor;
 
 /** Persisted canonical relationship signal and the requesting user's optional lifecycle state. */
@@ -23,6 +25,7 @@ public class RelationshipSignal {
     private String rankExplanationJson;
     private LocalDateTime evidenceAsOf;
     private String sourceStateHash;
+    private String sourceModelVersion = RelationshipWarmthModel.current().version();
     private String generationToken;
     private long version;
     private LocalDateTime resolvedAt;

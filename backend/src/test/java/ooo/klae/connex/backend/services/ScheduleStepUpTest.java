@@ -230,7 +230,8 @@ class ScheduleStepUpTest {
                 reportPermissionPolicy,
                 privilegedAccountService,
                 new SessionSecurityService(sessionProperties(), properties(enforced), CLOCK,
-                        mock(UserMapper.class), mock(SpringSessionMapper.class)),
+                        mock(UserMapper.class), mock(SpringSessionMapper.class),
+                        mock(PrivilegedAccountService.class)),
                 new ObjectMapper(),
                 CLOCK);
     }

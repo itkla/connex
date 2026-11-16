@@ -71,7 +71,7 @@ function MemberRow({ member }: { member: WorkspaceMember }) {
         <span className="flex min-w-0 items-center gap-2">
             <Avatar size="sm">
                 {member.profilePictureUrl && <AvatarImage src={member.profilePictureUrl} alt="" />}
-                <AvatarFallback className="bg-brand-light text-[10px] font-medium text-brand-dark">
+                <AvatarFallback className="bg-brand-light text-[10px] font-medium text-brand-text">
                     {member.displayName.slice(0, 1).toUpperCase()}
                 </AvatarFallback>
             </Avatar>

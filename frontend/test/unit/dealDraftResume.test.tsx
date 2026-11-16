@@ -112,7 +112,7 @@ vi.mock('next/dynamic', async () => {
 });
 
 vi.mock('next-intl', () => ({
-    useTranslations: () => translate,
+    useTimeZone: () => "UTC", useTranslations: () => translate,
 }));
 
 vi.mock('motion/react', async () => {
@@ -148,6 +148,8 @@ vi.mock('@/app/hooks/useActions', () => ({
 vi.mock('@/app/hooks/useWorkspace', () => ({
     useWorkspace: () => state,
 }));
+
+vi.mock('@/app/hooks/usePermissions', () => ({ usePermission: () => true }));
 
 vi.mock('@/app/hooks/useApiErrorToast', () => ({
     useApiErrorToast: () => vi.fn(),
@@ -787,7 +789,8 @@ describe('deal draft persistence', () => {
         expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({
             name: 'Won renewal',
             duplicateReviewToken: 'review-token',
-        }), undefined);
+        }), {});
+        expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({ actualValue: undefined }), {});
         expect(readDealDraft()).toBeNull();
         await mounted.unmount();
     });
@@ -942,7 +945,7 @@ describe('deal draft persistence', () => {
             pipeline: PIPELINE.id,
             stage: STAGE.id,
             company: COMPANY.id,
-        }), undefined);
+        }), {});
         await mounted.unmount();
     });
 
@@ -971,7 +974,7 @@ describe('deal draft persistence', () => {
             pipeline: PIPELINE.id,
             stage: null,
             company: COMPANY.id,
-        }), undefined);
+        }), {});
         await mounted.unmount();
     });
 
@@ -992,7 +995,7 @@ describe('deal draft persistence', () => {
             pipeline: null,
             stage: null,
             company: null,
-        }), undefined);
+        }), {});
         expect(toasts.warn).toHaveBeenCalledWith('feedback.restoredDealReferenceUnavailable');
         await mounted.unmount();
     });
@@ -1119,6 +1122,8 @@ describe('deal draft persistence', () => {
         expect(dealNameInputs(mounted)).toHaveLength(1);
         await act(async () => latestOpenConfirm().onDiscard());
         expect(dealNameInputs(mounted)).toHaveLength(0);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(connectedElements(mounted, 'BUTTON').some((button) => button.getAttribute('role') === 'option')).toBe(true);
 
         await act(async () => mounted.dispatch('click', requiredButton(mounted, (button) => (
             button.getAttribute('role') === 'option'

@@ -193,13 +193,14 @@ class AiAssistantPromptInjectionGoldenTest {
         mentioned.setKind("person");
         mentioned.setId(31);
         mentioned.setValue("Kenji Sato");
+        var turn = MaskingEngine.mentionScanText("What is happening with " + spelling + "?");
         when(identifierMapper.findMentionedRecords(
-                7, "[7]", MaskingEngine.mentionScanText("What is happening with " + spelling + "?").lookupText(),
+                7, "[7]", turn.literalText(), turn.labelText(),
                 200, "", 0))
                 .thenReturn(List.of(mentioned));
         MaskingContext context = new MaskingContext();
         AiAssistantIdentifierResolver resolver = new AiAssistantIdentifierResolver(
-                identifierMapper, workspaceService, workspaceScopeControlAccess);
+                identifierMapper, workspaceService, workspaceScopeControlAccess, mock(ooo.klae.connex.backend.services.ReferenceService.class));
         resolver.seed(
                 resolver.resolve("What is happening with " + spelling + "?"), context);
         AiChatMessage userRequest = new AiChatMessage();
@@ -331,7 +332,7 @@ class AiAssistantPromptInjectionGoldenTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 mock(AiAssistantDateResolver.class),
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
         assertThrows(AiAssistantLoopException.class, () ->
                 executor.execute(parsed.tool().name(), parsed.tool().args(), resources, true));
         verifyNoInteractions(

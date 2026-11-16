@@ -133,7 +133,7 @@ class BusinessCardServiceTest {
                 rateLimiter,
                 capabilityEntitlement,
                 duplicateDecisionLockService,
-                clock);
+                clock, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         image = new MockMultipartFile("image", "card.jpg", "image/jpeg", new byte[] {1, 2, 3});
         validated = new ValidatedBusinessCardImage(
                 image.getBytes(), "image/jpeg", "jpg", 120, 70);
@@ -1006,6 +1006,35 @@ class BusinessCardServiceTest {
 
         verify(rateLimiter, never()).requireImportAllowed();
         verifyNoInteractions(importRequestMapper, imageValidator);
+    }
+
+    @Test
+    void importStatusWithoutCompanyWorkSkipsFailingControlReads() {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(5)) {
+            org.mockito.Mockito.lenient().when(fixture.control.findOrganizationWorkspacesForShare(5))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "recordVisibilityScopeControlAccess", fixture.scopes);
+            when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+            when(importRequestMapper.get(5, IDEMPOTENCY_KEY))
+                .thenReturn(new BusinessCardImportRecord(
+                    new byte[32], 31, 41, null, EXPIRY, 9, null, null));
+            Person person = new Person();
+            person.setId(31);
+            Attachment attachment = new Attachment();
+            attachment.setId(41);
+            when(personService.getPersonById(31)).thenReturn(person);
+            when(attachmentService.getById(41)).thenReturn(attachment);
+
+            BusinessCardImportResponse response = service.importStatus(IDEMPOTENCY_KEY);
+
+            assertEquals(31, response.contact().getId());
+            assertEquals(41, response.attachment().getId());
+            verify(workspaceService).requirePermission(Permission.ATTACHMENT_CREATE);
+            verify(importRequestMapper).get(5, IDEMPOTENCY_KEY);
+            verify(importRequestMapper, never()).getForUpdate(anyInt(), anyString());
+            verifyNoInteractions(fixture.control);
+        }
     }
 
     @Test

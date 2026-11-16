@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -53,6 +54,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -91,7 +93,7 @@ import ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
 import ooo.klae.connex.backend.tenant.Permission;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -117,7 +119,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
     @MockitoBean private CapabilityRegistry capabilityRegistry;
     @MockitoBean private ConnectorSecretCipher connectorSecretCipher;
     @MockitoBean private DeliveryProviderRouter deliveryProviderRouter;
-    @MockitoBean private WebAuthnService webAuthnService;
+    @MockitoSpyBean private PrivilegedAccountService privilegedAccountService;
 
     private AudienceSyncConnector connector;
     private MockMvc mockMvc;
@@ -141,7 +143,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         when(connectorSecretCipher.decryptCredential(workspace.getId(), credentialRef))
                 .thenReturn("integration-api-key");
         when(deliveryProviderRouter.connectorFor(CONNECTOR)).thenReturn(connector);
-        when(webAuthnService.hasPasskey(anyInt())).thenReturn(true);
+        doReturn(PrivilegedMfaStanding.SATISFIED).when(privilegedAccountService).enforcedStanding(anyInt());
     }
 
     @Test
@@ -385,16 +387,20 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         }
     }
 
-    @Test
-    void roleRevokedInTransactionAToTransactionBWindowAbortsTheExport() throws Exception {
+    @ParameterizedTest
+    @MethodSource("revokedExportPermissions")
+    void roleRevokedInTransactionAToTransactionBWindowAbortsTheExport(Permission revokedPermission) throws Exception {
         String prefix = "export-role-race-" + unique();
         person(newCompany(), prefix, prefix + "@example.com");
         CampaignDto campaign = campaignWithSnapshot(prefix, "Role race export");
-        CampaignActorRole target = newCampaignActor(workspace);
+        CampaignActorRole target = newCampaignActor(workspace, List.of(
+                Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE,
+                Permission.CONSENT_MANAGE, Permission.EXPORT_DATA));
         CampaignActorRole revoker = newCampaignActor(workspace, List.of(
                 Permission.CAMPAIGN_VIEW,
                 Permission.CAMPAIGN_MANAGE,
                 Permission.CONSENT_MANAGE,
+                Permission.EXPORT_DATA,
                 Permission.ROLE_MANAGE));
         CountDownLatch releaseFinalRevalidation = new CountDownLatch(1);
         CountDownLatch preparationCommitted = pauseAfterPreparation(releaseFinalRevalidation);
@@ -404,21 +410,25 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                     createExportAs(target.actor(), campaign.id()));
             assertTrue(preparationCommitted.await(10, TimeUnit.SECONDS));
             authenticateAs(revoker.actor(), workspace.getId());
+            approveForStepUp(revoker.actor());
             roleService.updateRole(
                     workspace.getId(), revoker.actor().getId(), target.role().getId(),
                     target.role().getName(), List.of(
-                            Permission.CAMPAIGN_VIEW.name(),
-                            Permission.CONSENT_MANAGE.name()));
+                            Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE,
+                            Permission.CONSENT_MANAGE, Permission.EXPORT_DATA).stream()
+                            .filter(permission -> permission != revokedPermission)
+                            .map(Permission::name).toList());
             releaseFinalRevalidation.countDown();
 
             ExecutionException failure = assertThrows(
                     ExecutionException.class, () -> export.get(20, TimeUnit.SECONDS));
             assertTrue(failure.getCause() instanceof ForbiddenException);
             assertEquals(
-                    "Requires the CAMPAIGN_MANAGE permission in this workspace",
+                    "Requires the " + revokedPermission.name() + " permission in this workspace",
                     failure.getCause().getMessage());
             verify(connector, never()).pushAudience(any(), any());
             authenticateAs(currentUser, workspace.getId());
+            approveForStepUp(currentUser);
             CampaignAudienceExportDto outcome = audienceExportService.listExports(campaign.id()).getFirst();
             assertEquals("failed", outcome.status());
             assertEquals(1, outcome.failedCount());
@@ -630,6 +640,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                 WHERE workspace_id = ? AND id = ?
                 """, String.class, workspace.getId(), export.getId()));
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         assertThrows(ooo.klae.connex.backend.exceptions.BadRequestException.class,
                 () -> audienceExportService.createExport(
                         campaign.id(), new CampaignAudienceExportRequest(
@@ -684,6 +695,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         assertNull(restricted.failedCount());
 
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         CampaignAudienceExportDto detailed = audienceExportService.getExport(campaign.id(), created.id());
         assertEquals(true, detailed.detailedCountsAvailable());
         assertEquals(1, detailed.pushedCount());
@@ -695,11 +707,14 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         String prefix = "export-outcome-permission-" + unique();
         person(newCompany(), prefix, prefix + "@example.com");
         CampaignDto campaign = campaignWithSnapshot(prefix, "Outcome permission export");
-        CampaignActorRole target = newCampaignActor(workspace);
+        CampaignActorRole target = newCampaignActor(workspace, List.of(
+                Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE,
+                Permission.CONSENT_MANAGE, Permission.EXPORT_DATA));
         CampaignActorRole revoker = newCampaignActor(workspace, List.of(
                 Permission.CAMPAIGN_VIEW,
                 Permission.CAMPAIGN_MANAGE,
                 Permission.CONSENT_MANAGE,
+                Permission.EXPORT_DATA,
                 Permission.ROLE_MANAGE));
         CountDownLatch providerCallStarted = new CountDownLatch(1);
         CountDownLatch releaseProvider = new CountDownLatch(1);
@@ -714,11 +729,13 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                     createExportAs(target.actor(), campaign.id()));
             assertTrue(providerCallStarted.await(10, TimeUnit.SECONDS));
             authenticateAs(revoker.actor(), workspace.getId());
+            approveForStepUp(revoker.actor());
             roleService.updateRole(
                     workspace.getId(), revoker.actor().getId(), target.role().getId(),
                     target.role().getName(), List.of(
                             Permission.CAMPAIGN_VIEW.name(),
-                            Permission.CAMPAIGN_MANAGE.name()));
+                            Permission.CAMPAIGN_MANAGE.name(),
+                            Permission.EXPORT_DATA.name()));
             releaseProvider.countDown();
 
             CampaignAudienceExportDto result = pending.get(20, TimeUnit.SECONDS);
@@ -735,6 +752,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
             releaseProvider.countDown();
             shutdown(executor);
             authenticateAs(currentUser, workspace.getId());
+            approveForStepUp(currentUser);
         }
     }
 
@@ -968,7 +986,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         assertFalse(storedChanges.has("pushed"));
         assertFalse(storedChanges.has("notPushed"));
 
-        CampaignActorRole auditReader = newCampaignActor(workspace, List.of(Permission.AUDIT_READ));
+        CampaignActorRole auditReader = newCampaignActor(workspace, List.of(Permission.AUDIT_READ, Permission.EXPORT_DATA));
         String auditJson = mockMvc.perform(authenticatedGet(auditReader.actor(), "/api/audit")
                         .param("entityType", "campaign")
                         .param("entityId", Integer.toString(campaign.id())))
@@ -1091,6 +1109,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                 "Foreign reconciliation export", null, "email", null, foreign.actor().getId(),
                 null, null, null, null, null));
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         mockMvc.perform(reconcileRequest(
                         currentUser, foreignCampaign.id(), ambiguous.getId(), "delivered"))
                 .andExpect(status().isNotFound());
@@ -1120,6 +1139,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
 
         CampaignActorWorkspace other = newCampaignWorkspaceActor();
         authenticateAs(other.actor(), other.workspace().getId());
+        approveForStepUp(other.actor());
 
         assertThrows(ResourceNotFoundException.class, () -> audienceExportService.createExport(
                 campaign.id(), new CampaignAudienceExportRequest(1, CONNECTOR)));
@@ -1167,8 +1187,13 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         return new CampaignSnapshotFixture(campaign, snapshot.version(), snapshotId);
     }
 
+    private static Stream<Permission> revokedExportPermissions() {
+        return Stream.of(Permission.CAMPAIGN_MANAGE, Permission.EXPORT_DATA);
+    }
+
     private CampaignAudienceExportDto createExportAs(ooo.klae.connex.backend.beans.User actor, int campaignId) {
         authenticateAs(actor, workspace.getId());
+        approveForStepUp(actor);
         try {
             return audienceExportService.createExport(
                     campaignId, new CampaignAudienceExportRequest(1, CONNECTOR));
@@ -1206,13 +1231,15 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                 .with(authentication(authenticated));
     }
 
-    private static MockHttpSession authenticatedSession(ooo.klae.connex.backend.beans.User principal) {
+    private MockHttpSession authenticatedSession(ooo.klae.connex.backend.beans.User principal) {
         MockHttpSession session = AuthenticatedSessions.stampedSession(principal);
         long now = System.currentTimeMillis();
         session.setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR, now);
         session.setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, principal.getId());
         session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, principal.getId());
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, principal);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, principal, session, credential);
         return session;
     }
 

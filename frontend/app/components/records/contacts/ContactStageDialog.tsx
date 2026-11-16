@@ -127,7 +127,7 @@ function WorkspaceContactStageDialog({
     const availableReasons = useMemo(
         () => reasons?.filter((candidate) =>
             isCanonicalDisqualificationReasonCode(candidate.code)
-            && (candidate.archivedAt === null || candidate.code === currentReason)) ?? [],
+            && (candidate.archivedAt == null || candidate.code === currentReason)) ?? [],
         [currentReason, reasons],
     );
     const selectedReason = isCanonicalDisqualificationReasonCode(reason)

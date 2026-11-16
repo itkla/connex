@@ -12,6 +12,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +25,7 @@ final class TenantExportExecution {
 
     private final Object monitor = new Object();
     private final long deadlineNanos;
+    private final LongSupplier nanoTime;
     private final ThreadPoolExecutor cancellationExecutor;
     private final Cleanup cleanup;
     private final List<TrackedResource> resources = new ArrayList<>();
@@ -33,6 +35,7 @@ final class TenantExportExecution {
     private final AtomicBoolean completionPublished = new AtomicBoolean();
     private final AtomicBoolean cancellationDispatchClaimed = new AtomicBoolean();
 
+    private long organizationPrivacyGeneration;
     private State state = State.NEW;
     private boolean writerStarted;
     private boolean cancellationDispatchCompleted;
@@ -42,7 +45,16 @@ final class TenantExportExecution {
             Duration timeout,
             ThreadPoolExecutor cancellationExecutor,
             Cleanup cleanup) {
+        this(timeout, cancellationExecutor, cleanup, System::nanoTime);
+    }
+
+    TenantExportExecution(
+            Duration timeout,
+            ThreadPoolExecutor cancellationExecutor,
+            Cleanup cleanup,
+            LongSupplier nanoTime) {
         Objects.requireNonNull(timeout, "timeout");
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         this.cancellationExecutor =
             Objects.requireNonNull(cancellationExecutor, "cancellationExecutor");
         this.cleanup = Objects.requireNonNull(cleanup, "cleanup");
@@ -50,7 +62,26 @@ final class TenantExportExecution {
             throw new IllegalArgumentException("Tenant export timeout must be positive");
         }
         long timeoutNanos = timeout.toNanos();
-        deadlineNanos = System.nanoTime() + timeoutNanos;
+        deadlineNanos = nanoTime.getAsLong() + timeoutNanos;
+    }
+
+    /** Binds the immutable source authority before any snapshot or response output. */
+    void bindOrganizationGeneration(long generation) {
+        synchronized (monitor) {
+            if (generation <= 0 || organizationPrivacyGeneration != 0 || state != State.NEW) {
+                throw new IllegalStateException("Tenant export privacy authority is unavailable");
+            }
+            organizationPrivacyGeneration = generation;
+        }
+    }
+
+    long organizationPrivacyGeneration() {
+        synchronized (monitor) {
+            if (organizationPrivacyGeneration <= 0) {
+                throw new IllegalStateException("Tenant export privacy authority is unavailable");
+            }
+            return organizationPrivacyGeneration;
+        }
     }
 
     void armDeadline(ScheduledThreadPoolExecutor deadlineExecutor) {
@@ -58,7 +89,7 @@ final class TenantExportExecution {
         if (!deadlineArmClaimed.compareAndSet(false, true)) {
             throw new IllegalStateException("Tenant export deadline is single-use");
         }
-        long remainingNanos = Math.max(deadlineNanos - System.nanoTime(), 0);
+        long remainingNanos = Math.max(deadlineNanos - nanoTime.getAsLong(), 0);
         ScheduledFuture<?> scheduled = deadlineExecutor.schedule(
             this::cancel,
             remainingNanos,
@@ -134,7 +165,7 @@ final class TenantExportExecution {
             throw new IllegalArgumentException("Tenant export operation timeout must be positive");
         }
         checkActive();
-        long now = System.nanoTime();
+        long now = nanoTime.getAsLong();
         long capNanos = cap.toNanos();
         long exportRemaining;
         synchronized (monitor) {
@@ -304,7 +335,7 @@ final class TenantExportExecution {
     }
 
     private long remainingNanosLocked() {
-        return deadlineNanos - System.nanoTime();
+        return deadlineNanos - nanoTime.getAsLong();
     }
 
     private void unregister(TrackedResource resource) {

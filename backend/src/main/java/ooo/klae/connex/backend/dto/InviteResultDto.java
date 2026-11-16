@@ -3,18 +3,13 @@ package ooo.klae.connex.backend.dto;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import ooo.klae.connex.backend.mail.MailDispatchOutcome;
 
-/**
- * The outcome of inviting someone to a workspace by email. Exactly one field is
- * populated: {@code invite} for an emailed token invite (the address has no Connex account, or
- * has one that still owes email verification while the instance runs it), or {@code member} when
- * the address belongs to an existing account whose mailbox ownership is settled, which is added as
- * a pending member and notified in-app instead.
- */
+/** An invitation result independent of recipient account existence or profile. */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class InviteResultDto {
     private InviteDto invite;
-    private MemberDto member;
+    private MailDispatchOutcome emailDelivery;
 }

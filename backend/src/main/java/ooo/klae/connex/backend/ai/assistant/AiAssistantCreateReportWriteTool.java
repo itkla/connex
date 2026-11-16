@@ -104,7 +104,7 @@ public class AiAssistantCreateReportWriteTool implements AiAssistantWriteTool {
                         widget.measure(), widget.groupBy(), widget.chartType()))
                 .toList(), source.filters(), source.range(), source.bucket(), source.layout());
         ReportDefinitionDto created = reportService.create(new ReportDefinitionRequest(
-                request.name(), null, template.cadence(), template.key(), config));
+                request.name(), null, template.cadence(), template.key(), config), execution.admission());
         if (created == null) {
             throw new IllegalStateException("Created report could not be read back");
         }

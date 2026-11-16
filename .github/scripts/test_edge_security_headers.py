@@ -309,6 +309,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
                 "@client_errors",
                 "@csp_reports",
                 "@webauthn",
+                "@mission_decisions",
                 "@workflows",
                 "@saml",
                 "/api/*",
@@ -325,6 +326,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             "@client_errors": "{$CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES:16384}",
             "@csp_reports": "{$CONNEX_CSP_REPORTS_MAX_BODY_BYTES:16384}",
             "@webauthn": "{$CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}",
+            "@mission_decisions": "{$CONNEX_MISSION_DECISION_MAX_BODY_BYTES:16384}",
             "@workflows": "{$CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}",
             "@saml": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
             "/api/*": "{$CONNEX_API_MAX_BODY_BYTES:10485760}",
@@ -353,7 +355,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         lines = tokenized_caddyfile()
         self.assertIn(["header_up", "X-Forwarded-For", "{client_ip}"], lines)
         self.assertIn(["header_up", "-CF-Connecting-IP"], lines)
-        self.assertEqual(9, lines.count(["import", "backend_proxy"]))
+        self.assertEqual(10, lines.count(["import", "backend_proxy"]))
 
     def test_launch_signups_use_frontend_without_application_credentials(self) -> None:
         caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")

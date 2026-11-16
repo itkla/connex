@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -40,6 +42,8 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 @Slf4j
 public class AiOutputCacheStore {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Sentinel used for {@code subjectBId} on single-subject (deal-scoped) features. */
     public static final int NO_SUBJECT = 0;
 
@@ -48,7 +52,7 @@ public class AiOutputCacheStore {
      * a purely prompt-derived hash would not otherwise reflect — invalidate previously stored rows on
      * deploy. Bump this when output-shaping logic changes without a corresponding prompt change.
      */
-    static final String HASH_VERSION = "v3-provider-profile-grounding";
+    static final String HASH_VERSION = "v4-dispatched-exposure";
 
     private final AiOutputCacheMapper aiOutputCacheMapper;
     private final PersonMapper personMapper;
@@ -193,8 +197,10 @@ public class AiOutputCacheStore {
             }
             sortedPersonIds.add(personId);
         }
+        String personWorkspaceIdsJson = sortedPersonIds.isEmpty() ? null
+            : recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         for (int personId : sortedPersonIds) {
-            Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, personId);
+            Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, personWorkspaceIdsJson, personId);
             if (person == null || person.getSuspendedAt() != null || person.getProvisionCeasedAt() != null) {
                 return false;
             }

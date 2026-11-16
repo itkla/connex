@@ -26,7 +26,7 @@ export type SettingsDestination = {
 /**
  * A manifest entry whose destination can be offered: one that names a label.
  *
- * An entry with no `titleKey` is a bare redirect stub — there is nothing to render on a row — so it
+ * An entry with no `titleKey` is an unlabeled forward — there is nothing to render on a row — so it
  * is not addressable here and cannot be registered by name. Deriving the id union from the manifest
  * rather than restating it makes a renamed or retired entry a compile error at every entry point
  * that named it.
@@ -68,7 +68,7 @@ const SERVED_ROUTES: ReadonlySet<string> = new Set(
  * Whether a canonical settings route is served by a page today.
  *
  * Shared with the breadcrumb registry, which derives a canonical destination's trail from the group
- * that owns it and must leave the legacy tables to answer for a group whose route has not shipped.
+ * that owns it and skips a group whose route has not shipped.
  *
  * @param route - a canonical route from `SETTINGS_GROUPS`
  * @returns whether some manifest entry renders it

@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -18,11 +20,15 @@ import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
@@ -49,6 +55,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationTemplateAvailability
 import ooo.klae.connex.backend.tenant.Permission;
 
 class GuidedRecordCreationServiceTest {
+    private static final RecordVisibilityScope SCOPE = new RecordVisibilityScope(90, List.of(7, 8, 9));
     private final PersonService personService = mock(PersonService.class);
     private final CompanyService companyService = mock(CompanyService.class);
     private final DealService dealService = mock(DealService.class);
@@ -57,6 +64,9 @@ class GuidedRecordCreationServiceTest {
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final JsonMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
+    private final RecordVisibilityScopeControlAccess scopes =
+        unfiltered();
+
     private GuidedRecordCreationService service;
 
     @BeforeEach
@@ -64,7 +74,45 @@ class GuidedRecordCreationServiceTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         service = new GuidedRecordCreationService(
-            personService, companyService, dealService, augmentationService, workspaceService);
+            personService, companyService, dealService, augmentationService, workspaceService, scopes);
+    }
+
+    @Test
+    void missingGuidedCurrencyUsesWorkspaceDefaultAndExplicitTemplateCurrencyIsPreserved() {
+        when(workspaceService.getCurrentDefaultCurrency()).thenReturn("EUR");
+        RecordCreationTemplateUseDto template = use(RecordCreationRecordType.deal);
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, null)));
+        when(dealService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
+            new GuidedDealRecordDto("Renewal", BigDecimal.TEN, null, 8, 9, null, null, "proof"),
+            template, Map.of(), List.of());
+        assertEquals("EUR", service.createDeal(request).getCurrency());
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, node("GBP"))));
+        assertEquals("GBP", service.createDeal(new GuidedDealCreateRequestDto(
+            request.record(), template, Map.of(), List.of())).getCurrency());
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t\n"})
+    void absentAndBlankCurrencyPreserveTemplateThenWorkspacePrecedence(String currency) {
+        when(workspaceService.getCurrentDefaultCurrency()).thenReturn("EUR");
+        when(dealService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        RecordCreationTemplateUseDto template = use(RecordCreationRecordType.deal);
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, node("GBP"))));
+        var record = new GuidedDealRecordDto("Renewal", BigDecimal.TEN, currency, 8, 9, null, null, "proof");
+
+        assertEquals("GBP", service.createDeal(new GuidedDealCreateRequestDto(
+            record, template, Map.of(), List.of())).getCurrency());
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, null)));
+        assertEquals("EUR", service.createDeal(new GuidedDealCreateRequestDto(
+            record, template, Map.of(), List.of())).getCurrency());
     }
 
     @Test
@@ -76,10 +124,10 @@ class GuidedRecordCreationServiceTest {
             field("company", null, false, node(44)),
             field("custom:9", 9, true, node("default")),
             field("tags", null, true, array(6, 4)));
-        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use))
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use, SCOPE))
             .thenReturn(resolved);
-        when(personService.createReviewed(any(), eq("proof"), any())).thenAnswer(invocation ->
-            invocation.getArgument(0));
+        when(personService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED), org.mockito.ArgumentMatchers.any(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
         GuidedPersonCreateRequestDto request = new GuidedPersonCreateRequestDto(
             new GuidedPersonRecordDto(
                 "Ada", "ada@example.com", null, null, null, null, null, null, "proof"),
@@ -92,11 +140,16 @@ class GuidedRecordCreationServiceTest {
         assertEquals(44, created.getCompany().getId());
         ArgumentCaptor<RecordCreationAugmentation> augmentation =
             ArgumentCaptor.forClass(RecordCreationAugmentation.class);
-        verify(personService).createReviewed(any(), eq("proof"), augmentation.capture());
+        verify(personService).createReviewed(
+            any(), eq("proof"), augmentation.capture(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE));
         assertEquals("default", augmentation.getValue().customFields().get(9).textValue());
         assertEquals(List.of(6, 4), augmentation.getValue().tagIds());
-        verify(workspaceService).lockAndRequirePermissions(
+        var order = org.mockito.Mockito.inOrder(scopes, workspaceService, augmentationService);
+        order.verify(scopes).getForWorkspace(7);
+        order.verify(workspaceService).lockAndRequirePermissions(
             7, Map.of(11, Set.of(Permission.PERSON_CREATE)));
+        order.verify(augmentationService).resolvePreliminary(RecordCreationRecordType.person, use, SCOPE);
+        verify(scopes, org.mockito.Mockito.times(1)).getForWorkspace(7);
     }
 
     @Test
@@ -105,7 +158,7 @@ class GuidedRecordCreationServiceTest {
         RecordCreationTemplateUseDto dealUse = use(RecordCreationRecordType.deal);
         when(augmentationService.resolvePreliminary(RecordCreationRecordType.company, companyUse))
             .thenReturn(resolved(RecordCreationRecordType.company, field("name", null, true, null)));
-        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, dealUse))
+        when(augmentationService.resolvePreliminary(eq(RecordCreationRecordType.deal), eq(dealUse), eq(SCOPE)))
             .thenReturn(resolved(
                 RecordCreationRecordType.deal,
                 field("name", null, true, null),
@@ -113,10 +166,10 @@ class GuidedRecordCreationServiceTest {
                 field("currency", null, true, null),
                 field("pipeline", null, true, null),
                 field("stage", null, true, null)));
-        when(companyService.createCompanyReviewed(any(), eq(null), any())).thenAnswer(invocation ->
-            invocation.getArgument(0));
-        when(dealService.createReviewed(any(), eq(null), any())).thenAnswer(invocation ->
-            invocation.getArgument(0));
+        when(companyService.createCompanyReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        when(dealService.createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
 
         Company company = service.createCompany(new GuidedCompanyCreateRequestDto(
             new GuidedCompanyRecordDto("Connex", "https://connex.example", "CRM", null, null, null),
@@ -129,16 +182,33 @@ class GuidedRecordCreationServiceTest {
 
         assertEquals("https://connex.example", company.getWebsite());
         assertEquals(new BigDecimal("12.34"), deal.getValue());
-        assertEquals(new BigDecimal("0.00"), deal.getActualValue());
+        assertNull(deal.getActualValue());
         assertEquals("2026-12-31", deal.getExpectedCloseDate());
-        verify(companyService).createCompanyReviewed(any(), eq(null), any());
-        verify(dealService).createReviewed(any(), eq(null), any());
+        verify(companyService).createCompanyReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED));
+        verify(dealService).createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" "})
+    void missingGuidedCurrencyUsesTemplateBeforeSchemaDefault(String currency) {
+        RecordCreationTemplateUseDto use = use(RecordCreationRecordType.deal);
+        when(dealService.createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        for (JsonNode configured : new JsonNode[]{null, node("JPY")}) {
+            when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, use, SCOPE))
+                .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, configured)));
+            Deal created = service.createDeal(new GuidedDealCreateRequestDto(
+                new GuidedDealRecordDto("Deal", BigDecimal.ZERO, currency, 1, 2, null, null, null),
+                use, Map.of(), List.of()));
+            assertEquals(configured == null ? "USD" : "JPY", created.getCurrency());
+        }
     }
 
     @Test
     void missingTemplateRequiredValueStopsBeforeCanonicalCreation() {
         RecordCreationTemplateUseDto use = use(RecordCreationRecordType.person);
-        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use))
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use, SCOPE))
             .thenReturn(resolved(
                 RecordCreationRecordType.person,
                 field("name", null, true, null),
@@ -152,13 +222,13 @@ class GuidedRecordCreationServiceTest {
             () -> service.createPerson(request));
 
         assertEquals("TEMPLATE_FIELD_NOT_SUBMITTED", exception.error().code());
-        verify(personService, never()).createReviewed(any(), any(), any());
+        verify(personService, never()).createReviewed(any(), any(), any(), any(), any());
     }
 
     @Test
     void lockedPermissionCheckPrecedesTemplateAndCanonicalWork() {
         RecordCreationTemplateUseDto use = use(RecordCreationRecordType.deal);
-        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, use))
+        when(augmentationService.resolvePreliminary(eq(RecordCreationRecordType.deal), eq(use), eq(SCOPE)))
             .thenReturn(resolved(RecordCreationRecordType.deal));
         GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
             new GuidedDealRecordDto(
@@ -167,17 +237,19 @@ class GuidedRecordCreationServiceTest {
 
         service.createDeal(request);
 
-        var order = inOrder(workspaceService, augmentationService, dealService);
+        var order = inOrder(scopes, workspaceService, augmentationService, dealService);
+        order.verify(scopes).getForWorkspace(7);
         order.verify(workspaceService).lockAndRequirePermissions(
             7, Map.of(11, Set.of(Permission.DEAL_CREATE)));
-        order.verify(augmentationService).resolvePreliminary(RecordCreationRecordType.deal, use);
-        order.verify(dealService).createReviewed(any(), eq(null), any());
+        order.verify(augmentationService).resolvePreliminary(eq(RecordCreationRecordType.deal), eq(use), eq(SCOPE));
+        order.verify(dealService).createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE));
+        verify(scopes, org.mockito.Mockito.times(1)).getForWorkspace(7);
     }
 
     @Test
     void reviewedStageNameReachesCanonicalCreationWithTheSubmittedPipeline() {
         RecordCreationTemplateUseDto use = use(RecordCreationRecordType.deal);
-        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, use))
+        when(augmentationService.resolvePreliminary(eq(RecordCreationRecordType.deal), eq(use), eq(SCOPE)))
             .thenReturn(resolved(RecordCreationRecordType.deal));
         GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
             new GuidedDealRecordDto("Deal", BigDecimal.ZERO, "USD", 8, 10, null, null, null),
@@ -188,7 +260,8 @@ class GuidedRecordCreationServiceTest {
         ArgumentCaptor<Deal> deal = ArgumentCaptor.forClass(Deal.class);
         ArgumentCaptor<RecordCreationAugmentation> augmentation =
             ArgumentCaptor.forClass(RecordCreationAugmentation.class);
-        verify(dealService).createReviewed(deal.capture(), eq(null), augmentation.capture());
+        verify(dealService).createReviewed(
+            deal.capture(), eq(null), augmentation.capture(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE));
         assertEquals(8, deal.getValue().getPipelineId());
         assertEquals(10, deal.getValue().getStageId());
         assertEquals("Discovery", augmentation.getValue().reviewedStageName());

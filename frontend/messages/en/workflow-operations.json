@@ -22,7 +22,9 @@
       "attention": "Needs attention",
       "paused": "Paused",
       "queued": "Queued",
-      "overdue": "Overdue"
+      "overdue": "Overdue",
+      "unavailable": "Unavailable",
+      "unavailableBody": "Some workflows can't run in this environment. Review them and turn them off, or ask your administrator for help."
     },
     "triggerDiagnostics": {
       "title": "Some triggers never reached their workflow",
@@ -33,7 +35,8 @@
       "statusLabel": "Filter by run status",
       "failureLabel": "Filter by reason",
       "allStatuses": "All statuses",
-      "allFailures": "All reasons"
+      "allFailures": "All reasons",
+      "clear": "Clear filters"
     },
     "runs": {
       "title": "Recent runs",
@@ -43,9 +46,11 @@
       "loadMore": "Load more",
       "loadingMore": "Loading more",
       "runMeta": "Run #{run} · version {version}",
-      "legacyRunMeta": "Earlier run #{run} · version {version}",
+      "runReference": "Run #{run}",
       "failureCategory": "Reason: {category}",
-      "recipeOrigin": "From a recipe"
+      "recipeOrigin": "From a recipe",
+      "firstRunTitle": "No runs yet",
+      "firstRunBody": "Runs appear here when a workflow starts. Review your workflows and turn one on to get started."
     },
     "failureCategory": {
       "actor": "Who it runs as",
@@ -76,7 +81,7 @@
       "title": "What ran",
       "description": "Each row is what one step actually did, recorded as it happened — never guessed afterwards.",
       "legacyTitle": "Summary only",
-      "legacyBody": "This run was carried over from an earlier automation, so only its summary was kept. Connex won't guess which steps it took.",
+      "legacyBody": "Step details were not recorded for this run. Review its summary and the workflow settings to investigate.",
       "outcome": "Took the {outcome} branch",
       "attempts": "{count, plural, one {# attempt} other {# attempts}}"
     },
@@ -100,7 +105,8 @@
         "archived": "Archived",
         "intervention_required": "Needs a person",
         "backlogged": "Behind",
-        "degraded": "Having trouble"
+        "degraded": "Having trouble",
+        "unavailable": "Unavailable"
       },
       "signal": {
         "intake_paused": "New records aren't being picked up. Anything already waiting stays where it is.",
@@ -110,7 +116,9 @@
         "queued_backlog": "Runs are waiting their turn.",
         "waiting_backlog": "Runs are partway through, waiting out a delay.",
         "overdue_backlog": "At least one waiting run is past due.",
-        "recent_failure": "A recent run failed."
+        "recent_failure": "A recent run failed.",
+        "execution_unavailable": "This workflow can't run here. Ask your administrator for help.",
+        "latest_run_failed": "The most recent completed run had a problem. Review its result."
       }
     },
     "backlog": {
@@ -143,14 +151,16 @@
       "disableHelp": "Turning this off stops new runs; runs already going will finish. Archiving is separate."
     },
     "reason": {
-      "actor_unavailable": "The member this workflow runs as is no longer available.",
-      "actor_inactive": "The member this workflow runs as is no longer active.",
+      "actor_unavailable": "A member needed by this workflow is no longer available.",
+      "actor_inactive": "A member needed by this workflow is no longer active.",
       "permission_denied": "The member this workflow runs as lost a permission this step needed.",
       "action_permission_missing": "The member this workflow runs as can't do what this step needs.",
       "reference_unavailable": "Something this step points to — a tag, a stage, or a member — is gone.",
       "record_unavailable": "The record this run was for is gone, or you can no longer see it.",
       "retry_exhausted": "Connex retried this as many times as it's allowed to.",
       "retry_not_safe": "This step can't be safely retried on its own.",
+      "configuration_invalid": "This step’s settings are no longer valid.",
+      "state_conflict": "The record’s current state prevented this step from finishing.",
       "execution_failed": "The step couldn't finish.",
       "unknown": "This version of Connex can't explain what went wrong. Reload the page, and tell support if it keeps happening."
     },
@@ -247,8 +257,8 @@
       "scope_not_supported": "This workflow can't run on the records you selected.",
       "nested_command_scope": "Pick the records again from a list.",
       "action_permission_missing": "The member this workflow runs as can't do what one of its steps needs.",
-      "actor_unavailable": "The member this workflow runs as is no longer available.",
-      "actor_inactive": "The member this workflow runs as is no longer active.",
+      "actor_unavailable": "A member needed by this workflow is no longer available.",
+      "actor_inactive": "A member needed by this workflow is no longer active.",
       "configuration_missing": "This workflow is missing a setting it needs.",
       "definition_invalid": "The published version of this workflow has a problem. Open it and fix the issues before running it."
     },
@@ -314,7 +324,8 @@
           "title": "Review a cooling company",
           "description": "On a schedule, find companies whose warmth is cooling and create a task to check in."
         }
-      }
+      },
+      "coolingUnavailable": "This recipe can't create tasks for companies yet. Choose another recipe."
     },
     "sourceEvent": {
       "person": {

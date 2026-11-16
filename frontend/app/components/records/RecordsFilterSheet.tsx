@@ -103,7 +103,7 @@ function OptionRow({
             size="page"
             className={cn(
                 'h-auto min-h-11 w-full justify-start text-left font-normal',
-                selected && 'bg-brand-light/60 font-medium text-brand-dark hover:bg-brand-light/70',
+                selected && 'bg-brand-light/60 font-medium text-brand-text hover:bg-brand-light/70',
                 disabled && 'opacity-50',
             )}
         >
@@ -208,7 +208,7 @@ export default function RecordsFilterSheet<T>({
                                         onSelect={() => onSortChange(option.key)}
                                         indicator={
                                             active ? (
-                                                <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-brand-dark">
+                                                <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-brand-text">
                                                     {sortDirection === 'asc' ? (
                                                         <>
                                                             {t('sortAscending')}

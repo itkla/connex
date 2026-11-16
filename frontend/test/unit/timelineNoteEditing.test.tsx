@@ -22,7 +22,7 @@ vi.mock("@/app/hooks/useRecordTargetSearch", () => ({
     useContactTargetSearch: () => ({ contacts: [] }),
     useDealTargetSearch: () => ({ deals: [] }),
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key, useLocale: () => "en" }));
+vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key, useTimeZone: () => "UTC", useLocale: () => "en" }));
 vi.mock("next/navigation", () => ({
     usePathname: () => "/records/contacts/31", useRouter: () => ({ refresh: api.refresh }),
     useSearchParams: () => new URLSearchParams(),
@@ -129,6 +129,11 @@ describe("timeline note editing", () => {
             await act(async () => save?.click());
             expect(api.save).toHaveBeenCalledWith(26);
         } else {
+            expect(api.remove).not.toHaveBeenCalled();
+            const confirm = document.querySelector('[role="dialog"] button[data-variant="destructive"]');
+            expect(confirm).toBeInstanceOf(HTMLButtonElement);
+            if (!(confirm instanceof HTMLButtonElement)) throw new Error("Missing delete confirmation");
+            await act(async () => confirm.click());
             expect(api.remove).toHaveBeenCalledWith(26);
         }
         expect(api.refresh).toHaveBeenCalledOnce();

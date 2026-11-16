@@ -11,7 +11,7 @@ const sonner = vi.hoisted(() => ({
 
 vi.mock("sonner", () => ({ toast: sonner }));
 
-import { toastDismiss, toastLoading } from "@/app/lib/toast";
+import { toastDismiss, toastLoading, toastError, toastSuccess, toastInfo, toastWarn } from "@/app/lib/toast";
 
 describe("branded toast lifecycle helpers", () => {
     beforeEach(() => {
@@ -37,5 +37,26 @@ describe("branded toast lifecycle helpers", () => {
         toastDismiss("export");
 
         expect(sonner.dismiss).toHaveBeenCalledWith("export");
+    });
+});
+
+
+describe("semantic toast foregrounds", () => {
+    it.each([
+        [toastSuccess, sonner.success, "brand"],
+        [toastLoading, sonner.loading, "brand"],
+        [toastError, sonner.error, "destructive"],
+        [toastInfo, sonner.info, "info"],
+        [toastWarn, sonner.warning, "warning"],
+    ] as const)("pairs the variant surface and foreground", (show, spy, token) => {
+        show("Outcome", { description: "Recovery details", id: "outcome" });
+        expect(spy).toHaveBeenLastCalledWith("Outcome", {
+            description: "Recovery details",
+            id: "outcome",
+            style: {
+                backgroundColor: `var(--color-${token})`,
+                color: `var(--color-${token}-foreground)`,
+            },
+        });
     });
 });

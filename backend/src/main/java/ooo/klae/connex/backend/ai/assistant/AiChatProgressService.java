@@ -14,7 +14,10 @@ import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
+import ooo.klae.connex.backend.dto.AiChatQueryScopeDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
+import ooo.klae.connex.backend.dto.AiChatTurnDto;
+import ooo.klae.connex.backend.dto.AiChatTurnToolCallDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -38,8 +41,42 @@ public class AiChatProgressService {
     static final Set<String> PROGRESS_STATUSES = Set.of(
             "running", "proposed", "complete", "failed", "skipped", "timed_out", "cancelled");
 
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final ObjectMapper objectMapper;
+    private final AiAssistantToolCatalog toolCatalog;
+
+    /**
+     * Projects progress and requester-only execution evidence from the same bounded row snapshot.
+     * The DTO applies the same requester check as partial text and detailed progress.
+     */
+    public AiChatTurnDto projectTurn(
+            AiChatTurn turn, Integer viewerUserId, AiChatQueryScopeDto scope) {
+        if (turn.getPrivacyGeneration() == null || turn.getOrganizationPrivacyGeneration() <= 0
+                || privacyGuard.currentGeneration(turn.getWorkspaceId()) != turn.getOrganizationPrivacyGeneration()) {
+            throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
+        }
+        try {
+            privacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(), turn.getSessionId(),
+                    turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq(), privacyGuard.organizationId(turn.getWorkspaceId()),
+                    turn.getOrganizationPrivacyGeneration()));
+        } catch (AiAssistantLoopException withdrawn) {
+            if (privacyGuard.currentGeneration(turn.getWorkspaceId()) != turn.getOrganizationPrivacyGeneration()) {
+                throw withdrawn;
+            }
+            return new AiChatTurnDto(turn.getId(), turn.getSessionId(), turn.getStatus(), turn.getTerminalReason(),
+                    null, List.of(), viewerUserId != null && Objects.equals(viewerUserId, turn.getRequestedByUserId()), null, null);
+        }
+        List<AiChatToolCall> toolCalls = toolCalls(
+                turn.getWorkspaceId(), turn.getSessionId(), turn.getId());
+        return AiChatTurnDto.from(
+                turn, project(turn.getId(), turn.getStatus(), toolCalls), viewerUserId, scope,
+                toolCalls.stream()
+                        .map(call -> new AiChatTurnToolCallDto(
+                                call.getToolName(), toolCatalog.tier(call.getToolName()),
+                                call.getStatus()))
+                        .toList());
+    }
 
     /** Returns the current safe milestone snapshot for one authorized turn. */
     public List<AiChatProgressItemDto> project(AiChatTurn turn) {
@@ -61,12 +98,21 @@ public class AiChatProgressService {
      */
     public List<AiChatProgressItemDto> project(
             int workspaceId, int sessionId, int turnId, String turnStatus) {
+        return project(turnId, turnStatus, toolCalls(workspaceId, sessionId, turnId));
+    }
+
+    private List<AiChatToolCall> toolCalls(int workspaceId, int sessionId, int turnId) {
+        return chatMapper.listToolCallsByTurn(
+                workspaceId, sessionId, AiAssistantToolCallKey.turnPrefix(turnId),
+                AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN, privacyGuard.currentGeneration(workspaceId));
+    }
+
+    private List<AiChatProgressItemDto> project(
+            int turnId, String turnStatus, List<AiChatToolCall> toolCalls) {
         Map<String, ProgressAccumulator> milestones = new LinkedHashMap<>();
         milestones.put(SCOPE, new ProgressAccumulator(
                 0, SCOPE, "queued".equals(turnStatus) ? "running" : "complete"));
-        for (AiChatToolCall toolCall : chatMapper.listToolCallsByTurn(
-                workspaceId, sessionId, AiAssistantToolCallKey.turnPrefix(turnId),
-                AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN)) {
+        for (AiChatToolCall toolCall : toolCalls) {
             if (AiAssistantToolCatalog.FIND_TOOLS.equals(toolCall.getToolName())) {
                 continue;
             }

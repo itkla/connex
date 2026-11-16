@@ -63,6 +63,7 @@ public class CampaignEngagementController {
      * @param sendId one send to restrict to, or null for every send
      * @param status optional delivery statuses to include
      * @param event an optional lifecycle event the delivery must carry
+     * @param submitted whether to restrict to confirmed submissions, regardless of later status
      * @param page the one-based page number
      * @param size the page size, capped by {@link PageBounds#MAX_SIZE}
      * @return the page of recipients and the total it was drawn from
@@ -75,7 +76,8 @@ public class CampaignEngagementController {
             @RequestParam(required = false) List<String> status,
             @RequestParam(required = false) String event,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "25") int size) {
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(defaultValue = "false") boolean submitted) {
         PageBounds bounds = PageBounds.of(page, size);
         return campaignRecipientService.getRecipients(
             id,
@@ -85,7 +87,8 @@ public class CampaignEngagementController {
             DealFilterNormalizer.validateOptionalValue(
                 event, CampaignRecipientService.RECIPIENT_EVENTS, "event"),
             bounds.size(),
-            bounds.offset());
+            bounds.offset(),
+            submitted);
     }
 
     /**

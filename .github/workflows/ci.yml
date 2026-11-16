@@ -59,7 +59,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install lightweight image test dependencies
-        run: python -m pip install Pillow==12.3.0 numpy==2.3.5
+        run: python -m pip install Pillow==13.0.0 numpy==2.3.5
       - name: Install pinned OCR lock compiler
         # pip is pinned alongside pip-tools on purpose. This step exists to prove requirements.lock
         # is reproducible, so leaving the compiler's own dependency floating defeats it: pip 26.2
@@ -151,15 +151,30 @@ jobs:
   support-bundle:
     name: Support bundle tooling — offline regression tests
     needs: classify
-    if: needs.classify.outputs.support_bundle == 'true'
+    # The operator reader must also accept the archive the Java exporter produces, so a change on
+    # either side of that contract runs this job.
+    if: needs.classify.outputs.support_bundle == 'true' || needs.classify.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Lint the support bundle shell tooling
-        run: shellcheck -x deploy/support-bundle/*.sh deploy/support-bundle/tests/run-tests.sh
+        run: shellcheck -x deploy/support-bundle/*.sh deploy/support-bundle/tests/*.sh
       - name: Integrity, redaction, and transport regression tests
         run: bash deploy/support-bundle/tests/run-tests.sh
+      - name: Set up JDK 26
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: gradle
+      - name: Produce a support bundle with the Java exporter
+        working-directory: backend
+        run: >-
+          bash gradlew unitTest --no-daemon --stacktrace
+          --tests 'ooo.klae.connex.backend.services.SupportBundleArchiveDumpTest'
+      - name: Verify and render the Java-produced bundle with the operator reader
+        run: bash deploy/support-bundle/tests/read-java-archive.sh backend/build/support-bundle/sample-bundle.zip
 
   backend-unit:
     name: Backend — unit tests
@@ -454,6 +469,10 @@ jobs:
           # never a way to reach the scripted adapter — that one stays forbidden everywhere
           # (DeploymentProfileValidator.FORBIDDEN_KEYS_BY_PROFILE).
           CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS: "true"
+          SPRING_APPLICATION_JSON: >-
+            {"connex":{"ai":{"missions-enabled":true,"missions-single-jvm-confirmed":true,
+            "mission-capabilities":[{"provider":"openai_compatible","endpoint":"http://127.0.0.1:8080/v1",
+            "model":"scripted-json","capability":"missions_v1"}]}}}
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)

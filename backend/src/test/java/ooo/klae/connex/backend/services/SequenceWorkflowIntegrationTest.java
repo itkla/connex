@@ -84,6 +84,7 @@ import ooo.klae.connex.backend.exceptions.SequenceException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
@@ -91,8 +92,10 @@ import ooo.klae.connex.backend.mappers.SequenceMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /** Real-database sequence workflow, transaction, concurrency, preview, and lifecycle proofs. */
 @SpringBootTest(
@@ -110,7 +113,7 @@ class SequenceWorkflowIntegrationTest {
     @Autowired private TenantExportService exportService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private UserOffboardingService offboardingService;
-    @Autowired private OrgMemberService orgMemberService;
+    @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private CompanyMapper companyMapper;
     @Autowired private DealMapper dealMapper;
     @Autowired private OrganizationMapper organizationMapper;
@@ -156,7 +159,9 @@ class SequenceWorkflowIntegrationTest {
             otherWorkspace,
             "sequence_other_" + suffix,
             List.of("SEQUENCE_VIEW", "SEQUENCE_MANAGE"));
-        orgMemberService.addFoundingOwner(organization.getId(), manager.getId());
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, manager);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, otherManager);
+        orgMemberMapper.addMember(organization.getId(), manager.getId(), "owner");
     }
 
     @AfterEach
@@ -194,11 +199,13 @@ class SequenceWorkflowIntegrationTest {
                         + " WHERE wr.workspace_id = ?",
                     workspaceId);
                 jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspaceId);
+                TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspaceId);
                 jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
             }
         }
         if (organization != null) {
             jdbcTemplate.update("DELETE FROM org_member WHERE org_id = ?", organization.getId());
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organization.getId());
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
         if (manager != null && viewer != null && otherManager != null) {
@@ -555,7 +562,7 @@ class SequenceWorkflowIntegrationTest {
                     created.id(), 1, new SequencePreviewRequest(refused.getId()))));
             assertEquals(404, failure.status().value());
         }
-        verify(personMapper, never()).getPersonById(anyInt(), anyInt());
+        verify(personMapper, never()).getPersonById(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
     }
 
     @Test
@@ -697,7 +704,7 @@ class SequenceWorkflowIntegrationTest {
             deal.setStageId(stage.getId());
             deal.setCompanyId(companyId);
             dealMapper.insert(deal);
-            dealMapper.addPerson(targetWorkspace.getId(), deal.getId(), personId, null);
+            dealMapper.addPerson(targetWorkspace.getId(), "[7,8,9]", deal.getId(), personId, null);
             return deal;
         });
     }
@@ -746,6 +753,10 @@ class SequenceWorkflowIntegrationTest {
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         request.getSession().setAttribute(
             SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
+        if (user.getId() == manager.getId() || user.getId() == otherManager.getId()) {
+            int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, user);
+            OwnershipOfferTestFixtures.stepUp(jdbcTemplate, user, request.getSession(), credential);
+        }
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
@@ -789,6 +800,7 @@ class SequenceWorkflowIntegrationTest {
         created.setName(name + " " + suffix);
         created.setSlug(name.toLowerCase(Locale.ROOT).replace(' ', '-') + "-" + suffix);
         workspaceMapper.insert(created);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, created.getId());
         return created;
     }
 

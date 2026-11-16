@@ -1,5 +1,6 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 import type { ActiveRecordRef, ActiveSelection, RecordType } from '@/app/lib/actions/types';
+import { askConnexTurnWriteState } from '@/app/lib/askConnexSurface';
 import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
     AiAssistantToolCall,
@@ -16,9 +17,11 @@ import type {
     AiChatProgressSource,
     AiChatThinkingFrame,
     AiChatTodo,
+    AiChatTurn,
+    AiChatTurnToolCall,
     Page,
 } from '@/app/lib/types';
-import { formatDate, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
+import { formatCalendarDate, formatDate, formatUtcDateTime } from '@/app/lib/utils';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
 const RESOURCE_HANDLE = /(^|[^\p{L}\p{N}_])r[1-9]\d*($|[^\p{L}\p{N}_])/u;
@@ -292,6 +295,12 @@ export type AskConnexTurnState = {
     generationHandle: string | null;
     reason: string | null;
     progress: AiChatProgressItem[];
+    /** Latest durable per-call evidence; absent until supplied by a supporting server. */
+    toolCalls?: AiChatTurnToolCall[] | null;
+    /** Execution evidence is retained until a different turn is accepted or the session resets. */
+    writeCommitted?: boolean;
+    /** Whether the latest reconciliation obtained current terminal execution evidence. */
+    evidenceReconciled?: boolean;
     /**
      * Whether this client may stop the turn. A shared-session participant who opened the session
      * while another member's turn was running adopts that turn into the same state the requester
@@ -310,9 +319,19 @@ export type AskConnexTurnEvent =
         generationHandle: string | null;
         status: string;
         progress?: AiChatProgressItem[];
+        toolCalls?: AiChatTurnToolCall[] | null;
         cancellable?: boolean;
     }
-    | { type: 'status'; status: string; reason?: string | null; progress?: AiChatProgressItem[] }
+    | {
+        type: 'status';
+        status: string;
+        reason?: string | null;
+        progress?: AiChatProgressItem[];
+        toolCalls?: AiChatTurnToolCall[] | null;
+    }
+    | { type: 'toolsObserved'; sessionId: number; toolCalls: readonly AiAssistantToolCall[] }
+    | { type: 'reconciling'; sessionId: number; turnId: number }
+    | { type: 'reconciled'; turn: AiChatTurn }
     | { type: 'reset' };
 
 /** User action exposed by an assistant tool-call card. */
@@ -321,6 +340,7 @@ export type AskConnexToolAction = 'approve' | 'reject' | 'undo';
 /** Localized failure category retained on a card after an action rolls back. */
 export type AskConnexToolCardFailure =
     | 'proposalChanged'
+    | 'proposalExpired'
     | 'proposalPermissionLost'
     | 'proposalUnavailable'
     | 'undoConflict'
@@ -441,6 +461,8 @@ function sameToolCallProjection(
     const currentChanges = askConnexToolChanges(current);
     const incomingChanges = askConnexToolChanges(incoming);
     return current.status === incoming.status
+        && current.reviewState === incoming.reviewState
+        && current.reviewExpiresAt === incoming.reviewExpiresAt
         && current.updatedAt === incoming.updatedAt
         && current.undoAvailable === incoming.undoAvailable
         && current.undoExpiresAt === incoming.undoExpiresAt
@@ -530,6 +552,8 @@ export function reduceAskConnexToolCards(
             return {
                 ...card,
                 status: event.mutation.status,
+                reviewState: event.mutation.reviewState,
+                reviewExpiresAt: event.mutation.reviewExpiresAt,
                 undoAvailable: event.mutation.undoAvailable,
                 undoExpiresAt: event.mutation.undoExpiresAt,
                 pendingAction: null,
@@ -541,14 +565,23 @@ export function reduceAskConnexToolCards(
     });
 }
 
-/** Returns controls allowed by a card's tier, durable state, and live undo deadline. */
+/** Whether a pending proposal has a valid, still-open server review deadline. */
+export function askConnexProposalReviewOpen(card: AiAssistantToolCall, now: number): boolean {
+    if (card.status !== 'proposed' || card.reviewState !== 'open'
+        || typeof card.reviewExpiresAt !== 'string') return false;
+    const deadline = Date.parse(card.reviewExpiresAt);
+    return Number.isFinite(deadline) && now < deadline;
+}
+
+/** Returns controls allowed by a card's tier, durable state, and independent deadlines. */
 export function askConnexToolCardAffordances(
     card: AskConnexToolCardState,
     now: number,
 ): AskConnexToolAction[] {
     if (card.tier === 'confirm' && card.status === 'proposed') {
+        if (!askConnexProposalReviewOpen(card, now) || card.failure === 'proposalExpired') return [];
         if (card.failure === 'proposalUnavailable' || card.failure === 'undoConflict') return [];
-        return askConnexProposalAppliable(card) ? ['reject', 'approve'] : ['reject'];
+        return askConnexProposalAppliable(card, now) ? ['reject', 'approve'] : ['reject'];
     }
     if (card.tier !== 'auto'
         || card.status !== 'executed'
@@ -559,11 +592,15 @@ export function askConnexToolCardAffordances(
     return Number.isFinite(expiresAt) && now <= expiresAt ? ['undo'] : [];
 }
 
-/** Derives the visual expiry state for an executed auto-tier card. */
+/** Keeps pending proposal expiry distinct from an executed action's closed undo window. */
 export function askConnexToolCardStatus(
     card: AskConnexToolCardState,
     now: number,
-): AskConnexToolCardState['status'] | 'expired' {
+): AskConnexToolCardState['status'] | 'expired' | 'proposalExpired' {
+    if (card.status === 'proposed' && (card.reviewState === 'expired'
+        || card.failure === 'proposalExpired'
+        || (card.reviewState === 'open' && typeof card.reviewExpiresAt === 'string'
+            && now >= Date.parse(card.reviewExpiresAt)))) return 'proposalExpired';
     if (card.tier !== 'auto' || card.status !== 'executed' || card.undoExpiresAt === null) {
         return card.status;
     }
@@ -621,9 +658,10 @@ export function askConnexToolProposesRemoval(
  * permission went — is out until it is re-read; one that merely failed to reach the server stays
  * in, because retrying it is the whole point.
  */
-export function askConnexProposalAppliable(card: AskConnexToolCardState): boolean {
+export function askConnexProposalAppliable(card: AskConnexToolCardState, now: number): boolean {
     const changes = askConnexToolChanges(card);
-    return (card.failure === null || card.failure === 'actionFailed')
+    return card.tier === 'confirm' && askConnexProposalReviewOpen(card, now)
+        && (card.failure === null || card.failure === 'actionFailed')
         && changes.some(askConnexChangeApplicable)
         && changes.every((change) => change.state === 'ready' || change.state === 'unchanged');
 }
@@ -723,6 +761,7 @@ export function askConnexProposalGroups(
     cards: readonly AskConnexToolCardState[],
     actionableToolCallIds: ReadonlySet<number>,
     excludedToolCallIds: ReadonlySet<number>,
+    now: number,
 ): AskConnexProposalGroup[] {
     const byTurn = new Map<number, AskConnexToolCardState[]>();
     const decidedByTurn = new Map<number, AskConnexToolCardState[]>();
@@ -744,10 +783,10 @@ export function askConnexProposalGroups(
             turnId,
             messageId: ordered.find((card) => card.messageId !== null)?.messageId ?? null,
             cards: ordered,
-            applicable: ordered.filter(askConnexProposalAppliable).length,
+            applicable: ordered.filter((card) => askConnexProposalAppliable(card, now)).length,
             included,
             selected: ordered.filter(
-                (card) => included.has(card.id) && askConnexProposalAppliable(card),
+                (card) => included.has(card.id) && askConnexProposalAppliable(card, now),
             ).length,
             applied: decided.filter((card) => card.status === 'executed').length,
             discarded: decided.filter((card) => card.status === 'rejected').length,
@@ -868,13 +907,14 @@ export function askConnexChangeValueText(
     locale: string,
     responseDueInHours: (hours: number) => string,
     taskStatus?: Readonly<Record<'open' | 'done', string>>,
+    timeZone = 'UTC',
 ): string {
     if (field === 'dueDate') return formatDate(value, locale);
     if (field === 'taskStatus' && (value === 'open' || value === 'done')) {
         return taskStatus?.[value] ?? value;
     }
     if (field !== 'responseDue') return value;
-    if (side === 'current') return formatUtcDateTime(value, locale, value);
+    if (side === 'current') return formatUtcDateTime(value, locale, value, timeZone);
     const hours = Number(value);
     return Number.isInteger(hours) && hours > 0 ? responseDueInHours(hours) : value;
 }
@@ -1429,6 +1469,16 @@ export function askConnexMessageContent(content: string): string {
     return content.replace(REFERENCE_TOKEN, '$1').trim();
 }
 
+/** Resolves a retained message's author after nullable identity fields have been omitted. */
+export function askConnexMessageAuthor(
+    message: Pick<AiChatMessage, 'authorKind' | 'authorDisplayName' | 'authorUserId'>,
+    labels: { assistantAuthor: string; formerMember: string; memberAuthor: (id: number) => string },
+): string {
+    if (message.authorKind !== 'user') return labels.assistantAuthor;
+    return message.authorDisplayName
+        ?? (message.authorUserId == null ? labels.formerMember : labels.memberAuthor(message.authorUserId));
+}
+
 /** Removes one attached record token from MentionEditor content. */
 export function removeAskConnexAttachment(content: string, attachment: AskConnexAttachment): string {
     return content
@@ -1536,6 +1586,29 @@ export function reduceAskConnexTurn(
     event: AskConnexTurnEvent,
 ): AskConnexTurnState {
     if (event.type === 'reset') return EMPTY_ASK_CONNEX_TURN;
+    if (event.type === 'toolsObserved') {
+        if (state.sessionId !== event.sessionId) return state;
+        return {
+            ...state,
+            writeCommitted: askConnexTurnWriteState(state, event.toolCalls, null) === 'committed',
+        };
+    }
+    if (event.type === 'reconciling') {
+        return state.sessionId === event.sessionId && state.turnId === event.turnId
+            ? { ...state, evidenceReconciled: false } : state;
+    }
+    if (event.type === 'reconciled') {
+        if (state.sessionId !== event.turn.sessionId || state.turnId !== event.turn.turnId) return state;
+        const evidenceReconciled = event.turn.toolCalls != null || state.toolCalls == null;
+        return {
+            ...state,
+            progress: event.turn.progress,
+            toolCalls: event.turn.toolCalls ?? state.toolCalls,
+            evidenceReconciled,
+            writeCommitted: state.writeCommitted === true
+                || askConnexTurnWriteState(event.turn, [], null) === 'committed',
+        };
+    }
     if (event.type === 'accepted') {
         return {
             phase: event.status === 'running' ? 'running' : 'accepted',
@@ -1544,9 +1617,14 @@ export function reduceAskConnexTurn(
             generationHandle: event.generationHandle,
             reason: null,
             progress: event.progress ?? [],
+            toolCalls: event.toolCalls,
+            writeCommitted: (state.sessionId === event.sessionId && state.turnId === event.turnId
+                && state.writeCommitted === true)
+                || askConnexTurnWriteState({ ...event, progress: event.progress ?? [] }, [], null) === 'committed',
             cancellable: event.cancellable ?? false,
         };
     }
+    const projectedCalls = 'toolCalls' in event ? event.toolCalls : state.toolCalls;
     const phase = event.status === 'queued' || event.status === 'accepted'
         ? 'accepted'
         : event.status === 'running'
@@ -1563,6 +1641,9 @@ export function reduceAskConnexTurn(
         phase,
         reason: event.reason ?? null,
         progress: event.progress ?? state.progress,
+        toolCalls: projectedCalls,
+        writeCommitted: state.writeCommitted === true
+            || askConnexTurnWriteState({ ...state, toolCalls: projectedCalls }, [], null) === 'committed',
     };
 }
 
@@ -1735,21 +1816,18 @@ const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * The absolute rendering of an answer timestamp.
  *
  * The step guard accepts an offset instant, an offset-less date-time, and a bare calendar date, and
- * every accepted shape has to read the same way in both halves of a freshness line. This shares
- * {@link parseMysqlDateTime} with `formatRelativeTime` — so an offset-less value is read as UTC and
- * a calendar date as that calendar day — rather than handing the raw string to `new Date`, which
- * reads a bare date as UTC midnight and lands on the previous day west of Greenwich.
+ * every accepted shape has to read the same way in both halves of a freshness line. Calendar values
+ * use a fixed calendar;
+ * instant values use the shared UTC parser and the explicit display zone. Both the absolute and
+ * relative halves retain the intended calendar day without consulting the rendering host.
  *
  * @param value a model-declared timestamp
  * @param locale BCP-47 locale tag
  */
-export function formatAnswerInstant(value: string, locale: string): string {
-    const ms = parseMysqlDateTime(value);
-    if (Number.isNaN(ms)) return ANSWER_ROW_PLACEHOLDER;
-    const options: Intl.DateTimeFormatOptions = CALENDAR_DATE.test(value.trim())
-        ? { dateStyle: 'medium' }
-        : { dateStyle: 'medium', timeStyle: 'short' };
-    return new Intl.DateTimeFormat(locale, options).format(new Date(ms));
+export function formatAnswerInstant(value: string, locale: string, timeZone = 'UTC'): string {
+    return CALENDAR_DATE.test(value.trim())
+        ? formatCalendarDate(value, locale, { dateStyle: 'medium' })
+        : formatUtcDateTime(value, locale, ANSWER_ROW_PLACEHOLDER, timeZone);
 }
 
 /** Route for one cited record, matching the records browser's detail paths. */
@@ -1863,21 +1941,6 @@ export function latestAskConnexSuggestions(
     return [...unique];
 }
 
-/**
- * The prompt a stopped answer offers to send again: the most recent thing the member themselves
- * wrote. A withheld or empty message carries nothing to resend, so it yields nothing to offer.
- */
-export function askConnexRetryPrompt(messages: readonly AiChatMessage[]): string | null {
-    for (let index = messages.length - 1; index >= 0; index--) {
-        const message = messages[index];
-        if (message === undefined || message.authorKind !== 'user') continue;
-        if (message.contentWithheld === true) return null;
-        const content = message.content.trim();
-        return content.length === 0 ? null : content;
-    }
-    return null;
-}
-
 /** Groups consecutive messages by sender without crossing a required transcript insertion point. */
 export function groupAskConnexMessages(
     messages: readonly AiChatMessage[],
@@ -1888,13 +1951,13 @@ export function groupAskConnexMessages(
         const current = groups.at(-1);
         const previous = current?.messages.at(-1);
         if (current?.authorKind === message.authorKind
-            && current.authorUserId === message.authorUserId
+            && current.authorUserId === (message.authorUserId ?? null)
             && (previous === undefined || !breakAfterMessageIds?.has(previous.id))) {
             current.messages.push(message);
         } else {
             groups.push({
                 authorKind: message.authorKind,
-                authorUserId: message.authorUserId,
+                authorUserId: message.authorUserId ?? null,
                 messages: [message],
             });
         }

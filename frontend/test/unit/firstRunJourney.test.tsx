@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("next-intl", () => ({
     useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
-    useLocale: () => "en",
+    useTimeZone: () => "UTC", useLocale: () => "en",
 }));
 
 vi.mock("motion/react", async () => {

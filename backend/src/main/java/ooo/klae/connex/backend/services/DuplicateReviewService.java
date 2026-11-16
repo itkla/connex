@@ -14,9 +14,12 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
@@ -54,6 +57,8 @@ public class DuplicateReviewService {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final WorkspaceService workspaceService;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * Returns a database-pageable current review queue. Lowercase query kinds use the
@@ -62,31 +67,40 @@ public class DuplicateReviewService {
      * @param query validated filters and pagination
      * @return visible review items and total
      */
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ, timeout = 4)
     @RequirePermission(Permission.REPORT_READ)
     public PageResponse<DuplicateReviewItemDto> list(DuplicateReviewQuery query) {
         DuplicateReviewQuery required = Objects.requireNonNull(query, "query");
         validateCompatibility(required.getRecordType(), required.getKind());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long offset = Math.multiplyExact((long) required.getPage() - 1L, required.getSize());
-        long total = duplicateReviewMapper.countVisibleItems(
-            workspaceId,
-            required.getRecordType(),
-            required.getKind(),
-            required.getState(),
-            MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
-        List<DuplicateReviewItemDto> items = duplicateReviewMapper.findVisibleItems(
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        transaction.setReadOnly(true);
+        transaction.setTimeout(4);
+        return transaction.execute(status -> {
+            long total = duplicateReviewMapper.countVisibleItems(
                 workspaceId,
                 required.getRecordType(),
                 required.getKind(),
                 required.getState(),
-                required.getSize(),
-                offset,
-                MAX_GROUP_SIZE_FOR_PAIR_EXPANSION)
-            .stream()
-            .map(DuplicateReviewService::toDto)
-            .toList();
-        return new PageResponse<>(items, total);
+                MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
+            List<DuplicateReviewItemDto> items = duplicateReviewMapper.findVisibleItems(
+                    workspaceId,
+                    orgWorkspaceIdsJson,
+                    required.getRecordType(),
+                    required.getKind(),
+                    required.getState(),
+                    required.getSize(),
+                    offset,
+                    MAX_GROUP_SIZE_FOR_PAIR_EXPANSION)
+                .stream()
+                .map(DuplicateReviewService::toDto)
+                .toList();
+            return new PageResponse<>(items, total);
+        });
     }
 
     /**
@@ -258,6 +272,8 @@ public class DuplicateReviewService {
         Permission permission = mutationPermission(recordType);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         workspaceService.lockAndRequirePermissions(
             workspaceId,
             Map.of(actorId, Set.of(Permission.REPORT_READ, permission)));
@@ -273,7 +289,7 @@ public class DuplicateReviewService {
             throw staleEvidence();
         }
         DuplicateReviewItemRow visible = duplicateReviewMapper.findVisibleItemById(
-            workspaceId, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
+            workspaceId, orgWorkspaceIdsJson, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
         if (visible == null || !"pair".equals(visible.getItemType())) {
             throw staleEvidence();
         }
@@ -285,7 +301,7 @@ public class DuplicateReviewService {
             throw staleEvidence();
         }
         DuplicateReviewItemRow result = duplicateReviewMapper.findVisibleItemById(
-            workspaceId, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
+            workspaceId, orgWorkspaceIdsJson, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
         if (result == null) {
             throw staleEvidence();
         }

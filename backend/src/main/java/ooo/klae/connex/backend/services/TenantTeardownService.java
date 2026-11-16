@@ -77,6 +77,7 @@ public class TenantTeardownService {
     private final SessionSecurityService sessionSecurityService;
     private final TenantWorkScope tenantWorkScope;
     private final TenantLifecycleControlMapper controlMapper;
+    private final ooo.klae.connex.backend.mappers.OwnershipOfferMapper ownershipOfferMapper;
     private final TenantLifecycleControlOperations controlOperations;
     private final TenantLifecycleAccess lifecycleAccess;
     private final TenantTeardownTenantTransaction tenantTransaction;
@@ -85,6 +86,7 @@ public class TenantTeardownService {
     private final AuditService auditService;
     private final TenantLifecycleProperties properties;
     private final Clock clock;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService missionPrivacy;
 
     /** Tears down one exact workspace after owner authorization and slug confirmation. */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -291,6 +293,7 @@ public class TenantTeardownService {
     }
 
     private void sweepTenant(int workspaceId) {
+        missionPrivacy.prepareWorkspaceTeardown(workspaceId);
         for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values()) {
             for (TenantLifecycleRegistry.Preparation preparation : declaration.preparations()) {
                 tenantTransaction.prepare(
@@ -401,6 +404,11 @@ public class TenantTeardownService {
         for (Map.Entry<String, Long> entry : controlRows.entrySet()) {
             tableRows.put(entry.getKey(), entry.getValue());
             totalRows = Math.addExact(totalRows, entry.getValue());
+        }
+        if (!tenantWorkScope.unroutedRead(() -> ownershipOfferMapper.workspaceRootExists(workspaceId))) {
+            long offers = tenantWorkScope.unroutedRead(() -> ownershipOfferMapper.countWorkspaceReferences(workspaceId));
+            tableRows.put("ownership_offer", offers);
+            totalRows = Math.addExact(totalRows, offers);
         }
         return new TenantResidualReport(
             workspaceId,

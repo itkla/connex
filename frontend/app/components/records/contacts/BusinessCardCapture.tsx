@@ -44,6 +44,7 @@ type BusinessCardCaptureProps = {
     status: BusinessCardScanStatus;
     requestError: BusinessCardRequestErrorKind | null;
     importError: BusinessCardRequestErrorKind | null;
+    workspaceUnavailableMessage?: string | null;
     requiresExactImportRetry: boolean;
     disabled: boolean;
     onCancelScan: () => void;
@@ -334,6 +335,7 @@ export function BusinessCardCapture({
     status,
     requestError,
     importError,
+    workspaceUnavailableMessage,
     requiresExactImportRetry,
     disabled,
     onCancelScan,
@@ -350,7 +352,7 @@ export function BusinessCardCapture({
         ? [...new Set(result.warnings.map(warningMessageKey))]
         : [];
 
-    if (!file && !importError) return null;
+    if (!file && !importError && !workspaceUnavailableMessage) return null;
 
     return (
         <section
@@ -382,11 +384,11 @@ export function BusinessCardCapture({
                                 {status === 'scanning' && <ArrowPathIcon className="mt-0.5 size-3.5 shrink-0 animate-spin text-brand-dark motion-reduce:animate-none" aria-hidden="true" />}
                                 {status === 'ready' && <CheckCircleIcon className="mt-0.5 size-3.5 shrink-0 text-brand-dark" aria-hidden="true" />}
                                 {(status === 'manual' || status === 'error') && <ExclamationTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
-                                <span className={cn(requestError ? 'text-destructive' : 'text-muted-foreground')}>
+                                <span className={cn(requestError || workspaceUnavailableMessage ? 'text-destructive' : 'text-muted-foreground')}>
                                     {status === 'scanning' && t('cardScanning')}
                                     {status === 'ready' && t('cardScanReady')}
                                     {status === 'manual' && t(scanAvailable ? 'cardManualFallback' : 'cardManualOnly')}
-                                    {status === 'error' && requestError && t(scanErrorMessageKey(requestError))}
+                                    {status === 'error' && (workspaceUnavailableMessage ?? (requestError && t(scanErrorMessageKey(requestError))))}
                                 </span>
                             </div>
                             {confidences.length > 0 && (
@@ -428,7 +430,7 @@ export function BusinessCardCapture({
                 </Button>
             )}
 
-            {(status === 'manual' || status === 'error') && file && (
+            {(status === 'manual' || status === 'error') && file && !workspaceUnavailableMessage && (
                 <Button type="button" variant="ghost" size="xs" className="w-fit" disabled={cardControlsDisabled} onClick={onRetryScan}>
                     <ArrowPathIcon data-icon="inline-start" />
                     {t(scanAvailable ? 'retryCardScan' : 'checkCardScanner')}
@@ -441,7 +443,13 @@ export function BusinessCardCapture({
                 </ul>
             )}
 
-            {importError && (
+            {workspaceUnavailableMessage && status !== 'error' && (
+                <p className="text-xs leading-relaxed text-destructive" role="alert">
+                    {workspaceUnavailableMessage}
+                </p>
+            )}
+
+            {importError && !workspaceUnavailableMessage && (
                 <div className="grid gap-2">
                     <p className="text-xs leading-relaxed text-destructive" role="alert">
                         {t(importErrorMessageKey(importError, onDiscardImage != null))}

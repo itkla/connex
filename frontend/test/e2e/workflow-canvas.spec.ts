@@ -312,6 +312,7 @@ test.describe("workflow canvas", () => {
         await page.getByRole("button", { name: "Save draft" }).click();
         await create.pending;
         await page.getByRole("button", { name: "Back to workflows" }).click();
+        await page.getByRole("button", { name: "Discard changes", exact: true }).click();
         await expect(page).toHaveURL(/\/workflows$/);
 
         create.release();

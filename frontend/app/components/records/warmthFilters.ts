@@ -140,21 +140,6 @@ export function withValidWarmthHorizon(state: FilterState): FilterState {
 }
 
 /**
- * Removes every warmth key from a filter state, for a surface that cannot apply warmth at all. The
- * keys stay in the URL so they take effect again once that surface is left, but nothing may count
- * them, chip them, or send them meanwhile.
- *
- * @param state - the browser's current filter state
- */
-export function withoutWarmth(state: FilterState): FilterState {
-    return Object.fromEntries(
-        Object.entries(state).filter(
-            ([key]) => key !== WARMTH_FILTER_KEY && key !== WARMTH_HORIZON_FILTER_KEY,
-        ),
-    );
-}
-
-/**
  * Builds the warmth facet's options from the counts the backend returned, in the canonical hot→cold
  * order. A band is offered when the workspace holds records in it or when it is already selected, so
  * a shared link never silently drops a filter whose bucket has since emptied — the same rule the

@@ -47,6 +47,7 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class ScheduleService {
     private static final Set<String> CADENCES = Set.of("weekly", "monthly", "quarterly");
+    static final String EXPORT_PERMISSION_DENIED = "run-as user lacks EXPORT_DATA permission";
 
     private final ScheduleMapper scheduleMapper;
     private final ReportMapper reportMapper;
@@ -81,12 +82,13 @@ public class ScheduleService {
      * @return the stored schedule
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    @RequirePermission(Permission.REPORT_UPDATE)
+    @RequirePermission(Permission.EXPORT_DATA)
     public ReportScheduleDto create(int reportDefinitionId, ReportScheduleRequest request) {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::deferExportStepUpRefusal);
+        requireSchedulePermissions(workspaceId, currentUserId);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
@@ -120,12 +122,13 @@ public class ScheduleService {
      * @return the stored schedule
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    @RequirePermission(Permission.REPORT_UPDATE)
+    @RequirePermission(Permission.EXPORT_DATA)
     public ReportScheduleDto update(int reportDefinitionId, ReportScheduleRequest request) {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::deferExportStepUpRefusal);
+        requireSchedulePermissions(workspaceId, currentUserId);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
@@ -197,6 +200,9 @@ public class ScheduleService {
                 schedule.getWorkspaceId(), schedule.getRunAsUserId()));
         if (control.user() == null || control.role() == null) {
             return DeliveryAccess.denied("run-as user is not an active workspace member");
+        }
+        if (!control.permissions().contains(Permission.EXPORT_DATA)) {
+            return DeliveryAccess.denied(EXPORT_PERMISSION_DENIED);
         }
         Set<Permission> required;
         try {
@@ -311,10 +317,9 @@ public class ScheduleService {
      * delivery channel.
      *
      * <p>A schedule is the one export surface that keeps emitting tenant data with no session to
-     * step up, so the control sits on the mutation that decides where a report goes rather than on
-     * the unattended send. Gating the send is unimplementable and gating it would strand every
-     * already-approved schedule, so {@code ReportDeliveryScheduler} deliberately passes through
-     * {@link #claimDue}, {@link #deliveryAccess} and the recipient re-derivation untouched.
+     * step up, so assertion freshness is checked on the mutation that decides where a report goes.
+     * Unattended delivery still revalidates the run-as member's current export and report permissions
+     * through {@link #deliveryAccess}, independently of the interactive session.
      *
      * <p>Accounts that administer no other principal are unaffected. A schedule may only name
      * active members who already hold the report's own read permissions, so an ordinary member
@@ -484,6 +489,11 @@ public class ScheduleService {
         for (Permission permission : requiredPermissions) {
             workspaceService.requirePermission(workspaceId, userId, permission);
         }
+    }
+
+    private void requireSchedulePermissions(int workspaceId, int userId) {
+        workspaceService.requirePermission(workspaceId, userId, Permission.REPORT_UPDATE);
+        workspaceService.requirePermission(workspaceId, userId, Permission.EXPORT_DATA);
     }
 
     private ReportDefinition requireDefinition(int workspaceId, int reportDefinitionId) {

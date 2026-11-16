@@ -39,6 +39,11 @@ public final class MaskedPrompt {
             return this;
         }
 
+        Builder addMessage(String role, List<OutboundSegment> segments) {
+            messages.add(new MaskedMessage(role, segments));
+            return this;
+        }
+
         MaskedPrompt build() {
             return new MaskedPrompt(systemPrompt, messages);
         }

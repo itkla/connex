@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -123,6 +124,10 @@ class AiChatAgentLoopParallelReadStepTest {
         AiChatAttachmentContextService attachmentContextService =
                 mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
+        when(persistenceService.withPrivacyToken(any(), any())).thenAnswer(invocation -> {
+            Supplier<?> work = invocation.getArgument(1);
+            return work.get();
+        });
         runLeaseHeartbeat = mock(AiRunLeaseHeartbeat.class);
         AiRunLeaseService runLeaseService = mock(AiRunLeaseService.class);
         AiChatProgressService progressService = mock(AiChatProgressService.class);
@@ -290,9 +295,10 @@ class AiChatAgentLoopParallelReadStepTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
-        verify(persistenceService).proposeTool(TURN, 1, 1, "search_records", search("alpha"));
         verify(persistenceService).proposeTool(
-                TURN, 1, 2, "aggregate_metric", "{\"metric\":\"deal_kpis\"}");
+                TURN, 1, 1, "search_records", refused(search("alpha")));
+        verify(persistenceService).proposeTool(
+                TURN, 1, 2, "aggregate_metric", refused("{\"metric\":\"deal_kpis\"}"));
         verify(persistenceService, times(2)).failTool(
                 TURN, 29, "{\"reason\":\"tool_not_loaded\"}");
         verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
@@ -655,7 +661,8 @@ class AiChatAgentLoopParallelReadStepTest {
                 eq("search_records"), any(JsonNode.class), any(), eq(true), any());
         verify(toolExecutor, never()).execute(
                 eq("get_record"), any(), any(), any(Boolean.class), any());
-        verify(persistenceService).proposeTool(TURN, 1, 2, "get_record", "{\"handle\":\"r1\"}");
+        verify(persistenceService).proposeTool(
+                TURN, 1, 2, "get_record", refused("{\"handle\":\"r1\"}"));
         verify(persistenceService).failTool(TURN, 29, "{\"reason\":\"unknown_handle\"}");
         List<AiToolExchange> replayed = requests().getLast().exchanges();
         assertEquals(
@@ -823,7 +830,7 @@ class AiChatAgentLoopParallelReadStepTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
-        verify(persistenceService).proposeTool(TURN, 3, 1, "set_todos", todos("nine"));
+        verify(persistenceService).proposeTool(TURN, 3, 1, "set_todos", refused(todos("nine")));
         verify(persistenceService).failTool(
                 TURN, 29, "{\"reason\":\"plan_updates_exhausted\"}");
         verify(persistenceService).proposeTool(TURN, 3, 2, "search_records", search("alpha"));
@@ -875,7 +882,8 @@ class AiChatAgentLoopParallelReadStepTest {
             bindingsSeen.addAll(resources.maskingContext().tokenBindings());
             String query = arguments.path("query").asString();
             return new AiAssistantToolResult(
-                    Map.of("records", List.of(resources.register("deal", SEARCH_DEALS.get(query)))),
+                    Map.of("records", List.of(resources.register("deal", SEARCH_DEALS.get(query))),
+                            "contact", SEARCH_CONTACTS.get(query)),
                     List.of(new AiAssistantToolResult.Identifier(
                             "person", SEARCH_CONTACTS.get(query))));
         }).when(toolExecutor).execute(
@@ -953,6 +961,12 @@ class AiChatAgentLoopParallelReadStepTest {
         return "{\"items\":[\"" + item + "\"]}";
     }
 
+
+    /** The stored form of a refused call's arguments: wrapped, never a bare envelope (#1867). */
+    private static String refused(String argumentsJson) {
+        return "{\"refusedArguments\":" + argumentsJson + "}";
+    }
+
     private static String search(String query) {
         return "{\"query\":\"" + query + "\",\"kinds\":[\"deal\"]}";
     }
@@ -966,7 +980,15 @@ class AiChatAgentLoopParallelReadStepTest {
                         any(AiResponseSchema.class), any(AiNativeToolRequest.class),
                         eq(directAdmission), any(Runnable.class)));
         for (AiNativeToolCompletion<AiAssistantStep.FinalAnswer> response : responses) {
-            stubbing = stubbing.thenReturn(response);
+            stubbing = stubbing.thenAnswer(call -> {
+                AiInvocation invocation = call.getArgument(0);
+                invocation.prompt().getMessages().forEach(message ->
+                        invocation.context().exposeDispatchedPayload(message.getContent()));
+                AiNativeToolRequest request = call.getArgument(5);
+                request.exchanges().forEach(exchange ->
+                        invocation.context().exposeDispatchedPayload(exchange.maskedResult()));
+                return response;
+            });
         }
     }
 

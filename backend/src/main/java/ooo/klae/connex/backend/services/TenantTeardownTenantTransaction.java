@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -9,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.TenantStorageResidual;
 import ooo.klae.connex.backend.mappers.TenantLifecycleMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.storage.ObjectDeletionRetryQueue;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
@@ -20,6 +23,8 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 public class TenantTeardownTenantTransaction {
     private final TenantLifecycleMapper mapper;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
+    private final NotificationMapper notificationMapper;
+    private final NotificationStateVersionService notificationStateVersions;
 
     /** Applies one registry-declared nullable reference preparation. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -44,7 +49,28 @@ public class TenantTeardownTenantTransaction {
         if (!registered.direct()) {
             throw new IllegalArgumentException("Cascade lifecycle tables are not deleted directly");
         }
+        if ("notification".equals(registered.table())) {
+            return deleteNotifications(workspaceId, limit);
+        }
         return mapper.deleteDirectBatch(workspaceId, registered, limit);
+    }
+
+    private int deleteNotifications(int workspaceId, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("Notification teardown batch size must be positive");
+        }
+        List<NotificationMapper.DeletionCandidate> candidates = notificationMapper.lockTeardownBatch(workspaceId, limit);
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+        int rows = notificationMapper.deleteTeardownBatch(workspaceId,
+            candidates.stream().map(NotificationMapper.DeletionCandidate::id).toList());
+        if (rows != candidates.size()) {
+            throw new IllegalStateException("Locked notification teardown batch changed");
+        }
+        new TreeSet<>(candidates.stream().map(NotificationMapper.DeletionCandidate::recipientId).toList())
+            .forEach(notificationStateVersions::markChanged);
+        return rows;
     }
 
     /** Reads one bounded keyset page of lifecycle-owned object keys. */

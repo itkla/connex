@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.SavedViewService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SegmentService;
@@ -65,6 +66,36 @@ class AiAssistantScopeReadServiceTest {
     private WorkspaceService workspaceService;
     private AiAssistantScopeReadService service;
 
+    @Test
+    void incompleteActivityProseDoesNotDiscardOtherRows() throws Exception {
+        Person person = new Person();
+        person.setId(1);
+        person.setName("Routine Contact");
+        when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID)).thenReturn(List.of(1));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(person));
+        when(activityMapper.countAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean())).thenReturn(2L);
+        when(activityMapper.getAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean(), anyInt(), anyInt()))
+                .thenReturn(List.of(
+                        new AiAssistantScopeActivity(1, 1, "meeting", "Keep this subject",
+                                "`[Unknown Former Alias](user:42)`", "2026-08-22 10:00:00", 1, null),
+                        new AiAssistantScopeActivity(2, 1, "meeting", "Other subject", "Keep this activity",
+                                "2026-08-22 11:00:00", 1, null)));
+        var context = new MaskingContext();
+
+        var result = service.scopeActivities(AiChatQueryScope.none(), "person", null, List.of(), 30, 50, 5,
+                new AiChatResourceRegistry(context));
+
+        var data = JsonMapper.builder().build().valueToTree(result.data());
+        assertEquals(2, result.data().get("returnedActivities"));
+        assertEquals("(unavailable reference)", data.path("activities").path(0).path("notes").asString());
+        assertEquals("Keep this subject", data.path("activities").path(0).path("subject").asString());
+        assertEquals("Keep this activity", data.path("activities").path(1).path("notes").asString());
+        assertFalse(data.toString().contains("Unknown Former Alias"));
+        assertFalse(context.identifierDictionary().contains("Unknown Former Alias"));
+    }
+
     @BeforeEach
     void setUp() {
         activityMapper = mock(ActivityMapper.class);
@@ -84,11 +115,13 @@ class AiAssistantScopeReadServiceTest {
         when(workspaceScopeControlAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
                 new OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
                         1, List.of(WORKSPACE_ID), "[" + WORKSPACE_ID + "]"));
+        ReferenceService referenceService = mock(ReferenceService.class);
+        when(referenceService.hydrateActivitiesForMasking(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         service = new AiAssistantScopeReadService(
                 activityMapper, segmentService, segmentMapper, savedViewService,
                 scoringService, dealRiskService, personMapper, companyMapper, dealMapper,
                 workspaceService, workspaceScopeControlAccess, objectMapper,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), referenceService, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test
@@ -159,7 +192,7 @@ class AiAssistantScopeReadServiceTest {
         later.setId(2);
         later.setName(laterName);
         when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID)).thenReturn(List.of(1, 2));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of(first, later));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(first, later));
         when(activityMapper.countAiAssistantScopeActivities(
                 anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean()))
                 .thenReturn(2L);
@@ -778,9 +811,9 @@ class AiAssistantScopeReadServiceTest {
         List<Integer> ids = IntStream.rangeClosed(1, size).boxed().toList();
         when(segmentService.evaluate(eq("company"), any(SegmentDefinition.class)))
                 .thenReturn(ids);
-        when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+        when(companyMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
                 .thenAnswer(invocation -> {
-                    List<Integer> requested = invocation.getArgument(1);
+                    List<Integer> requested = invocation.getArgument(2);
                     List<Company> companies = new ArrayList<>();
                     for (Integer id : requested) {
                         Company company = new Company();
@@ -827,4 +860,18 @@ class AiAssistantScopeReadServiceTest {
     private static List<String> exclusions(AiAssistantToolResult result) {
         return (List<String>) result.data().get("exclusions");
     }
+    @Test
+    void emptyBareCohortsKeepTheirPreviousResultWithoutAControlRead() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", operation.scopes);
+            assertEquals(List.of(), service.cohort("company", AiChatQueryScope.none(), List.of()).ids());
+            assertEquals(List.of(), service.previewCohort(AiChatQueryScope.none(), "company", false).ids());
+            var result = service.scopeActivities(AiChatQueryScope.none(), "company", null,
+                List.of(), 30, 25, 5, new AiChatResourceRegistry());
+            assertEquals(0, result.data().get("readRecords"));
+            assertEquals(List.of(), result.data().get("activities"));
+            org.mockito.Mockito.verifyNoInteractions(operation.control);
+        }
+    }
+
 }

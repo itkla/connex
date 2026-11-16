@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.dto.ExportPermissions;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
@@ -16,8 +17,30 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
  * Mapper for workspace and membership persistence.
  */
 public interface WorkspaceMapper {
+    /** Returns the immutable successful control cutover deadline as UTC, or null if unavailable. */
+    String findPendingInvitationCutoverDeadline();
+
+    /** A bounded primary-key window includes active rows without locking them. */
+    record PendingDeadlineRow(int userId, long membershipId, boolean needsBackfill) { }
+
+    /** Reads at most limit memberships within one workspace, regardless of status or freshness. */
+    List<PendingDeadlineRow> findPendingDeadlineWindow(@Param("workspaceId") int workspaceId,
+        @Param("afterUserId") int afterUserId, @Param("limit") int limit);
+
+    /** Persists the immutable cutover deadline only for the exact still-pending generation. */
+    int backfillPendingDeadline(@Param("workspaceId") int workspaceId, @Param("userId") int userId,
+        @Param("membershipId") long membershipId);
+
     List<Workspace> getWorkspacesForUser(int userId);
     List<WorkspaceMembershipDto> getMembershipsForUser(int userId);
+    /** Discovers every membership scope without status or lifecycle filtering for final erasure. */
+    List<Integer> discoverAccountMembershipWorkspaceIds(@Param("userId") int userId);
+    /** Retains an exact erasure membership through the user index before its clustered row. */
+    WorkspaceMember lockAccountMembershipForUpdate(
+        @Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    /** Preserves owner NOWAIT semantics with the same user-index-first erasure acquisition. */
+    WorkspaceMember lockAccountMembershipWithoutWaiting(
+        @Param("workspaceId") int workspaceId, @Param("userId") int userId);
     /** Returns the exact active membership through a current shared-locking read. */
     WorkspaceMembershipDto getMembershipForUserForShare(
         @Param("workspaceId") int workspaceId,
@@ -37,6 +60,9 @@ public interface WorkspaceMapper {
     WorkspaceMember lockAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    /** Exact membership lock that refuses contention while a caller retains the workspace root. */
+    WorkspaceMember lockAuthorizationMembershipWithoutWaiting(
+        @Param("workspaceId") int workspaceId, @Param("userId") int userId);
     /** Retains exact membership authority without excluding other authorized readers. */
     WorkspaceMember lockAuthorizationMembershipForShare(
         @Param("workspaceId") int workspaceId,
@@ -48,6 +74,11 @@ public interface WorkspaceMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    List<Integer> getActiveMemberIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("userIds") List<Integer> userIds
+    );
+    /** Internal authored-reference provenance lookup; never returns recipient profiles. */
     List<Integer> getMemberIdsIncludingPending(
         @Param("workspaceId") int workspaceId,
         @Param("userIds") List<Integer> userIds
@@ -58,6 +89,12 @@ public interface WorkspaceMapper {
     );
     String getRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<User> getMembers(int workspaceId);
+    String findPendingInvitationReferenceByEmail(@Param("workspaceId") int workspaceId,
+        @Param("email") String email);
+
+    Integer findPendingInvitationUserId(@Param("workspaceId") int workspaceId,
+        @Param("reference") String reference);
+
     List<MemberDto> getMembersWithRoles(int workspaceId);
     MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
@@ -82,10 +119,16 @@ public interface WorkspaceMapper {
         @Param("workspaceId") int workspaceId,
         @Param("name") String name,
         @Param("timezone") String timezone);
+    int updateDefaultCurrency(
+        @Param("workspaceId") int workspaceId,
+        @Param("defaultCurrency") String defaultCurrency);
     Integer getOrgId(int workspaceId);
     List<Integer> findWorkspaceIds();
     List<Integer> findWorkspaceIdsPage(
         @Param("afterId") int afterId, @Param("limit") int limit);
+    Integer findLastWorkspaceId();
+    List<Integer> findWorkspaceIdsThroughPage(
+        @Param("afterId") int afterId, @Param("throughId") int throughId, @Param("limit") int limit);
     List<Integer> findWorkspaceIdsLifecyclePage(
         @Param("afterId") int afterId, @Param("limit") int limit);
     /**
@@ -101,6 +144,12 @@ public interface WorkspaceMapper {
      * @return id/org/name rows in name then id order, empty when the anchor does not exist
      */
     List<Workspace> findOrganizationWorkspacesForShare(@Param("workspaceId") int workspaceId);
+
+    /**
+     * Loads the same unfiltered organization set for destructive cache erasure, flushing local
+     * MyBatis state so committed workspace creation cannot be hidden by an earlier sharing read.
+     */
+    List<Workspace> findOrganizationWorkspacesForCachePurge(@Param("workspaceId") int workspaceId);
 
     /**
      * Loads every active workspace of an active organization, which is the scope the read-path
@@ -144,4 +193,11 @@ public interface WorkspaceMapper {
         @Param("userId") int userId,
         @Param("role") String role
     );
+    /** Returns export access for built-in roles in this exact control-plane scope. */
+    ExportPermissions getExportPermissions(@Param("workspaceId") int workspaceId);
+    /** Reads current policy while retaining the workspace root through transaction completion. */
+    ExportPermissions getExportPermissionsForShare(@Param("workspaceId") int workspaceId);
+    /** Replaces only the named built-in role's export access. */
+    int updateExportPermission(@Param("workspaceId") int workspaceId, @Param("role") String role,
+        @Param("enabled") boolean enabled);
 }

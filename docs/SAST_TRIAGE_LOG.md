@@ -478,7 +478,12 @@ requirements meet in these handlers and the conflict is resolved by acceptance, 
   cross-site subresource shapes via a Fetch-Metadata allowlist (`Sec-Fetch-Dest: empty` only,
   `no-cors` refused, cross-site origins refused outside the CORS allowlist); a forged row can
   only ever name a session the caller already had access to, carries no caller-supplied text,
-  and the write is rate-limited per workspace.
+  and the write is rate-limited per workspace. Chromium exercises the refusal end to end through
+  the Next.js `/api` rewrite (`frontend/test/e2e/assistant-admission-filter.spec.ts`, #1520) on
+  every push to `main` and on every pull request that changes `frontend/` or `backend/`; a
+  pull request touching only `docs/` or `deploy/` does not run it. The browser, staging and Caddy
+  evidence is in
+  [AI_SECURITY.md](backend/AI_SECURITY.md#cross-site-admission-of-audited-assistant-reads).
 - Residual: clients that omit Fetch Metadata (documented in the filter's Javadoc) and
   `SameSite=None` SAML deployments retain a narrowed forgery vector for these metadata-only rows.
 
@@ -1034,9 +1039,22 @@ The filter and interceptor layer reaches at least the following durable writes o
    use, so does any cross-site subresource load. Content is fixed and derived from the victim's
    identity. Repetition was unbounded, which was tracked as a finding in its own right on
    [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into this false-positive
-   rationale; since that fix, `DenialAuditRateLimiter` admits at most one row per hour for each user,
-   action, and client address, for at most eight addresses per user and action, per replica, while
-   the 403 itself is unchanged;
+   rationale; with #1936's User-Agent differentiation, `DenialAuditRateLimiter` keeps eight address
+   slots per user/action/reason, each admitting four fingerprints inside its original hour: at most
+   32 rows per replica across retained address windows, and one for a stable browser/address.
+   Fingerprints never consume other address slots, extend expiry or refresh eviction order. Without
+   releases, every address-only admission remains admitted while windows are retained. Release removes
+   only its fingerprint; other fingerprints' evidence keeps its original address slot and expiry.
+   A retry with surviving evidence stays suppressed. Retaining occupied capacity can also block a new
+   address the old rule would admit after release, so there is no universal per-request evidence
+   guarantee after releases. The last fingerprint's release or expiry frees the address slot.
+   The full UTF-8 header's unkeyed SHA-256 fingerprint stays in memory only; absent and
+   firewall-rejected headers share one sentinel. Suppression counts every omitted row; eviction
+   counts only live keys dropped at the 4,096-key bound. Saturation and restarts can re-arm windows.
+   Proxy-collapsed addresses have only four fingerprint slots; cookie-only SSR cannot identify the
+   originating browser. The 403 itself is unchanged; see
+   [Privileged MFA](PRIVILEGED_MFA.md#auditing-the-filters-own-refusals) for the admission and release
+   contract;
 3. Spring Session JDBC — `UPDATE SPRING_SESSION SET LAST_ACCESS_TIME` on every authenticated
    request (verified in spring-session-jdbc 4.1.0 bytecode);
 4. gated session-attribute writes — when an authenticated session lacks the legacy
@@ -1123,3 +1141,190 @@ approver Security Owner role
 `ShareWorkspaceControlAccess` gaining a mutating statement, a structural split of
 `TenantWorkScope.unrouted` that separates read and write suppliers, or a material update to the
 query.
+
+### `java/csrf-unprotected-request-type` — structural split of the `unrouted` merge (#1815)
+
+Re-evaluation of #67, #153, #186 and #189, triggered by the change their entries name: a structural
+split of `TenantWorkScope.unrouted` that separates read and write suppliers. The split shipped in PR
+[#2003](https://github.com/itkla/connex/pull/2003), tracked on
+[#1815](https://github.com/itkla/connex/issues/1815).
+
+**The mechanism.** CodeQL resolves the `work.get()` in `TenantWorkScope.runWithOverride` by merging
+every lambda that reaches it. Every `TenantWorkScope` entry funnels through that one `Supplier`. On
+`main`, 34 of the rule's 47 results therefore carried the identical merged sink set: 100 reported
+locations, mostly AI-feature and provider-connection persistence, whichever handler the flow started
+from.
+
+**The change.** `TenantWorkScope.unroutedRead` keeps `unrouted`'s routing semantics, but takes a
+`ControlPlaneRead`, its own functional interface, and never goes through the shared `Supplier`.
+The read-only control-plane sites that GET flows entered moved onto it:
+- the `OrganizationWorkspaceScope`, `DealCollaborator` and `ShareWorkspace` control-access helpers;
+- read helpers split out of `NotificationQuietHoursControlAccess` and `AiBudgetControlAccess`;
+- `AttachmentReadService`, `DataSubjectRequestService` (list, get, prepareDisclosure), `HealthService`,
+  `IntroductionService`, `NativeConnectService`, `ProviderConnectionService:76`,
+  `ProviderCapturePolicyService:766` and `UserService:97`.
+
+Every converted lambda was traced to its SQL, first by a classification pass and then by an
+independent review. The review found one shared-state mutation, the health probe's guard-status
+tracking, which moved out of the read before merge. It also listed pure reads left on `unrouted`
+inside the OAuth callback and the export grant redemption. Both flows genuinely write, so converting
+those reads would not change their results. `backend/AGENTS.md` records the rule.
+
+| Field | Value |
+| --- | --- |
+| Before | `main` `e9825428c`, analysis `1892160414`: 47 results for the rule (72 in total) |
+| After | `refs/pull/2003/merge` `222237959`, analysis `1892355483`: 22 results (47 in total) |
+| No result appears only after | 0 |
+
+**Results that no longer reproduce (25).** They include the four whose entries named this split as a
+re-evaluation trigger: #67 (`UserController:73`), #153 (`ReportController:126`), #186
+(`DealController:854`) and #189 (`ShareController:35`). The other 21 are:
+- `AiOrganizationBudgetController:27`;
+- `AttachmentController` (4);
+- `BusinessCardController:100`;
+- `DataSubjectRequestController:33` and `:49`;
+- `HealthController:39`;
+- `IntroductionController` (4);
+- `NativeConnectController:37`;
+- `NotificationController:65` and `:122`;
+- `PersonController:616` and `:647`;
+- `ProviderCaptureController:44` and `:68`;
+- `ProviderConnectionController:37`.
+
+Their alerts need no fresh disposition, because the results behind them no longer exist.
+
+**Results that remain (22).** Every one already has a dismissed alert.
+- **11 audit appends**, each with a 3-location sink set in `AuditIntegrityService`:
+  - `AiAssistantController:136`, `:274`, `:367` and `:395`;
+  - `AuditController:49`;
+  - `ExportController:55`, `:83`, `:102` and `:111`;
+  - `OrgAuditController:46`;
+  - `ReportController:180`.
+
+  These are dismissed `won't fix` as audited reads (#32, #35, #157, #158, #167–#173) and are
+  unaffected by the split.
+- **7 still carrying the merged sink set**, because they still enter the shared `Supplier`:
+  - **Through `unrouted`, around a genuine write:**
+    - `ProviderConnectionController:47` (#58/#134, `won't fix`): the OAuth callback stores
+      credentials and consumes its state.
+    - `TenantLifecycleController:67` (#66/#147, `won't fix`): the export grant redemption.
+    - `DataSubjectRequestController:61` (#41/#120): see the record defect below.
+  - **Through `runAs` → `withWorkspacePlacement`:** `DeliveryUnsubscribeController:53` (#164) and
+    `DocumentAcceptanceController:65` (#165), false positives per
+    [#1599](https://github.com/itkla/connex/issues/1599).
+  - **Through `inWorkspace`:** `TenantDiagnosticsController:32` (#65/#146) and `:40` (#64/#145),
+    false positives that assemble read-only metadata. A routed read entry would be the next split.
+- **`RadarController:36` and `:47`** (#57/#140 and #56/#139, false positive). On `main` they carried
+  the merged set. Their sink set now narrows to 7 locations in `RelationshipSignalWriteService`: the
+  detector-family bootstrap their recorded rationale already analyses. Disposition unchanged.
+- **`AiAssistantController:340`** (#33, `won't fix`) and **`WorkflowManualRunController:44`**
+  (#68/#148, `won't fix`). Their sink sets are their own writes and are unchanged.
+
+**Record defect found by this re-evaluation: #120 and its predecessor #41.** Their dismissal comment
+says the disclosure audit "is written by the separate recording path, not this GET". It is not.
+`DataSubjectRequestService.disclosure` writes the strict `appi.subject_request.disclosure` audit
+itself, through `unrouted` at `:137`, after assembling the disclosure. If that audit can't be
+written, the request fails with 503. The write predates `34f8dbd6e` (2026-07-22, #810), which only
+moved it into `recordDisclosureAudit`, so the comment was wrong when written: the call sat at `:133`
+on the dismissal-day `main` (`b7b552a39`). The GET therefore genuinely writes its access audit, both
+the row and the audit-integrity head. That is the audited-read class dispositioned `won't fix`
+above, not a false positive.
+
+**Re-disposition, 2026-10-05**, per [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md), tracked on
+[#2004](https://github.com/itkla/connex/issues/2004):
+- An independent read-only context reproduced the evidence on `e175aa331`. It also found that the
+  path is gated on an organization admin or owner with a fresh WebAuthn step-up
+  (`requireMutationAccess`).
+- #41, which carries the live result, was reopened and re-dismissed as `won't fix`, with expiry
+  2027-04-05 and re-review 2027-03-05.
+- #120 is left `fixed`. On reopen it recomputed to `fixed`, because its `src/…` path lineage is no
+  longer reported, so it has no live finding to suppress. That matches the 2026-09-01 handling of
+  stale records above. It was briefly re-dismissed in error and then reopened back to `fixed`.
+- At that time, moving disclosure assembly to `POST` remained an alternative for the Security Owner.
+
+**Superseding owner decision, 2026-10-12**, tracked on
+[#2004](https://github.com/itkla/connex/issues/2004): the Security Owner approved moving disclosure
+assembly and its strict access audit to a CSRF-protected POST, with the frontend and backend API
+contract deployed together. The implementation removes GET and implicit HEAD without an alias or
+redirect and preserves the existing authorization, step-up, assembly and fail-closed audit flow;
+see [the API migration contract](backend/API_SURFACE.md#disclosure-method-migration-2004).
+The historical dispositions above remain evidence of the earlier assessment. #41's dismissal
+stands until shipment and automatic CodeQL resolution is evidenced; #120 remains fixed. Post-merge
+CodeQL scan evidence and staging direct/proxy retirement probes must be attached to #2004 before
+closure. Post-merge scan and deployed retirement evidence remain pending.
+
+### `java/csrf-unprotected-request-type` — #195: mission-holdings purge progress read
+
+PR [#2120](https://github.com/itkla/connex/pull/2120) adds a progress GET whose control authorization
+and projection execute only SELECTs. Current organization-administrator authorization remains in
+`DataSubjectRequestControlOperations.missionPurgeOperation`; progress never initiates deletion or
+appends completion evidence. The reported sinks in `AiBudgetControlOperations` and
+`AiOutputCacheStore` are the shared callback merge described in #1815 above. The read reached
+`TenantWorkScope.runWithOverride` through `inLifecycleWorkspace` and shared `inAcceptedScope` with
+the invalidation callback.
+
+The structural remediation adds `inLifecycleWorkspaceRead(WorkspaceRead)` with a separate callback
+invocation and moves placement lookup onto `unroutedRead`. Both lifecycle reads and mutating
+workspace entries use the same private, callback-free route scope for operation snapshots,
+lifecycle fencing, transaction catalog-change refusal, override restoration, and thread-local
+cleanup. The read entry invokes `read.read()` directly. No `WorkspaceRead` implementation,
+including test callbacks compiled by CodeQL, may call a Supplier/Runnable-based scope entry;
+nesting/fencing tests use `inLifecycleWorkspace`, exercising the shared route scope instead.
+Progress installs accepted system
+identity through callback-free helpers and directly executes its fresh, read-only READ COMMITTED
+transaction, without passing through invalidation's `Supplier`. The system-principal lookup uses
+an uncached SELECT, keeping the control-plane read free of shared-state mutation. Placement,
+transaction catalog guards, current administrator checks, and identity restoration remain
+fail-closed. Routing tests cover dedicated placement and restoration after read failure. No
+suppression or dismissal is added; clearance requires a subsequent Security workflow scan.
+
+### `java/csrf-unprotected-request-type` — record-visibility callback split (#2175)
+
+PR [#2175](https://github.com/itkla/connex/pull/2175) introduced record-visibility operation scopes
+around company reads and writes. Its merge-ref scan reports 87 CSRF results, with 77 sharing the
+same 100-location merged sink set; 64 new alerts (#203–#266) start at GET handlers. Their traces
+enter `RecordVisibilityScopeControlAccess` and merge read callbacks with mutation callbacks through
+`Supplier.get`, repeating the mechanism structurally separated in #2003 above.
+
+**The change.** `RecordVisibilityRead` gives eager and deferred read operations their own direct
+callback invocation. Neither read entry adapts into a `Supplier`, and mutation entries never adapt
+into the read interface. Read callers retain the same identity checks, prepared routed-snapshot
+validation, operation memo, deferred failure replay and restoration. The converted paths cover
+company projections, scoring, dashboard, replay, search, tags, pipeline projections, comments,
+reference hydration, person/deal projections and watch listings. Company-logo authorization uses
+the read entry; stream opening remains outside it because storage admission and readiness tracking
+change shared state through their existing callbacks.
+
+Radar feed bootstrap and AI transcript access retain mutation callbacks: they really persist
+signal-family state or access-audit evidence and retain authorization locks. No suppression,
+dismissal, CSRF policy change or audit removal accompanies this split. Unit tests cover both read
+entries, and a source-scan architecture guard rejects cross-interface adapters, including adapters
+through helpers. CodeQL clearance and the resulting sink sets require the next CI Security scan;
+local compilation and unit tests cannot establish that result.
+
+### `java/csrf-unprotected-request-type` — mission proposals and My Work (#2158, round 13)
+
+CI run `39520519761` reports alerts #267/#268 at the mission output/item GET handlers and
+#227/#228 at the My Work page/summary GET handlers. The paths enter mission card projection
+and merge at `RecordVisibilityScopeControlAccess.runWithinScope` with unrelated mutation
+callbacks, including `AttachmentWriteOperations`. This repeats the shared `Supplier` mechanism
+described in #2003 and #2175 above.
+
+Mission card projection and page-context reads now use the existing `RecordVisibilityRead`
+interface. Its private `runWithinScopeRead` invokes the read directly; read and mutation entries
+share only callback-free scope installation/restoration. `TenantWorkScope.inWorkspaceRead`
+prepares the active workspace placement before proposal output, item, version and mission metadata
+transactions begin. `AiAgentScopePolicy.evaluateRead` also separates selected-record validation
+from execution callbacks, so the read chain cannot rejoin the mutation interface through that
+helper. My Work reaches the same mission output/card read path. Administrative retained reads
+keep their existing audit writes and mutation callbacks.
+
+Direct tool execution, proposal preparation and decision coordination establish workspace scopes
+before their tenant work. Singleton publication and report freeze also prepare scopes before
+opening their independent REQUIRES_NEW, READ_COMMITTED transactions and revalidating sources.
+The read transactions retain READ_COMMITTED isolation and existing
+authorization/privacy locks; the decision coordinator retains independent item commits. Scoped
+entries restore their enclosing context on failure. No read callback, including test callbacks,
+may adapt into a Supplier/Runnable-based mutating scope entry. No suppression, dismissal, CSRF
+policy change or audit removal is included. Local tests cover preparation before tenant transactions
+in both modes and scope restoration. Alert clearance requires a subsequent CodeQL Security scan.

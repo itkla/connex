@@ -1,6 +1,6 @@
 # Connex — Data-Subject Request Handling Procedure (開示等の請求)
 
-> **Status:** Phase-0 **process** deliverable for the APPI pathway ([#224]) — issue [#221]. Request **tracking** and the **subject-scoped disclosure export** are productized (increment 1 of [#221]): org administrators log and track requests via `POST/GET/PUT /api/orgs/{orgId}/data-subject-requests` and assemble a disclosure via `GET /api/orgs/{orgId}/data-subject-requests/{id}/disclosure` (all endpoints are org-admin gated; create/update and the disclosure assembly additionally require recent authentication and write audit-log records — the disclosure fails closed if its audit record cannot be persisted). Cease-of-use and cease-of-provision are also productized (increment 2 of [#221]): `PUT /api/persons/{id}/restrictions` on the owning workspace suspends processing and/or ceases third-party provision.
+> **Status:** Phase-0 **process** deliverable for the APPI pathway ([#224]) — issue [#221]. Request **tracking** and the **subject-scoped disclosure export** are productized (increment 1 of [#221]): org administrators log and track requests via `POST/GET/PUT /api/orgs/{orgId}/data-subject-requests` and assemble a disclosure via `POST /api/orgs/{orgId}/data-subject-requests/{id}/disclosure` (see the [authenticated, CSRF-header, optional-body contract](backend/API_SURFACE.md#disclosure-method-migration-2004); all endpoints are org-admin gated; create/update and the disclosure assembly additionally require recent authentication and write audit-log records — the disclosure fails closed if its audit record cannot be persisted). Cease-of-use and cease-of-provision are also productized (increment 2 of [#221]): `PUT /api/persons/{id}/restrictions` on the owning workspace suspends processing and/or ceases third-party provision.
 > **Not legal advice.** Confirm response methods, fees, and identity-verification standards with counsel and each customer's DPA ([APPI_DPA_TEMPLATE.md](APPI_DPA_TEMPLATE.md)).
 > **Owner:** Hunter Nakagawa, Founder · **Contact point:** privacy@connexcrm.jp · **Last reviewed:** 2026-08-13 · **Next review:** 2027-02-13
 > Review at least every 6 months; ownership, contact, and off-cycle review triggers follow [SECURITY.md](SECURITY.md) §6.
@@ -28,7 +28,7 @@ A data subject (or authorized representative) may request, regarding their **ret
 - Record the verification on the request (`identityVerifiedAt`) — the disclosure export refuses to assemble until it is recorded.
 
 ## 5. Fulfil the request
-- **Disclosure:** assemble the retained subject evidence in the inventory below via the subject-scoped export (`GET /api/orgs/{orgId}/data-subject-requests/{id}/disclosure`), including current consent, consent history, and outbound audience-export evidence. The export is **operator-facing raw material**: it can contain third-party personal data and confidential business information, so apply the Art. 33(2) exceptions and redact before releasing anything to the subject. Flag `special_care` custom fields and suspected special-care free-text locations under [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md). Attachment binaries are not embedded — retrieve flagged files through the normal attachment endpoints. Do **not** substitute the workspace-wide CSV export, which over-discloses.
+- **Disclosure:** assemble the retained subject evidence in the inventory below via the subject-scoped export (`POST /api/orgs/{orgId}/data-subject-requests/{id}/disclosure`; see the [authenticated, CSRF-header, optional-body contract](backend/API_SURFACE.md#disclosure-method-migration-2004)), including current consent, consent history, and outbound audience-export evidence. The export is **operator-facing raw material**: it can contain third-party personal data and confidential business information, so apply the Art. 33(2) exceptions and redact before releasing anything to the subject. Flag `special_care` custom fields and suspected special-care free-text locations under [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md). Attachment binaries are not embedded — retrieve flagged files through the normal attachment endpoints. Do **not** substitute the workspace-wide CSV export, which over-discloses.
 - **Correction:** update via the standard record edit; log the change (captured in `audit_log`).
 - **Cease of use:** set `suspended: true` via `PUT /api/persons/{id}/restrictions` — the contact stops being processed (warmth/decay scoring, automation rules, intro suggestions, network reports, AI features, notification nudges, CSV exports) while staying visible for management and disclosure. For **erasure**, note that deletion is hard-delete per record — confirm with the customer/operator before irreversible deletion.
 - **Cease third-party provision:** set `provisionCeased: true` on the same endpoint — every standing cross-workspace share is revoked immediately (audited with the revoked count), new shares are refused, and the contact is excluded from AI outbound. Record the instruction on the request.
@@ -67,12 +67,57 @@ against the response DTO; changes to disclosure sections must update both.
 
 The `notes` section is complete and is never filtered by note visibility class: private notes are
 disclosed to the handling operator as raw assembly material and must be reviewed for statutory
-redaction (Art. 33(2)) like every other section. It carries no row cap and holds the largest
-free-text material in the response. Note bodies are read in pages, but the assembled response is
-held in memory in full, so a subject with a very large note corpus produces a correspondingly large
-response and a matching peak heap on the serving instance. Run such an export off-peak and expect
-a slow response; there is no operator-facing continuation or page parameter, and the export is
-never silently truncated.
+redaction (Art. 33(2)) like every other section. It carries no row or aggregate-byte cap. Note IDs
+and bodies are read in ascending pages of at most 100, with only one page retained at a time.
+Two synchronous serialization passes share one explicit REPEATABLE READ tenant snapshot: the first
+counts and fingerprints the complete JSON while discarding bytes; a strict control audit commits
+independently before the second pass writes the same JSON directly to the response. Other disclosure
+sections remain materialized, and an individual note/page can still be large. Large exports may be
+slow. There is no continuation or page parameter, and exports are never silently shortened.
+
+Each serving instance admits at most two concurrent disclosures, with at most one per organization.
+Requests never wait for admission; excess requests receive the existing 503 response before opening a
+snapshot. Placement discovery finishes in a separate short control read first. One disclosure
+uses at most two connections (snapshot plus independent audit); provision four for both slots,
+plus capacity for ordinary traffic. Pools of two or three admit only one disclosure, retaining
+audit capacity; a pool smaller than two is refused before the snapshot. For single-slot pools,
+the instance remembers at most 128 other organizations refused for capacity, with first-refusal
+timestamps (`MAX_REFUSED_DISCLOSURE_ORGANIZATIONS`); saturation evicts the oldest entry. When the
+holder releases, including after a deadline, the oldest retained organization receives an
+exclusive 30-second reservation (`DISCLOSURE_TURNOVER_RESERVATION`). The former holder and any
+other non-reserved organization receive the same 503 before a snapshot. The reservation is
+consumed by admission or lapses unused after 30 seconds. Other refusals are cleared at turnover,
+so unused reservations cannot chain. Pools of at least four keep the two-slot behavior.
+
+Pass-two delivery has an absolute 120-second deadline, configured by
+`connex.data-subject-disclosure.delivery-timeout-ms`
+(`CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS`, default `120000`). Page boundaries and every 8 KiB
+of output check it; a deadline task closes the request's socket even when the client trickles
+bytes. The deployed Tomcat NIO connector explicitly sets `server.tomcat.connection-timeout`
+(`CONNEX_TOMCAT_CONNECTION_TIMEOUT`, default `30s`), which also initializes its blocking write
+timeout. The delivery bound is the deadline plus one connector blocking-write timeout: 150 seconds
+with defaults, before normal cleanup completes. On expiry the read transaction rolls back, the
+note source is invalidated, context is restored and admission is released. This is a delivery
+bound; preparation and preflight precede it. The supported deployment uses HTTP/1.1 from Caddy
+to Tomcat; disclosure fails closed on a live server without its cancellation hook.
+
+Retain the raw response and the `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`,
+`X-Disclosure-Byte-Length`, and `X-Disclosure-SHA256` headers when checking completeness. Version-one
+SHA-256 values cover exact compact UTF-8 JSON before HTTP content coding; the notes hash covers the
+ordinary array from `[` through `]`. Check the received byte length and complete-document hash,
+then parse JSON and check note count (and the notes hash using the original array bytes). The SPA
+reformats downloaded JSON, so its reformatted copy cannot verify these raw-byte hashes.
+
+Reject incomplete HTTP framing, invalid JSON, byte-length mismatch, or digest/count mismatch. A
+committed interrupted response is left truncated: writer cleanup does not append closing delimiters
+or an error suffix. A durable audit records assembly and an authorized release attempt, not confirmed
+client receipt. Discard an incomplete download and retry explicitly; each retry assembles and audits
+again. For overload, wait for the organization's active download to finish or expire before
+retrying. In a single-slot pool, a refused organization should retry during its turnover reservation;
+other organizations must wait for the reservation to be used or its 30-second window to lapse.
+For deadline expiry, use a connection that can finish within the configured limit; an
+operator may adjust the limit with its resource budget in mind. There is no automatic network/503
+retry or continuation token.
 
 Audience-export evidence includes exports by other workspaces in the request's organization that
 held a shared subject, even after the standing share is revoked. Audience-export member lists are
@@ -111,7 +156,7 @@ not stored on the export and cannot be reconstructed from its current connector 
 
 ---
 
-**Known conscious exclusions** (tracked in [#579](https://github.com/itkla/connex/issues/579)): the disclosure export omits persisted AI outputs (`ai_output_cache`) and audit `changes` payloads (actions/outcomes only). Restricting a contact now purges its person-keyed AI cache — intro rationales naming the subject and the briefs/risk rationales of the subject's deals — so those demasked outputs do not persist at rest; report narratives (keyed by report, not person) are not purged and regenerate without the subject. Free text in *other* records naming the subject is outside the restriction's reach. Keep this procedure as the human process around the tooling.
+**Known conscious exclusions** (tracked in [#579](https://github.com/itkla/connex/issues/579)): the disclosure export omits persisted AI outputs (`ai_output_cache`) and audit `changes` payloads (actions/outcomes only). Restricting a contact purges intro rationales naming the subject and deal briefs/risk rationales identified through their current structured links, including qualifying caches in sibling workspaces of the same organization. Report narratives carry no person provenance, so the purge conservatively deletes every report narrative in that organization while preserving foreign-organization caches. Removed links and free text in *other* records naming the subject remain outside the restriction's reliable provenance. Single-database erasure reads a fresh organization ceiling immediately before deletion; freshness of routed destructive snapshots remains a prerequisite to enabling catalog routing (#2172). Keep this procedure as the human process around the tooling.
 
 [#221]: https://github.com/itkla/connex/issues/221
 [#224]: https://github.com/itkla/connex/issues/224

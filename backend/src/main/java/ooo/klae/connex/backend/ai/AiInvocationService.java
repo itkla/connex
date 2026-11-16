@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,7 +29,10 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -191,8 +195,7 @@ public class AiInvocationService {
                 invocation, AiOutputMode.TEXT, null,
                 NO_INVOCATION_COMMITMENT, NO_INVOCATION_COMMITMENT)) {
             AiCompletionResult result = raw.result();
-            Demasker.DemaskResult demasked = demask(
-                    CompletionNormalizer.stripReasoning(result.text()), invocation.context());
+            Demasker.DemaskResult demasked = demask(result, invocation.context());
             raw.close();
             emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                     result.stopReason(), demasked.warnings(), null, false, null);
@@ -224,8 +227,7 @@ public class AiInvocationService {
                 admission::commitInvocation,
                 Objects.requireNonNull(providerAttemptGuard, "providerAttemptGuard"))) {
             AiCompletionResult result = raw.result();
-            Demasker.DemaskResult demasked = demask(
-                    CompletionNormalizer.stripReasoning(result.text()), invocation.context());
+            Demasker.DemaskResult demasked = demask(result, invocation.context());
             raw.close();
             emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                     result.stopReason(), demasked.warnings(), null, false, null);
@@ -496,6 +498,11 @@ public class AiInvocationService {
                     raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
                     "unexpected_tool_call", "", false, false);
         }
+        if (invocation.context().containsUnexposedTokenInProviderText(result.text())
+                || invocation.context().containsUnexposedTokenInProviderText(result.reasoning())) {
+            return malformed(raw, invocation, result, AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER,
+                    "invented_placeholder", "", false, false);
+        }
         CompletionNormalizer.CapturedCompletion captured =
                 CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
         if ((captured.ambiguous() && captured.answer().isBlank())
@@ -509,6 +516,11 @@ public class AiInvocationService {
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
         ObjectNode object = AiJson.extractObject(stripped, objectMapper);
+        if (invocation.context().containsUnexposedToken(stripped)
+                || object != null && invocation.context().containsUnexposedToken(object.toString())) {
+            return malformed(raw, invocation, result, AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER,
+                    "invented_placeholder", "", object != null, false);
+        }
         if (object == null) {
             return malformed(
                     raw, invocation, result, truncationReason(result.stopReason()),
@@ -520,7 +532,11 @@ public class AiInvocationService {
                     raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
                     rejectionReason, stripped, true, captureRepair);
         }
-        int warnings = demaskTree(object, invocation.context());
+        Map<String, Set<String>> memberReplacements = new LinkedHashMap<>();
+        int warnings = Demasker.demaskTree(object, invocation.context(), (path, member) ->
+                        memberReplacements.computeIfAbsent(path, ignored -> new LinkedHashSet<>()).add(member));
+        Map<String, List<String>> memberIdentifiers = new LinkedHashMap<>();
+        memberReplacements.forEach((path, members) -> memberIdentifiers.put(path, List.copyOf(members)));
         T value;
         try {
             value = objectMapper.treeToValue(object, type);
@@ -539,7 +555,7 @@ public class AiInvocationService {
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
         return new AiStructuredRepairAttempt<>(
                 new AiStructuredOutcome.Parsed<>(value, warnings,
-                        result.inputTokens(), result.outputTokens(), result.stopReason()),
+                        result.inputTokens(), result.outputTokens(), result.stopReason(), memberIdentifiers),
                 Optional.empty(), reasoning.rejectionReason() == null
                         ? reasoning.content()
                         : Optional.empty());
@@ -551,22 +567,50 @@ public class AiInvocationService {
             AiRawOutputGuard toolGuard,
             AiNativeToolRequest nativeTools) {
         AiCompletionResult result = raw.result();
+        if (invocation.context().containsUnexposedTokenInProviderText(result.text())
+                || invocation.context().containsUnexposedTokenInProviderText(result.reasoning())) {
+            return malformedNativeTool(raw, invocation, result,
+                    new ReasoningNormalization(Optional.empty(), null), "invented_placeholder", 1);
+        }
         CompletionNormalizer.CapturedCompletion captured =
                 CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
         ReasoningNormalization reasoning = captured.ambiguous()
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
         List<AiToolCall> calls = result.toolCalls();
+        int inventedCalls = 0;
+        for (AiToolCall call : calls) {
+            if (invocation.context().containsUnexposedTokenInProviderText(call.id())
+                    || invocation.context().containsUnexposedTokenInProviderText(call.name())
+                    || call.thoughtSignature() != null
+                            && invocation.context().containsUnexposedTokenInProviderText(call.thoughtSignature())
+                    || invocation.context().containsUnexposedTokenInProviderText(call.arguments())) {
+                inventedCalls = saturatedSum(inventedCalls, 1);
+                continue;
+            }
+            JsonNode decoded = null;
+            try {
+                decoded = objectMapper.readTree(call.arguments());
+            } catch (JacksonException | IllegalArgumentException exception) {
+                decoded = null;
+            }
+            if (decoded != null && invocation.context().containsUnexposedToken(decoded.toString())) {
+                inventedCalls = saturatedSum(inventedCalls, 1);
+            }
+        }
+        if (inventedCalls != 0) {
+            return malformedNativeTool(raw, invocation, result, reasoning, "invented_placeholder", inventedCalls);
+        }
         if (calls.size() > nativeTools.maxParallelCalls()) {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_multiple_calls",
-                    refusedBatchDemaskWarnings(calls, invocation.context()));
+                    0);
         }
         if (captured.ambiguous()
                 || CompletionNormalizer.containsReasoningTag(captured.answer())) {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_call_content",
-                    refusedBatchDemaskWarnings(calls, invocation.context()));
+                    0);
         }
         ReasoningNormalization narration = normalizeNarration(captured.answer(), invocation);
         Set<String> seenIds = new HashSet<>();
@@ -576,7 +620,7 @@ public class AiInvocationService {
                             .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
                 return malformedNativeTool(
                         raw, invocation, result, reasoning, "native_duplicate_call_id",
-                        refusedBatchDemaskWarnings(calls, invocation.context()));
+                        0);
             }
         }
         List<JsonNode> callArguments = new ArrayList<>(calls.size());
@@ -588,12 +632,12 @@ public class AiInvocationService {
             } catch (JacksonException | IllegalArgumentException exception) {
                 return malformedNativeTool(
                         raw, invocation, result, reasoning, "native_arguments_not_object",
-                        refusedBatchDemaskWarnings(calls, invocation.context()));
+                        0);
             }
             if (arguments == null || !arguments.isObject()) {
                 return malformedNativeTool(
                         raw, invocation, result, reasoning, "native_arguments_not_object",
-                        refusedBatchDemaskWarnings(calls, invocation.context()));
+                        0);
             }
             ObjectNode step = objectMapper.createObjectNode();
             ObjectNode tool = step.putObject("tool");
@@ -610,11 +654,24 @@ public class AiInvocationService {
                         "tool_name".equals(rejectionReason)
                                 ? "native_unknown_tool"
                                 : "native_invalid_arguments",
-                        refusedBatchDemaskWarnings(calls, invocation.context()));
+                        0);
             }
             warnings = saturatedSum(warnings, demaskTree(arguments, invocation.context()));
             callArguments.add(arguments);
         }
+        for (AiToolCall call : calls) {
+            try {
+                OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                        OutboundSegment.admittedProviderField(call.id(), invocation.context()),
+                        invocation.context(), objectMapper);
+                OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                        OutboundSegment.admittedProviderField(call.arguments(), invocation.context()),
+                        invocation.context(), objectMapper);
+            } catch (MaskingLeakException exception) {
+                return malformedNativeTool(raw, invocation, result, reasoning, "native_member_leak", warnings);
+            }
+        }
+        calls.forEach(call -> invocation.context().recordProviderCallAdmission(call.id()));
         raw.close();
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
@@ -642,47 +699,6 @@ public class AiInvocationService {
     private static int saturatedSum(int total, int addition) {
         int sum = total + addition;
         return sum < 0 ? Integer.MAX_VALUE : sum;
-    }
-
-    /**
-     * Counts the demask warnings of a batched response the boundary is about to refuse.
-     *
-     * <p>Every envelope refusal is repairable and an invented placeholder is not, so for a response
-     * carrying several calls the count is taken before the refusal is decided rather than skipped
-     * because of it — whether the response is refused for its size, for its content, for a shared
-     * identifier, or because one sibling's arguments failed to parse or failed the raw step guard.
-     * Otherwise a guard-rejected sibling would earn the whole batch a repair while another call in
-     * it had invented a placeholder, which that call alone would never have earned. Every call whose
-     * arguments parse as a JSON object is demasked exactly as an admitted call is, on a fresh parse
-     * so the admitted path's own arguments are untouched; a call whose arguments do not parse is
-     * left uncounted, as the admitted path refuses such arguments before demasking them. The raw
-     * step guard is deliberately not consulted: a guard rejection must not decide which refusal the
-     * response gets.
-     *
-     * <p>A response carrying one call keeps the order it has always had: its own guard rejection is
-     * the refusal, and it has no sibling whose placeholder that rejection could hide.
-     *
-     * @param calls every call the refused response carried
-     * @param context the invocation's request-local masking context
-     * @return the saturated sum of every object-shaped call's demask warnings, or 0 for one call
-     */
-    private int refusedBatchDemaskWarnings(List<AiToolCall> calls, MaskingContext context) {
-        if (calls.size() <= 1) {
-            return 0;
-        }
-        int warnings = 0;
-        for (AiToolCall call : calls) {
-            JsonNode arguments;
-            try {
-                arguments = objectMapper.readTree(call.arguments());
-            } catch (JacksonException | IllegalArgumentException exception) {
-                continue;
-            }
-            if (arguments != null && arguments.isObject()) {
-                warnings = saturatedSum(warnings, demaskTree(arguments, context));
-            }
-        }
-        return warnings;
     }
 
     private <T> AiNativeToolCompletion<T> malformedNativeTool(
@@ -868,23 +884,29 @@ public class AiInvocationService {
             throw new AiProviderException("AI provider reported an invalid output token limit");
         }
         boolean invocationOutputTokensClamped = invocation.maxTokens() > providerMaxOutputTokens;
-        boolean outputTokensClamped = invocation.outputTokensClamped()
-                || invocationOutputTokensClamped;
-        AiInvocation effectiveInvocation = invocationOutputTokensClamped
+        AiInvocation providerInvocation = invocationOutputTokensClamped
                 ? withMaxTokens(invocation, providerMaxOutputTokens)
                 : invocation;
-        registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
+        registerEnvelopeAuthoredText(providerInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
         try {
             serializedPrompt = serializeProviderInput(
-                    effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
+                    providerInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
         } catch (AiProviderException exception) {
-            emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
+            emitAudit(workspaceId, orgId, resolved, providerInvocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null,
-                    outputTokensClamped);
+                    providerInvocation.outputTokensClamped());
             throw exception;
         }
+
+        var mission = AiAgentExecutionPolicy.current();
+        int maxOutputTokens = mission == null ? providerInvocation.maxTokens()
+                : mission.persistence().maxOutputTokens(mission,
+                        serializedPrompt.getBytes(StandardCharsets.UTF_8).length, providerInvocation.maxTokens());
+        AiInvocation effectiveInvocation = maxOutputTokens < providerInvocation.maxTokens()
+                ? withMaxTokens(providerInvocation, maxOutputTokens) : providerInvocation;
+        boolean outputTokensClamped = effectiveInvocation.outputTokensClamped();
 
         if (serializedPrompt.getBytes(StandardCharsets.UTF_8).length > providerInputByteCeiling(
                 adapter.contextWindowTokens(resolved.target()), effectiveInvocation.maxTokens())) {
@@ -895,7 +917,22 @@ public class AiInvocationService {
         }
 
         try {
-            OutboundLeakScan.assertNoLeakInServerEnvelope(serializedPrompt, effectiveInvocation.context(), objectMapper);
+            if (nativeTools != null) {
+                for (AiToolExchange exchange : nativeTools.exchanges()) {
+                    AiToolCall call = exchange.call();
+                    if (effectiveInvocation.context().containsUnexposedTokenInProviderText(call.id())
+                            || effectiveInvocation.context().containsUnexposedTokenInProviderText(call.name())
+                            || effectiveInvocation.context().containsUnexposedTokenInProviderText(call.arguments())
+                            || call.thoughtSignature() != null
+                                    && effectiveInvocation.context().containsUnexposedTokenInProviderText(
+                                            call.thoughtSignature())) {
+                        throw new MaskingLeakException("Native replay contains an invented placeholder");
+                    }
+                }
+            }
+            OutboundLeakScan.assertNoLeakInClassifiedEnvelope(serializedPrompt,
+                    outboundSegments(effectiveInvocation.prompt(), nativeTools, effectiveInvocation.context()),
+                    effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null, exception,
@@ -1045,7 +1082,7 @@ public class AiInvocationService {
             AiReasoningMode reasoningMode,
             AiProviderAttemptExecutor providerAttemptExecutor) {
         List<AiMessage> messages = invocation.prompt().getMessages().stream()
-                .map(message -> new AiMessage(message.getRole(), message.getContent()))
+                .map(message -> new AiMessage(message.getRole(), message.getContent(), message.getSegments()))
                 .toList();
         return new AiCompletionRequest(
                 resolved.target(), resolved.credentials(), systemPrompt(invocation.prompt(), reasoningMode),
@@ -1178,6 +1215,36 @@ public class AiInvocationService {
         } catch (Exception exception) {
             throw new AiProviderException("AI prompt serialization failed");
         }
+    }
+
+    /**
+     * Classifies text before serialization: only tenant data can expose reversible bindings. Replayed
+     * opaque fields remain provider-authored; names are fixed vocabulary because the native request
+     * constructor requires every exchange name to belong to its declared definitions.
+     * System, schema and catalog text are entirely static and are absent from tenant-bearing parts.
+     */
+    private static List<OutboundSegment> outboundSegments(
+            MaskedPrompt prompt, AiNativeToolRequest nativeTools, MaskingContext context) {
+        List<OutboundSegment> segments = new ArrayList<>();
+        for (MaskedMessage message : prompt.getMessages()) {
+            segments.addAll(message.getSegments());
+        }
+        if (nativeTools != null) {
+            for (AiToolExchange exchange : nativeTools.exchanges()) {
+                AiToolCall call = exchange.call();
+                segments.add(OutboundSegment.admittedProviderField(
+                        call.id(), context.providerCallAdmissionContext(call.id())));
+                segments.add(new OutboundSegment(call.name(), OutboundSegment.Origin.SERVER_STATIC));
+                segments.add(OutboundSegment.admittedProviderField(
+                        call.arguments(), context.providerCallAdmissionContext(call.id())));
+                if (call.thoughtSignature() != null) {
+                    segments.add(new OutboundSegment(call.thoughtSignature(), OutboundSegment.Origin.PROVIDER_OPAQUE));
+                }
+                segments.addAll(exchange.resultSegments());
+            }
+            segments.addAll(nativeTools.repairSegments());
+        }
+        return List.copyOf(segments);
     }
 
     private static String systemPrompt(MaskedPrompt prompt, AiReasoningMode reasoningMode) {
@@ -1414,6 +1481,7 @@ public class AiInvocationService {
         private final AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
         private boolean failureAudited;
+        private AiAgentDispatchReservation missionDispatch;
 
         private ProviderAttemptTracker(
                 int workspaceId,
@@ -1480,6 +1548,12 @@ public class AiInvocationService {
                             null, null, null, null, null, structured, null,
                             outputTokensClamped);
                 }
+                var mission = AiAgentExecutionPolicy.current();
+                if (mission != null) {
+                    mission.capability().requireTarget(resolved.target());
+                    missionDispatch = mission.persistence().reserveDispatch(mission,
+                            (long) serializedPrompt.getBytes(StandardCharsets.UTF_8).length + invocation.maxTokens());
+                }
                 return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                     requireCurrentProviderSnapshot();
                     aiFeatureGate.requireAiUsable(invocation.feature());
@@ -1505,6 +1579,10 @@ public class AiInvocationService {
                         outputTokensClamped);
                 throw exception;
             } catch (RuntimeException exception) {
+                if (exception instanceof AiProviderRequestRejectedException rejected
+                        && rejected.permitsStructuredOutputFallback()) {
+                    settleRejectedMissionDispatch();
+                }
                 closeBudget();
                 failureAudited = true;
                 String reason = exception instanceof AiProviderException
@@ -1535,6 +1613,11 @@ public class AiInvocationService {
         }
 
         @Override
+        public synchronized void onResponse(Set<String> dispatchedTokens) {
+            invocation.context().exposeDispatchedTokens(dispatchedTokens);
+        }
+
+        @Override
         public void checkpoint() {
             aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                 requireCurrentProviderSnapshot();
@@ -1545,6 +1628,10 @@ public class AiInvocationService {
         }
 
         private void requireCurrentProviderSnapshot() {
+            var mission = AiAgentExecutionPolicy.current();
+            if (mission != null) {
+                mission.capability().requireTarget(resolved.target());
+            }
             ResolvedAiProvider current = aiProviderConfigService.resolveForOrg(orgId, userId);
             if (!resolved.equals(current)) {
                 throw new AiProviderException(
@@ -1584,7 +1671,22 @@ public class AiInvocationService {
                 throw new IllegalStateException("Provider attempt completed without a budget reservation");
             }
             activeLease.settle(inputTokens, outputTokens);
+            var mission = AiAgentExecutionPolicy.current();
+            if (mission != null) {
+                var dispatch = Objects.requireNonNull(missionDispatch, "missionDispatch");
+                mission.persistence().recordUsage(mission, dispatch, inputTokens, outputTokens);
+                missionDispatch = null;
+            }
             budgetLease = null;
+        }
+
+        /** A definite protocol rejection consumed a decision but no generated tokens. */
+        private void settleRejectedMissionDispatch() {
+            var mission = AiAgentExecutionPolicy.current();
+            if (mission != null && missionDispatch != null) {
+                mission.persistence().recordUsage(mission, missionDispatch, 0, 0);
+                missionDispatch = null;
+            }
         }
 
         private synchronized void closeBudget() {
@@ -1615,16 +1717,25 @@ public class AiInvocationService {
         }
     }
 
+    private static Demasker.DemaskResult demask(AiCompletionResult result, MaskingContext context) {
+        Demasker.DemaskResult demasked = demask(CompletionNormalizer.stripReasoning(result.text()), context);
+        if (demasked.warnings() == 0 && (context.containsUnexposedTokenInProviderText(result.text())
+                || context.containsUnexposedTokenInProviderText(result.reasoning()))) {
+            return new Demasker.DemaskResult("", 1);
+        }
+        return demasked;
+    }
+
     private static Demasker.DemaskResult demask(String text, MaskingContext context) {
-        return context.privacyMode() == AiPrivacyMode.UNMASKED
-                ? new Demasker.DemaskResult(text == null ? "" : text, 0)
-                : Demasker.demask(text, context);
+        Demasker.DemaskResult demasked = Demasker.demask(text, context);
+        if (demasked.warnings() == 0 && context.containsUnexposedTokenInProviderText(text)) {
+            return new Demasker.DemaskResult("", 1);
+        }
+        return demasked;
     }
 
     private static int demaskTree(JsonNode node, MaskingContext context) {
-        return context.privacyMode() == AiPrivacyMode.UNMASKED
-                ? 0
-                : Demasker.demaskTree(node, context);
+        return Demasker.demaskTree(node, context);
     }
 
     private record MalformedDiagnostic(

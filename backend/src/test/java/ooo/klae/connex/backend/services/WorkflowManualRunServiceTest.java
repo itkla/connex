@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -9,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -22,11 +24,16 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -50,13 +57,22 @@ import ooo.klae.connex.backend.dto.WorkflowManualPrepareRequest;
 import ooo.klae.connex.backend.dto.WorkflowManualScope;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowActionRetryPolicy.RetrySafety;
+import ooo.klae.connex.backend.support.RecordVisibilityOperationFixture;
+import ooo.klae.connex.backend.support.RecordVisibilityScopes;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowManualRunServiceTest {
+    @org.junit.jupiter.api.BeforeEach
+    void installCompanyScopeFixture() {
+        RecordVisibilityScopes.install(service);
+    }
+
 
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;
@@ -158,6 +174,79 @@ class WorkflowManualRunServiceTest {
 
         assertEquals("cancelled", result.status());
         assertEquals(cancelledAt, result.completedAt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "missing", "ordinary"})
+    void savedViewScopeReadFailuresPropagateUnchangedThroughPreparation(String kind) throws Exception {
+        stubSavedViewScope("{\"segments\":{\"match\":\"all\",\"conditions\":[]}}");
+        RuntimeException failure = switch (kind) {
+            case "snapshot" -> new TenantScopeSnapshotException("scope mismatch");
+            case "missing" -> new TenantScopeSnapshotMissingException("missing payload");
+            case "ordinary" -> new DataAccessResourceFailureException("control unavailable");
+            default -> throw new AssertionError(kind);
+        };
+        try (var fixture = new RecordVisibilityOperationFixture(7)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(7)).thenThrow(failure);
+            ReflectionTestUtils.setField(
+                service, "recordVisibilityScopeControlAccess", fixture.scopes);
+            when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class))).thenAnswer(call -> {
+                fixture.scopes.getForWorkspace(7);
+                throw new AssertionError("The scope read must refuse this operation");
+            });
+
+            assertSame(failure, assertThrows(RuntimeException.class, () -> service.prepare(
+                11, new WorkflowManualPrepareRequest("saved_view", new WorkflowManualScope.SavedView(5)))));
+
+            verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            verifyNoInteractions(canonicalizer, operationsMapper, actionGuard);
+        }
+    }
+
+    @Test
+    void malformedSavedViewSegmentsStillRefusePreparation() throws Exception {
+        stubSavedViewScope("{\"segments\":\"malformed\"}");
+        var segments = JsonMapper.builder().build().readTree("\"malformed\"");
+        var malformed = assertThrows(JacksonException.class,
+            () -> JsonMapper.builder().build().treeToValue(segments, SegmentDefinition.class));
+        when(objectMapper.treeToValue(segments, SegmentDefinition.class)).thenThrow(malformed);
+
+        var refusal = assertThrows(BadRequestException.class, () -> service.prepare(
+            11, new WorkflowManualPrepareRequest("saved_view", new WorkflowManualScope.SavedView(5))));
+
+        assertEquals("Saved view scope is malformed", refusal.getMessage());
+        verifyNoInteractions(segmentService, canonicalizer, operationsMapper);
+    }
+
+    @Test
+    void invalidSavedViewSegmentDefinitionsKeepTheMalformedRefusal() throws Exception {
+        stubSavedViewScope("{\"segments\":{\"match\":\"all\",\"conditions\":[]}}");
+        when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class)))
+            .thenThrow(new BadRequestException("A condition group requires at least one condition or nested group"));
+
+        var refusal = assertThrows(BadRequestException.class, () -> service.prepare(
+            11, new WorkflowManualPrepareRequest("saved_view", new WorkflowManualScope.SavedView(5))));
+
+        assertEquals("Saved view scope is malformed", refusal.getMessage());
+        verifyNoInteractions(canonicalizer, operationsMapper);
+    }
+
+    @Test
+    void emptyManualSelectionSkipsTheScopeEvenWhenControlReadsFail() throws Exception {
+        stubSavedView("{\"segments\":{\"match\":\"all\",\"conditions\":[]}}");
+        try (var fixture = new RecordVisibilityOperationFixture(7)) {
+            lenient().when(fixture.control.findOrganizationWorkspacesForShare(7))
+                .thenThrow(new DataAccessResourceFailureException("control unavailable"));
+            ReflectionTestUtils.setField(
+                service, "recordVisibilityScopeControlAccess", fixture.scopes);
+
+            var result = service.prepare(11, new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+            assertEquals(0, result.exactCount());
+            assertEquals(List.of("scope_empty"), result.blockers());
+            verifyNoInteractions(fixture.control, dealService, actionGuard);
+        }
     }
 
     @Test
@@ -380,7 +469,7 @@ class WorkflowManualRunServiceTest {
         verify(operationsMapper, never()).insertInvocation(any());
     }
 
-    private void stubSavedView(String configJson) throws Exception {
+    private SavedView stubSavedViewScope(String configJson) throws Exception {
         when(workspaceService.getCurrentUserId()).thenReturn(41);
         Workflow workflow = new Workflow();
         workflow.setId(11);
@@ -411,8 +500,14 @@ class WorkflowManualRunServiceTest {
             when(objectMapper.treeToValue(
                 view.getConfig().get("segments"), SegmentDefinition.class))
                 .thenReturn(new SegmentDefinition());
-            when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class)))
-                .thenReturn(List.of());
+        }
+        return view;
+    }
+
+    private void stubSavedView(String configJson) throws Exception {
+        SavedView view = stubSavedViewScope(configJson);
+        if (view.getConfig().get("segments") != null) {
+            when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class))).thenReturn(List.of());
         }
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());

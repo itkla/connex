@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -39,6 +40,31 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
+    void modelCutoverRetainsMatchedActorStateAndLaterSourceChangesStillResurface() {
+        var writer = new RelationshipSignalWriteService(signalMapper);
+        LocalDateTime at = LocalDateTime.of(2026, 8, 8, 12, 0);
+        RelationshipSignal first = signal("relationship_decay", "person", 41,
+            "relationship_decay:person:41", "first");
+        first.setSourceModelVersion("warmth-v1");
+        writer.replaceFamily(workspace.getId(), "relationship_decay", "first", List.of(first), at, at);
+        signalMapper.insertState(workspace.getId(), first.getId(), currentUser.getId(),
+            "dismissed", null, first.getSourceStateHash());
+        RelationshipSignal next = signal("relationship_decay", "person", 41,
+            first.getDedupeKey(), "next");
+        next.setSourceStateHash("b".repeat(64));
+        writer.replaceFamily(workspace.getId(), "relationship_decay", "next", List.of(next), at.plusMinutes(1), at);
+        var persisted = signalMapper.getActiveForActor(workspace.getId(), first.getId(), currentUser.getId());
+        assertEquals(next.getSourceStateHash(), persisted.getDismissedSourceHash());
+        assertEquals("dismissed", persisted.getDisposition());
+        assertNull(signalMapper.lockByDedupeKey(workspace.getId() + 100_000, first.getDedupeKey()));
+        next.setSourceStateHash("c".repeat(64));
+        next.setGenerationToken("live-change");
+        writer.replaceFamily(workspace.getId(), "relationship_decay", "live-change", List.of(next), at.plusMinutes(2), at);
+        persisted = signalMapper.getActiveForActor(workspace.getId(), first.getId(), currentUser.getId());
+        assertNotEquals(persisted.getSourceStateHash(), persisted.getDismissedSourceHash());
+    }
+
+    @Test
     void threeIdenticalGenerationCyclesCreateNoDuplicateDomainRowsOrNotifications() {
         int notificationsBefore = count("notification");
         int activitiesBefore = count("activity");
@@ -70,7 +96,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
                 asOfInstant));
         RelationshipSignalReconciliationService reconciliation =
             new RelationshipSignalReconciliationService(
-                detector, writer, Clock.fixed(asOfInstant, ZoneOffset.UTC));
+                detector, writer, Clock.fixed(asOfInstant, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         for (int cycle = 0; cycle < 3; cycle++) {
             reconciliation.reconcileWorkspace(workspace.getId());
         }
@@ -118,6 +144,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             "relationship_decay:person:53",
             "newer");
         newer.setSourceStateHash("n".repeat(64));
+        newer.setEvidenceAsOf(newerAttempt);
         writer.replaceFamily(
             workspace.getId(),
             RelationshipSignalDetectorService.RELATIONSHIP_DECAY,
@@ -132,6 +159,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             "relationship_decay:person:53",
             "older");
         older.setSourceStateHash("o".repeat(64));
+        older.setEvidenceAsOf(olderAttempt);
 
         writer.replaceFamily(
             workspace.getId(),
@@ -224,7 +252,9 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
                 workspace.getId(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
             .thenReturn(Map.of(subject.getId(), persistedSourceHash));
         when(scoringService.companySourceStateHashes(workspace.getId())).thenReturn(Map.of());
-        when(detectorPersonMapper.getByIds(workspace.getId(), List.of(subject.getId())))
+        var detectorScopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        String personScopeJson = detectorScopes.getForWorkspace(workspace.getId()).workspaceIdsJson();
+        when(detectorPersonMapper.getByIds(workspace.getId(), personScopeJson, List.of(subject.getId())))
             .thenReturn(List.of(subject));
         RelationshipSignalDetectorService detector = new RelationshipSignalDetectorService(
             scoringService,
@@ -234,7 +264,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             mock(CompanyMapper.class),
             mock(DealMapper.class),
             new ObjectMapper(),
-            Clock.fixed(firstAsOf, ZoneOffset.UTC));
+            Clock.fixed(firstAsOf, ZoneOffset.UTC), detectorScopes);
         RelationshipSignalWriteService writer = new RelationshipSignalWriteService(signalMapper);
 
         Detection first = detector.detectDecay(workspace.getId(), "first");
@@ -339,7 +369,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             3,
             goesColdAt,
             daysUntilCold,
-            "warmth-v1",
+            "warmth-v2",
             asOf);
     }
 

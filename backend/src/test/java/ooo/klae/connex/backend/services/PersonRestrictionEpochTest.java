@@ -12,7 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -42,7 +42,8 @@ class PersonRestrictionEpochTest {
     private final DuplicateDecisionLockService duplicateDecisionLockService =
             mock(DuplicateDecisionLockService.class);
     private final ProviderCaptureMapper providerCaptureMapper = mock(ProviderCaptureMapper.class);
-    private final AiRestrictionEpoch restrictionEpoch = mock(AiRestrictionEpoch.class);
+    private final AiAgentPrivacyService restrictionEpoch = mock(AiAgentPrivacyService.class);
+    private final RecordVisibilityScopeControlAccess scopeAccess = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final PersonService personService = new PersonService(
             personMapper,
             mock(ShareMapper.class),
@@ -68,11 +69,17 @@ class PersonRestrictionEpochTest {
             duplicateDecisionLockService,
             mock(RecordCreationAugmentationService.class),
             providerCaptureMapper,
-            restrictionEpoch);
+            restrictionEpoch,
+            scopeAccess);
 
     @BeforeEach
     void setUp() {
+        when(scopeAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(ORG_ID, List.of(7, 8, 9)));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        when(scopeAccess.getFreshForWorkspace(WORKSPACE_ID)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(ORG_ID,
+                List.of(WORKSPACE_ID, OTHER_WORKSPACE_ID)));
         when(duplicateDecisionLockService.lockCurrentOrganization()).thenReturn(ORG_ID);
         when(duplicateDecisionLockService.lockCurrentOrganization(
                 ooo.klae.connex.backend.tenant.Permission.PERSON_UPDATE))
@@ -88,8 +95,8 @@ class PersonRestrictionEpochTest {
         Person after = person(LocalDateTime.parse("2026-08-01T12:00:00"));
         when(personMapper.getOwnedPersonByIdForUpdate(WORKSPACE_ID, PERSON_ID)).thenReturn(before);
         when(personMapper.existsOwned(WORKSPACE_ID, PERSON_ID)).thenReturn(true);
-        when(personMapper.getPersonById(WORKSPACE_ID, PERSON_ID)).thenReturn(after);
-        when(aiOutputCacheMapper.deleteForPerson(WORKSPACE_ID, PERSON_ID)).thenReturn(4);
+        when(personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", PERSON_ID)).thenReturn(after);
+        when(aiOutputCacheMapper.deleteForPerson(WORKSPACE_ID, "[7,11]", PERSON_ID)).thenReturn(4);
 
         Person result = personService.updateProcessingRestrictions(PERSON_ID, true, false);
 
@@ -97,8 +104,13 @@ class PersonRestrictionEpochTest {
         InOrder fence = inOrder(personMapper, workspaceMapper, restrictionEpoch, aiOutputCacheMapper);
         fence.verify(personMapper).getOwnedPersonByIdForUpdate(WORKSPACE_ID, PERSON_ID);
         fence.verify(workspaceMapper).findByOrgId(ORG_ID);
-        fence.verify(restrictionEpoch).bumpAll(List.of(WORKSPACE_ID, OTHER_WORKSPACE_ID));
-        fence.verify(aiOutputCacheMapper).deleteForPerson(WORKSPACE_ID, PERSON_ID);
+        fence.verify(restrictionEpoch).invalidateAssistantOrganization(
+                org.mockito.ArgumentMatchers.eq(ORG_ID),
+                org.mockito.ArgumentMatchers.eq(List.of(WORKSPACE_ID, OTHER_WORKSPACE_ID)),
+                org.mockito.ArgumentMatchers.any(java.util.UUID.class),
+                org.mockito.ArgumentMatchers.eq("restriction"),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull());
+        fence.verify(aiOutputCacheMapper).deleteForPerson(WORKSPACE_ID, "[7,11]", PERSON_ID);
     }
 
     private static Workspace workspace(int id) {

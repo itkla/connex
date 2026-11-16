@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -141,6 +142,59 @@ class SearchTenantIsolationTest {
         assertEquals(0L, sentinelAuditRowCount(sentinel));
     }
 
+    @Test
+    void publicUserSearchWithholdsPendingProfilesUntilAcceptance() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspace(organization);
+        Workspace sibling = newWorkspace(organization);
+        Workspace foreign = newWorkspace(newOrganization());
+        User actor = newMember(workspace);
+        workspaceMapper.addMember(sibling.getId(), actor.getId(), "member");
+        workspaceMapper.addMember(foreign.getId(), actor.getId(), "member");
+        User recipient = newSearchableMember(workspace, "PendingSearch" + unique());
+        userMapper.markEmailVerified(recipient.getId());
+        workspaceMapper.removeMember(workspace.getId(), recipient.getId());
+        workspaceMapper.addPendingMember(workspace.getId(), recipient.getId(), "member");
+        MockHttpSession actorSession = login(actor.getUsername());
+        MockHttpSession recipientSession = login(recipient.getUsername());
+
+        for (String query : List.of(recipient.getEmail(), recipient.getUsername(), recipient.getDisplayName())) {
+            mockMvc.perform(get("/api/search").session(actorSession)
+                    .header("X-Workspace-Id", workspace.getId())
+                    .queryParam("types", "users").queryParam("query", query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.users.length()").value(0));
+        }
+        mockMvc.perform(get("/api/companies/page").session(recipientSession)
+                .header("X-Workspace-Id", workspace.getId()))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/workspaces/{id}/accept", workspace.getId())
+                .session(recipientSession).with(csrf().asHeader()))
+            .andExpect(status().isOk());
+
+        for (String query : List.of(recipient.getEmail(), recipient.getUsername(), recipient.getDisplayName())) {
+            mockMvc.perform(get("/api/search").session(actorSession)
+                    .header("X-Workspace-Id", workspace.getId())
+                    .queryParam("types", "users").queryParam("query", query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.users.length()").value(1))
+                .andExpect(jsonPath("$.users[0].id").value(recipient.getId()))
+                .andExpect(jsonPath("$.users[0].username").value(recipient.getUsername()))
+                .andExpect(jsonPath("$.users[0].displayName").value(recipient.getDisplayName()))
+                .andExpect(jsonPath("$.users[0].email").value(recipient.getEmail()))
+                .andExpect(jsonPath("$.users[0].timezone").value("UTC"))
+                .andExpect(jsonPath("$.users[0].locale").value("en"));
+        }
+        for (Workspace other : List.of(sibling, foreign)) {
+            mockMvc.perform(get("/api/search").session(actorSession)
+                    .header("X-Workspace-Id", other.getId())
+                    .queryParam("types", "users").queryParam("query", recipient.getEmail()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.users.length()").value(0));
+        }
+    }
+
     private long auditRowCount() {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_log WHERE action = ?", Long.class, "search");
@@ -219,6 +273,41 @@ class SearchTenantIsolationTest {
                 result.andExpect(jsonPath("$." + collection + ".length()").value(0));
             }
         }
+
+        for (List<String> subset : List.of(
+                RESULT_COLLECTIONS.subList(0, 8), RESULT_COLLECTIONS.subList(8, 16))) {
+            for (Workspace active : List.of(ownerWorkspace, siblingWorkspace, foreignWorkspace)) {
+                var result = mockMvc.perform(get("/api/search")
+                                .queryParam("query", sentinel)
+                                .queryParam("types", String.join(",", subset))
+                                .header("X-Workspace-Id", active.getId())
+                                .session(session))
+                        .andExpect(status().isOk());
+                for (String collection : RESULT_COLLECTIONS) {
+                    int expected = active == ownerWorkspace && subset.contains(collection) ? 1 : 0;
+                    result.andExpect(jsonPath("$." + collection + ".length()").value(expected));
+                }
+            }
+        }
+    }
+
+    @Test
+    void selectedGroupsStillRequireAuthenticationAndWorkspaceMembership() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace(newOrganization());
+        User actor = newMember(workspace);
+        Workspace inaccessibleWorkspace = newWorkspace(newOrganization());
+        MockHttpSession session = login(actor.getUsername());
+
+        mockMvc.perform(get("/api/search").queryParam("query", "needle")
+                        .queryParam("types", "companies")
+                        .header("X-Workspace-Id", workspace.getId()))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/search").queryParam("query", "needle")
+                        .queryParam("types", "companies")
+                        .header("X-Workspace-Id", inaccessibleWorkspace.getId())
+                        .session(session))
+                .andExpect(status().isForbidden());
     }
 
     private Product newProduct(Workspace workspace, String sentinel) {

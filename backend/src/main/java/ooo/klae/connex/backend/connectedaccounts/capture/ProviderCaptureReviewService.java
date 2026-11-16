@@ -30,6 +30,8 @@ import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.IdentityKind;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -52,6 +54,7 @@ public class ProviderCaptureReviewService {
     private final PlatformTransactionManager transactionManager;
     private final TenantWorkScope tenantWorkScope;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /** Lists held ambiguous or unmatched participants with current exact candidates. */
     public ProviderCaptureReviewPage page(String provider, int page, int size) {
@@ -82,13 +85,15 @@ public class ProviderCaptureReviewService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         ProviderConnection expectedConnection = connection(userId, provider);
+        RecordVisibilityScope recordVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         transaction(() -> decideInTransaction(
             provider,
             reviewId,
             request,
             workspaceId,
             userId,
-            credentialGeneration(expectedConnection)));
+            credentialGeneration(expectedConnection),
+            recordVisibilityScope));
         recordStrict(
             "provider.capture.review",
             workspaceId,
@@ -104,7 +109,8 @@ public class ProviderCaptureReviewService {
             ProviderCaptureReviewRequest request,
             int workspaceId,
             int userId,
-            long expectedCredentialGeneration) {
+            long expectedCredentialGeneration,
+            RecordVisibilityScope recordVisibilityScope) {
         duplicateDecisionLockService.lockCurrentOrganization();
         workspaceService.requirePermission(
             workspaceId, userId, Permission.ACTIVITY_CREATE);
@@ -163,14 +169,16 @@ public class ProviderCaptureReviewService {
                 userId,
                 interaction,
                 captureMapper.getParticipants(
-                    workspaceId, participant.getInteractionId()));
+                    workspaceId, participant.getInteractionId()),
+                recordVisibilityScope);
         } else {
             admitIfAutomatic(
                 workspaceId,
                 userId,
                 provider,
                 participant.getInteractionId(),
-                connection);
+                connection,
+                recordVisibilityScope);
         }
     }
 
@@ -181,13 +189,15 @@ public class ProviderCaptureReviewService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         ProviderConnection expectedConnection = connection(userId, provider);
+        RecordVisibilityScope recordVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         transaction(() -> approveInTransaction(
             provider,
             interactionId,
             version,
             workspaceId,
             userId,
-            credentialGeneration(expectedConnection)));
+            credentialGeneration(expectedConnection),
+            recordVisibilityScope));
         recordStrict(
             "provider.capture.approve",
             workspaceId,
@@ -203,7 +213,8 @@ public class ProviderCaptureReviewService {
             long version,
             int workspaceId,
             int userId,
-            long expectedCredentialGeneration) {
+            long expectedCredentialGeneration,
+            RecordVisibilityScope recordVisibilityScope) {
         duplicateDecisionLockService.lockCurrentOrganization();
         workspaceService.requirePermission(
             workspaceId, userId, Permission.ACTIVITY_CREATE);
@@ -231,7 +242,7 @@ public class ProviderCaptureReviewService {
         interaction.setAdmissionStatus("admitted");
         interaction.setVersion(version + 1);
         pagePersistence.projectHistorical(
-            workspaceId, userId, interaction, participants);
+            workspaceId, userId, interaction, participants, recordVisibilityScope);
     }
 
     private Resolution resolution(
@@ -318,7 +329,8 @@ public class ProviderCaptureReviewService {
             int userId,
             String provider,
             long interactionId,
-            ProviderConnection connection) {
+            ProviderConnection connection,
+            RecordVisibilityScope recordVisibilityScope) {
         ProviderCapturedInteraction interaction =
             captureMapper.getInteractionForUpdate(
                 workspaceId, userId, provider, interactionId);
@@ -354,7 +366,7 @@ public class ProviderCaptureReviewService {
         interaction.setAdmissionStatus("admitted");
         interaction.setVersion(interaction.getVersion() + 1);
         pagePersistence.projectHistorical(
-            workspaceId, userId, interaction, participants);
+            workspaceId, userId, interaction, participants, recordVisibilityScope);
     }
 
     private ProviderCaptureReviewDto review(

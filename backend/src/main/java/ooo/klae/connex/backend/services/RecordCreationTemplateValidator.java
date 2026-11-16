@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -41,6 +43,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry.CustomTypeDefinition;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry.FieldDefinition;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
+import ooo.klae.connex.backend.validation.CurrencyCodes;
 
 @Service
 public class RecordCreationTemplateValidator {
@@ -74,6 +77,7 @@ public class RecordCreationTemplateValidator {
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
     private final ObjectWriter canonicalWriter;
@@ -86,7 +90,7 @@ public class RecordCreationTemplateValidator {
             PersonMapper personMapper,
             PipelineMapper pipelineMapper,
             WorkspaceService workspaceService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper, RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess) {
         this.fieldRegistry = fieldRegistry;
         this.customFieldMapper = customFieldMapper;
         this.tagMapper = tagMapper;
@@ -95,6 +99,7 @@ public class RecordCreationTemplateValidator {
         this.pipelineMapper = pipelineMapper;
         this.workspaceService = workspaceService;
         this.objectMapper = objectMapper;
+        this.recordVisibilityScopeControlAccess = recordVisibilityScopeControlAccess;
         this.canonicalWriter = objectMapper.rebuild()
             .changeDefaultPropertyInclusion(ignored -> JsonInclude.Value.construct(
                 JsonInclude.Include.ALWAYS,
@@ -111,13 +116,21 @@ public class RecordCreationTemplateValidator {
             LocalizedTextDto name,
             LocalizedTextDto description,
             RecordCreationTemplateDefinitionDto definition) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(),
+            () -> validateAndCanonicalize(recordType, name, description, definition, null));
+    }
+
+    ValidatedTemplate validateAndCanonicalize(
+            RecordCreationRecordType recordType, LocalizedTextDto name, LocalizedTextDto description,
+            RecordCreationTemplateDefinitionDto definition, @Nullable String orgWorkspaceIdsJson) {
         if (recordType == null) {
             throw invalid("A record type is required");
         }
         LocalizedTextDto canonicalName = requiredLocalized(name, 128, "name");
         LocalizedTextDto canonicalDescription = optionalLocalized(description, 512, "description");
         RecordCreationTemplateDefinitionDto canonicalDefinition =
-            canonicalDefinition(recordType, definition);
+            canonicalDefinition(recordType, definition, orgWorkspaceIdsJson);
         String json;
         try {
             json = canonicalWriter.writeValueAsString(canonicalDefinition);
@@ -145,7 +158,7 @@ public class RecordCreationTemplateValidator {
 
     private RecordCreationTemplateDefinitionDto canonicalDefinition(
             RecordCreationRecordType recordType,
-            RecordCreationTemplateDefinitionDto definition) {
+            RecordCreationTemplateDefinitionDto definition, @Nullable String orgWorkspaceIdsJson) {
         if (definition == null || definition.schemaVersion() != 1 || definition.groups() == null) {
             throw invalid("schemaVersion must be 1 and groups must be present");
         }
@@ -174,7 +187,7 @@ public class RecordCreationTemplateValidator {
             List<RecordCreationTemplateFieldDto> fields = new ArrayList<>();
             for (RecordCreationTemplateFieldDto field : group.fields()) {
                 RecordCreationTemplateFieldDto canonical =
-                    canonicalField(recordType, field, fieldKeys);
+                    canonicalField(recordType, field, fieldKeys, orgWorkspaceIdsJson);
                 fields.add(canonical);
                 fieldCount++;
                 if (fieldCount > 40) {
@@ -194,7 +207,7 @@ public class RecordCreationTemplateValidator {
         }
         if (pipelineDefault != null && stageDefault != null) {
             Stage stage = pipelineMapper.getVisibleStageById(
-                workspaceService.getCurrentWorkspaceId(), stageDefault);
+                workspaceService.getCurrentWorkspaceId(), scopeJson(workspaceService.getCurrentWorkspaceId(), orgWorkspaceIdsJson), stageDefault);
             if (stage == null || stage.getPipeline() == null
                     || stage.getPipeline().getId() != pipelineDefault) {
                 throw defaultForbidden("The default stage does not belong to the default pipeline");
@@ -206,7 +219,7 @@ public class RecordCreationTemplateValidator {
     private RecordCreationTemplateFieldDto canonicalField(
             RecordCreationRecordType recordType,
             RecordCreationTemplateFieldDto field,
-            Set<String> fieldKeys) {
+            Set<String> fieldKeys, @Nullable String orgWorkspaceIdsJson) {
         if (field == null || field.key() == null || field.key().isBlank()) {
             throw invalid("Every field needs a key");
         }
@@ -248,7 +261,7 @@ public class RecordCreationTemplateValidator {
             field.key(),
             core == null ? customType.defaultKinds() : core.defaultKinds(),
             custom,
-            field.defaultSpec());
+            field.defaultSpec(), orgWorkspaceIdsJson);
         return new RecordCreationTemplateFieldDto(
             field.key(), field.required(), helpText, placeholder, defaultSpec);
     }
@@ -258,7 +271,7 @@ public class RecordCreationTemplateValidator {
             String fieldKey,
             Set<RecordCreationDefaultKind> allowedKinds,
             CustomFieldDefinition custom,
-            RecordCreationDefaultSpecDto spec) {
+            RecordCreationDefaultSpecDto spec, @Nullable String orgWorkspaceIdsJson) {
         if (spec == null) {
             return null;
         }
@@ -274,6 +287,7 @@ public class RecordCreationTemplateValidator {
                     throw defaultForbidden("A string default cannot be empty");
                 }
                 validateStringDefault(recordType, fieldKey, custom, value);
+                if ("currency".equals(fieldKey)) value = CurrencyCodes.required(value);
                 yield new RecordCreationDefaultSpecDto(
                     spec.kind(), value, null, null, null, null, null);
             }
@@ -283,7 +297,7 @@ public class RecordCreationTemplateValidator {
             }
             case literal_boolean, literal_date -> spec;
             case literal_reference -> {
-                validateReference(workspaceId, fieldKey, spec.referenceId());
+                validateReference(workspaceId, fieldKey, spec.referenceId(), orgWorkspaceIdsJson);
                 yield spec;
             }
             case literal_references -> {
@@ -360,8 +374,8 @@ public class RecordCreationTemplateValidator {
         if ("leadSource".equals(fieldKey) && !LEAD_SOURCES.contains(value)) {
             throw defaultForbidden("The lead source default is not allowed for interactive creation");
         }
-        if ("currency".equals(fieldKey) && !value.matches("^[A-Z]{3}$")) {
-            throw defaultForbidden("The currency default must be a three-letter code");
+        if ("currency".equals(fieldKey) && !CurrencyCodes.isSupported(value)) {
+            throw defaultForbidden("The currency default must be a supported ISO 4217 monetary code");
         }
         if (custom != null && "select".equals(custom.getFieldType())
                 && !customOptionExists(custom, value)) {
@@ -380,15 +394,21 @@ public class RecordCreationTemplateValidator {
         }
     }
 
-    private void validateReference(int workspaceId, String fieldKey, Integer id) {
+    private String scopeJson(int workspaceId, @Nullable String suppliedScopeJson) {
+        return suppliedScopeJson == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson()
+            : suppliedScopeJson;
+    }
+
+    private void validateReference(int workspaceId, String fieldKey, Integer id, @Nullable String orgWorkspaceIdsJson) {
         if (id == null || id <= 0) {
             throw defaultForbidden("A reference default must use a positive ID");
         }
         boolean exists = switch (fieldKey) {
-            case "company" -> companyMapper.exists(workspaceId, id);
-            case "referrerPerson" -> personMapper.exists(workspaceId, id);
-            case "pipeline" -> pipelineMapper.pipelineExists(workspaceId, id);
-            case "stage" -> pipelineMapper.getVisibleStageById(workspaceId, id) != null;
+            case "company" -> companyMapper.exists(workspaceId, scopeJson(workspaceId, orgWorkspaceIdsJson), id);
+            case "referrerPerson" -> personMapper.exists(workspaceId, scopeJson(workspaceId, orgWorkspaceIdsJson), id);
+            case "pipeline" -> pipelineMapper.pipelineExists(workspaceId, scopeJson(workspaceId, orgWorkspaceIdsJson), id);
+            case "stage" -> pipelineMapper.getVisibleStageById(workspaceId, scopeJson(workspaceId, orgWorkspaceIdsJson), id) != null;
             default -> false;
         };
         if (!exists) {

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -146,7 +147,7 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         activityMapper.insert(activity(subject, activityDeal, actor));
         noteMapper.insert(note(subject, noteDeal, actor));
         taskMapper.insert(task(subject, taskDeal, actor));
-        dealMapper.addPerson(workspace.getId(), stakeholderDeal.getId(), subject.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), stakeholderDeal.getId(), subject.getId(), null);
         for (Deal deal : new Deal[] {activityDeal, noteDeal, taskDeal, stakeholderDeal}) {
             save(workspace, "deal.brief:en", deal.getId(), 0, "brief-" + deal.getId(), "{}", 0);
             save(workspace, "deal.risk_rationale:en", deal.getId(), 0,
@@ -158,7 +159,8 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         save(sameOrg, "report.narrative:v4:ja", 4243, 0, "report-sibling", "{}", 0);
         save(foreignOrg, "report.narrative:v4:en", 4244, 0, "report-foreign", "{}", 0);
 
-        assertEquals(7, aiOutputCacheMapper.deleteForPerson(workspace.getId(), subject.getId()));
+        assertEquals(7, aiOutputCacheMapper.deleteForPerson(workspace.getId(),
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), subject.getId()));
 
         assertNull(cached("deal.brief:en", activityDeal));
         assertNull(cached("deal.brief:en", noteDeal));
@@ -185,7 +187,7 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), stakeholder.getId(), null);
         PersonEdge edge = new PersonEdge();
         edge.setWorkspaceId(workspace.getId());
         edge.setSourcePersonId(Math.min(stakeholder.getId(), connected.getId()));
@@ -199,7 +201,8 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         save(foreignOrg, "deal.brief:en", deal.getId(), 0, "brief-foreign", "{}", 0);
         save(foreignOrg, "deal.risk_rationale:en", deal.getId(), 0, "risk-foreign", "{}", 0);
 
-        assertEquals(2, aiOutputCacheMapper.deleteForPerson(workspace.getId(), connected.getId()));
+        assertEquals(2, aiOutputCacheMapper.deleteForPerson(workspace.getId(),
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), connected.getId()));
 
         assertNull(aiOutputCacheMapper.getBySubject(
                 workspace.getId(), "deal.brief:en", deal.getId(), 0));

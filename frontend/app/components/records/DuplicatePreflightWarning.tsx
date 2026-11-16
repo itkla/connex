@@ -8,10 +8,13 @@ import type {
     DuplicateCandidate,
     DuplicatePreflightResponse,
 } from '@/app/lib/types';
+import type { ApiError } from '@/app/lib/api';
+import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
 import type {
     DuplicatePreflightKind,
     DuplicatePreflightStatus,
 } from '@/app/hooks/useDuplicatePreflight';
+import { canAcknowledgeDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -33,6 +36,8 @@ function context(candidate: DuplicateCandidate): string[] {
 
 /**
  * Shows canonical duplicate evidence and requires an explicit acknowledgement before a new record is created.
+ * When the check failed because the workspace the form belongs to is no longer available, it says so
+ * in place of the retry, which could only fail again (#1732).
  */
 export default function DuplicatePreflightWarning({
     id,
@@ -43,11 +48,13 @@ export default function DuplicatePreflightWarning({
     onAcknowledgedChange,
     onRetry,
     personResolution,
+    workspaceRefusal = null,
 }: {
     id?: string;
     kind: DuplicatePreflightKind;
     status: DuplicatePreflightStatus;
     response: DuplicatePreflightResponse | null;
+    workspaceRefusal?: ApiError | null;
     acknowledged?: boolean;
     onAcknowledgedChange?: (checked: boolean) => void;
     onRetry?: () => void;
@@ -58,10 +65,15 @@ export default function DuplicatePreflightWarning({
     };
 }) {
     const t = useTranslations('DuplicateWarning');
+    const tRoot = useTranslations();
 
     if (status === 'idle') return null;
     if (status === 'checking') {
         return <p id={id} className="text-xs text-muted-foreground" role="status">{t('checking')}</p>;
+    }
+    const workspaceMessage = status === 'error' ? workspaceUnavailableDescription(workspaceRefusal, tRoot) : null;
+    if (workspaceMessage !== null) {
+        return <p id={id} className="text-xs text-destructive" role="alert">{workspaceMessage}</p>;
     }
     if (status === 'error') {
         return (
@@ -74,6 +86,7 @@ export default function DuplicatePreflightWarning({
         );
     }
     if (!response || response.candidates.length === 0 && !response.truncated) return null;
+    const canAcknowledge = canAcknowledgeDuplicatePreflight(response);
 
     return (
         <section id={id} className="grid gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3" aria-label={t('heading')}>
@@ -99,7 +112,8 @@ export default function DuplicatePreflightWarning({
                                     {candidate.name}
                                 </Link>
                                 <Badge variant={candidate.strength === 'STRONG' ? 'secondary' : 'outline'} className="h-5 px-1.5 text-[10px]">
-                                    {t(`strength.${candidate.strength}`)}
+                                    {t(kind === 'company' && candidate.strength === 'WEAK'
+                                        ? 'companyNameStrength' : `strength.${candidate.strength}`)}
                                 </Badge>
                                 {!candidate.ownedByActiveWorkspace && (
                                     <span className="text-[11px] text-muted-foreground">{t('shared')}</span>
@@ -110,7 +124,8 @@ export default function DuplicatePreflightWarning({
                             )}
                             <p className="text-[11px] text-muted-foreground">
                                 {candidate.matches
-                                    .map((match) => t(`evidence.${match.kind}`))
+                                    .map((match) => t(kind === 'company' && match.kind === 'NAME'
+                                        ? 'companyNameEvidence' : `evidence.${match.kind}`))
                                     .join(' · ')}
                             </p>
                         </li>
@@ -119,7 +134,7 @@ export default function DuplicatePreflightWarning({
             </ul>
             {response.truncated && (
                 <p className="text-xs text-muted-foreground">
-                    {t('truncated')}
+                    {t(canAcknowledge ? 'nameOnlyTruncated' : 'truncated')}
                 </p>
             )}
             {personResolution && !response.truncated ? (
@@ -157,7 +172,7 @@ export default function DuplicatePreflightWarning({
                         </span>
                     </Button>
                 </div>
-            ) : onAcknowledgedChange && !response.truncated ? (
+            ) : onAcknowledgedChange && canAcknowledge ? (
                 <label className="flex items-start gap-2 text-xs text-foreground">
                     <Checkbox
                         checked={acknowledged}

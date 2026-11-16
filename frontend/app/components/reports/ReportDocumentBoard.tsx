@@ -1,8 +1,9 @@
 'use client';
 
+import { getDateTimeFormatter, getNumberFormatter } from '@/app/lib/intlFormatters';
 import Link from 'next/link';
 import { useCallback, useEffect, useReducer, useRef, useState, type RefObject, useMemo } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
     ArrowDownTrayIcon,
@@ -20,6 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import ReportWidgetRenderer, { formatReportValue } from '@/app/components/reports/ReportWidgetRenderer';
+import { formatDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { reportFigureBasisKey } from '@/app/components/reports/reportFigureBasis';
 import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
 import { useReportLabels } from '@/app/components/reports/reportLabels';
@@ -29,6 +31,7 @@ import {
     deleteReportSnapshot,
     exportReportCsv,
     exportReportSnapshotCsv,
+    exportReportPng,
     generateReport,
     getReportSnapshot,
     resolveAcceptedAiGeneration,
@@ -36,7 +39,9 @@ import {
 } from '@/app/lib/api';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
+import { renderReportPng } from '@/app/lib/reportPng';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
@@ -168,9 +173,12 @@ export default function ReportDocumentBoard({
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
+    const exportPermission = usePermissionCheck('EXPORT_DATA');
+    const canExport = exportPermission === 'granted';
     const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
-    const snapshotDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }), [locale]);
+    const timeZone = useTimeZone();
+    const snapshotDateFormatter = useMemo(() => getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone }), [locale, timeZone]);
     const { activeWorkspace } = useWorkspace();
     const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
@@ -409,6 +417,7 @@ export default function ReportDocumentBoard({
     };
 
     const exportCsv = async () => {
+        if (!canExport) return;
         const input = activeSnapshot ? null : generationInput();
         if (!activeSnapshot && !input) return;
         setExporting(true);
@@ -426,12 +435,13 @@ export default function ReportDocumentBoard({
     };
 
     const exportPng = async () => {
-        if (!paperRef.current) return;
+        if (!canExport || !paperRef.current) return;
         setExportingPng(true);
         try {
-            await exportElementPng(paperRef.current, `${definition.name}.png`);
-        } catch {
-            toastError(t('document.pngFailed'));
+            const element = paperRef.current;
+            await exportReportPng(definition.id, () => renderReportPng(element), `${definition.name}.png`);
+        } catch (error) {
+            showApiError(error, 'document.pngFailed');
         } finally {
             setExportingPng(false);
         }
@@ -459,6 +469,7 @@ export default function ReportDocumentBoard({
                         reportId={definition.id}
                         reportName={definition.name}
                         canManage={canUpdateReports}
+                        canExport={canExport}
                         defaultTimezone={defaultTimezone}
                     />
                     <Button variant="outline" onClick={createSnapshot} disabled={!document || snapshotting}>
@@ -467,27 +478,32 @@ export default function ReportDocumentBoard({
                     </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" disabled={!document || exporting || exportingPng}>
+                            <Button variant="outline" disabled={!canExport || !document || exporting || exportingPng}>
                                 <ArrowDownTrayIcon />
                                 {exporting || exportingPng ? t('document.exporting') : t('document.export')}
                                 <ChevronDownIcon className="size-4 opacity-60" />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => void exportCsv()} disabled={exporting}>
+                            <DropdownMenuItem onSelect={() => void exportCsv()} disabled={!canExport || exporting}>
                                 <ArrowDownTrayIcon />
                                 {t('document.csv')}
                             </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => void exportPng()} disabled={exportingPng}>
+                            <DropdownMenuItem onSelect={() => void exportPng()} disabled={!canExport || exportingPng}>
                                 <PhotoIcon />
                                 {t('document.png')}
                             </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => window.print()}>
+                            <DropdownMenuItem disabled={!canExport} onSelect={() => canExport && window.print()}>
                                 <PrinterIcon />
                                 {t('document.pdf')}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
+                    {!canExport && (
+                        <p className="max-w-xs text-xs text-muted-foreground">
+                            {t(exportPermission === 'denied' ? 'exportPermissionDenied' : 'exportPermissionUnavailable')}
+                        </p>
+                    )}
                     {canUpdateReports ? (
                         <Button asChild variant="brand">
                             <Link href={`/insights/reports/${definition.id}/edit`}>
@@ -515,8 +531,8 @@ export default function ReportDocumentBoard({
                         </Button>
                         {snapshots.map((snapshot) => {
                             const active = activeSnapshotId === snapshot.id;
-                            const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
-                                .format(new Date(snapshot.generatedAt));
+                            const dateLabel = getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone })
+                                .format(new Date(parseMysqlDateTime(snapshot.generatedAt)));
                             const deletable = canDeleteReports
                                 && canDeleteOwnedRecord(snapshot.generatedBy, currentUserId, activeWorkspace?.role);
                             return (
@@ -606,7 +622,7 @@ export default function ReportDocumentBoard({
                 selectedItems={snapshotPendingDelete !== null ? [snapshotPendingDelete] : []}
                 entityLabel={t('document.snapshotEntityLabel')}
                 getDisplayName={(snapshot) => t('document.snapshotNamed', {
-                    date: snapshotDateFormatter.format(new Date(snapshot.generatedAt)),
+                    date: snapshotDateFormatter.format(new Date(parseMysqlDateTime(snapshot.generatedAt))),
                 })}
                 isDeleting={deletingSnapshotId !== null}
                 confirmDelete={confirmDeleteSnapshot}
@@ -630,6 +646,7 @@ function ReportPaper({
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const { localizeLabel } = useReportLabels();
     const citationIndex = new Map(document.citations.map((citation, index) => [citation.sourceId, index + 1]));
     const layoutById = new Map(document.definition.config.layout.map((item) => [item.widgetId, item]));
@@ -663,7 +680,7 @@ function ReportPaper({
             <header className="border-b border-border pb-8">
                 <div className="flex flex-wrap items-start justify-between gap-6">
                     <div className="max-w-3xl">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-brand-dark">{t('document.reportLabel')}</p>
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-brand-text">{t('document.reportLabel')}</p>
                         <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
                             {document.definition.name}
                         </h1>
@@ -689,13 +706,13 @@ function ReportPaper({
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
                                     {t('document.currentStateAsOf')}
                                 </dt>
-                                <dd className="mt-1 text-foreground">{formatDateTime(document.generatedAt, locale)}</dd>
+                                <dd className="mt-1 text-foreground">{formatDateTime(document.generatedAt, locale, timeZone)}</dd>
                             </div>
                         ) : null}
                         {snapshot ? (
                             <div>
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.snapshot')}</dt>
-                                <dd className="mt-1 text-foreground">{formatDateTime(snapshot.generatedAt, locale)}</dd>
+                                <dd className="mt-1 text-foreground">{formatDateTime(snapshot.generatedAt, locale, timeZone)}</dd>
                             </div>
                         ) : null}
                     </dl>
@@ -809,10 +826,10 @@ function ReportPaper({
                                             <p className="text-xs tabular-nums text-muted-foreground">
                                                 {widget.measure === 'attainment'
                                                     ? t('document.attainmentValue', {
-                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
                                                     })
                                                     : t('document.changeValue', {
-                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
                                                     })}
                                             </p>
                                         ) : null}
@@ -857,7 +874,7 @@ function ReportPaper({
                         <tbody className="divide-y divide-border">
                             {document.appendix.map((row) => (
                                 <tr key={row.sourceId} id={`source-${row.sourceId}`}>
-                                    <td className="px-4 py-3 text-xs font-medium text-brand-dark">
+                                    <td className="px-4 py-3 text-xs font-medium text-brand-text">
                                         [{citationIndex.get(row.sourceId) ?? row.sourceId}]
                                     </td>
                                     <td className="px-4 py-3 text-foreground">
@@ -902,7 +919,7 @@ function ReportPaper({
 
             <footer className="mt-10 flex flex-wrap justify-between gap-3 border-t border-border pt-5 text-xs text-muted-foreground">
                 <span>{t('document.generatedBy')}</span>
-                <span>{formatDateTime(document.generatedAt, locale)}</span>
+                <span>{formatDateTime(document.generatedAt, locale, timeZone)}</span>
             </footer>
         </article>
     );
@@ -927,7 +944,7 @@ function NarrativeClaim({
                 <a
                     key={reference.sourceId}
                     href={`#source-${reference.sourceId}`}
-                    className="align-super text-[0.7em] font-semibold text-brand-dark hover:underline"
+                    className="align-super text-[0.7em] font-semibold text-brand-text hover:underline"
                 >
                     [{reference.index}]
                 </a>
@@ -951,7 +968,7 @@ function Citation({
 }) {
     return (
         <li className="flex gap-2">
-            <span className="font-semibold text-brand-dark">[{index}]</span>
+            <span className="font-semibold text-brand-text">[{index}]</span>
             <span>
                 {label} · {formatReportValue(citation.value, citation.unit, locale)}
                 {citation.priorValue != null
@@ -971,13 +988,10 @@ function SectionHeading({ id, title }: { id: string; title: string }) {
 }
 
 function formatRange(start: string, end: string, locale: string): string {
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' });
+    const formatter = getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone: 'UTC' });
     return `${formatter.format(new Date(`${start}T00:00:00Z`))} - ${formatter.format(new Date(`${end}T00:00:00Z`))}`;
 }
 
-function formatDateTime(value: string, locale: string): string {
-    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
-}
 
 function sourceDisplayLabel(label: string, measureLabel: string | undefined): string {
     if (!measureLabel) return label;
@@ -1003,50 +1017,4 @@ function ReportDocumentSkeleton() {
             </div>
         </div>
     );
-}
-
-async function exportElementPng(element: HTMLElement, filename: string): Promise<void> {
-    const clonedNode = element.cloneNode(true);
-    if (!(clonedNode instanceof HTMLElement)) throw new Error('Report cloning is unavailable');
-    const clone = clonedNode;
-    const sources = [element, ...Array.from(element.querySelectorAll('*'))];
-    const targets = [clone, ...Array.from(clone.querySelectorAll('*'))];
-    sources.forEach((source, index) => {
-        const target = targets[index];
-        if (!(target instanceof HTMLElement || target instanceof SVGElement)) return;
-        const computed = window.getComputedStyle(source);
-        target.style.cssText = Array.from(computed)
-            .map((property) => `${property}:${computed.getPropertyValue(property)};`)
-            .join('');
-    });
-    const width = Math.ceil(element.scrollWidth);
-    const height = Math.ceil(element.scrollHeight);
-    const maximumDimension = 16384;
-    const scale = Math.min(2, maximumDimension / width, maximumDimension / height);
-    const serialized = new XMLSerializer().serializeToString(clone);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml">${serialized}</div></foreignObject></svg>`;
-    const svgUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
-    try {
-        const image = new Image();
-        image.src = svgUrl;
-        await image.decode();
-        const canvas = window.document.createElement('canvas');
-        canvas.width = Math.max(1, Math.floor(width * scale));
-        canvas.height = Math.max(1, Math.floor(height * scale));
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('Canvas rendering is unavailable');
-        context.scale(scale, scale);
-        context.drawImage(image, 0, 0, width, height);
-        const blob = await new Promise<Blob>((resolve, reject) => {
-            canvas.toBlob((result) => result ? resolve(result) : reject(new Error('PNG export failed')), 'image/png');
-        });
-        const url = URL.createObjectURL(blob);
-        const anchor = window.document.createElement('a');
-        anchor.href = url;
-        anchor.download = filename;
-        anchor.click();
-        URL.revokeObjectURL(url);
-    } finally {
-        URL.revokeObjectURL(svgUrl);
-    }
 }

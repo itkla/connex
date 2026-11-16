@@ -159,25 +159,36 @@ public interface ReportMapper {
      * periods. Decay is evaluated at {@code warmthReference}, which callers align with the
      * millisecond-normalized Java snapshot immediately before {@code end}. An interaction exactly
      * at {@code end} belongs to the following period.
+     * The unfiltered control-derived workspace ceiling is resolved once for the entire report.
      */
     List<ReportAggregateRow> aggregateCoverageGaps(
         @Param("query") ReportAggregateQuery query,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("warmthReference") java.time.LocalDateTime warmthReference,
         @Param("model") SqlParameters model
     );
 
-    List<ReportAggregateRow> aggregateSingleThreadedDeals(@Param("query") ReportAggregateQuery query);
+    /** Masks invisible company labels without excluding otherwise eligible workspace deals. */
+    List<ReportAggregateRow> aggregateSingleThreadedDeals(
+        @Param("query") ReportAggregateQuery query,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
 
+    /** Applies the unfiltered organization ceiling before account aggregation, ordering and limit. */
     List<ReportNetworkAccountRow> getNetworkAccountValues(
         @Param("query") ReportAggregateQuery query,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("limit") int limit);
 
+    /** Applies historical record/share timestamps with the current operation's unfiltered organization ceiling. */
     List<Integer> getVisiblePersonIdsAt(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("asOf") java.time.LocalDateTime asOf);
 
+    /** Applies historical record/share timestamps with the current operation's unfiltered organization ceiling. */
     List<Integer> getVisibleCompanyIdsAt(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("asOf") java.time.LocalDateTime asOf);
 
     /** Clears report-definition creator references during account deletion. */

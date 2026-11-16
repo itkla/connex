@@ -1,0 +1,46 @@
+{
+  "id": "mission_closing_repair",
+  "selector": "connex_script_mission_closing_repair",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "closing": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I reviewed [the selected record](record:r1).\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "closing": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I reviewed [the selected record](record:r1).\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

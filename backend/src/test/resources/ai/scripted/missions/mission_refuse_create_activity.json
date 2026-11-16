@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_create_activity",
+  "selector": "connex_script_mission_refuse_create_activity",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_activity",
+        "arguments": "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Review follow-up\",\"start\":\"2026-10-20T09:00:00Z\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

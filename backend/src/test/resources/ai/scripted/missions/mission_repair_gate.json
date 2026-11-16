@@ -1,0 +1,24 @@
+{
+  "id": "mission_repair_gate",
+  "selector": "connex_script_mission_repair_gate",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "malformed",
+        "text": "{"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I reviewed [the selected record](record:r1).\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
+import { settingsConfigRedirects } from "./app/lib/settingsRedirects";
 import {
   DOCUMENT_ACCEPTANCE_SECURITY_HEADERS,
   FRAME_ANCESTORS_DIRECTIVE,
@@ -12,6 +13,7 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 const BACKEND_IMPORT_MAX_BODY_BYTES = 67_108_864;
 
 const isDevelopment = process.env.NODE_ENV === "development";
+const disableTurbopackBuildCache = process.env.CONNEX_DISABLE_TURBOPACK_BUILD_CACHE === "1";
 
 /**
  * Documentation articles whose slug has been renamed, and the address each one moved to.
@@ -50,11 +52,22 @@ const nextConfig: NextConfig = {
     ],
   },
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
-  ...(isDevelopment
-    ? { experimental: { proxyClientMaxBodySize: BACKEND_IMPORT_MAX_BODY_BYTES } }
+  ...(isDevelopment || disableTurbopackBuildCache
+    ? {
+        experimental: {
+          ...(isDevelopment ? { proxyClientMaxBodySize: BACKEND_IMPORT_MAX_BODY_BYTES } : {}),
+          ...(disableTurbopackBuildCache ? { turbopackFileSystemCacheForBuild: false } : {}),
+        },
+      }
+    : {}),
+  ...(process.env.CONNEX_SKIP_BUILD_TYPECHECK === "1"
+    ? { typescript: { ignoreBuildErrors: true } }
     : {}),
   async redirects() {
-    return DOCS_SLUG_REDIRECTS.map((redirect) => ({ ...redirect, permanent: true }));
+    return [
+      ...DOCS_SLUG_REDIRECTS.map((redirect) => ({ ...redirect, permanent: true })),
+      ...settingsConfigRedirects(),
+    ];
   },
   async rewrites() {
     return [

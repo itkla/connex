@@ -2,10 +2,28 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
+  <select id="activeAiChatRecipientIdsAfter" resultType="int" useCache="false" flushCache="true">
+    SELECT user_id FROM workspace_member WHERE workspace_id = #{workspaceId}
+      AND status = 'active' AND user_id &gt; #{afterId} ORDER BY user_id LIMIT #{limit}
+  </select>
+
 
   <sql id="userColumns">
     id, username, display_name, email, email_verified, password_hash, session_epoch, timezone, locale, last_login_at, profile_picture_url, created_at, updated_at
   </sql>
+
+  <select id="findExistingIds" resultType="int">
+    SELECT id FROM app_user WHERE id IN
+    <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
+  <select id="getUserOptions" resultType="User">
+    SELECT u.id, u.username, u.display_name, u.email, u.timezone, u.locale, u.created_at, u.updated_at, u.last_login_at, u.profile_picture_url
+    FROM app_user u JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'active'
+      AND (u.display_name LIKE #{query} OR u.username LIKE #{query})
+    ORDER BY u.display_name, u.id LIMIT 50
+  </select>
 
   <select id="getAllUsers" resultType="User">
     SELECT <include refid="userColumns"/>
@@ -95,7 +113,7 @@
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
     WHERE wm.workspace_id = #{workspaceId}
-      AND wm.status IN ('active', 'pending')
+      AND wm.status = 'active'
       AND (u.username LIKE #{query} OR u.display_name LIKE #{query})
     ORDER BY u.id
   </select>
@@ -105,7 +123,7 @@
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
     WHERE wm.workspace_id = #{workspaceId}
-      AND wm.status IN ('active', 'pending')
+      AND wm.status = 'active'
       AND (u.username LIKE #{query} OR u.display_name LIKE #{query})
       AND u.id IN
       <foreach item="id" collection="ids" open="(" separator="," close=")">
@@ -183,7 +201,7 @@
       AND account_deletion_reservation_until &gt; UTC_TIMESTAMP(6)
   </select>
 
-  <select id="isAccountDeletionReservationOwner" resultType="boolean">
+  <select id="isAccountDeletionReservationOwner" resultType="boolean" flushCache="true" useCache="false">
     SELECT COALESCE(
       account_deletion_reservation_owner = #{owner}
         AND account_deletion_reservation_until &gt; UTC_TIMESTAMP(6),
@@ -191,6 +209,7 @@
     )
     FROM app_user
     WHERE id = #{id}
+    FOR UPDATE
   </select>
 
   <update id="reserveAccountDeletion">
@@ -234,36 +253,82 @@
     FROM app_user WHERE email = #{email}
   </select>
 
+  <!-- One row per membership that makes the account privileged, naming that membership's
+       organization as o.id. The privilege predicate and the passkey-sufficiency checks below are all
+       built from this one definition, so "privileged" and "covered" cannot drift apart (#1534).
+       privilegedOrgCondition is appended to every branch, so it may only refer to o.id and to
+       columns of the enclosing query. -->
+  <sql id="privilegedOrgBranches">
+    SELECT o.id AS org_id, o.name AS org_name, om.org_role AS org_role,
+           NULL AS workspace_id, NULL AS workspace_name
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
+    WHERE om.user_id = ${privilegedUserId}
+      ${privilegedOrgCondition}
+    UNION ALL
+    SELECT o.id AS org_id, o.name AS org_name, NULL AS org_role,
+           w.id AS workspace_id, w.name AS workspace_name
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    WHERE wm.user_id = ${privilegedUserId}
+      AND wm.status = 'active'
+      AND wm.role_id IS NULL
+      AND wm.role IN ('admin', 'owner')
+      ${privilegedOrgCondition}
+    UNION ALL
+    SELECT o.id AS org_id, o.name AS org_name, NULL AS org_role,
+           w.id AS workspace_id, w.name AS workspace_name
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
+    WHERE wm.user_id = ${privilegedUserId}
+      AND wm.status = 'active'
+      AND wrp.permission IN (
+        'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+        'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+        'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+        'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS'
+      )
+      ${privilegedOrgCondition}
+  </sql>
+
   <sql id="privilegedAccountPredicate">
     EXISTS (
-      SELECT 1
-      FROM org_member om
-      JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
-      WHERE om.user_id = ${privilegedUserId}
-      UNION ALL
-      SELECT 1
-      FROM workspace_member wm
-      JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
-      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
-      WHERE wm.user_id = ${privilegedUserId}
-        AND wm.status = 'active'
-        AND wm.role_id IS NULL
-        AND wm.role IN ('admin', 'owner')
-      UNION ALL
-      SELECT 1
-      FROM workspace_member wm
-      JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
-      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
-      JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
-      WHERE wm.user_id = ${privilegedUserId}
-        AND wm.status = 'active'
-        AND wrp.permission IN (
-          'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
-          'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
-          'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
-          'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS'
-        )
+      <include refid="privilegedOrgBranches">
+        <property name="privilegedUserId" value="${privilegedUserId}"/>
+        <property name="privilegedOrgCondition" value=""/>
+      </include>
     )
+  </sql>
+
+  <!-- Whether passkey c, of account credentialUserId, satisfies privileged MFA (#1534): it carries
+       break-glass assurance, or no organization where the account is privileged lacks coverage for
+       it. One passkey has to cover every such organization; coverage split across two passkeys does
+       not count. Grandfathering is per-organization coverage, so GRANDFATHERED assurance, which
+       nothing writes, is not sufficient on its own. -->
+  <sql id="sufficientPasskey">
+    (c.privileged_assurance = 'BREAK_GLASS'
+      OR NOT EXISTS (
+        <include refid="privilegedOrgBranches">
+          <property name="privilegedUserId" value="${credentialUserId}"/>
+          <property name="privilegedOrgCondition"
+              value="AND NOT EXISTS (SELECT 1 FROM privileged_credential_attestation pca WHERE pca.credential_row_id = c.id AND pca.org_id = o.id)"/>
+        </include>
+      ))
+  </sql>
+
+  <!-- Whether passkey c vouches in organization coverageOrgId (#1534): it carries break-glass
+       assurance, or it is covered in that organization. A grantor's authority in one organization
+       rests on this, not on the grantor's standing everywhere. -->
+  <sql id="coveredInOrganization">
+    (c.privileged_assurance = 'BREAK_GLASS'
+      OR EXISTS (
+        SELECT 1
+        FROM privileged_credential_attestation pca
+        WHERE pca.credential_row_id = c.id AND pca.org_id = ${coverageOrgId}
+      ))
   </sql>
 
   <sql id="unenrolledPrivilegedAccount">
@@ -279,6 +344,208 @@
 
   <select id="isPrivilegedAccount" resultType="boolean">
     SELECT <include refid="privilegedAccountPredicate"><property name="privilegedUserId" value="#{id}"/></include>
+  </select>
+
+  <select id="privilegedMfaStanding" resultType="ooo.klae.connex.backend.beans.PrivilegedMfaStandingRow">
+    SELECT
+      <include refid="privilegedAccountPredicate"><property name="privilegedUserId" value="#{id}"/></include> AS privileged,
+      EXISTS (
+        SELECT 1
+        FROM webauthn_user_entity e
+        JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+        WHERE e.user_id = #{id}
+      ) AS hasPasskey,
+      EXISTS (
+        SELECT 1
+        FROM webauthn_user_entity e
+        JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+        WHERE e.user_id = #{id}
+          AND <include refid="sufficientPasskey"><property name="credentialUserId" value="#{id}"/></include>
+      ) AS hasSufficientPasskey
+  </select>
+
+  <select id="hasWorkspaceOrganizationPrivilege" resultType="boolean" flushCache="true" useCache="false">
+    SELECT EXISTS (
+      SELECT 1
+      FROM workspace w
+      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+      JOIN org_member om ON om.org_id = o.id
+      WHERE w.id = #{workspaceId} AND om.user_id = #{id}
+        AND om.org_role IN ('owner', 'admin')
+    )
+  </select>
+
+  <select id="lockedWorkspaceMfaPasskeySufficiency" resultType="boolean" flushCache="true" useCache="false">
+    SELECT
+    <choose>
+      <when test="attestationEnforced">
+        (COALESCE(c.privileged_assurance = 'BREAK_GLASS', FALSE)
+          OR pca.credential_row_id IS NOT NULL)
+      </when>
+      <otherwise>TRUE</otherwise>
+    </choose>
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    JOIN workspace w ON w.id = #{workspaceId}
+    <if test="attestationEnforced">
+      LEFT JOIN privileged_credential_attestation pca
+        ON pca.credential_row_id = c.id AND pca.org_id = w.org_id
+    </if>
+    WHERE e.user_id = #{id}
+    ORDER BY c.id
+    FOR SHARE OF e, c, w
+    <if test="attestationEnforced">, pca</if>
+    NOWAIT
+  </select>
+
+  <select id="isSufficientPasskey" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+      WHERE e.user_id = #{userId}
+        AND c.id = #{credentialRowId}
+        AND <include refid="sufficientPasskey"><property name="credentialUserId" value="#{userId}"/></include>
+    )
+  </select>
+
+  <select id="hasOtherSufficientPasskey" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+      WHERE e.user_id = #{userId}
+        AND c.id != #{credentialRowId}
+        AND <include refid="sufficientPasskey"><property name="credentialUserId" value="#{userId}"/></include>
+    )
+  </select>
+
+  <select id="sufficientPasskeyCredentialIds" resultType="_byte[]">
+    SELECT c.credential_id
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id = #{userId}
+      AND <include refid="sufficientPasskey"><property name="credentialUserId" value="#{userId}"/></include>
+    ORDER BY c.id
+  </select>
+
+  <select id="isPasskeyCoveredInOrganization" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+      WHERE e.user_id = #{userId}
+        AND c.id = #{credentialRowId}
+        AND <include refid="coveredInOrganization"><property name="coverageOrgId" value="#{orgId}"/></include>
+    )
+  </select>
+
+  <select id="hasPasskeyCoveredInOrganization" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+      WHERE e.user_id = #{userId}
+        AND <include refid="coveredInOrganization"><property name="coverageOrgId" value="#{orgId}"/></include>
+    )
+  </select>
+
+  <select id="privilegedInOrganizationAmong" resultType="int" flushCache="true">
+    SELECT u.id
+    FROM app_user u
+    WHERE u.id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">#{userId}</foreach>
+      AND EXISTS (
+        <include refid="privilegedOrgBranches">
+          <property name="privilegedUserId" value="u.id"/>
+          <property name="privilegedOrgCondition" value="AND o.id = #{orgId}"/>
+        </include>
+      )
+  </select>
+
+  <select id="coveredInOrganizationAmong" resultType="int" flushCache="true">
+    SELECT DISTINCT e.user_id
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">#{userId}</foreach>
+      AND <include refid="coveredInOrganization"><property name="coverageOrgId" value="#{orgId}"/></include>
+  </select>
+
+  <select id="privilegedMemberships" resultType="ooo.klae.connex.backend.beans.PrivilegedMembershipRow">
+    SELECT DISTINCT org_id AS orgId, org_name AS orgName, org_role AS orgRole,
+           (EXISTS (SELECT 1 FROM org_member self_owner
+                    WHERE self_owner.org_id = memberships.org_id
+                      AND self_owner.user_id = #{userId} AND self_owner.org_role = 'owner')
+            AND NOT EXISTS (SELECT 1 FROM org_member other_owner
+                            WHERE other_owner.org_id = memberships.org_id
+                              AND other_owner.user_id != #{userId} AND other_owner.org_role = 'owner')) AS orgLastOwner,
+           workspace_id AS workspaceId, workspace_name AS workspaceName,
+           (EXISTS (SELECT 1 FROM workspace_member self_owner
+                    WHERE self_owner.workspace_id = memberships.workspace_id
+                      AND self_owner.user_id = #{userId} AND self_owner.role = 'owner'
+                      AND self_owner.status = 'active')
+            AND NOT EXISTS (SELECT 1 FROM workspace_member other_owner
+                            WHERE other_owner.workspace_id = memberships.workspace_id
+                              AND other_owner.user_id != #{userId} AND other_owner.role = 'owner'
+                              AND other_owner.status = 'active')) AS workspaceLastOwner
+    FROM (
+      <include refid="privilegedOrgBranches">
+        <property name="privilegedUserId" value="#{userId}"/>
+        <property name="privilegedOrgCondition" value=""/>
+      </include>
+    ) memberships
+    ORDER BY org_id, workspace_id
+  </select>
+
+  <select id="passkeyApprovalGaps" resultType="ooo.klae.connex.backend.beans.PasskeyApprovalGap">
+    SELECT DISTINCT c.id AS credentialRowId,
+           c.credential_id AS credentialId,
+           gap.org_id AS orgId,
+           gap_org.name AS orgName
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    JOIN (
+      <include refid="privilegedOrgBranches">
+        <property name="privilegedUserId" value="#{userId}"/>
+        <property name="privilegedOrgCondition" value=""/>
+      </include>
+    ) gap
+    JOIN organization gap_org ON gap_org.id = gap.org_id
+    WHERE e.user_id = #{userId}
+      AND NOT (c.privileged_assurance &lt;=&gt; 'BREAK_GLASS')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM privileged_credential_attestation pca
+        WHERE pca.credential_row_id = c.id AND pca.org_id = gap.org_id
+      )
+    ORDER BY c.id, gap.org_id
+  </select>
+
+  <select id="countAttestationRequiredAccounts" resultType="long">
+    SELECT COUNT(*)
+    FROM app_user u
+    WHERE u.username != '__connex_system__'
+      AND <include refid="privilegedAccountPredicate"><property name="privilegedUserId" value="u.id"/></include>
+      AND EXISTS (
+        SELECT 1
+        FROM webauthn_user_entity e
+        JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+        WHERE e.user_id = u.id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM webauthn_user_entity e
+        JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+        WHERE e.user_id = u.id
+          AND <include refid="sufficientPasskey"><property name="credentialUserId" value="u.id"/></include>
+      )
+  </select>
+
+  <select id="countGrandfatheredCoverage" resultType="long">
+    SELECT COUNT(*)
+    FROM privileged_credential_attestation
+    WHERE source = 'GRANDFATHERED'
   </select>
 
   <select id="listUnenrolledPrivilegedAccounts"
@@ -311,6 +578,7 @@
            u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id AND wm.workspace_id = #{workspaceId}
+      AND wm.status = 'active'
     WHERE u.username LIKE #{query} OR u.display_name LIKE #{query} OR u.email LIKE #{query}
     ORDER BY u.username
     LIMIT 10

@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -17,6 +16,7 @@ import ooo.klae.connex.backend.beans.CampaignAudienceSnapshot;
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignMessage;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
+import ooo.klae.connex.backend.delivery.CampaignMessageTokens;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.capability.Capability;
@@ -43,11 +43,11 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @Service
 @RequiredArgsConstructor
 public class CampaignTriggeredSendService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     private static final String PURPOSE = "marketing";
     private static final String ROLLBACK_SNAPSHOT_LABEL = "Triggered (system)";
-    private static final int TOKEN_BYTES = 32;
-    private static final SecureRandom RANDOM = new SecureRandom();
     private static final List<Permission> REQUIRED_PERMISSIONS = List.of(
             Permission.CAMPAIGN_MANAGE,
             Permission.CAMPAIGN_SEND,
@@ -85,8 +85,9 @@ public class CampaignTriggeredSendService {
         CampaignSend discovered = campaignSendMapper.getTriggeredSend(
                 workspaceId, request.messageId(), request.messageVersion());
         int actorId = workspaceService.getCurrentUserId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Set<Permission> permissions = workspaceService.lockedPermissionsFor(workspaceId, actorId);
-        return enrollLocked(workspaceId, actorId, permissions, request, discovered);
+        return enrollLocked(workspaceId, actorId, permissions, request, discovered, personWorkspaceIdsJson);
     }
 
     /**
@@ -184,9 +185,10 @@ public class CampaignTriggeredSendService {
             Set<Permission> lockedPermissions) {
         Request request = requireRequest(personId, messageIdValue, messageVersionValue);
         int workspaceId = requireResolvedWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         CampaignSend discovered = campaignSendMapper.getTriggeredSend(
                 workspaceId, request.messageId(), request.messageVersion());
-        return enrollLocked(workspaceId, actorId, lockedPermissions, request, discovered);
+        return enrollLocked(workspaceId, actorId, lockedPermissions, request, discovered, personWorkspaceIdsJson);
     }
 
     private EnrollmentResult enrollLocked(
@@ -194,7 +196,7 @@ public class CampaignTriggeredSendService {
             int actorId,
             Set<Permission> permissions,
             Request request,
-            CampaignSend discoveredSend) {
+            CampaignSend discoveredSend, String personWorkspaceIdsJson) {
         if (!triggeredSendGate.enabled()) {
             throw new ForbiddenException("Triggered campaign delivery is not enabled on this instance");
         }
@@ -224,6 +226,7 @@ public class CampaignTriggeredSendService {
                     "Campaign message revision not found for version: " + request.messageVersion());
         }
         DeliveryChannel channel = resolveChannel(message.getChannel());
+        CampaignMessageTokens.validate(revision);
         requireDeliveryReady(workspaceId, channel);
 
         AudienceEligibilityService.AudienceClassification eligibility =
@@ -234,7 +237,7 @@ public class CampaignTriggeredSendService {
             auditExclusion(campaign, request, exclusionReason);
             return EnrollmentResult.excluded(exclusionReason);
         }
-        Person person = personMapper.getPersonById(workspaceId, request.personId());
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, request.personId());
         if (person == null) {
             throw new ResourceNotFoundException(
                     "Contact not found with id: " + request.personId());
@@ -249,7 +252,9 @@ public class CampaignTriggeredSendService {
                 workspaceId, actorId, campaign, message, revision);
         CampaignSend send = resolveSend(
                 workspaceId, actorId, campaign, message, revision, snapshot, discoveredSend);
-        if (!"triggered".equals(send.getStatus())) {
+        send = campaignSendMapper.getSendForUpdate(workspaceId, send.getId());
+        if (send == null || !"triggered".equals(send.getStatus()) || send.isContentRefused()
+                || send.getCompletedAt() != null) {
             throw new BadRequestException("The triggered campaign send is not accepting enrollments");
         }
         CampaignDelivery existing = campaignDeliveryMapper.getBySendAndPerson(
@@ -264,7 +269,6 @@ public class CampaignTriggeredSendService {
         delivery.setPersonId(request.personId());
         delivery.setAddress(address);
         delivery.setStatus("pending");
-        delivery.setUnsubscribeToken(newToken());
         try {
             campaignDeliveryMapper.insertDeliveries(workspaceId, List.of(delivery));
         } catch (DuplicateKeyException exception) {
@@ -478,17 +482,6 @@ public class CampaignTriggeredSendService {
             throw new ForbiddenException("A resolved workspace membership is required");
         }
         return workspaceId;
-    }
-
-    private static String newToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        StringBuilder builder = new StringBuilder(TOKEN_BYTES * 2);
-        for (byte value : bytes) {
-            builder.append(Character.forDigit((value >> 4) & 0xF, 16));
-            builder.append(Character.forDigit(value & 0xF, 16));
-        }
-        return builder.toString();
     }
 
     private record Request(int personId, int messageId, int messageVersion) { }

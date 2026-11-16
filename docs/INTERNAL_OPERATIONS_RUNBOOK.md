@@ -228,27 +228,23 @@ is no suspended, disabled, or removed state — removal deletes the row.
 | `active` | **Yes** | Every auth and RBAC read filters on `status = 'active'`. |
 | `pending` | **No** | Tenant resolution rejects with `Not a member of workspace …` and the effective permission set is empty. |
 
-`pending` rows are still visible in the settings roster (so admins can see who has not accepted), in
-the user's own pending list (`GET /api/workspaces/pending`), and to @-mention lookup. That
-mention-visibility helper is explicitly documented as **never to be used for auth or RBAC**.
-
-**Which path produces which state is not intuitive:**
+Historical `pending` rows remain in the user's own pending list
+(`GET /api/workspaces/pending`). Administrators see an address-only entry under pending invitations,
+with an opaque revocation handle and no expiry. Pending profiles do not appear in the active roster,
+member search, organization layout or reference hydration.
 
 | How the person joins | Resulting state |
 |---|---|
-| Redeems an emailed token invite | **`active` immediately** |
+| Accepts an emailed token invite | **`active` immediately after acceptance** |
 | Redeems a shareable invite link | **`active` immediately** |
-| Added by an admin when the email **already belongs to a Connex user** | **`pending`** — they must accept |
-| **Emailed an invite** at an address that **already belongs to a Connex user** | **`pending`** — and **no email is sent** |
+| Historical account-backed invitation | **`pending`** until the recipient accepts |
 
-**That last row is the trap.** `createInvite` checks the address first: when it already belongs to a
-Connex account it silently switches to `addPendingMember` and returns a member instead of an invite
-— **no token row, no email, no link to hand over**. The invitee gets only an in-app
-`workspace.join` notification and a row in their own pending list, neither of which they will see
-until they happen to sign in. From the admin's side the roster just shows `pending`, which looks
-identical to an invite that was emailed and ignored. **So a `pending` row does not mean "they
-ignored the email" — on this path there was never an email.** Chase it by telling the person
-directly to sign in and accept at **Settings → Membership**.
+Both email invitation creation and the compatibility member-add endpoint now create the same token
+invitation for every address. They do not resolve recipient account existence, and mail delivery uses
+the same attempt path. The invitation is listed separately from active members until acceptance.
+Resending an address supersedes any historical pending grant in the replacement transaction.
+Historical invitation formats remain distinguishable by their absent expiry; see the
+[disclosure contract](backend/SECURITY_BOUNDARIES.md#workspace-invitation-disclosure).
 
 `pending → active` happens only via the invitee's own `POST /api/workspaces/{id}/accept`, which
 re-applies the organization email-domain ceiling on activation. Declining deletes the row. A user
@@ -436,9 +432,8 @@ blocks creating the invite. When no sender is configured the invite is still cre
 is skipped." From the operator's side both are indistinguishable from success. The link path removes
 the ambiguity: you hold the credential and deliver it yourself.
 
-**Also remember the existing-account branch:** emailing an invite to an address that already belongs
-to a Connex user sends **no mail at all** and produces a `pending` member instead — see "Membership
-states" above.
+Email invitation creation follows the same mail-attempt and token path for every address. A
+historical pending membership may predate this uniform flow — see "Membership states" above.
 
 Shareable links are created in the UI at **Settings → Members**, or directly:
 
@@ -543,8 +538,41 @@ field mapping and data ownership up front.
 
 Relationship warmth is **computed on read** from logged interactions. There is no scheduled scoring
 job to wait for and no backfill to trigger — but equally, **nothing appears until interactions
-exist**. The model (`warmth-v1`) is a recency-decayed, intent-weighted sum of touches, weighted
+exist**. The model (`warmth-v2`) is a recency-decayed, intent-weighted sum of touches, weighted
 meeting > call > email > note > task, with a **30-day half-life**, squashed to 0–100.
+
+Only completed tasks with a recorded `completed_at` contribute, dated at completion at the same whole-second precision as other task dates. Planned tasks,
+future completion timestamps and undated historical completions do not affect the current reading.
+Reopening clears the completion instant; completing again records a new instant. V240 does not infer
+completion from `updated_at`, so scores that depended on older tasks can fall. No scoring backfill job
+is needed. The scoring change can be reverted; notes retain their existing weight.
+
+Deal risk distinguishes missing history from decay: a contact with no eligible past touch has
+`daysSinceTouch = null` and contributes no cold-stakeholder factor, regardless of the empty score's
+band. Future-only activities remain no history. A genuine cold or cooling relationship retains its
+existing role-based severity. This does not change the warmth model or weights.
+
+Deals list risk filters capture a workspace-scoped maximum deal ID, then seek through the cohort
+with `id > lastId AND id <= upperId ORDER BY id LIMIT 250`. The candidate query forces the existing
+`uq_deal_workspace_id` range and deal-first join order, avoiding offset rescans and per-batch
+filesorts. Every batch retains the same captured visibility scope, member scope, segment and native
+filters. Renames do not change traversal order, and inserts above the watermark wait until the next
+request. This bounds cohort identity; it does not freeze every mutable risk input in an MVCC snapshot.
+Each batch reuses the existing risk assessor. The list retains at most 1,000 actual matches, loads
+that bounded cohort with current display-safe collation keys, and sorts/pages it in memory using the
+requested list order and ID ties. More than 1,000 actual matches requires narrowing the filter;
+broad candidate sets alone do not trigger that refusal. Metrics and exports use the same keyset
+scan. Risk-only filters exclude closed and opted-out candidates in SQL; filters including `none`
+retain them. The 1,000-record select-all action limit remains in place. Dashboard and Analytics retain
+their separately disclosed interactive candidate ceilings.
+
+The first successful warmth notification sweep after the model change quietly baselines all current
+relationship cooling, introduction and deal-risk expectations, independently of recipient preferences.
+It commits the workspace model marker together with those baselines. A failed score-dependent pass
+leaves the cutover pending. Later persisted source changes release suppression normally. New
+workspaces start on the current model without suppressing their first live expectations. Radar rebases
+only actor dismissals and follow-up links matching each signal's previous source hash at its model
+transition; later evidence changes retain their usual resurfacing behavior.
 
 | Surface | What the tester must do first |
 |---|---|
@@ -733,6 +761,65 @@ the `status` dimension is deliberate: it keeps last-success and last-failure ind
 volume, so **a run of failures cannot evict the last known good run**. Do not simplify it to a flat
 per-job cap. Statuses are `succeeded`, `failed` and `skipped`; detail payloads are key-whitelisted
 and capped, and instance-scoped rows (no workspace) retain only `phase`.
+
+Explicitly empty successful mission, privacy-initialization, lead-SLA, approval, brief, watch,
+notification and Radar sweeps persist
+one idle sample per job/workspace every fifteen minutes per process. Their complete zero-counter
+metadata identifies an idle pass; positive counters, unknown metadata, failures and skipped outcomes
+always retain the ordinary recording path. A failure or work run resets sampling, so the next idle
+success records recovery immediately. A failed recording is retried at the next tick. Retention
+still partitions by status. Privacy counts new barriers, enrollment/pending work, legacy turns and
+startup recovery candidates; existing empty barriers do not count as work. Notification and Radar
+passes report material changes, resolutions and baseline writes. Degraded notification passes count
+conservatively as work so their existing outcome records are never sampled away. Positive counts
+always record.
+
+Diagnostics merges process-local last-idle ticks with durable history by job and workspace, inside
+the existing authorized workspace scope. Both workspace merging and organization aggregation compare
+starts as UTC instants truncated to whole seconds, matching `job_run`'s `DATETIME` precision. Durable
+rows win ties over cached ticks, whose IDs are unset; durable ties use the higher row ID as in the
+database query. This deliberately keeps a durable failure visible ahead of a same-second cached
+success until a later-second cached tick establishes recovery. A newer durable outcome can still
+establish recovery by row ID. This avoids inferring order from fractions discarded by storage. A newer
+durable failure from another instance wins over an older local tick, and one workspace's success
+cannot hide another workspace's failure. Another
+instance sees the most recent durable idle sample, which may lag fifteen minutes. The support
+bundle currently omits `job-runs.json` with `job_run_not_available`; it does not merge local ticks.
+Restarting a process takes a new first sample. The local cache retains at most 20,000
+job/workspace pairs; evicting an older pair causes its next tick to take a fresh durable sample.
+There is no deployment-wide sampling lock, so idle sampling scales with the number of processes.
+
+The mission scheduler intentionally polls one page of at most 100 workspaces every five seconds,
+with a separate single worker and no queued pages while that worker is busy. An empty page resets
+the cursor and takes a poll of its own. The measured approximately nineteen-second workspace
+cadence in #2381 is consistent with paging and sweep duration; the five-second delay is not applied
+independently to each workspace. Privacy initialization defaults to sixty seconds; notification,
+Radar, lead-SLA and brief sweeps default to five minutes; watch and approval sweeps default to
+fifteen minutes. These timing defaults are unchanged. The maintenance scheduling tests pin the
+mission timer defaults; changing product timing requires a separate decision.
+
+Signal upserts preserve their generation, evidence timestamp, row version and update timestamp when
+source hash, model, label, ranking and JSON evidence are unchanged. Missing-row resolution retains
+all currently admitted candidate keys, including unchanged rows carrying an earlier generation.
+Admission ranks all computed families and persisted active candidates from failed detectors before
+selecting the canonical top fifty. Unchanged overflow is never revived just to be resolved again;
+a changed rank can re-enter. The final persisted-row cap remains a concurrency backstop. Each family
+still advances its locked attempt/success watermark: these three bounded metadata updates per
+workspace/pass retain stale-attempt rejection across processes. Radar freshness uses that family's
+persisted evidence time together with the row's last material evidence time. The family time never
+exceeds the oldest admitted candidate's evidence, so unchanged rows stay actionable after a fresh
+check while genuinely stale evidence still refuses task creation. Feed reads reuse their bulk family
+state; task admission adds one non-locking family read without acquiring a family lock after a signal.
+Detector/write failure remains
+isolated by family; a write failure can temporarily leave admission underfilled until a successful
+pass repairs it.
+
+Notification upserts preserve `updated_at` for identical material payloads and preserve existing
+read/dismiss/snooze/trigger state as before. Structural JSON comparison prevents MySQL's JSON
+formatting from advancing recipient versions or pushing unchanged reminders. SQL still executes
+after the dedupe pre-read, preserving protection against a concurrent change; affected-row counts
+catch that race. Notification email claims remain separate, one-use writes and are never reset by
+reconciliation. Auto-increment reservation by an unchanged upsert is not a changed row.
 
 ### Support bundle
 
@@ -934,7 +1021,7 @@ category, severity, title, body, actor label `Automation`, source type, and sour
 | WHEN not matched | `skipped` | `succeeded` after Condition → no → End |
 | Partial execution | `partial` | No equivalent; the run fails or becomes `intervention_required` |
 | User history | Exposed as stable `legacy-<id>` keys | Exposed as stable `canonical-<id>` keys; both histories are merged |
-| Operations telemetry | Not included in workflow operations summaries | Included in summaries, interventions, failures, and overdue counts |
+| Operations telemetry | Included through linked rule executions; failures and partial outcomes need attention | Included in summaries, interventions, failures, and overdue counts |
 
 #### Idempotency and ownership
 
@@ -1291,6 +1378,13 @@ This verifies each returned row's HMAC, including its signed previous-hash field
 prove adjacent-chain continuity, detect deletion of entire rows/chains, compare external checkpoints,
 or scan unread history/system-scope rows. The separate append-only trigger readiness warning is
 not proof of HMAC verification. A complete historic chain audit remains operator-owned.
+
+Account-wide privileged email-change refusals (`auth.email_change.refused`) use explicit null
+`workspace_id` and `org_id` on the `system` chain (`chain_scope_id = 0`), like export and schedule
+step-up refusals (#1997). Readers and alerting must include that chain; the workspace/org reads
+below do not return those rows. Previously recorded tenant-scoped refusals remain in their original
+chains. The refusal reasons and immediate pre-lock versus deferred under-lock timing are described
+in [Privileged MFA](PRIVILEGED_MFA.md#email-change-on-a-privileged-account).
 
 For unattended recent-row coverage, schedule the following once per minute for **each** workspace
 and organization the operator is authorized to audit. Use a locally protected curl config with a

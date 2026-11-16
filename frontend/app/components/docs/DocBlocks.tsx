@@ -36,8 +36,8 @@ const CALLOUT_STYLES: Record<
     },
     tip: {
         container: "border-brand/30 bg-brand-light",
-        icon: "text-brand-dark",
-        title: "text-brand-dark",
+        icon: "text-brand-text",
+        title: "text-brand-text",
         Icon: LightBulbIcon,
     },
     warning: {
@@ -48,7 +48,7 @@ const CALLOUT_STYLES: Record<
     },
     quirk: {
         container: "border-border bg-card",
-        icon: "text-brand-dark",
+        icon: "text-brand-text",
         title: "text-foreground",
         Icon: SparklesIcon,
     },
@@ -136,7 +136,7 @@ function Steps({ block }: { block: StepsBlock }) {
             <ol className="space-y-4">
                 {block.items.map((item, index) => (
                     <li key={item.title} className="flex gap-4">
-                        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-light text-sm font-semibold tabular-nums text-brand-dark">
+                        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-light text-sm font-semibold tabular-nums text-brand-text">
                             {index + 1}
                         </span>
                         <div className="pt-0.5">

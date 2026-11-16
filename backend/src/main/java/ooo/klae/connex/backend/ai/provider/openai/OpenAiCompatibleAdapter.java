@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.ai.provider.openai;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 
 import org.springframework.context.annotation.Profile;
@@ -13,11 +12,9 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
-import ooo.klae.connex.backend.ai.provider.AiInputImage;
-import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiModelCatalog;
-import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -28,14 +25,9 @@ import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
-import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
-import ooo.klae.connex.backend.ai.provider.AiToolExchange;
-import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProviderProfile;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Adapter for customer-supplied OpenAI-compatible chat-completions endpoints. The adapter
@@ -181,12 +173,12 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
             while (true) {
                 try {
-                    String requestBody = buildRequestBody(request, enforcement);
+                    AiProviderDispatch requestBody = OpenAiRequestBody.prepare(request, enforcement, false, objectMapper);
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             openAiCompatibleClient.complete(
                                     endpoint, target.allowInternalEndpoint(),
-                                    request.credentials(), requestBody, deadline,
-                                    request.providerAttemptExecutor()::beforeSend));
+                                    request.credentials(), requestBody.body(), deadline,
+                                    requestBody));
                     return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
@@ -222,21 +214,21 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
             while (true) {
                 try {
-                    String requestBody = buildRequestBody(request, enforcement, true);
+                    AiProviderDispatch requestBody = OpenAiRequestBody.prepare(request, enforcement, true, objectMapper);
                     AiStructuredOutputEnforcement appliedEnforcement = enforcement;
                     return request.providerAttemptExecutor().executeStream(() ->
                             openAiCompatibleClient.stream(
                                     endpoint,
                                     target.allowInternalEndpoint(),
                                     request.credentials(),
-                                    requestBody,
+                                    requestBody.body(),
                                     deadline,
                                     new OpenAiSseAccumulator(
                                             objectMapper,
                                             observer,
                                             appliedEnforcement,
                                             request.reasoningMode()),
-                                    request.providerAttemptExecutor()::beforeSend));
+                                    requestBody));
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {
@@ -283,152 +275,6 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         }
     }
 
-    private String buildRequestBody(
-            AiCompletionRequest request,
-            AiStructuredOutputEnforcement enforcement) throws Exception {
-        return buildRequestBody(request, enforcement, false);
-    }
-
-    private String buildRequestBody(
-            AiCompletionRequest request,
-            AiStructuredOutputEnforcement enforcement,
-            boolean streamed) throws Exception {
-        String modelId = request.target().modelId();
-        if (modelId == null || modelId.isBlank()) {
-            throw new AiProviderException("OpenAI-compatible model id is required");
-        }
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("model", modelId);
-        ArrayNode messages = root.putArray("messages");
-        if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
-            ObjectNode system = messages.addObject();
-            system.put("role", "system");
-            system.put("content", request.systemPrompt());
-        }
-        boolean imagesPending = !request.images().isEmpty();
-        for (AiMessage message : request.messages()) {
-            ObjectNode node = messages.addObject();
-            node.put("role", message.role());
-            if (imagesPending && "user".equals(message.role())) {
-                ArrayNode content = node.putArray("content");
-                content.addObject().put("type", "text").put("text", message.content());
-                for (AiInputImage image : request.images()) {
-                    ObjectNode imageUrl = content.addObject()
-                            .put("type", "image_url")
-                            .putObject("image_url");
-                    imageUrl.put("url", dataUrl(image));
-                    imageUrl.put("detail", "high");
-                }
-                imagesPending = false;
-            } else {
-                node.put("content", message.content());
-            }
-        }
-        addNativeHistory(messages, request.nativeTools());
-        if (imagesPending) {
-            throw new AiProviderException("AI images require a user message");
-        }
-        if (OpenAiChatParameters.usesReasoningDialect(modelId)) {
-            root.put("max_completion_tokens", request.maxTokens());
-        } else {
-            root.put("max_tokens", request.maxTokens());
-            root.put("temperature", request.temperature());
-        }
-        addResponseFormat(root, request, enforcement);
-        addNativeTools(root, request.nativeTools());
-        if (request.reasoningMode() == AiReasoningMode.NATIVE) {
-            root.putObject("extra_body")
-                    .putObject("google")
-                    .putObject("thinking_config")
-                    .put("include_thoughts", true);
-        }
-        if (streamed) {
-            root.put("stream", true);
-            root.putObject("stream_options").put("include_usage", true);
-        }
-        return objectMapper.writeValueAsString(root);
-    }
-
-    /**
-     * Replays completed exchanges as the assistant and tool messages the endpoint expects.
-     *
-     * <p>One assistant message per run of exchanges sharing a step, carrying one {@code tool_calls}
-     * entry per exchange in that run and followed by their {@code tool} messages in the same order.
-     * A step that carried exactly one call therefore serializes to the single-call assistant message
-     * this adapter has always written, byte for byte; the request record already refused any
-     * grouping that would rebuild a message the model never sent.
-     *
-     * @param messages the request's message array, appended to in place
-     * @param nativeTools the native request whose exchanges are replayed, or null
-     */
-    private static void addNativeHistory(
-            ArrayNode messages,
-            AiNativeToolRequest nativeTools) {
-        if (nativeTools == null) {
-            return;
-        }
-        List<AiToolExchange> exchanges = nativeTools.exchanges();
-        int index = 0;
-        while (index < exchanges.size()) {
-            int runEnd = index;
-            while (runEnd + 1 < exchanges.size()
-                    && exchanges.get(runEnd + 1).step() == exchanges.get(index).step()) {
-                runEnd++;
-            }
-            ObjectNode assistant = messages.addObject();
-            assistant.put("role", "assistant");
-            assistant.putNull("content");
-            ArrayNode toolCalls = assistant.putArray("tool_calls");
-            for (int position = index; position <= runEnd; position++) {
-                AiToolExchange exchange = exchanges.get(position);
-                ObjectNode call = toolCalls.addObject();
-                call.put("id", exchange.call().id());
-                call.put("type", "function");
-                if (exchange.call().thoughtSignature() != null) {
-                    call.putObject("extra_content")
-                            .putObject("google")
-                            .put("thought_signature", exchange.call().thoughtSignature());
-                }
-                ObjectNode function = call.putObject("function");
-                function.put("name", exchange.call().name());
-                function.put("arguments", exchange.call().arguments());
-            }
-            for (int position = index; position <= runEnd; position++) {
-                AiToolExchange exchange = exchanges.get(position);
-                ObjectNode tool = messages.addObject();
-                tool.put("role", "tool");
-                tool.put("tool_call_id", exchange.call().id());
-                tool.put("content", exchange.maskedResult());
-            }
-            index = runEnd + 1;
-        }
-        if (nativeTools.repairMessage() != null) {
-            ObjectNode repair = messages.addObject();
-            repair.put("role", "user");
-            repair.put("content", nativeTools.repairMessage());
-        }
-    }
-
-    private static void addNativeTools(
-            ObjectNode root,
-            AiNativeToolRequest nativeTools) {
-        if (nativeTools == null) {
-            return;
-        }
-        ArrayNode tools = root.putArray("tools");
-        for (AiToolDefinition definition : nativeTools.definitions()) {
-            ObjectNode tool = tools.addObject();
-            tool.put("type", "function");
-            ObjectNode function = tool.putObject("function");
-            function.put("name", definition.name());
-            function.put("description", definition.description());
-            function.put("strict", true);
-            function.set("parameters", definition.parametersSchema());
-        }
-        root.put("tool_choice", nativeTools.finalOnly() ? "none" : "auto");
-        root.put("parallel_tool_calls", nativeTools.maxParallelCalls() > 1);
-    }
-
     private static AiStructuredOutputEnforcement requestedEnforcement(
             AiCompletionRequest request) {
         if (request.reasoningMode() == AiReasoningMode.TAGGED) {
@@ -440,34 +286,6 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return request.responseSchema() == null
                 ? AiStructuredOutputEnforcement.JSON_OBJECT
                 : AiStructuredOutputEnforcement.JSON_SCHEMA;
-    }
-
-    private static void addResponseFormat(
-            ObjectNode root,
-            AiCompletionRequest request,
-            AiStructuredOutputEnforcement enforcement) {
-        switch (enforcement) {
-            case PROMPT_ONLY -> {
-                return;
-            }
-            case JSON_OBJECT -> root.putObject("response_format").put("type", "json_object");
-            case JSON_SCHEMA -> {
-                if (request.responseSchema() == null) {
-                    throw new AiProviderException("AI response schema is required");
-                }
-                ObjectNode responseFormat = root.putObject("response_format");
-                responseFormat.put("type", "json_schema");
-                ObjectNode jsonSchema = responseFormat.putObject("json_schema");
-                jsonSchema.put("name", request.responseSchema().name());
-                jsonSchema.put("strict", true);
-                jsonSchema.set("schema", request.responseSchema().schema());
-            }
-        }
-    }
-
-    private static String dataUrl(AiInputImage image) {
-        return "data:" + image.contentType() + ";base64,"
-                + Base64.getEncoder().encodeToString(image.content());
     }
 
     private AiCompletionResult parseResponse(

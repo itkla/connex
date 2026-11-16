@@ -6,6 +6,8 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
@@ -51,6 +53,25 @@ public class MailService {
     public void sendForWorkspace(int workspaceId, MailMessage message) {
         ResolvedMailConfig config = resolver.resolveForWorkspace(workspaceId);
         deliverQuietly(config, message, "workspace " + workspaceId);
+    }
+
+    /**
+     * Reports workspace mail submission after its triggering write releases its resources.
+     * Sender resolution commits before any SMTP connection, without an ambient transaction.
+     * Acceptance proves only submission to SMTP, never arrival in a recipient's mailbox.
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public MailDispatchOutcome submitForWorkspace(int workspaceId, MailMessage message) {
+        try {
+            ResolvedMailConfig config = resolver.resolveForWorkspace(workspaceId);
+            if (config == null || !config.usable()) {
+                return MailDispatchOutcome.SKIPPED;
+            }
+            deliver(config, message);
+            return MailDispatchOutcome.ACCEPTED;
+        } catch (RuntimeException exception) {
+            return MailDispatchOutcome.FAILED;
+        }
     }
 
     /**

@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.ExportPermissionRequest;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.RoleRequest;
 import ooo.klae.connex.backend.services.AuthService;
@@ -41,6 +42,15 @@ public class RoleController {
         return roleService.builtInRoles(workspaceId, authService.getCurrentUser().getId());
     }
 
+    /** Updates the export-only exception to a built-in role's fixed bundle. */
+    @PutMapping("/built-in/{role}/export-permission")
+    public List<WorkspaceRole> updateBuiltInExportPermission(@PathVariable int workspaceId,
+            @PathVariable String role,
+            @Valid @RequestBody ExportPermissionRequest request) {
+        return roleService.updateBuiltInExportPermission(workspaceId, authService.getCurrentUser().getId(),
+            role, request.enabled());
+    }
+
     @PostMapping
     public WorkspaceRole create(@PathVariable int workspaceId, @Valid @RequestBody RoleRequest request) {
         return roleService.createRole(workspaceId, authService.getCurrentUser().getId(),
@@ -51,7 +61,8 @@ public class RoleController {
     public WorkspaceRole update(@PathVariable int workspaceId, @PathVariable int roleId,
             @Valid @RequestBody RoleRequest request) {
         return roleService.updateRole(workspaceId, authService.getCurrentUser().getId(), roleId,
-                request.getName(), request.getPermissions());
+                request.getName(), request.getPermissions(),
+                Boolean.TRUE.equals(request.getAcknowledgeConfinement()));
     }
 
     @DeleteMapping("/{roleId}")

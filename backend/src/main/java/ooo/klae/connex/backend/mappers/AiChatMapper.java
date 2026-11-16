@@ -14,52 +14,62 @@ import ooo.klae.connex.backend.beans.AiChatTurnRef;
 
 /** Workspace-scoped persistence for assistant sessions, participants, messages, turns, and tools. */
 public interface AiChatMapper {
+
     List<AiChatSession> listAccessibleSessions(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     long countAccessibleSessions(
         @Param("workspaceId") int workspaceId,
-        @Param("userId") int userId);
+        @Param("userId") int userId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatSession> listInvitedSessions(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     long countInvitedSessions(
         @Param("workspaceId") int workspaceId,
-        @Param("userId") int userId);
+        @Param("userId") int userId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatSession> listRetainedSessions(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("activeMemberIds") List<Integer> activeMemberIds,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     long countRetainedSessions(
         @Param("workspaceId") int workspaceId,
-        @Param("activeMemberIds") List<Integer> activeMemberIds);
+        @Param("activeMemberIds") List<Integer> activeMemberIds,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getAccessibleSessionById(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getRetainedSessionById(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("id") int id,
-        @Param("activeMemberIds") List<Integer> activeMemberIds);
+        @Param("activeMemberIds") List<Integer> activeMemberIds,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getSessionById(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getSessionByIdForUpdate(
         @Param("workspaceId") int workspaceId,
@@ -85,7 +95,8 @@ public interface AiChatMapper {
 
     boolean sessionExists(
         @Param("workspaceId") int workspaceId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int insertSession(AiChatSession session);
 
@@ -149,6 +160,9 @@ public interface AiChatMapper {
     /** Clears invitation provenance for a permanently erased account across every workspace. */
     void clearParticipantInvitersAnywhere(@Param("userId") int userId);
 
+    /** Locks every session containing the user's provenance in workspace/id order within the catalog. */
+    List<Integer> lockSessionsForUserErasureAnywhere(@Param("userId") int userId);
+
     /** Clears session provenance for a permanently erased account across every workspace. */
     void clearSessionCreatorsAnywhere(@Param("userId") int userId);
 
@@ -161,6 +175,9 @@ public interface AiChatMapper {
     /** Clears turn provenance for a permanently erased account across every workspace. */
     void clearTurnRequestersAnywhere(@Param("userId") int userId);
 
+    /** Clears proposal-set ownership for a permanently erased account without transferring it. */
+    void clearProposalSetRequestersAnywhere(@Param("userId") int userId);
+
     boolean isParticipant(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
@@ -172,47 +189,101 @@ public interface AiChatMapper {
 
     int countAssistantMessages(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
-    int nextMessageSequence(
-        @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+    /** Allocates under the session mutex; deletion never makes a committed sequence reusable. */
+    default int nextMessageSequence(int workspaceId, int sessionId) {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Message allocation requires a content transaction");
+        }
+        Integer previous = lockMessageSequence(workspaceId, sessionId);
+        if (previous == null || previous < 0 || previous == Integer.MAX_VALUE) {
+            throw new ooo.klae.connex.backend.exceptions.ConflictException("Assistant message sequence exhausted");
+        }
+        if (advanceMessageSequence(workspaceId, sessionId, previous) != 1) {
+            throw new IllegalStateException("Assistant message allocation lost its session mutex");
+        }
+        return previous + 1;
+    }
+
+    /** Counts active mission capabilities while the caller holds the session root. */
+    int countNonterminalMissions(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+
+    Integer lockMessageSequence(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+
+    int advanceMessageSequence(@Param("workspaceId") int workspaceId,
+            @Param("sessionId") int sessionId, @Param("previous") int previous);
+
+    ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier getPrivacyBarrier(@Param("workspaceId") int workspaceId);
+
+    ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier lockPrivacyBarrierForShare(@Param("workspaceId") int workspaceId);
+
+    AiChatSession getPrivacySession(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+
+    int clearTurnContent(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("turnId") int turnId);
+
+    AiChatMessage getMissionMessage(@Param("workspaceId") int workspaceId,
+            @Param("runId") int runId, @Param("kind") String kind);
+
+    int linkMissionTurn(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("turnId") int turnId, @Param("runId") int runId, @Param("segmentId") int segmentId);
+
+    int taintSession(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("generation") long generation, @Param("seq") int seq);
+
+    int stampGeneratedTitle(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("generation") long generation);
+
 
     int insertMessage(AiChatMessage message);
 
     AiChatMessage getMessageById(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listAssistantMessagesBySessionAndTurnIds(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("turnIds") List<Integer> turnIds,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listRecentMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("maxSeq") int maxSeq,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
+
+    /** Loads the latest assistant answer within one workspace and session. */
+    AiChatMessage getLatestAnswer(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatMessage getHistorySummary(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listMessagesForCompaction(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("afterSeq") int afterSeq,
         @Param("beforeSeq") int beforeSeq,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int updateHistorySummary(
         @Param("workspaceId") int workspaceId,
@@ -225,7 +296,8 @@ public interface AiChatMapper {
 
     long countMessages(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int updateLastMessageAt(
         @Param("workspaceId") int workspaceId,
@@ -359,25 +431,29 @@ public interface AiChatMapper {
     AiChatTurn getTurnById(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatTurn getTurnByIdForUpdate(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("id") int id);
 
-    List<AiChatTurn> listActiveTurnsBySessionForUpdate(
+    /** Discovers ordinary active turns without locks while the caller retains the session mutex. */
+    List<Integer> listActiveTurnIdsBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
 
     List<AiChatTurn> listTurnsByIds(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("ids") List<Integer> ids);
+        @Param("ids") List<Integer> ids,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatTurn getLatestActiveTurnBySession(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int markTurnRunning(
         @Param("workspaceId") int workspaceId,
@@ -424,28 +500,54 @@ public interface AiChatMapper {
     AiChatToolCall getToolCallById(
         @Param("workspaceId") int workspaceId,
         @Param("messageId") int messageId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatToolCall getToolCallByIdempotencyKey(
         @Param("workspaceId") int workspaceId,
-        @Param("idempotencyKey") String idempotencyKey);
+        @Param("idempotencyKey") String idempotencyKey,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatToolCall getToolCallBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
+
+    /** Discovers immutable origin before entering legacy decision lock order without reading payloads. */
+    String getToolArtifactOrigin(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
         @Param("id") int id);
 
+    /**
+     * Lists session tool calls with an optional pending-proposal filter.
+     *
+     * @param reviewCreatedAfter real UTC cutoff when pendingOnly is true; null for history reads
+     */
     List<AiChatToolCall> listToolCallsBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("pendingOnly") boolean pendingOnly,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("reviewCreatedAfter") LocalDateTime reviewCreatedAfter,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
+
+    /** Returns the newest trusted undecided rows beyond a session's raw history window, newest first. */
+    List<AiChatToolCall> listUndecidedToolCallsAfterHistory(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("afterMessageId") int afterMessageId,
+        @Param("afterToolCallId") int afterToolCallId,
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatToolCall> listToolCallsByTurn(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("idempotencyPrefix") String idempotencyPrefix,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatToolCall getToolCallBySessionForUpdate(
         @Param("workspaceId") int workspaceId,
@@ -465,4 +567,34 @@ public interface AiChatMapper {
         @Param("id") int id,
         @Param("resultJson") String resultJson,
         @Param("executedByUserId") int executedByUserId);
+    /** Reads a canonical mission singleton using explicit root/action ownership. */
+    AiChatToolCall getMissionToolCall(@Param("workspaceId") int workspaceId,
+            @Param("rootRunId") int rootRunId, @Param("actionId") int actionId,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
+
+    /** Discovers content-free mission ancestry before ordered decision roots are acquired. */
+    AiChatToolCall getMissionToolAncestry(@Param("workspaceId") int workspaceId,
+            @Param("sessionId") int sessionId, @Param("id") int id,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
+
+    /** Discovers invalidated canonical rows solely for ordered erasure. */
+    AiChatToolCall getMissionToolCallForMaintenance(@Param("workspaceId") int workspaceId,
+            @Param("rootRunId") int rootRunId, @Param("actionId") int actionId);
+
+    /** Locks the canonical singleton only after its action and root have been locked. */
+    AiChatToolCall lockMissionToolCall(@Param("workspaceId") int workspaceId,
+            @Param("rootRunId") int rootRunId, @Param("actionId") int actionId);
+
+    /** Inserts a trusted source-linked singleton with V233 membership left unused. */
+    int insertMissionToolCall(@Param("call") AiChatToolCall call);
+
+    /** Withdraws pending source-linked proposals while preserving terminal receipts. */
+    int withdrawPendingMissionCalls(@Param("workspaceId") int workspaceId,
+            @Param("rootRunId") int rootRunId, @Param("reason") String reason,
+            @Param("resultJson") String resultJson);
+
+    /** Retains the exact session shared through an authorized mission content projection. */
+    AiChatSession getMissionSessionForShare(@Param("workspaceId") int workspaceId,
+            @Param("userId") int userId, @Param("id") int id);
+
 }

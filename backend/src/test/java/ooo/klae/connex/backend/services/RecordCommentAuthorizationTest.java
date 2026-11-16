@@ -44,7 +44,7 @@ class RecordCommentAuthorizationTest {
             mock(NotificationPreferenceService.class),
             mock(NotificationChangePublisher.class),
             auditService,
-            mock(ObjectMapper.class));
+            mock(ObjectMapper.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         RecordComment comment = new RecordComment();
         comment.setId(5L);
         comment.setWorkspaceId(7);

@@ -58,13 +58,13 @@ function ContactPicker({
                     className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                 />
                 <ComboboxContent className="pointer-events-auto">
+                    <ComboboxEmpty>{emptyText}</ComboboxEmpty>
                     <ComboboxList>
-                        <ComboboxEmpty>{emptyText}</ComboboxEmpty>
-                        {items.map((c) => (
+                        {(c: (typeof items)[number]) => (
                             <ComboboxItem key={c.id} value={c}>
                                 {c.name}
                             </ComboboxItem>
-                        ))}
+                        )}
                     </ComboboxList>
                 </ComboboxContent>
             </Combobox>

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -23,6 +24,148 @@ import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 
 class AiChatStreamingProgressTest {
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void nativeWholeFieldsAndNumberedFragmentsAreScreenedOnlyAsNewText(boolean implied) throws Exception {
+        var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED),
+                mock(AiChatTurnPersistenceService.class), new MaskingContext()).observer(true);
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var accumulator = new ooo.klae.connex.backend.ai.provider.openai.OpenAiSseAccumulator(mapper, observer,
+                ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY,
+                ooo.klae.connex.backend.ai.provider.AiReasoningMode.NONE);
+        for (int index = 0; index < 2; index++) {
+            var call = new java.util.LinkedHashMap<String, Object>();
+            if (!implied) {
+                call.put("index", 0);
+            }
+            call.put("id", implied ? "call_1" : index == 0 ? "call_" : "1");
+            call.put("function", java.util.Map.of("name", index == 0 ? "search_" : "records",
+                    "arguments", index == 0 ? "{" : "}"));
+            call.put("extra_content", java.util.Map.of("google", java.util.Map.of("thought_signature",
+                    implied ? "signature" : index == 0 ? "sig" : "nature")));
+            accumulator.accept(mapper.writeValueAsString(java.util.Map.of("choices", List.of(java.util.Map.of(
+                    "delta", java.util.Map.of("tool_calls", List.of(call)))))));
+        }
+        assertEquals("call_1search_records{}signature".length(), observer.screenedCharacters());
+        assertEquals(5, observer.activeScreens());
+    }
+
+    @Test
+    void hiddenFieldLengthDoesNotSuppressTerminalContentGuard() {
+        var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED),
+                mock(AiChatTurnPersistenceService.class), new MaskingContext()).observer(true);
+        observer.onProviderField("reasoning", "x".repeat(16_001));
+        observer.onContentDelta("{\"text\":\"A terminal answer.\"}");
+        assertThrows(AiAssistantLoopException.class, observer::requireNoTerminalText);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void hiddenFieldsContinueScreeningAfterTheFormerAggregateBound(boolean oneHugeDelta) {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence,
+                new MaskingContext()).observer(false);
+        if (oneHugeDelta) {
+            observer.onProviderField("reasoning", "x".repeat(50_000));
+        } else {
+            for (int index = 0; index < 500; index++) {
+                observer.onProviderField("reasoning", "x".repeat(100));
+            }
+        }
+        assertEquals(50_000, observer.screenedCharacters());
+        assertEquals(2, observer.activeScreens());
+        observer.onProviderField("reasoning", "{{P99}}");
+        verify(persistence).resetPartialContent(any(), anyInt());
+        assertEquals(0, observer.activeScreens());
+        assertEquals("invented_placeholder", assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish("unused")).detailReason());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void adaptersScreenPublicTextOnceAndHiddenFieldsOnlyAsNewDeltas(boolean vertex) throws Exception {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(call ->
+                call.<Integer>getArgument(1) + call.<String>getArgument(2).length());
+        var progress = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence, new MaskingContext());
+        var observer = progress.observer(true);
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var enforcement = ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY;
+        var reasoning = ooo.klae.connex.backend.ai.provider.AiReasoningMode.NONE;
+        var openai = new ooo.klae.connex.backend.ai.provider.openai.OpenAiSseAccumulator(
+                mapper, observer, enforcement, reasoning);
+        var gemini = new ooo.klae.connex.backend.ai.provider.vertex.VertexSseAccumulator(
+                mapper, observer, enforcement, reasoning);
+        String response = "{\"text\":\"" + "x".repeat(512) + "\"}";
+        for (int index = 0; index < response.length(); index++) {
+            String value = response.substring(index, index + 1);
+            if (vertex) {
+                gemini.accept(mapper.writeValueAsString(java.util.Map.of("candidates", List.of(java.util.Map.of(
+                        "content", java.util.Map.of("parts", List.of(java.util.Map.of("text", value),
+                                java.util.Map.of("text", "r", "thought", true))))))));
+            } else {
+                openai.accept(mapper.writeValueAsString(java.util.Map.of("choices", List.of(java.util.Map.of(
+                        "delta", java.util.Map.of("content", value, "reasoning_content", "r"))))));
+            }
+        }
+        assertEquals(2L * response.length(), observer.screenedCharacters());
+        assertEquals("x".repeat(512), observer.finish("x".repeat(512)));
+    }
+
+    @Test
+    void hiddenFieldCandidatesAreIndependentAndRefusalStopsAllFurtherScanning() {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence,
+                new MaskingContext()).observer(true);
+        observer.onProviderField("reasoning", "{{P");
+        observer.onProviderField("tool:0:arguments", "12}}");
+        org.mockito.Mockito.verifyNoInteractions(persistence);
+        observer.onProviderField("reasoning", "12}}");
+        long screened = observer.screenedCharacters();
+        observer.onProviderField("reasoning", "x".repeat(50_000));
+        observer.onContentDelta("x".repeat(50_000));
+        assertEquals(screened, observer.screenedCharacters());
+        assertEquals("invented_placeholder", assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish("unused")).detailReason());
+        verify(persistence).resetPartialContent(any(), anyInt());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void screeningContinuesAfterPublicationTruncationAndWithdrawsImmediately(boolean hidden, boolean overlong) {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(call ->
+                call.<Integer>getArgument(1) + call.<String>getArgument(2).length());
+        var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence,
+                new MaskingContext()).observer(false);
+        String prefix = "Safe words. ".repeat(30);
+        observer.onContentDelta("{\"tool\":null,\"final\":{\"text\":\"" + prefix);
+        observer.onContentDelta("x".repeat(17_000));
+        long screened = observer.screenedCharacters();
+        java.util.function.Consumer<String> append = hidden
+                ? delta -> observer.onProviderField("tool:0:arguments", delta) : observer::onContentDelta;
+        append.accept("{{");
+        append.accept(overlong ? " ".repeat(16_385) : "P99}}");
+        assertTrue(observer.screenedCharacters() > screened);
+        verify(persistence).resetPartialContent(any(), org.mockito.ArgumentMatchers.intThat(offset -> offset > 0));
+        assertEquals("invented_placeholder", assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish("unused")).detailReason());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void placeholdersCrossingTheFormerScreeningBudgetWithdrawImmediately(boolean hidden) {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence,
+                new MaskingContext()).observer(false);
+        java.util.function.Consumer<String> append = hidden
+                ? delta -> observer.onProviderField("reasoning", delta) : observer::onContentDelta;
+        append.accept("x".repeat(15_998) + "{{");
+        org.mockito.Mockito.verify(persistence, org.mockito.Mockito.never()).resetPartialContent(any(), anyInt());
+        append.accept("P99}}");
+        verify(persistence).resetPartialContent(any(), anyInt());
+    }
+
     private static AiChatQueuedTurn turn(AiPrivacyMode privacyMode) {
         return new AiChatQueuedTurn(
                 7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(), privacyMode, true);
@@ -42,6 +185,7 @@ class AiChatStreamingProgressTest {
                         + ((String) call.getArgument(2)).length());
         MaskingContext context = new MaskingContext();
         String token = MaskingEngine.maskField(EntityKind.PERSON, "Ada Lovelace", context);
+        context.exposeDispatchedPayload(token);
         AiChatStreamingProgress progress = new AiChatStreamingProgress(
                 turn(AiPrivacyMode.MASKED), persistenceService, context);
 
@@ -129,12 +273,12 @@ class AiChatStreamingProgressTest {
                 new MaskingContext(AiPrivacyMode.UNMASKED));
 
         AiChatStreamingProgress.Observer observer = progress.observer(true);
-        observer.onContentDelta("{\"text\":\"Braces {{P1}} stay literal.\"}");
-        observer.finish("Braces {{P1}} stay literal.");
+        observer.onContentDelta("{\"text\":\"Braces {P1} stay literal.\"}");
+        observer.finish("Braces {P1} stay literal.");
 
         ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).appendPartialBatch(any(), anyInt(), batches.capture());
-        assertEquals("Braces {{P1}} stay literal.", batches.getValue());
+        assertEquals("Braces {P1} stay literal.", batches.getValue());
     }
 
     @Test
@@ -380,6 +524,102 @@ class AiChatStreamingProgressTest {
         observer.onContentDelta(ending + "\"}");
         assertEquals(prefix + "t1" + ending, observer.finish(prefix + "t1" + ending));
         verify(persistence, org.mockito.Mockito.never()).appendPartialBatch(any(), anyInt(), any());
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> splitRefusedMemberSpellings() {
+        return java.util.stream.Stream.of(false, true).flatMap(nativeProtocol -> java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "{{m", "1}}"),
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "｛｛ｍ", "１｝｝"),
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "﹛﹛Ｍ", "1﹜﹜")));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("splitRefusedMemberSpellings")
+    void splitNoncanonicalMemberTokensNeverReachPartialFrames(boolean nativeProtocol, String start, String end) {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any()))
+                .thenAnswer(call -> (Integer) call.getArgument(1) + ((String) call.getArgument(2)).length());
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Unused Member");
+        var progress = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence, context);
+        var observer = progress.observer(nativeProtocol);
+        String safe = "Safe answer words. ".repeat(40);
+        String opening = nativeProtocol ? "{\"text\":\"" : "{\"tool\":null,\"final\":{\"text\":\"";
+        observer.onContentDelta(opening + safe + start);
+        var batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atMost(4)).appendPartialBatch(any(), anyInt(), batches.capture());
+        for (String batch : batches.getAllValues()) {
+            assertTrue(!batch.contains(start));
+            assertTrue(!batch.contains("{{") && !batch.contains("｛") && !batch.contains("﹛"));
+        }
+        observer.onContentDelta(end + (nativeProtocol ? "\"}" : "\"}}"));
+        var refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish(safe + start + end));
+        assertEquals("malformed_output", refused.terminalReason());
+        assertEquals("invented_placeholder", refused.detailReason());
+        verify(persistence, org.mockito.Mockito.atMost(4)).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertTrue(batches.getAllValues().stream().noneMatch(batch -> batch.contains(start) || batch.contains(end)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void unexposedMemberRefusalSurvivesRealTransportAndResetsAlreadyFlushedFrames(boolean nativeProtocol) throws Exception {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any()))
+                .thenAnswer(call -> (Integer) call.getArgument(1) + ((String) call.getArgument(2)).length());
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Unused Member");
+        var queued = turn(AiPrivacyMode.MASKED);
+        var progress = new AiChatStreamingProgress(queued, persistence, context);
+        var observer = progress.observer(nativeProtocol);
+        String prefix = "Safe answer words. ".repeat(40);
+        String answer = prefix + "{{M1}}";
+        String body = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, answer);
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/stream", exchange -> {
+            byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        server.start();
+        var client = ooo.klae.connex.backend.ai.egress.FixedAiProviderClientTestSupport.loopback();
+        try {
+            String host = "stream.example.test";
+            var response = org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> client.postStream(
+                    java.net.URI.create("http://" + host + ":" + server.getAddress().getPort() + "/stream"),
+                    java.util.Set.of(host), java.util.Map.of(), org.apache.hc.core5.http.ContentType.APPLICATION_JSON,
+                    new byte[0], ooo.klae.connex.backend.ai.egress.AiRequestDeadline.afterMillis(10_000),
+                    "member stream fixture", observer, input -> {
+                        String text = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                        int token = text.indexOf("{{M1}}");
+                        observer.onContentDelta(text.substring(0, token));
+                        observer.onContentDelta(text.substring(token));
+                        return text;
+                    }));
+            assertEquals(200, response.statusCode());
+            if (nativeProtocol) {
+                verify(persistence, org.mockito.Mockito.never()).appendPartialBatch(any(), anyInt(), any());
+            } else {
+                verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), any());
+            }
+            verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(queued),
+                    org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
+            var refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                    () -> observer.finish(answer));
+            assertEquals("malformed_output", refused.terminalReason());
+            assertEquals("invented_placeholder", refused.detailReason());
+            progress.reset();
+            verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(queued),
+                    org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
+            var repaired = progress.observer(nativeProtocol);
+            repaired.onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"));
+            assertEquals("Ready", repaired.finish("Ready"));
+        } finally {
+            ooo.klae.connex.backend.ai.egress.FixedAiProviderClientTestSupport.close(client);
+            server.stop(0);
+        }
     }
 
 }

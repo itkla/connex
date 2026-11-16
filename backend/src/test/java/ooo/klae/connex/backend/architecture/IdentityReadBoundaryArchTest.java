@@ -38,6 +38,7 @@ class IdentityReadBoundaryArchTest {
         "findVisiblePersonIdentityMatches",
         "findVisibleCompanyIdentityMatches",
         "findVisiblePersonNameMatches",
+        "findVisiblePersonNameMatchState",
         "findVisibleCompanyNameMatches");
     private static final String READ_METHODS = String.join("|", GUARDED_READ_METHODS);
 

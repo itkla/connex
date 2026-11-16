@@ -13,6 +13,7 @@ import {
     type DuplicatePreflightResponse,
 } from '@/app/lib/types';
 import { isFieldError, preflightPersonDuplicates } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import CompanyContactsField, { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import ContactSubView from '@/app/components/records/companies/ContactSubView';
 import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
@@ -45,7 +46,7 @@ import { toastError } from '@/app/lib/toast';
 const inputBase = 'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const inputError = 'ring-2 ring-destructive focus:ring-destructive';
 const inputWarn = 'ring-2 ring-amber-500 focus:ring-amber-500';
-const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand';
+const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand-text';
 const PAGE_EASE: [number, number, number, number] = [0.77, 0, 0.175, 1];
 
 function useCompanyLogoSelection({
@@ -145,6 +146,7 @@ type Props = {
     createNewCompany: (
         duplicateReviewToken: string | null,
         reviewedContacts: PendingContact[],
+        init?: RequestInit,
     ) => void | Promise<void>;
     pendingContacts: PendingContact[];
     addPendingContact: (draft: PendingContactDraft) => void;
@@ -300,6 +302,7 @@ export default function NewCompanyDialog({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current
                 || isCreating
                 || logoSelectionPending
@@ -308,14 +311,15 @@ export default function NewCompanyDialog({
         submissionPendingRef.current = true;
         setSubmissionPending(true);
         try {
-            const duplicateDecision = await duplicatePreflight.reviewNow();
+            const duplicateDecision = await duplicatePreflight.reviewNow(origin);
             if (!duplicateDecision.allowed) return;
-            const reviewedContacts = await reviewPendingContacts();
+            const reviewedContacts = await reviewPendingContacts(origin);
             if (!reviewedContacts) return;
             resetFieldErrors();
             await createNewCompany(
                 duplicateDecision.duplicateReviewToken,
                 reviewedContacts,
+                origin,
             );
         } catch (err) {
             captureFieldErrors(err);
@@ -348,7 +352,7 @@ export default function NewCompanyDialog({
         setView('contact');
     };
 
-    const reviewPendingContacts = async (): Promise<PendingContact[] | null> => {
+    const reviewPendingContacts = async (origin: RequestInit): Promise<PendingContact[] | null> => {
         const reviewedContacts: PendingContact[] = [];
         for (const contact of pendingContacts) {
             let response: DuplicatePreflightResponse;
@@ -357,7 +361,7 @@ export default function NewCompanyDialog({
                     name: contact.name,
                     emails: contact.email ? [contact.email] : [],
                     phones: contact.phone ? [contact.phone] : [],
-                }, requestInit);
+                }, origin);
             } catch {
                 toastError(t('contactDuplicateReviewChanged'));
                 openEditContact(contact);
@@ -494,7 +498,7 @@ export default function NewCompanyDialog({
                             {logoPreview ? (
                                 <img src={logoPreview} alt="" className="size-full bg-white object-contain" />
                             ) : initial ? (
-                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-dark">
+                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-text">
                                     {initial}
                                 </div>
                             ) : (
@@ -578,6 +582,7 @@ export default function NewCompanyDialog({
                                 acknowledged={duplicatePreflight.acknowledged}
                                 onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                                 onRetry={duplicatePreflight.retry}
+                                workspaceRefusal={duplicatePreflight.workspaceRefusal}
                             />
                         </div>
 
@@ -769,8 +774,8 @@ export default function NewCompanyDialog({
                     {announcement}
                 </p>
             </ResponsiveDialogContent>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </ResponsiveDialog>
-        <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </>
     );
 }
@@ -784,7 +789,7 @@ type NewCompanyFormProps = {
     isCreating: boolean;
     isSuccess?: boolean;
     existingCompanies?: Company[];
-    createNewCompany: (duplicateReviewToken: string | null) => void | Promise<void>;
+    createNewCompany: (duplicateReviewToken: string | null, reviewedContacts?: PendingContact[], init?: RequestInit) => void | Promise<void>;
     requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the surface, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
@@ -891,6 +896,7 @@ export function NewCompanyForm({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current
                 || isCreating
                 || logoSelectionPending
@@ -899,10 +905,10 @@ export function NewCompanyForm({
         submissionPendingRef.current = true;
         setSubmissionPending(true);
         try {
-            const duplicateDecision = await duplicatePreflight.reviewNow();
+            const duplicateDecision = await duplicatePreflight.reviewNow(origin);
             if (!duplicateDecision.allowed) return;
             resetFieldErrors();
-            await createNewCompany(duplicateDecision.duplicateReviewToken);
+            await createNewCompany(duplicateDecision.duplicateReviewToken, undefined, origin);
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
@@ -939,7 +945,7 @@ export function NewCompanyForm({
                         {logoPreview ? (
                             <img src={logoPreview} alt="" className="size-full bg-white object-contain" />
                         ) : initial ? (
-                            <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-dark">
+                            <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-text">
                                 {initial}
                             </div>
                         ) : (
@@ -1020,6 +1026,7 @@ export function NewCompanyForm({
                             acknowledged={duplicatePreflight.acknowledged}
                             onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                             onRetry={duplicatePreflight.retry}
+                            workspaceRefusal={duplicatePreflight.workspaceRefusal}
                         />
                     </div>
 

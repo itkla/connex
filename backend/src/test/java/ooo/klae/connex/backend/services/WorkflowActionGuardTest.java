@@ -7,6 +7,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -41,6 +43,21 @@ class WorkflowActionGuardTest {
     @Mock private WorkflowTriggeredSendGate triggeredSendGate;
 
     @InjectMocks private WorkflowActionGuard guard;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create_task", "notify"})
+    void followUpsRefuseAnUnavailableExplicitMember(String type) {
+        RuleAction action = new RuleAction();
+        action.setType(type);
+        action.setTargetUserId(29);
+        when(definitionValidator.actionPermissions(action, "person")).thenReturn(Set.of());
+        when(workspaceService.permissionsFor(7, 17)).thenReturn(Set.of());
+
+        WorkflowDiagnosticDto diagnostic = guard.blocker(7, 17, "person", 41, "follow-up", action);
+
+        assertEquals(WorkflowDiagnosticCode.ACTION_TARGET_MEMBER_UNAVAILABLE, diagnostic.code());
+        assertEquals("config.targetUserId", diagnostic.fieldPath());
+    }
 
     @Test
     void removeTagFailsClosedWhenThePublishedTagReferenceWasDeleted() {

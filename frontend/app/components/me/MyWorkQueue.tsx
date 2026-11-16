@@ -21,6 +21,7 @@ import {
     CurrencyYenIcon,
     LockClosedIcon,
     ShieldCheckIcon,
+    SparklesIcon,
     XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { EllipsisHorizontalIcon } from "@heroicons/react/20/solid";
@@ -41,6 +42,7 @@ import type {
     WorkItemSource,
     WorkItemUrgency,
 } from "@/app/lib/types";
+import { parseCalendarDateUtc, parseMysqlDateTime } from "@/app/lib/utils";
 import { cn } from "@/lib/utils";
 import { toastError, toastSuccess, toastWarn } from "@/app/lib/toast";
 import { emitNotificationStateChanged } from "@/app/components/notifications/notificationEvents";
@@ -103,9 +105,10 @@ const SOURCE_ICON: Record<WorkItemSource, React.ComponentType<{ className?: stri
     task: ClipboardDocumentCheckIcon,
     notification: CurrencyYenIcon,
     document_approval: ShieldCheckIcon,
+    ai_mission: SparklesIcon,
 };
 
-const SOURCES: WorkItemSource[] = ["task", "notification", "document_approval"];
+const SOURCES: WorkItemSource[] = ["task", "notification", "document_approval", "ai_mission"];
 const URGENCIES: WorkItemUrgency[] = ["critical", "high", "normal", "low"];
 const AUTO_ADVANCE_ACTION_GUARD_MS = 500;
 
@@ -692,12 +695,12 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                         </Button>
                     </div>
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={rejectGuard.confirm.open}
+                    onKeepEditing={rejectGuard.confirm.onKeepEditing}
+                    onDiscard={rejectGuard.confirm.onDiscard}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={rejectGuard.confirm.open}
-                onKeepEditing={rejectGuard.confirm.onKeepEditing}
-                onDiscard={rejectGuard.confirm.onDiscard}
-            />
 
             <Drawer
                 open={detail != null}
@@ -790,7 +793,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                                     : ""}
                                                 {t(`queueEvidence_${row.code}`)}
                                                 {" · "}
-                                                {formatInstant(format, row.date != null ? `${row.date}T00:00:00` : row.occurredAt)}
+                                                {row.date != null ? formatDay(format, row.date) : formatInstant(format, row.occurredAt)}
                                             </span>
                                         </li>
                                     ))}
@@ -852,11 +855,11 @@ type Translate = ReturnType<typeof useTranslations<"MePage">>;
 type Format = ReturnType<typeof useFormatter>;
 
 function formatDay(format: Format, isoDate: string): string {
-    return format.dateTime(new Date(`${isoDate}T00:00:00`), { month: "short", day: "numeric" });
+    return format.dateTime(parseCalendarDateUtc(isoDate), { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function formatInstant(format: Format, iso: string): string {
-    return format.dateTime(new Date(iso), {
+    return format.dateTime(parseMysqlDateTime(iso), {
         month: "short", day: "numeric", hour: "numeric", minute: "numeric",
     });
 }
@@ -880,6 +883,8 @@ function reasonLabel(t: Translate, format: Format, item: WorkItem): string {
             return date != null
                 ? t("queueReason_deal_closing_soon", { date: formatDay(format, date) })
                 : t("queueReason_deal_closing_soon_undated");
+        case "mission_review_pending":
+            return t("queueReason_mission_review_pending");
         case "document_approval_pending":
             return requestedByLabel != null && requestedByLabel.length > 0
                 ? t("queueReason_document_approval_pending_by", { name: requestedByLabel })
@@ -932,6 +937,9 @@ function PrimaryAction({
                 {t("queueDismiss")}
             </Button>
         );
+    }
+    if (item.source === "ai_mission" && item.permittedActions.includes("open_context")) {
+        return <Button size="inline" variant="outline" asChild><Link href={contextHref(item)}>{t("queueOpenContext")}</Link></Button>;
     }
     return null;
 }

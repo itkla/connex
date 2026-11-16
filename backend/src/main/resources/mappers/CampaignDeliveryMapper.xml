@@ -6,17 +6,17 @@
   <sql id="deliveryColumns">
     id, workspace_id, send_id, person_id, address, status, skip_reason, provider_message_id,
     provider_id, attempt_target_fingerprint, attempt_count, last_error, last_error_code,
-    reconciliation_required_at, reconciliation_outcome, unsubscribe_token, unsubscribe_token_hash,
+    reconciliation_required_at, reconciliation_outcome,
     created_at, submitted_at, frequency_reserved_at, updated_at
   </sql>
 
   <insert id="insertDeliveries">
     INSERT INTO campaign_delivery
-      (workspace_id, send_id, person_id, address, status, unsubscribe_token)
+      (workspace_id, send_id, person_id, address, status)
     VALUES
     <foreach item="delivery" collection="deliveries" separator=",">
       (#{workspaceId}, #{delivery.sendId}, #{delivery.personId}, #{delivery.address},
-       #{delivery.status}, #{delivery.unsubscribeToken})
+       #{delivery.status})
     </foreach>
   </insert>
 
@@ -28,6 +28,9 @@
       AND s.campaign_id = #{campaignId}
     <if test="sendId != null">
       AND d.send_id = #{sendId}
+    </if>
+    <if test="submitted">
+      AND d.submitted_at IS NOT NULL
     </if>
     <if test="statuses != null and statuses.size() > 0">
       AND d.status IN
@@ -46,9 +49,14 @@
   <select id="listRecipients" resultType="ooo.klae.connex.backend.dto.CampaignRecipientRow">
     SELECT d.id AS delivery_id, d.send_id, s.channel, d.person_id, d.status, d.skip_reason,
            d.reconciliation_required_at, d.last_error_code AS reason_code,
-           d.created_at, d.updated_at
+           d.created_at, d.updated_at, m.name AS message_name,
+           (SELECT COUNT(*) FROM campaign_send preceding_send
+            WHERE preceding_send.workspace_id = #{workspaceId}
+              AND preceding_send.campaign_id = s.campaign_id
+              AND preceding_send.id &lt;= s.id) AS send_number
     FROM campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    LEFT JOIN campaign_message m ON m.workspace_id = s.workspace_id AND m.id = s.message_id
     <include refid="recipientFilter"/>
     ORDER BY d.id
     LIMIT #{limit} OFFSET #{offset}
@@ -105,9 +113,34 @@
       AND person_id = #{personId} AND dedupe_active = 1
   </select>
 
+  <insert id="insertUnsubscribeTokenHash">
+    INSERT INTO campaign_delivery_unsubscribe_token (token_hash, workspace_id, delivery_id)
+    VALUES (#{tokenHash}, #{workspaceId}, #{deliveryId})
+  </insert>
+
   <select id="getByTokenHash" resultType="CampaignDelivery">
-    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
-    WHERE unsubscribe_token_hash = #{tokenHash}
+    SELECT d.* FROM campaign_delivery_unsubscribe_token t
+    JOIN campaign_delivery d ON d.workspace_id = t.workspace_id AND d.id = t.delivery_id
+    WHERE t.token_hash = #{tokenHash}
+  </select>
+
+  <select id="getUnsubscribeTokenDeliveryId" resultType="int">
+    SELECT delivery_id FROM campaign_delivery_unsubscribe_token
+    WHERE token_hash = #{tokenHash} AND workspace_id = #{workspaceId}
+  </select>
+
+  <select id="findUnsubscribeTokenHashes" resultType="string">
+    SELECT token_hash FROM campaign_delivery_unsubscribe_token
+    WHERE workspace_id = #{workspaceId}
+    <choose>
+      <when test="tokenHashes != null and !tokenHashes.isEmpty()">
+        AND token_hash IN
+        <foreach item="tokenHash" collection="tokenHashes" open="(" separator="," close=")">
+          #{tokenHash}
+        </foreach>
+      </when>
+      <otherwise>AND 1 = 0</otherwise>
+    </choose>
   </select>
 
   <select id="findByProviderMessage" resultType="CampaignDelivery">
@@ -135,10 +168,26 @@
     WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
   </select>
 
+  <!-- An audience claim takes its own lease end time (#1773), the age anchor that lets a dead
+       attempt be swept even before any frequency reservation. It has no owner: audience rows are never
+       replayed, so no other worker can hold the row and an owner would fence nothing. The dispatch
+       lease columns stay a triggered claim's, so dispatch_lease_owner IS NULL still means audience. -->
   <update id="claim">
     UPDATE campaign_delivery
-    SET status = 'dispatching', attempt_count = attempt_count + 1
+    SET status = 'dispatching', attempt_count = attempt_count + 1,
+        audience_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'pending'
+  </update>
+
+  <!-- Renews an audience attempt's lease just before egress. Unlike the triggered renewal it does not
+       require the lease to be live: an audience row is never re-claimed, so an attempt whose lease ran
+       out during preparation may still proceed as long as no sweep has taken the row first. The row's
+       status decides that race; a swept row matches nothing here. -->
+  <update id="renewAudienceClaim">
+    UPDATE campaign_delivery
+    SET audience_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner IS NULL AND submitted_at IS NULL
   </update>
 
   <update id="claimTriggered">
@@ -152,7 +201,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'pending'
       AND (d.attempt_target_fingerprint IS NULL
         OR d.attempt_target_fingerprint = #{attemptTargetFingerprint})
-      AND s.origin = 'triggered' AND s.status = 'triggered'
+      AND s.origin = 'triggered' AND s.status = 'triggered' AND s.completed_at IS NULL
   </update>
 
   <update id="markPendingTriggeredTargetMismatchAmbiguous">
@@ -165,7 +214,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'pending'
       AND d.attempt_target_fingerprint IS NOT NULL
       AND d.attempt_target_fingerprint &lt;&gt; #{attemptTargetFingerprint}
-      AND s.origin = 'triggered' AND s.status = 'triggered'
+      AND s.origin = 'triggered' AND s.status = 'triggered' AND s.completed_at IS NULL
   </update>
 
   <update id="renewTriggeredClaim">
@@ -194,10 +243,14 @@
         dispatch_lease_owner = NULL, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
       AND dispatch_lease_owner = #{leaseOwner}
+      AND EXISTS (
+        SELECT 1 FROM campaign_send s
+        WHERE s.workspace_id = #{workspaceId} AND s.id = campaign_delivery.send_id
+          AND s.completed_at IS NULL)
   </update>
 
   <select id="expiredTriggeredClaimsPage" resultType="CampaignDelivery">
-    SELECT d.id, d.provider_id, d.attempt_target_fingerprint, s.channel
+    SELECT d.id, d.send_id, d.provider_id, d.attempt_target_fingerprint, s.channel
     FROM campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
     WHERE d.workspace_id = #{workspaceId} AND d.status = 'dispatching'
@@ -215,7 +268,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
       AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)
       AND d.attempt_target_fingerprint = #{attemptTargetFingerprint}
-      AND s.origin = 'triggered' AND s.status = 'triggered'
+      AND s.origin = 'triggered' AND s.status = 'triggered' AND s.completed_at IS NULL
   </update>
 
   <update id="markExpiredTriggeredClaimAmbiguous">
@@ -256,7 +309,7 @@
     SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
         d.last_error_code = #{lastErrorCode},
         d.reconciliation_required_at = UTC_TIMESTAMP(6),
-        d.reconciliation_outcome = NULL
+        d.reconciliation_outcome = NULL, d.audience_lease_until = NULL
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
       AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
       AND d.frequency_reserved_at IS NOT NULL
@@ -264,7 +317,65 @@
       AND s.origin = 'audience'
   </update>
 
-  <!-- A slow live worker whose terminal write lost to the reservation sweep after the provider
+  <!-- An unreserved audience attempt is abandoned once its audience lease has been expired for the
+       grace, or, when an older version claimed it with no lease, once it has been idle for longer than
+       such an attempt is expected to run, measured on updated_at's own clock. -->
+  <sql id="abandonedUnreservedAudienceAttemptAge">
+    ((d.audience_lease_until IS NOT NULL
+        AND d.audience_lease_until &lt; DATE_SUB(UTC_TIMESTAMP(6), INTERVAL #{graceMicros} MICROSECOND))
+      OR (d.audience_lease_until IS NULL
+        AND d.updated_at &lt; DATE_SUB(CURRENT_TIMESTAMP, INTERVAL #{legacyIdleSeconds} SECOND)))
+  </sql>
+
+  <!-- Audience attempts abandoned with no frequency reservation (#1773): a person row that died
+       before reserving or after a pre-egress release, and a row with no person, which never reserves.
+       Send status is not filtered, as for the reservation sweep. -->
+  <select id="abandonedUnreservedAudienceAttemptsPage" resultType="CampaignDelivery">
+    SELECT d.id, d.send_id, d.person_id
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NULL
+      AND <include refid="abandonedUnreservedAudienceAttemptAge"/>
+      AND s.origin = 'audience'
+    ORDER BY d.id
+    LIMIT #{limit}
+  </select>
+
+  <!-- A person row with no reservation never reached the provider: reservation precedes egress and
+       is released only where egress provably did not happen, including a rejection the adapter proves
+       preceded egress. It fails without reconciliation and holds no frequency cap. -->
+  <update id="markAbandonedUnreservedAudienceAttemptFailed">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
+        d.last_error_code = NULL, d.audience_lease_until = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NULL AND d.person_id IS NOT NULL
+      AND <include refid="abandonedUnreservedAudienceAttemptAge"/>
+      AND s.origin = 'audience'
+  </update>
+
+  <!-- A row with no person skips reservation, so it may already have reached the provider. It is
+       held for reconciliation like an expired reservation, and never replayed. -->
+  <update id="markAbandonedUnreservedAudienceAttemptAmbiguous">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
+        d.last_error_code = #{lastErrorCode},
+        d.reconciliation_required_at = UTC_TIMESTAMP(6),
+        d.reconciliation_outcome = NULL, d.audience_lease_until = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NULL AND d.person_id IS NULL
+      AND <include refid="abandonedUnreservedAudienceAttemptAge"/>
+      AND s.origin = 'audience'
+  </update>
+
+  <!-- A slow live worker whose terminal write lost to a sweep that held the row for reconciliation (an
+       expired reservation, or a person-less attempt that outlived its lease) after the provider
        accepted the message records only the provider correlation, so bounce and complaint webhooks
        still resolve to the row. Status, reconciliation state, and the reservation stay unchanged,
        including on a row an operator has already resolved: the decision it carries is evidence the
@@ -282,7 +393,11 @@
       AND s.origin = 'audience'
       AND ((d.status = 'failed' AND d.submitted_at IS NULL
           AND d.reconciliation_required_at IS NOT NULL AND d.reconciliation_outcome IS NULL
-          AND d.last_error = #{lastError} AND d.last_error_code = #{lastErrorCode})
+          AND d.last_error IN
+          <foreach item="lastError" collection="lastErrors" open="(" separator="," close=")">
+            #{lastError}
+          </foreach>
+          AND d.last_error_code = #{lastErrorCode})
         OR d.reconciliation_outcome IS NOT NULL)
   </update>
 
@@ -321,7 +436,8 @@
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
         provider_message_id = #{providerMessageId}, last_error = NULL, last_error_code = NULL,
         reconciliation_required_at = NULL,
-        submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP(6))
+        submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP(6)),
+        audience_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
@@ -352,7 +468,7 @@
   <update id="markSkipped">
     UPDATE campaign_delivery
     SET status = 'skipped', skip_reason = #{skipReason}, last_error_code = NULL,
-        reconciliation_required_at = NULL
+        reconciliation_required_at = NULL, audience_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
@@ -368,7 +484,7 @@
   <update id="markFailed">
     UPDATE campaign_delivery
     SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
-        last_error_code = #{lastErrorCode}
+        last_error_code = #{lastErrorCode}, audience_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
       AND reconciliation_required_at IS NULL
   </update>
@@ -388,7 +504,7 @@
     SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
         last_error_code = #{lastErrorCode},
         reconciliation_required_at = COALESCE(reconciliation_required_at, UTC_TIMESTAMP(6)),
-        reconciliation_outcome = NULL
+        reconciliation_outcome = NULL, audience_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
@@ -448,7 +564,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{deliveryId}
       AND d.person_id = #{personId} AND s.channel = #{channel}
       AND d.status = 'dispatching' AND d.submitted_at IS NULL
-      AND s.status IN ('queued', 'running', 'triggered')
+      AND s.status IN ('queued', 'running', 'triggered') AND s.completed_at IS NULL
       <choose>
         <when test="leaseOwner != null">
           AND s.origin = 'triggered' AND s.status = 'triggered'
@@ -513,6 +629,40 @@
       SELECT 1 FROM campaign_delivery_event
       WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND event_type = #{eventType}
     )
+  </select>
+
+  <sql id="uncertainPendingHistory">
+    ((attempt_count > 0 OR attempt_target_fingerprint IS NOT NULL
+      OR submitted_at IS NOT NULL OR frequency_reserved_at IS NOT NULL) AND NOT (last_error_code IS NULL
+      AND COALESCE(last_error, '') = 'Claim released before provider egress'))
+  </sql>
+
+  <update id="settleContentRefusedPending">
+    UPDATE campaign_delivery
+    SET status = CASE WHEN <include refid="uncertainPendingHistory"/> THEN 'failed' ELSE 'skipped' END,
+        skip_reason = CASE WHEN <include refid="uncertainPendingHistory"/> THEN NULL ELSE 'not_dispatchable' END,
+        reconciliation_required_at = CASE WHEN <include refid="uncertainPendingHistory"/>
+          THEN UTC_TIMESTAMP(6) ELSE reconciliation_required_at END
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
+  </update>
+
+  <insert id="insertContentRefusal">
+    INSERT INTO campaign_delivery_event (workspace_id, delivery_id, event_type, detail, provider_event_id)
+    SELECT #{workspaceId}, d.id, 'failed', 'CAMPAIGN_UNSUPPORTED_TOKEN', CONCAT('connex-content-refusal:', #{sendId})
+    FROM campaign_delivery d
+    WHERE d.workspace_id = #{workspaceId} AND d.send_id = #{sendId} AND d.status = 'pending'
+    ORDER BY d.id
+    LIMIT 1
+  </insert>
+
+  <select id="hasContentRefusal" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM campaign_delivery_event e
+      JOIN campaign_delivery recorded ON recorded.workspace_id = e.workspace_id AND recorded.id = e.delivery_id
+      WHERE e.workspace_id = #{workspaceId} AND recorded.workspace_id = #{workspaceId}
+        AND recorded.send_id = #{sendId} AND e.event_type = 'failed'
+        AND e.detail = 'CAMPAIGN_UNSUPPORTED_TOKEN'
+        AND e.provider_id IS NULL AND e.provider_event_id = CONCAT('connex-content-refusal:', #{sendId}))
   </select>
 
 </mapper>

@@ -34,7 +34,7 @@ final class ManagedContentResponse {
             ContentDisposition disposition) {
         StreamingResponseBody body = output -> {
             try (content) {
-                content.inputStream().transferTo(output);
+                content.writeTo(output);
             }
         };
         return ResponseEntity.ok()

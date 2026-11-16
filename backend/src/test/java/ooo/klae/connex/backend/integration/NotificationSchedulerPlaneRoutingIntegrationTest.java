@@ -149,7 +149,7 @@ class NotificationSchedulerPlaneRoutingIntegrationTest {
                 reconciliationCatalog.set(withSession(
                     NotificationSchedulerPlaneRoutingIntegrationTest::currentCatalog));
             }
-            return null;
+            return 0;
         }).when(reconciliationService).reconcileWorkspace(anyInt(), eq(true));
         tenantContext.set(Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE,
             "owner", scratchCatalog);

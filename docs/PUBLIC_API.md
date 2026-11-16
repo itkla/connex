@@ -82,6 +82,33 @@ Browser sessions never authenticate `/api/v1`, and public credentials never auth
 `/api/**` routes. Public requests are stateless, do not create sessions, and do not require CSRF
 tokens. Browser CORS requests may send `Authorization`, but credentialed browser CORS mode is off.
 
+Privileged accounts awaiting passkey enrollment or approval are refused with
+`401 privileged_mfa_enrollment_required` or `401 privileged_mfa_attestation_required` in the usual
+public error envelope. Both refusals record `auth.mfa.policy.denied`, with reason
+`enrollment_required` or `attestation_required` and a summary beginning `Public API`. The append
+runs after the authentication read transaction ends and the tenant binding is cleared: it is an
+independent, account-scoped audit in the control catalog, with no workspace or organization scope.
+The denied account is both the actor and the user entity. The shared `DenialAuditRateLimiter`
+keeps eight resolved-address slots per user/action/reason, each admitting up to four distinct
+User-Agent fingerprints inside the address's original window (one hour by default): at most 32 rows
+per replica across retained address windows, or one row for a stable address and browser. Fingerprints
+never consume another address slot, extend its window or refresh eviction order. Without releases,
+admission is a strict superset of the address-only rule while windows are retained. The full
+UTF-8 header is hashed with unkeyed SHA-256 in memory only; the digest is never stored, logged or used
+as a metric tag. Absent and firewall-rejected headers share a sentinel and never prevent admission;
+rejected user agents remain null in the audit row. The address uses the same trusted-proxy
+resolver as browser denials. Browser and public denials share admission windows. An append failure
+is logged and releases only its address/fingerprint/identity admission so it can retry without
+removing other fingerprints' suppression. Releasing the last fingerprint or reaching the original
+expiry removes its address slot; otherwise the slot, original start and expiry remain. This preserves
+evidence for surviving fingerprints, including retries the old rule would admit. Retained slots still
+occupy capacity and can block a new address that the old limiter would admit after a release, so this
+does not guarantee evidence for every old-rule admission after releases. Every request keeps its 401
+response. Suppression counts every
+duplicate or capacity refusal, while eviction counts only live keys dropped at the 4,096-key bound.
+Saturation and restarts re-arm windows. See
+[Privileged MFA](PRIVILEGED_MFA.md#auditing-the-filters-own-refusals) for proxy and SSR qualifications.
+
 Revoking browser sessions (the session-epoch control) does not revoke personal access tokens. Containment for a compromised account is credential revocation, a role change below the credential's mapped permissions, or an account-deletion reservation — each of which blocks the credential on its next request.
 
 ## Credential management
@@ -164,11 +191,19 @@ chain. Firewall method rejections use `method_not_allowed`; other public firewal
 `bad_request` without exposing the rejection detail. Initial codes are `invalid_token`,
 `insufficient_scope`, `invalid_request`, `bad_request`,
 `invalid_cors_request`, `request_too_large`,
-`not_found`, `method_not_allowed`, `rate_limit_exceeded`,
-`privileged_mfa_enrollment_required`, `public_api_unavailable`, and `internal_error`.
-Invalid credentials and privileged accounts that require passkey enrollment receive `401`;
+`not_found`, `method_not_allowed`, `conflict`, `rate_limit_exceeded`,
+`privileged_mfa_enrollment_required`, `privileged_mfa_attestation_required`, `public_api_unavailable`,
+and `internal_error`.
+Invalid credentials, privileged accounts that require passkey enrollment and, under the default
+attestation enforcement, privileged accounts whose passkeys still await approval receive `401`;
 authenticated credentials without the required scope, including credentials whose entire stored
 scope set is no longer live under current RBAC, receive `403`.
+Lock contention receives `409` with `conflict` only when no writable Spring transaction has committed
+during handler execution, so the caller can retry because no tracked transaction committed. Handler
+commits retain `500` with `internal_error`. Tracking starts after the pre-handler authentication and
+tenant bookkeeping and ignores read-only transactions. It covers the request thread's handler-phase
+Spring transactions, including independent audit commits and Spring MVC async workers; autocommit
+statements and application executors without bound request attributes are outside this bound. See [the locking contract](backend/LOCKING.md#global-principles).
 Replacing a partial, uncommitted response with an error envelope preserves the correlation id,
 allowed CORS and `Vary` metadata, rate-limit and `Retry-After` headers, and HSTS while discarding
 stale representation headers and bytes.

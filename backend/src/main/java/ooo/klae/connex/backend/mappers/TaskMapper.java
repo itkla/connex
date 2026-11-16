@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.mappers;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWorkCommitment;
 import ooo.klae.connex.backend.ai.assistant.AiWatchOverdueCommitments;
 import ooo.klae.connex.backend.beans.HistoryImportProvenance;
@@ -22,6 +24,19 @@ import java.util.Set;
  */
 
 public interface TaskMapper {
+    List<Task> getListPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("filter") ActivityListFilter filter,
+        @Param("today") LocalDate today,
+        @Param("actorId") int actorId,
+        @Param("limit") int limit, @Param("offset") int offset);
+    long countList(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("filter") ActivityListFilter filter,
+        @Param("today") LocalDate today,
+        @Param("actorId") int actorId);
     List<Task> getAllTasks(int workspaceId);
     List<Task> getTasksPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
     long countTasks(int workspaceId);

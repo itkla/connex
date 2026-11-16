@@ -1,5 +1,8 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
+import { useTimeZoneSearch } from '@/app/hooks/useTimeZoneSearch';
+
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -56,6 +59,7 @@ type ScheduleDialogProps = {
     schedule: ReportSchedule | null;
     members: WorkspaceMember[];
     canManage: boolean;
+    canExport: boolean;
     loading: boolean;
     loadFailed: boolean;
     membersFailed: boolean;
@@ -72,6 +76,7 @@ export default function ScheduleDialog({
     schedule,
     members,
     canManage,
+    canExport,
     loading,
     loadFailed,
     membersFailed,
@@ -110,7 +115,7 @@ export default function ScheduleDialog({
         }
     };
 
-    const managementAvailable = canManage && !membersFailed;
+    const managementAvailable = canManage && canExport && !membersFailed;
 
     return (
         <>
@@ -136,18 +141,20 @@ export default function ScheduleDialog({
                             <ScheduleReadOnly
                                 schedule={schedule}
                                 canManage={canManage}
+                                canExport={canExport}
                                 membersFailed={membersFailed}
                                 onRetry={onRetry}
+                                onRequestDelete={onRequestDelete}
                             />
                         )
                     ) : null}
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={guard.confirm.onDiscard}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={guard.confirm.onDiscard}
-            />
         </>
     );
 }
@@ -239,6 +246,8 @@ function ScheduleForm({
             enabled,
         }).catch(() => undefined);
     };
+
+    const timeZoneSearch = useTimeZoneSearch(timezones);
 
     return (
         <form
@@ -340,9 +349,9 @@ function ScheduleForm({
                             </ComboboxValue>
                         </ComboboxChips>
                         <ComboboxContent anchor={recipientAnchor} className="pointer-events-auto">
+                            <ComboboxEmpty>{t('schedule.recipientsEmpty')}</ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>{t('schedule.recipientsEmpty')}</ComboboxEmpty>
-                                {members.map((member) => (
+                                {(member: (typeof members)[number]) => (
                                     <ComboboxItem key={member.id} value={member}>
                                         <span className="min-w-0">
                                             <span className="block truncate font-medium text-foreground">
@@ -353,7 +362,7 @@ function ScheduleForm({
                                             </span>
                                         </span>
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -375,7 +384,7 @@ function ScheduleForm({
                         onValueChange={(value) => {
                             if (typeof value === 'string') setTimezone(value);
                         }}
-                        itemToStringLabel={(value) => value}
+                        {...timeZoneSearch}
                         disabled={saving}
                     >
                         <ComboboxInput
@@ -387,11 +396,11 @@ function ScheduleForm({
                             aria-describedby={error?.fieldId === 'schedule-timezone' ? 'schedule-form-error' : undefined}
                         />
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('schedule.timezoneEmpty')}</ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>{t('schedule.timezoneEmpty')}</ComboboxEmpty>
-                                {timezones.map((value) => (
-                                    <ComboboxItem key={value} value={value}>{value}</ComboboxItem>
-                                ))}
+                                {(value: (typeof timezones)[number]) => (
+                                    <ComboboxItem key={value} value={value}>{timeZoneSearch.itemToStringLabel(value)}</ComboboxItem>
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -443,13 +452,17 @@ function ScheduleForm({
 function ScheduleReadOnly({
     schedule,
     canManage,
+    canExport,
     membersFailed,
     onRetry,
+    onRequestDelete,
 }: {
     schedule: ReportSchedule | null;
     canManage: boolean;
+    canExport: boolean;
     membersFailed: boolean;
     onRetry: () => void;
+    onRequestDelete: () => void;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
@@ -461,6 +474,10 @@ function ScheduleReadOnly({
                 <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
                     {t('schedule.readOnly')}
                 </div>
+            ) : null}
+
+            {!canExport ? (
+                <p className="text-sm text-muted-foreground">{t('schedule.exportRequired')}</p>
             ) : null}
 
             {membersFailed ? (
@@ -524,6 +541,11 @@ function ScheduleReadOnly({
             )}
 
             <ResponsiveDialogFooter>
+                {schedule && canManage ? (
+                    <Button type="button" variant="destructive" onClick={onRequestDelete}>
+                        {t('schedule.delete')}
+                    </Button>
+                ) : null}
                 <ResponsiveDialogClose asChild>
                     <Button type="button" variant="outline">{t('schedule.close')}</Button>
                 </ResponsiveDialogClose>
@@ -637,7 +659,7 @@ function isScheduleCadence(value: string): value is ReportScheduleCadence {
 }
 
 function formatHour(hour: number, locale: string): string {
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         hour: 'numeric',
         minute: '2-digit',
         hourCycle: 'h23',
@@ -648,7 +670,7 @@ function formatHour(hour: number, locale: string): string {
 function formatScheduleTimestamp(value: string, locale: string, timezone: string): string {
     const timestamp = parseMysqlDateTime(value);
     if (Number.isNaN(timestamp)) return value;
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',

@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.util.DateTimes;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /**
  * Assesses deal risk on read, layering a small set of deterministic signals over the deal timeline,
@@ -76,6 +77,7 @@ import ooo.klae.connex.backend.util.DateTimes;
 @RequiredArgsConstructor
 public class DealRiskService {
     private final DealMapper dealMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
@@ -136,6 +138,11 @@ public class DealRiskService {
      * factor, ordered by descending {@link DealRiskDto#getScore() score}.
      */
     public List<DealRiskDto> assessWorkspace(int workspaceId) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessWorkspaceWithinDealVisibility(workspaceId));
+    }
+
+    private List<DealRiskDto> assessWorkspaceWithinDealVisibility(int workspaceId) {
         return assessWorkspace(workspaceId, warmthByPerson(workspaceId));
     }
 
@@ -145,6 +152,11 @@ public class DealRiskService {
      * shares that map across its passes, avoiding a second full rescore here.
      */
     public List<DealRiskDto> assessWorkspace(int workspaceId, Map<Integer, RelationshipTemperatureDto> warmth) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessWorkspaceWithinDealVisibility(workspaceId, warmth));
+    }
+
+    private List<DealRiskDto> assessWorkspaceWithinDealVisibility(int workspaceId, Map<Integer, RelationshipTemperatureDto> warmth) {
         return assessWorkspaceNotificationStates(
                 workspaceId,
                 warmth,
@@ -163,13 +175,38 @@ public class DealRiskService {
             int workspaceId,
             Map<Integer, RelationshipTemperatureDto> warmth,
             Map<Integer, String> contactSourceStateHashes) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessWorkspaceNotificationStatesWithinDealVisibility(workspaceId, warmth, contactSourceStateHashes));
+    }
+
+    /** Reuses the snapshot captured before a notification writer acquired its locks. */
+    public List<NotificationRiskState> assessWorkspaceNotificationStates(
+            int workspaceId, Map<Integer, RelationshipTemperatureDto> warmth,
+            Map<Integer, String> contactSourceStateHashes, RecordVisibilityScope scope) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope,
+            () -> assessWorkspaceNotificationStatesWithinDealVisibility(workspaceId, warmth, contactSourceStateHashes, scope));
+    }
+
+    private List<NotificationRiskState> assessWorkspaceNotificationStatesWithinDealVisibility(
+            int workspaceId,
+            Map<Integer, RelationshipTemperatureDto> warmth,
+            Map<Integer, String> contactSourceStateHashes) {
+        return assessWorkspaceNotificationStatesWithinDealVisibility(
+            workspaceId, warmth, contactSourceStateHashes, null);
+    }
+
+    private List<NotificationRiskState> assessWorkspaceNotificationStatesWithinDealVisibility(
+            int workspaceId, Map<Integer, RelationshipTemperatureDto> warmth,
+            Map<Integer, String> contactSourceStateHashes, RecordVisibilityScope suppliedScope) {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         List<Deal> open = dealMapper.getAllDeals(workspaceId).stream()
             .filter(deal -> isOpen(deal) && !deal.isRiskExcluded())
             .toList();
         DealTouchState touchState = dealTouchState(workspaceId, open, now.toEpochMilli());
-        Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
+        RecordVisibilityScope scope = suppliedScope == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId) : suppliedScope;
+        Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId, scope);
 
         List<NotificationRiskState> out = new ArrayList<>();
         for (Deal deal : open) {
@@ -202,6 +239,11 @@ public class DealRiskService {
      * @return at-risk assessments ordered by descending score
      */
     public List<DealRiskDto> assessDeals(int workspaceId, List<Integer> dealIds) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessDealsWithinDealVisibility(workspaceId, dealIds));
+    }
+
+    private List<DealRiskDto> assessDealsWithinDealVisibility(int workspaceId, List<Integer> dealIds) {
         return assessDeals(workspaceId, dealIds, null);
     }
 
@@ -210,6 +252,28 @@ public class DealRiskService {
             int workspaceId,
             List<Integer> dealIds,
             Map<Integer, RelationshipTemperatureDto> knownWarmth) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessDealsWithinDealVisibility(workspaceId, dealIds, knownWarmth));
+    }
+
+    /** Assesses a parent operation's bounded cohort using its captured visibility snapshot. */
+    public List<DealRiskDto> assessDeals(
+            int workspaceId, List<Integer> dealIds,
+            Map<Integer, RelationshipTemperatureDto> knownWarmth, RecordVisibilityScope scope) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope,
+            () -> assessDealsWithinDealVisibility(workspaceId, dealIds, knownWarmth, scope));
+    }
+
+    private List<DealRiskDto> assessDealsWithinDealVisibility(
+            int workspaceId,
+            List<Integer> dealIds,
+            Map<Integer, RelationshipTemperatureDto> knownWarmth) {
+        return assessDealsWithinDealVisibility(workspaceId, dealIds, knownWarmth, null);
+    }
+
+    private List<DealRiskDto> assessDealsWithinDealVisibility(
+            int workspaceId, List<Integer> dealIds,
+            Map<Integer, RelationshipTemperatureDto> knownWarmth, RecordVisibilityScope suppliedScope) {
         if (dealIds == null || dealIds.isEmpty()) {
             return List.of();
         }
@@ -221,6 +285,8 @@ public class DealRiskService {
         if (open.isEmpty()) {
             return List.of();
         }
+        RecordVisibilityScope scope = suppliedScope == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId) : suppliedScope;
         List<Integer> openIds = open.stream().map(Deal::getId).toList();
         Map<Integer, Long> lastTouch = new HashMap<>();
         for (Deal deal : open) {
@@ -231,7 +297,7 @@ public class DealRiskService {
         }
         Map<Integer, List<DealStakeholder>> stakeholders = new HashMap<>();
         Set<Integer> personIds = new HashSet<>();
-        for (DealStakeholder stakeholder : dealMapper.getDealStakeholdersByDealIds(workspaceId, openIds)) {
+        for (DealStakeholder stakeholder : dealMapper.getDealStakeholdersByDealIds(workspaceId, scope.workspaceIdsJson(), openIds)) {
             stakeholders.computeIfAbsent(stakeholder.getDealId(), key -> new ArrayList<>()).add(stakeholder);
             personIds.add(stakeholder.getPersonId());
         }
@@ -251,6 +317,11 @@ public class DealRiskService {
 
     /** Returns complete workspace risk assessments only when the interactive ceiling is not exceeded. */
     public BoundedRiskAssessment assessBoundedWorkspace(int workspaceId) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessBoundedWorkspaceWithinDealVisibility(workspaceId));
+    }
+
+    private BoundedRiskAssessment assessBoundedWorkspaceWithinDealVisibility(int workspaceId) {
         RiskCandidateBatch candidates = riskCandidates(workspaceId, MemberScope.allTeam());
         if (candidates.truncated()) {
             return new BoundedRiskAssessment(List.of(), true);
@@ -258,8 +329,25 @@ public class DealRiskService {
         return new BoundedRiskAssessment(assessDeals(workspaceId, candidates.ids()), false);
     }
 
+    /** Returns a complete personal ranking within the same ceiling as other interactive reads. */
+    public BoundedRiskAssessment assessPersonal(int workspaceId, MemberScope memberScope) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(workspaceId, () -> {
+            RiskCandidateBatch candidates = riskCandidates(workspaceId, memberScope);
+            return candidates.truncated() ? new BoundedRiskAssessment(List.of(), true)
+                : new BoundedRiskAssessment(assessDeals(workspaceId, candidates.ids()), false);
+        });
+    }
+
     /** Returns the highest-risk dashboard deals from a fixed candidate ceiling. */
     public DashboardDealRiskResult assessDashboard(
+            int workspaceId,
+            Map<Integer, RelationshipTemperatureDto> warmth,
+            int limit) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessDashboardWithinDealVisibility(workspaceId, warmth, limit));
+    }
+
+    private DashboardDealRiskResult assessDashboardWithinDealVisibility(
             int workspaceId,
             Map<Integer, RelationshipTemperatureDto> warmth,
             int limit) {
@@ -271,6 +359,11 @@ public class DealRiskService {
 
     /** Returns compact per-currency analytics over a fixed interactive candidate ceiling. */
     public DealRiskAnalyticsDto analytics(int workspaceId, MemberScope memberScope) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> analyticsWithinDealVisibility(workspaceId, memberScope));
+    }
+
+    private DealRiskAnalyticsDto analyticsWithinDealVisibility(int workspaceId, MemberScope memberScope) {
         RiskCandidateBatch candidates = riskCandidates(workspaceId, memberScope);
         Map<String, List<DealRiskDto>> byCurrency = new HashMap<>();
         for (DealRiskDto risk : assessDeals(workspaceId, candidates.ids())) {
@@ -328,6 +421,11 @@ public class DealRiskService {
      * workspace, is already closed, or is opted out of risk evaluation.
      */
     public DealRiskDto assessDeal(int workspaceId, int dealId) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> assessDealWithinDealVisibility(workspaceId, dealId));
+    }
+
+    private DealRiskDto assessDealWithinDealVisibility(int workspaceId, int dealId) {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -338,7 +436,8 @@ public class DealRiskService {
             return new DealRiskDto(
                 dealId, deal.getValue(), deal.getCurrency(), NONE, 0, List.of(), assessedAt);
         }
-        List<DealStakeholder> dealStakeholders = dealMapper.getDealStakeholdersByDealId(workspaceId, dealId);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        List<DealStakeholder> dealStakeholders = dealMapper.getDealStakeholdersByDealId(workspaceId, scope.workspaceIdsJson(), dealId);
         Map<Integer, List<DealStakeholder>> stakeholders = Map.of(dealId, dealStakeholders);
         Map<Integer, Long> lastTouch = dealTouch(workspaceId, deal, now.toEpochMilli());
         Set<Integer> personIds = new HashSet<>();
@@ -432,7 +531,7 @@ public class DealRiskService {
 
     /**
      * A cooling-stakeholder factor for one deal contact, or {@code null} when the contact is warm
-     * enough not to warrant one or is opted out of risk evaluation. A cold band is sharper than a
+     * enough not to warrant one, has no eligible history, or is opted out of risk evaluation. A cold band is sharper than a
      * cooling-but-still-cool band, and a key role (champion, decision maker, buyer, sponsor)
      * escalates either by one step.
      */
@@ -440,7 +539,7 @@ public class DealRiskService {
         if (person.isRiskExcluded()) {
             return null;
         }
-        if (warmth == null) {
+        if (warmth == null || warmth.getDaysSinceTouch() == null) {
             return null;
         }
         boolean cold = COLD_BAND.equals(warmth.getBand());
@@ -683,9 +782,9 @@ public class DealRiskService {
         return (epochMillis == null || epochMillis > nowMs) ? null : epochMillis;
     }
 
-    private Map<Integer, List<DealStakeholder>> stakeholdersByDeal(int workspaceId) {
+    private Map<Integer, List<DealStakeholder>> stakeholdersByDeal(int workspaceId, RecordVisibilityScope scope) {
         Map<Integer, List<DealStakeholder>> map = new HashMap<>();
-        for (DealStakeholder person : dealMapper.getAllDealStakeholders(workspaceId)) {
+        for (DealStakeholder person : dealMapper.getAllDealStakeholders(workspaceId, scope.workspaceIdsJson())) {
             map.computeIfAbsent(person.getDealId(), key -> new ArrayList<>()).add(person);
         }
         return map;

@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.AiChatTurn;
  *     cancellation endpoint would accept a stop request from them. A shared-session participant
  *     watching another member's turn is not its requester and must not be offered that control.
  * @param scope the exact query scope the turn was authorized to read, or null when it declared none
+ * @param toolCalls bounded per-call execution evidence, or null when unavailable to this reader
  */
 @JsonInclude(JsonInclude.Include.ALWAYS)
 public record AiChatTurnDto(
@@ -27,7 +28,22 @@ public record AiChatTurnDto(
         String partialContent,
         List<AiChatProgressItemDto> progress,
         boolean requestedByCurrentUser,
-        AiChatQueryScopeDto scope) {
+        AiChatQueryScopeDto scope,
+        List<AiChatTurnToolCallDto> toolCalls) {
+
+    /** Creates a turn projection without per-call execution evidence for legacy callers. */
+    public AiChatTurnDto(
+            int turnId,
+            int sessionId,
+            String status,
+            String terminalReason,
+            String partialContent,
+            List<AiChatProgressItemDto> progress,
+            boolean requestedByCurrentUser,
+            AiChatQueryScopeDto scope) {
+        this(turnId, sessionId, status, terminalReason, partialContent, progress,
+                requestedByCurrentUser, scope, null);
+    }
 
     /** Creates a turn projection without an interpreted query scope. */
     public AiChatTurnDto(
@@ -44,6 +60,7 @@ public record AiChatTurnDto(
 
     public AiChatTurnDto {
         progress = progress == null ? List.of() : List.copyOf(progress);
+        toolCalls = requestedByCurrentUser && toolCalls != null ? List.copyOf(toolCalls) : null;
     }
 
     /** Creates a non-streaming turn projection for its own requester. */
@@ -93,8 +110,19 @@ public record AiChatTurnDto(
             List<AiChatProgressItemDto> progress,
             Integer viewerUserId,
             AiChatQueryScopeDto scope) {
+        return from(turn, progress, viewerUserId, scope, null);
+    }
+
+    /** Creates a turn projection with execution evidence visible only to its requester. */
+    public static AiChatTurnDto from(
+            AiChatTurn turn,
+            List<AiChatProgressItemDto> progress,
+            Integer viewerUserId,
+            AiChatQueryScopeDto scope,
+            List<AiChatTurnToolCallDto> toolCalls) {
         Objects.requireNonNull(turn, "turn");
-        boolean requester = Objects.equals(turn.getRequestedByUserId(), viewerUserId);
+        boolean requester = viewerUserId != null
+                && Objects.equals(turn.getRequestedByUserId(), viewerUserId);
         return new AiChatTurnDto(
                 turn.getId(), turn.getSessionId(), turn.getStatus(), turn.getTerminalReason(),
                 turn.isStreamed() && requester && !"resolved".equals(turn.getStatus())
@@ -102,7 +130,8 @@ public record AiChatTurnDto(
                         : null,
                 requester ? progress : sharedProgress(progress),
                 requester,
-                requester ? scope : null);
+                requester ? scope : null,
+                requester ? toolCalls : null);
     }
 
     private static List<AiChatProgressItemDto> sharedProgress(

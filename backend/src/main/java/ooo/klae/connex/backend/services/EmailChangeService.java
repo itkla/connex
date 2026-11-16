@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
@@ -29,7 +30,6 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Drives the verified account email-change flow. Changing an account email is a
@@ -46,6 +46,7 @@ public class EmailChangeService {
     private static final String REFUSED_ACTION = "auth.email_change.refused";
     private static final String REFUSED_SUMMARY = "Email change refused for a privileged account";
     private static final String ENROLLMENT_REQUIRED_REASON = "privileged_mfa_enrollment_required";
+    private static final String ATTESTATION_REQUIRED_REASON = "privileged_mfa_attestation_required";
     private static final String RECENT_AUTHENTICATION_REQUIRED_REASON = "recent_authentication_required";
 
     private final UserMapper userMapper;
@@ -60,7 +61,6 @@ public class EmailChangeService {
     private final AuditService auditService;
     private final LoginRateLimiter loginRateLimiter;
     private final PrivilegedAccountService privilegedAccountService;
-    private final WebAuthnService webAuthnService;
 
     @Value("${connex.email-change.token-expiry-minutes:30}")
     private int tokenExpiryMinutes;
@@ -104,7 +104,8 @@ public class EmailChangeService {
      * custom roles are locked. That role lock also clears this transaction's mapper read cache, so
      * the second evaluation re-reads privilege and passkey state instead of reusing the pre-lock
      * answers, and a promotion committed while this request waited is observed.
-     * The refusal audit is an independent append that takes the actor's {@code app_user} row
+     * The refusal audit uses explicit null workspace and organization scope because privilege is
+     * account-wide (#1997). It is an independent append that takes the actor's {@code app_user} row
      * shared. A pre-lock refusal is audited at once. A refusal that first appears under the lock is
      * audited once the transaction completes, because appending there would wait on this
      * transaction's own exclusive lock until the InnoDB timeout (#1993).
@@ -171,6 +172,9 @@ public class EmailChangeService {
         } catch (PasskeyEnrollmentRequiredException exception) {
             auditEmailChangeRefusal(userId, ENROLLMENT_REQUIRED_REASON);
             throw exception;
+        } catch (PrivilegedMfaAttestationRequiredException exception) {
+            auditEmailChangeRefusal(userId, ATTESTATION_REQUIRED_REASON);
+            throw exception;
         } catch (RecentAuthenticationRequiredException exception) {
             auditEmailChangeRefusal(userId, RECENT_AUTHENTICATION_REQUIRED_REASON);
             throw exception;
@@ -190,6 +194,9 @@ public class EmailChangeService {
         } catch (PasskeyEnrollmentRequiredException exception) {
             deferEmailChangeRefusalAudit(userId, ENROLLMENT_REQUIRED_REASON);
             throw exception;
+        } catch (PrivilegedMfaAttestationRequiredException exception) {
+            deferEmailChangeRefusalAudit(userId, ATTESTATION_REQUIRED_REASON);
+            throw exception;
         } catch (RecentAuthenticationRequiredException exception) {
             deferEmailChangeRefusalAudit(userId, RECENT_AUTHENTICATION_REQUIRED_REASON);
             throw exception;
@@ -200,25 +207,33 @@ public class EmailChangeService {
      * Requires a privileged account to hold a passkey and a fresh WebAuthn step-up. Unprivileged
      * accounts pass unchanged. Only a WebAuthn ceremony writes the step-up stamp, so an account
      * that has never enrolled cannot satisfy it and is refused with the enrollment code instead.
+     * Once attestation is enforced, an account whose passkeys are not yet approved is refused with
+     * the attestation code until a grantor's approval code covers one of them (#1534).
      *
      * @param userId the requesting account
      */
     private void requirePrivilegedStepUp(int userId) {
-        if (!privilegedAccountService.isPrivileged(userId)) {
+        PrivilegedMfaStanding standing = privilegedAccountService.enforcedStanding(userId);
+        if (standing == PrivilegedMfaStanding.UNPRIVILEGED) {
             return;
         }
-        if (!webAuthnService.hasPasskey(userId)) {
+        if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
             throw new PasskeyEnrollmentRequiredException();
+        }
+        if (standing == PrivilegedMfaStanding.ATTESTATION_REQUIRED) {
+            throw new PrivilegedMfaAttestationRequiredException();
         }
         sessionSecurityService.requireRecentAuthentication(userId);
     }
 
     private void auditEmailChangeRefusal(int userId, String reason) {
-        auditService.recordFailure(REFUSED_ACTION, "user", userId, null, REFUSED_SUMMARY, reason);
+        auditService.recordFailureScoped(REFUSED_ACTION, "user", userId, null, null, null,
+                REFUSED_SUMMARY, reason);
     }
 
     private void deferEmailChangeRefusalAudit(int userId, String reason) {
-        auditService.deferFailure(REFUSED_ACTION, "user", userId, null, REFUSED_SUMMARY, reason);
+        auditService.deferFailureScoped(REFUSED_ACTION, "user", userId, null, null, null,
+                REFUSED_SUMMARY, reason);
     }
 
     private void validateRequest(User user, String newEmail) {
@@ -291,12 +306,14 @@ public class EmailChangeService {
      *
      * <p>The programmatic, non-browser entry point: it self-claims the exchange rather than
      * carrying a browser-bound flow grant, so the HTTP surface uses
-     * {@link #confirmChangeByHash(String)} instead.
+     * {@link #confirmChangeByHash(String)} instead. Call it through
+     * {@link EmailChangeConfirmationService#confirm(String)}, which also clears the revoked
+     * invitations' notifications once this transaction commits.
      * @param rawToken the unhashed token from the verification link
-     * @return the pending invitations the change revoked, empty when there were none
+     * @return the account and the pending invitations the change revoked
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public List<RevokedInvitationDto> confirmChange(String rawToken) {
+    public EmailChangeConfirmation confirmChange(String rawToken) {
         String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
         return confirmChangeByHash(exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)));
     }
@@ -305,11 +322,13 @@ public class EmailChangeService {
      * Applies an email change only while its issuance generation matches the locked account,
      * revoking pending grants addressed to the previous email. READ COMMITTED makes pending-grant
      * discovery current after waiting for the account lock, including grants committed while queued.
+     * The revoked invitations' notifications are tenant data and are cleared after commit by
+     * {@link RevokedGrantNotificationCleanup} (#1708).
      * @param tokenHash the purpose-bound browser-flow source digest
-     * @return the pending invitations the change revoked, empty when there were none
+     * @return the account and the pending invitations the change revoked
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public List<RevokedInvitationDto> confirmChangeByHash(String tokenHash) {
+    public EmailChangeConfirmation confirmChangeByHash(String tokenHash) {
         EmailChangeToken token = tokenHash == null ? null
                 : emailChangeTokenMapper.findExchangedRedeemableByHash(tokenHash);
         if (token == null) {
@@ -342,7 +361,7 @@ public class EmailChangeService {
 
         auditService.record("user.email_change_completed", "user", user.getId(), user.getDisplayName(),
                 "Completed a verified email change", null);
-        return revoked;
+        return new EmailChangeConfirmation(user.getId(), revoked);
     }
 
     /**
@@ -351,12 +370,13 @@ public class EmailChangeService {
      *
      * <p>Runs under the already-held account root: workspace roots are locked in ascending id, then
      * the recipient's globally ordered membership set, matching the member-removal contract in
-     * {@code docs/backend/LOCKING.md} so notification cleanup cannot invert membership lock order.
-     * Each revoked grant gets the same recipient-scoped notification cleanup and scoped audit event
-     * as a declined invitation, so no orphaned "invited you" row or unattributed deletion is left.
-     * The pending row is deleted first and the cleanup runs only when that delete claimed the row,
-     * so a grant a concurrent decline already removed leaves no partial deletion behind and the
-     * notification state version is bumped exactly when this sweep deleted something.
+     * {@code docs/backend/LOCKING.md}. Each revoked grant gets the same scoped audit event as a
+     * declined invitation. Every statement here is control-plane, so the revocation commits
+     * atomically with the email change; the grant's notifications are tenant data in the
+     * workspace's own catalog and are cleared after commit by
+     * {@link RevokedGrantNotificationCleanup} (#1708). A grant a concurrent decline already removed
+     * is skipped, and the notification state version is bumped exactly when this sweep revoked
+     * something.
      * @param userId the account whose address just changed
      * @return the revoked grants in ascending workspace id
      */
@@ -375,8 +395,6 @@ public class EmailChangeService {
             if (workspaceMapper.removePendingMember(workspaceId, userId) == 0) {
                 continue;
             }
-            notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(workspaceId, userId);
-            notificationMapper.deleteAllForRecipient(workspaceId, userId);
             revoked.add(grant);
             auditService.recordScoped(
                 "workspace.member.decline", "workspace", workspaceId, workspaceId, grant.getOrgId(),

@@ -2,8 +2,10 @@
 
 import * as React from "react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react"
+import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { pickerQueryKey, type ServerPickerSearch } from "@/lib/server-picker-search"
 import { Button } from "@/components/ui/button"
 import {
   InputGroup,
@@ -13,7 +15,154 @@ import {
 } from "@/components/ui/input-group"
 import { ChevronDownIcon, XIcon, CheckIcon } from "lucide-react"
 
-const Combobox = ComboboxPrimitive.Root
+type PickerInputState = {
+  pendingInput: React.RefObject<boolean>
+  composing: React.RefObject<boolean>
+  registerInput: (element: HTMLInputElement | null) => void
+  itemsPending: boolean
+}
+
+const PickerInputContext = React.createContext<PickerInputState | null>(null)
+
+function pickerLabel<Value>(value: Value, toString?: (value: Value) => string): string {
+  if (toString && value != null) return toString(value)
+  if (value !== null && typeof value === "object") {
+    if ("label" in value) return String(value.label ?? "")
+    if ("value" in value) return String(value.value ?? "")
+  }
+  return String(value ?? "")
+}
+
+/** Base UI's boolean highlight mode reacts to input; settled server results reuse its public keyboard path. */
+function highlightSettledResult(element: HTMLInputElement) {
+  const listId = element.getAttribute("aria-controls")
+  const list = listId ? element.ownerDocument.getElementById(listId) : null
+  if (list?.querySelector('[role="option"]:not([aria-disabled="true"])')) {
+    element.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }))
+  }
+}
+
+/** Bounds results, normalizes local matching, and keeps pending server choices unselectable. */
+function Combobox<Value, Multiple extends boolean | undefined = false>(
+  { onInputValueChange, onValueChange, onOpenChange, itemsPending: requestedPending = false, items, filter, serverSearch, autoHighlight,
+    itemToStringLabel, ...props }: ComboboxPrimitive.Root.Props<Value, Multiple> & {
+    filter?: Exclude<ComboboxPrimitive.Root.Props<Value, Multiple>["filter"], null>
+    serverSearch?: ServerPickerSearch
+    itemsPending?: boolean
+  }
+) {
+  const itemsPending = requestedPending || (serverSearch?.pending ?? false)
+  const searchQuery = serverSearch?.query
+  const latestQuery = React.useRef(searchQuery ?? "")
+  const pendingInput = React.useRef(false)
+  const [queryEdited, setQueryEdited] = React.useState(false)
+  const composing = React.useRef(false)
+  const input = React.useRef<HTMLInputElement | null>(null)
+  const registerInput = React.useCallback((element: HTMLInputElement | null) => {
+    input.current = element
+  }, [])
+  const wasPending = React.useRef(itemsPending)
+  const highlight = autoHighlight ?? !serverSearch
+  const [uncontrolledValue, setUncontrolledValue] = React.useState<ComboboxPrimitive.Root.Props<Value, Multiple>["value"]>(props.defaultValue)
+  const selectedValue = props.value === undefined ? uncontrolledValue : props.value
+  const { contains } = ComboboxPrimitive.useFilter({ value: selectedValue, multiple: props.multiple })
+  const { contains: containsQuery } = ComboboxPrimitive.useFilter({ multiple: true })
+  const normalizedFilter = (value: Value, query: string) => (queryEdited ? containsQuery : contains)(
+    value, query.normalize("NFKC"), (item) => pickerLabel(item, itemToStringLabel).normalize("NFKC")
+  )
+
+  React.useLayoutEffect(() => {
+    if (searchQuery !== undefined) latestQuery.current = searchQuery
+  }, [searchQuery])
+
+  React.useLayoutEffect(() => {
+    const settled = wasPending.current && !itemsPending
+    wasPending.current = itemsPending
+    const element = input.current
+    if (!settled || !highlight || !pendingInput.current || composing.current || !element
+      || element.ownerDocument.activeElement !== element
+      || element.getAttribute("aria-expanded") !== "true"
+      || element.getAttribute("aria-activedescendant")) return
+    highlightSettledResult(element)
+  }, [items, itemsPending, highlight])
+
+  return (
+    <PickerInputContext.Provider value={{ pendingInput, composing, registerInput, itemsPending }}>
+      <ComboboxPrimitive.Root
+        autoHighlight={highlight}
+        limit={100}
+        {...props}
+        items={itemsPending ? [] : serverSearch ? items?.filter(serverSearch.accepts) : items}
+        filter={serverSearch ? null : filter === undefined ? normalizedFilter : filter}
+        itemToStringLabel={itemToStringLabel}
+        onOpenChange={(open, details) => {
+          onOpenChange?.(open, details)
+          if (!details.isCanceled && !open && details.reason === "escape-key" && selectedValue != null
+            && (!Array.isArray(selectedValue) || selectedValue.length > 0)) {
+            pendingInput.current = false
+            setQueryEdited(false)
+          }
+        }}
+        onInputValueChange={(value, details) => {
+          onInputValueChange?.(value, details)
+          if (details.isCanceled) return
+          if (details.reason === "input-change" || details.reason === "clear-press") latestQuery.current = pickerQueryKey(value)
+          if (details.reason === "input-change") pendingInput.current = value.trim() !== ""
+          else pendingInput.current = false
+          setQueryEdited(pendingInput.current)
+        }}
+        onValueChange={(value, details) => {
+          const staleSearch = serverSearch && (serverSearch.query !== latestQuery.current || !serverSearch.accepts(value))
+          if (details.reason === "item-press" && (itemsPending || staleSearch || composing.current)) {
+            details.cancel()
+            return
+          }
+          onValueChange?.(value, details)
+          if (!details.isCanceled) {
+            pendingInput.current = false
+            setQueryEdited(false)
+            if (props.value === undefined) setUncontrolledValue(() => value)
+          }
+        }}
+      />
+    </PickerInputContext.Provider>
+  )
+}
+
+function usePickerInput({ onKeyDown, onCompositionStart, onCompositionEnd, ...props }: ComboboxPrimitive.Input.Props) {
+  const localComposing = React.useRef(false)
+  const picker = React.useContext(PickerInputContext)
+  const composing = picker?.composing ?? localComposing
+  const inputProps = {
+    ...props,
+    onCompositionStart(event) {
+      composing.current = true
+      onCompositionStart?.(event)
+    },
+    onCompositionEnd(event) {
+      composing.current = false
+      onCompositionEnd?.(event)
+    },
+    onKeyDown(event) {
+      if (event.key === "Enter") {
+        const isComposing = composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+        const expanded = event.currentTarget.getAttribute("aria-expanded") === "true"
+        if (isComposing || (picker?.itemsPending && (expanded || picker.pendingInput.current))) {
+          event.preventDefault()
+          event.stopPropagation()
+          event.preventBaseUIHandler()
+          return
+        }
+        if (expanded || picker?.pendingInput.current) {
+          event.preventDefault()
+          if (!event.currentTarget.getAttribute("aria-activedescendant")) event.preventBaseUIHandler()
+        }
+      }
+      onKeyDown?.(event)
+    },
+  } satisfies ComboboxPrimitive.Input.Props
+  return { inputProps, registerInput: picker?.registerInput }
+}
 
 function ComboboxValue({ ...props }: ComboboxPrimitive.Value.Props) {
   return <ComboboxPrimitive.Value data-slot="combobox-value" {...props} />
@@ -60,11 +209,12 @@ function ComboboxInput({
   showTrigger?: boolean
   showClear?: boolean
 }) {
+  const { inputProps, registerInput } = usePickerInput(props)
   return (
     <InputGroup className={cn("w-auto", className)}>
       <ComboboxPrimitive.Input
-        render={<InputGroupInput disabled={disabled} />}
-        {...props}
+        render={<InputGroupInput ref={registerInput} disabled={disabled} />}
+        {...inputProps}
       />
       <InputGroupAddon align="inline-end">
         {showTrigger && (
@@ -120,10 +270,15 @@ function ComboboxContent({
   )
 }
 
-function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
+/** Requires the collection renderer so static children cannot bypass Base UI's filtered items. */
+function ComboboxList<Value>({ className, ...props }: Omit<ComboboxPrimitive.List.Props, "children"> & {
+  children: (item: Value, index: number) => React.ReactNode
+}) {
+  const picker = React.useContext(PickerInputContext)
   return (
     <ComboboxPrimitive.List
       data-slot="combobox-list"
+      aria-busy={picker?.itemsPending || undefined}
       className={cn(
         "no-scrollbar max-h-[min(calc(--spacing(72)---spacing(9)),calc(var(--available-height)---spacing(9)))] scroll-py-1 overflow-y-auto overscroll-contain p-1 data-empty:p-0",
         className
@@ -188,7 +343,13 @@ function ComboboxCollection({ ...props }: ComboboxPrimitive.Collection.Props) {
   )
 }
 
-function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
+function ComboboxPendingLabel() {
+  const t = useTranslations("UI")
+  return t("searching")
+}
+
+function ComboboxEmpty({ className, children, ...props }: ComboboxPrimitive.Empty.Props) {
+  const picker = React.useContext(PickerInputContext)
   return (
     <ComboboxPrimitive.Empty
       data-slot="combobox-empty"
@@ -197,7 +358,9 @@ function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
         className
       )}
       {...props}
-    />
+    >
+      {picker?.itemsPending ? <ComboboxPendingLabel /> : children}
+    </ComboboxPrimitive.Empty>
   )
 }
 
@@ -269,11 +432,13 @@ function ComboboxChipsInput({
   className,
   ...props
 }: ComboboxPrimitive.Input.Props) {
+  const { inputProps, registerInput } = usePickerInput(props)
   return (
     <ComboboxPrimitive.Input
       data-slot="combobox-chip-input"
+      render={<input ref={registerInput} />}
       className={cn("min-w-16 flex-1 outline-none", className)}
-      {...props}
+      {...inputProps}
     />
   )
 }

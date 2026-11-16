@@ -77,6 +77,60 @@ non-CORS requests. This is not an end-to-end token, tenant-interceptor, provider
 SSO ceremony test. `/api/v1` and framework protocol routes retain their dedicated tests and are not
 counted by this sentinel test. No alternate port, proxy deployment, or production traffic is tested.
 
+## My Work supporting reads
+
+Authenticated `GET /api/my-work/history`, `/pulse`, `/relationships`, `/deal-kpis`, and `/risks`
+resolve the caller and active workspace in `MyWorkReadService`. No user id, member selection, or
+workspace query parameter changes that scope. These are personal projections, separate from the
+administrator-only member-scoping controls on the Analytics endpoints. `deal-kpis` accepts a
+currency from the caller's own currency buckets and otherwise selects the most common currency
+(alphabetical tie-break, USD when empty). It delegates to the existing calendar-window KPI service
+for the latest 90 workspace-local dates and ISO-week trends, preserving all previous-period and
+currency boundaries. Supporting-query failures propagate to the section boundary.
+
+See [the My Work presentation and bounds contract](../frontend/PRODUCT_GRAMMAR.md#my-work).
+
+## Note link updates
+
+`PUT /api/notes/{id}` distinguishes an omitted `person` or `deal` property from explicit
+JSON `null`. Omission preserves that link; `null` removes it; a newly assigned ID passes the
+existing workspace and record-visibility checks. An unchanged stored link is retained without
+rechecking the linked record's visibility, so archiving a contact does not prevent edits to
+its readable notes. Each link is handled independently. DTO deserialization uses the no-arg
+constructor and link setters to track presence; the internal flags are never wire properties.
+The returned note includes the resulting non-null links. The full-page editor sends its held
+links and reconciles its header and save snapshot with save responses and refreshed server
+props. A response from a save started before a refresh cannot restore the older links. The
+dialog removes a link when its selector is emptied and sends explicit `null`.
+
+Standard note audit diffs retain content, title and visibility (visibility alone for private
+notes), not the person/deal relationship fields. Inline references in audited content do not
+establish which relationships were set, so those diffs cannot reliably reconstruct detached
+links. No automatic data repair is attempted.
+
+## Contact tag filtering
+
+`GET /api/persons/page`, `GET /api/persons/ids`, and `GET /api/exports/persons` accept
+`tagIds` as repeated or comma-separated integer values. Multiple tags match any selected tag;
+other contact filters still intersect that set. Page rows, totals, matching IDs and CSV export
+use the same tag membership predicate. Tags must belong to the resolved workspace, including
+when a contact is visible through sharing. An unknown or another workspace's tag matches no
+records. Existing visibility, matching-ID limits, export restrictions and export step-up apply.
+
+## Global search group selection
+
+`GET /api/search?query=...` accepts optional `types` as repeated parameters, comma-separated
+values, or both. Names are case-sensitive and match the response properties: `companies`,
+`people`, `deals`, `pipelines`, `tags`, `activities`, `notes`, `tasks`, `users`, `attachments`,
+`products`, `campaigns`, `reports`, `documentTemplates`, `documents`, and `workflows`.
+Whitespace is trimmed, duplicates and blank entries are ignored, and an unknown name or a
+selection with no remaining names returns the existing HTTP 400 code/message error shape.
+
+Omitting `types` searches every group as before. The response always retains all 16 arrays;
+unselected groups are empty and perform no mapper queries or reference hydration. Selected
+groups keep their existing workspace scope and permission gates; unreadable groups remain empty.
+For example, `types=companies,people&types=products` searches those three groups only.
+
 ## Lifecycle
 
 The endpoint's domain maintainer owns compatibility and migration; Backend maintainers are the
@@ -133,9 +187,84 @@ individual has accepted a new operational responsibility.
    identity and aggregate usage evidence to the tracked work. Rollbacks must not reactivate retired
    mappings; a deliberate EOL extension needs a new reviewed decision before expiry.
 
-No endpoints are presently annotated `@Deprecated`, so the lifecycle ledger has no deprecation or
-retirement rows. It is not evidence of a historic shutdown. Compatibility candidates below must go
-through the decision step before dates or removals are invented.
+No endpoints are presently annotated `@Deprecated`. The lifecycle ledger retains the disclosure
+GET/HEAD retirement tombstones approved in #2004; deployment evidence is still required before
+that issue closes. Compatibility candidates below must go through the decision step before dates
+or removals are invented.
+
+## Disclosure method migration (#2004)
+
+The Security Owner's 2026-10-12 decision replaces
+`GET /api/orgs/{orgId}/data-subject-requests/{requestId}/disclosure` and its implicit HEAD with
+`POST` on the same path. There is no GET/HEAD alias or redirect. The POST requires an authenticated
+session, a valid CSRF header, organization admin/owner authority, and fresh account-bound WebAuthn
+step-up. The body is optional; the SPA sends `{}` as JSON. Success remains HTTP 200 with the existing
+JSON properties, order, null omission and ordinary `notes` array, after the strict disclosure-access
+audit commits. The servlet response is written synchronously on the request thread inside the
+retained tenant snapshot. Request type, identity
+verification, and linked-subject checks are unchanged.
+
+Authorized retired GET/HEAD requests receive 405 (method denied); anonymous requests receive 401
+from the session security chain. Both paths must perform no disclosure assembly and append no
+disclosure-access audit. The HTTP integration test covers all four probes independently of the
+remaining generated inventory. POST is a different method and does not overlap either tombstone;
+the list/detail GET mappings do not match the disclosure suffix. OPTIONS remains available.
+
+Deploy backend and frontend together. Existing browser clients must refresh to load the POST
+wrapper; an old client receives 405 until it refreshes. CLI/integration usage is not measured, so
+the absence of other callers in source is not evidence of zero external usage. Publish the method
+migration with the coordinated release. Before closing #2004, attach staging revision and direct
+backend/frontend-proxy probes for authorized and anonymous GET/HEAD and one authorized POST.
+
+Preparation or assembly failure prevents the success audit. Final audit failure returns 503 with
+no disclosure payload, and the audit INSERT and integrity-head advance roll back together. A
+committed audit remains recorded if the response or download later fails. An explicit retry
+assembles again and adds another access event; there is no automatic network/503 retry. The SPA's
+bounded CSRF-refresh and step-up refusal retries remain unchanged. See [LOCKING.md](LOCKING.md)
+for the retained snapshot, suspend/audit/resume sequence and retained race windows.
+
+The additive `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`, `X-Disclosure-Byte-Length` and
+`X-Disclosure-SHA256` headers describe pass one's complete representation. Hashes use exact compact
+UTF-8 JSON before HTTP content coding; the notes hash covers the array including its delimiters.
+Both passes use one explicitly REPEATABLE READ tenant snapshot, bounded note ID/body pages, and a
+fixed non-note envelope. Admission permits two concurrent disclosures per instance and one per
+organization; requests never wait for admission. Overload and a configured pool smaller than two connections
+use the existing 503 shape before any snapshot. Placement discovery completes in a separate
+control transaction first, keeping the per-disclosure connection peak at two (snapshot plus audit),
+including cross-workspace and unresolved caller contexts. Provision four connections for both
+admission slots, plus ordinary traffic. Pools of two or three admit only one disclosure to retain
+audit capacity; the second request is refused before a snapshot. In these single-slot pools,
+capacity refusals from other organizations retain first-refusal timestamps for at most 128
+organization IDs (`MAX_REFUSED_DISCLOSURE_ORGANIZATIONS`), evicting the oldest entry on saturation.
+When the holder releases, the oldest retained organization receives a 30-second exclusive
+turnover reservation (`DISCLOSURE_TURNOVER_RESERVATION`). All non-reserved organizations,
+including the former holder, receive the same 503 before a snapshot. Admission consumes the
+reservation; an unused reservation lapses after 30 seconds. Other recorded refusals are cleared
+at turnover, preventing chained unused reservations. Pools of at least four keep two slots and
+the existing admission behavior.
+
+The absolute pass-two delivery deadline is
+`connex.data-subject-disclosure.delivery-timeout-ms` (environment
+`CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS`, default `120000`). It is checked before each note
+page read/write and every 8 KiB of output; expiry closes the specific request socket, rolls back
+the snapshot, invalidates the source and releases context/admission. The deployed Tomcat HTTP/1.1
+NIO connector sets `server.tomcat.connection-timeout` (`CONNEX_TOMCAT_CONNECTION_TIMEOUT`, default
+`30s`), which initializes its blocking write timeout. A blocked write can take one such timeout to
+unwind after socket closure: the delivery bound is deadline plus one connector write timeout
+(150 seconds by default). Preparation/preflight time is separate. A live server without the
+cancellable transport hook refuses disclosure before opening the response.
+
+Pass-two failures before commitment clear buffered disclosure bytes and use the existing 503
+shape. After commitment the response stays truncated; no error suffix or automatic closing JSON
+is appended. The writer withholds the final document byte until both passes' counts, digests and
+byte lengths match. Clients must reject incomplete framing, invalid JSON or integrity-header
+mismatches and retry explicitly. Wait for an active same-organization download to end after a 503.
+With a single-slot pool, a refused organization should retry during its turnover reservation;
+non-reserved organizations must wait for that reservation to be used or its 30-second window to lapse.
+After deadline expiry, discard the partial download and retry on a connection able to finish within
+the limit. Each retry assembles and audits anew; there is no continuation. Retain raw response bytes for hash verification: the SPA reformats
+its download. See [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](../APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md)
+for operator handling.
 
 ## Current source audit (2026-09-08)
 
@@ -169,3 +298,18 @@ claim of a complete penetration test or proof of production usage. Public metada
 choice; compatibility endpoints have no evidence supporting immediate removal. Production deployment
 revision, per-route usage, owner-approved compatibility EOL dates, and historical shutdown evidence
 were not available in this lane.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Mission singleton review
+
+`GET /api/ai/assistant/missions/{runId}/proposals/{actionSlot}` returns one exact frozen
+requester-owned item. `POST /api/ai/assistant/missions/{runId}/proposal-decisions` accepts a
+16 KiB body with a positive decimal-string membership revision and 1–50 unique canonical
+slot/preparation UUID pairs with approve/discard choices. Unknown properties are refused.
+Authentication, CSRF and the pinned workspace remain mandatory. Each item commits separately;
+HTTP 200 batch stop results preserve prior outcomes, including explicit indeterminate status
+when fresh authorized reconciliation cannot establish a failing item's outcome. Safe metadata
+and cancellation remain accessible when content is withheld or schemas are unsupported.

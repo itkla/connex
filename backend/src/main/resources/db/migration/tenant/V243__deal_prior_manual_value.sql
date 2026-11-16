@@ -1,0 +1,3 @@
+ALTER TABLE deal
+    ADD COLUMN prior_manual_value DECIMAL(15, 2) NULL,
+    ALGORITHM=INSTANT;

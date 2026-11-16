@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -85,6 +87,7 @@ public class ScoringService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final int MAX_BATCH_CONTACTS = 1_000;
     private static final int MAX_BATCH_COMPANIES = 2_000;
@@ -122,19 +125,26 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId) {
         Instant reference = scoringInstant(Instant.now(clock));
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         return temperatures(personMapper.getRelationshipScoreAggregates(
-            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
+            workspaceId, personWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     /** Scores all contacts and companies from compact aggregates computed by the database. */
     public WorkspaceScores scoreWorkspace(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> scoreWorkspaceWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
+    }
+
+    private WorkspaceScores scoreWorkspaceWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         Instant now = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
         return new WorkspaceScores(
             temperatures(personMapper.getRelationshipScoreAggregates(
-                workspaceId, reference, WARMTH_MODEL.sqlParameters()), now),
+                workspaceId, operationVisibilityScope.workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now),
             temperatures(companyMapper.getRelationshipScoreAggregates(
-                workspaceId, reference, WARMTH_MODEL.sqlParameters()), now)
+                workspaceId, operationVisibilityScope.workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now)
         );
     }
 
@@ -156,8 +166,9 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Instant asOf) {
         Instant reference = scoringInstant(asOf);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         return temperatures(personMapper.getRelationshipScoreAggregates(
-            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
+            workspaceId, personWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     List<RelationshipTemperatureDto> scoreContactsExcludingHistoryImports(
@@ -169,9 +180,10 @@ public class ScoringService {
         Instant reference = scoringInstant(asOf);
         LocalDateTime referenceDateTime =
             LocalDateTime.ofInstant(reference, ZoneOffset.UTC);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         return temperatures(
             personMapper.getRelationshipScoreAggregatesExcludingHistoryImports(
-                workspaceId,
+                workspaceId, personWorkspaceIdsJson,
                 referenceDateTime,
                 WARMTH_MODEL.sqlParameters(),
                 List.copyOf(excludedActivityIds),
@@ -221,12 +233,12 @@ public class ScoringService {
             Integer personId = personId(task.getPerson());
             if (personId != null
                     && !excludedTaskIds.contains(task.getId())
-                    && epoch(task.getCreatedAt()) != null) {
+                    && task.isCompleted() && epoch(task.getCompletedAt()) != null) {
                 touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
                     new SourceTouch(
                         "task",
                         task.getId(),
-                        task.getCreatedAt(),
+                        task.getCompletedAt(),
                         Double.toString(WARMTH_MODEL.taskWeight())));
             }
         }
@@ -235,7 +247,8 @@ public class ScoringService {
 
     /** Returns clock-independent fingerprints of persisted touches attributed to each company. */
     Map<Integer, String> companySourceStateHashes(int workspaceId) {
-        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        List<Person> persons = personMapper.getProcessablePersons(workspaceId, personWorkspaceIdsJson);
         Map<Integer, Integer> personCompany = personCompanyMap(persons);
         Set<Integer> processablePersonIds = personIds(persons);
         Map<Integer, Integer> dealCompany = dealCompanyMap(dealMapper.getAllDeals(workspaceId));
@@ -273,14 +286,14 @@ public class ScoringService {
             }
         }
         for (Task task : taskMapper.getAllTasks(workspaceId)) {
-            if (epoch(task.getCreatedAt()) != null) {
+            if (task.isCompleted() && epoch(task.getCompletedAt()) != null) {
                 addCompanySourceTouch(
                     task.getPerson(),
                     task.getDeal(),
                     new SourceTouch(
                         "task",
                         task.getId(),
-                        task.getCreatedAt(),
+                        task.getCompletedAt(),
                         Double.toString(WARMTH_MODEL.taskWeight())),
                     personCompany,
                     processablePersonIds,
@@ -369,13 +382,15 @@ public class ScoringService {
      */
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto contactEvidence(int workspaceId, int personId, int currentUserId) {
-        if (!personMapper.getProcessablePersonIds(workspaceId, List.of(personId)).contains(personId)) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
+        if (!personMapper.getProcessablePersonIds(workspaceId, orgWorkspaceIdsJson, List.of(personId)).contains(personId)) {
             throw new ResourceNotFoundException("Contact not found");
         }
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
         RelationshipEvidenceTotalsDto totals = boundedTotals(personMapper.getRelationshipEvidenceTotals(
-            workspaceId,
+            workspaceId, orgWorkspaceIdsJson,
             personId,
             reference,
             WARMTH_MODEL.sqlParameters(),
@@ -384,7 +399,7 @@ public class ScoringService {
         List<RelationshipEvidenceRowDto> rows = totals.contributorCount() == 0
             ? List.of()
             : personMapper.getRelationshipEvidenceContributors(
-                workspaceId,
+                workspaceId, orgWorkspaceIdsJson,
                 personId,
                 reference,
                 WARMTH_MODEL.sqlParameters(),
@@ -392,7 +407,7 @@ public class ScoringService {
                 MAX_EVIDENCE_CONTRIBUTORS
             );
         int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForPersonEvidence(
-            workspaceId, personId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
+            workspaceId, orgWorkspaceIdsJson, personId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
         return evidence(
             SubjectType.PERSON,
             personId,
@@ -426,8 +441,9 @@ public class ScoringService {
         }
         Instant reference = scoringInstant(Instant.now(clock));
         Map<Integer, RelationshipTemperatureDto> scores = new HashMap<>();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         for (RelationshipTemperatureDto score : temperatures(personMapper.getRelationshipScoreAggregatesByIds(
-                workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
+                workspaceId, personWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
                 WARMTH_MODEL.sqlParameters(), requested), reference)) {
             scores.put(score.getId(), score);
         }
@@ -440,9 +456,19 @@ public class ScoringService {
      * links target the same company, the touch is counted once.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> scoreCompaniesWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
+    }
+
+    private List<RelationshipTemperatureDto> scoreCompaniesWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
+        return scoreCompanies(workspaceId, operationVisibilityScope.workspaceIdsJson());
+    }
+
+    List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, String orgWorkspaceIdsJson) {
         Instant reference = scoringInstant(Instant.now(clock));
         return temperatures(companyMapper.getRelationshipScoreAggregates(
-            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
+            workspaceId, orgWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     /**
@@ -450,7 +476,13 @@ public class ScoringService {
      * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY}.
      */
     public List<RelationshipTemperatureDto> coolingCompanies(int workspaceId, int limit) {
-        return scoreCompanies(workspaceId).stream()
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> coolingCompaniesWithinVisibilityScope(workspaceId, limit, resolvedVisibilityScope));
+    }
+
+    private List<RelationshipTemperatureDto> coolingCompaniesWithinVisibilityScope(int workspaceId, int limit, RecordVisibilityScope operationVisibilityScope) {
+        return scoreCompaniesWithinVisibilityScope(workspaceId, operationVisibilityScope).stream()
             .filter(temperature -> "cooling".equals(temperature.getTrend()))
             .sorted((left, right) -> Integer.compare(
                 right.getDaysSinceTouch() == null ? 0 : right.getDaysSinceTouch(),
@@ -465,6 +497,19 @@ public class ScoringService {
      * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY}.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds) {
+        List<Integer> requested = requestedCompanyIds(companyIds);
+        if (requested.isEmpty()) return List.of();
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, resolvedVisibilityScope,
+            () -> scoreCompanyIds(workspaceId, requested,
+                resolvedVisibilityScope.workspaceIdsJson()));
+    }
+
+    List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds, String orgWorkspaceIdsJson) {
+        return scoreCompanyIds(workspaceId, requestedCompanyIds(companyIds), orgWorkspaceIdsJson);
+    }
+
+    private static List<Integer> requestedCompanyIds(Set<Integer> companyIds) {
         List<Integer> requested = companyIds.stream()
             .filter(java.util.Objects::nonNull)
             .distinct()
@@ -473,11 +518,16 @@ public class ScoringService {
             throw new BadRequestException(
                 "At most " + MAX_BATCH_COMPANIES + " companies may be scored in one request");
         }
+        return requested;
+    }
+
+    private List<RelationshipTemperatureDto> scoreCompanyIds(
+            int workspaceId, List<Integer> requested, String orgWorkspaceIdsJson) {
         if (requested.isEmpty()) return List.of();
         Instant reference = scoringInstant(Instant.now(clock));
         Map<Integer, RelationshipTemperatureDto> scores = new HashMap<>();
         for (RelationshipTemperatureDto score : temperatures(companyMapper.getRelationshipScoreAggregatesByIds(
-                workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
+                workspaceId, orgWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
                 WARMTH_MODEL.sqlParameters(), requested), reference)) {
             scores.put(score.getId(), score);
         }
@@ -490,8 +540,14 @@ public class ScoringService {
      * workspace cap.
      */
     public List<RelationshipTemperatureDto> scoreCompaniesForMap(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> scoreCompaniesForMapWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
+    }
+
+    private List<RelationshipTemperatureDto> scoreCompaniesForMapWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         long companyCount = companyMapper.countCompanies(
-            workspaceId, null, null, false, null, MemberScope.allTeam(), false, null);
+            workspaceId, operationVisibilityScope.workspaceIdsJson(), null, null, false, null, MemberScope.allTeam(), false, null);
         if (companyCount > MAX_BATCH_COMPANIES) {
             throw new BadRequestException(
                 "Relationship map supports at most " + MAX_BATCH_COMPANIES + " companies");
@@ -500,7 +556,7 @@ public class ScoringService {
         LocalDateTime reference = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
         return temperatures(
             companyMapper.getRelationshipScoreAggregates(
-                workspaceId, reference, WARMTH_MODEL.sqlParameters()), now);
+                workspaceId, operationVisibilityScope.workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now);
     }
 
     /**
@@ -510,9 +566,20 @@ public class ScoringService {
      * as-of-{@code asOf} employment when it assembles frames.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> scoreCompaniesWithinVisibilityScope(workspaceId, asOf, resolvedVisibilityScope));
+    }
+
+    private List<RelationshipTemperatureDto> scoreCompaniesWithinVisibilityScope(int workspaceId, Instant asOf, RecordVisibilityScope operationVisibilityScope) {
+        return scoreCompanies(workspaceId, asOf,
+            operationVisibilityScope.workspaceIdsJson());
+    }
+
+    List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf, String orgWorkspaceIdsJson) {
         Instant reference = scoringInstant(asOf);
         return temperatures(companyMapper.getRelationshipScoreAggregates(
-            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
+            workspaceId, orgWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     /**
@@ -527,14 +594,21 @@ public class ScoringService {
      */
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto companyEvidence(int workspaceId, int companyId, int currentUserId) {
-        if (companyMapper.getByIds(workspaceId, List.of(companyId)).stream()
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> companyEvidenceWithinVisibilityScope(workspaceId, companyId, currentUserId, resolvedVisibilityScope));
+    }
+
+    private RelationshipEvidenceDto companyEvidenceWithinVisibilityScope(int workspaceId, int companyId, int currentUserId, RecordVisibilityScope operationVisibilityScope) {
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
+        if (companyMapper.getByIds(workspaceId, orgWorkspaceIdsJson, List.of(companyId)).stream()
                 .noneMatch(company -> company.getId() == companyId)) {
             throw new ResourceNotFoundException("Company not found");
         }
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
         RelationshipEvidenceTotalsDto totals = boundedTotals(companyMapper.getRelationshipEvidenceTotals(
-            workspaceId,
+            workspaceId, orgWorkspaceIdsJson,
             companyId,
             reference,
             WARMTH_MODEL.sqlParameters(),
@@ -543,7 +617,7 @@ public class ScoringService {
         List<RelationshipEvidenceRowDto> rows = totals.contributorCount() == 0
             ? List.of()
             : companyMapper.getRelationshipEvidenceContributors(
-                workspaceId,
+                workspaceId, orgWorkspaceIdsJson,
                 companyId,
                 reference,
                 WARMTH_MODEL.sqlParameters(),
@@ -551,7 +625,7 @@ public class ScoringService {
                 MAX_EVIDENCE_CONTRIBUTORS
             );
         int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForCompanyEvidence(
-            workspaceId, companyId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
+            workspaceId, orgWorkspaceIdsJson, companyId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
         return evidence(
             SubjectType.COMPANY,
             companyId,
@@ -564,8 +638,14 @@ public class ScoringService {
     }
 
     public WarmthSummaryDto summarize(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceId, resolvedVisibilityScope, () -> summarizeWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
+    }
+
+    private WarmthSummaryDto summarizeWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         List<RelationshipTemperatureDto> contacts = scoreContacts(workspaceId);
-        List<RelationshipTemperatureDto> companies = scoreCompanies(workspaceId);
+        List<RelationshipTemperatureDto> companies = scoreCompaniesWithinVisibilityScope(workspaceId, operationVisibilityScope);
         return summarizeScores(contacts, companies);
     }
 
@@ -659,7 +739,8 @@ public class ScoringService {
                 processablePersonIds, dealCompany, byPerson, companyTouches);
         }
         for (Task t : taskMapper.getAllTasks(workspaceId)) {
-            collectTouch(epoch(t.getCreatedAt()), WARMTH_MODEL.taskWeight(), t.getPerson(), t.getDeal(),
+            if (!t.isCompleted()) continue;
+            collectTouch(epoch(t.getCompletedAt()), WARMTH_MODEL.taskWeight(), t.getPerson(), t.getDeal(),
                 processablePersonIds, dealCompany, byPerson, companyTouches);
         }
 

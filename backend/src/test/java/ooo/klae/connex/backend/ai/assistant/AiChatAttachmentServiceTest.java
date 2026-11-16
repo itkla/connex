@@ -57,6 +57,8 @@ class AiChatAttachmentServiceTest {
             "/api/attachments/content/0f8fad5b-d9cb-469f-a165-70867728950e.txt";
 
     private AiChatMapper chatMapper;
+    private AiAssistantPrivacyService organizationAuthority;
+    private AiChatPrivacyGuard privacyGuard;
     private AttachmentMapper attachmentMapper;
     private AttachmentWriteOperations writeOperations;
     private AiChatAttachmentPolicy attachmentPolicy;
@@ -72,6 +74,11 @@ class AiChatAttachmentServiceTest {
     @BeforeEach
     void setUp() {
         chatMapper = mock(AiChatMapper.class);
+        organizationAuthority = mock(AiAssistantPrivacyService.class);
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
+        privacyGuard = new AiChatPrivacyGuard(organizationAuthority);
         attachmentMapper = mock(AttachmentMapper.class);
         writeOperations = mock(AttachmentWriteOperations.class);
         attachmentPolicy = mock(AiChatAttachmentPolicy.class);
@@ -83,6 +90,7 @@ class AiChatAttachmentServiceTest {
         managedObjectService = mock(ManagedObjectService.class);
         auditService = mock(AuditService.class);
         service = new AiChatAttachmentService(
+                privacyGuard,
                 chatMapper,
                 attachmentMapper,
                 scanMapper,
@@ -96,6 +104,12 @@ class AiChatAttachmentServiceTest {
                 auditService,
                 mock(AiAssistantSessionReadAudit.class),
                 realtimeDispatcher);
+        var barrier = new ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(WORKSPACE_ID);
+        barrier.setGeneration(1L);
+        when(chatMapper.getPrivacyBarrier(WORKSPACE_ID)).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(WORKSPACE_ID)).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(WORKSPACE_ID, SESSION_ID)).thenAnswer(invocation -> activeSession());
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
         when(workspaceService.lockedPermissionsFor(WORKSPACE_ID, USER_ID))
@@ -108,8 +122,8 @@ class AiChatAttachmentServiceTest {
 
         assertThrows(ResourceNotFoundException.class, () -> service.list(SESSION_ID));
 
-        verify(chatMapper).getAccessibleSessionById(99, USER_ID, SESSION_ID);
-        verify(attachmentMapper, never()).getAssistantSessionAttachments(anyInt(), anyInt());
+        verify(chatMapper).getAccessibleSessionById(99, USER_ID, SESSION_ID, 1L);
+        verify(attachmentMapper, never()).getAssistantSessionAttachments(anyInt(), anyInt(), eq(1L));
     }
 
     @Test
@@ -118,9 +132,9 @@ class AiChatAttachmentServiceTest {
         User actor = mock(User.class);
         when(actor.getId()).thenReturn(USER_ID);
         when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(actor));
-        when(chatMapper.getAccessibleSessionById(WORKSPACE_ID, USER_ID, SESSION_ID))
+        when(chatMapper.getAccessibleSessionById(WORKSPACE_ID, USER_ID, SESSION_ID, 1L))
                 .thenReturn(session);
-        when(attachmentMapper.countAssistantSessionAttachments(WORKSPACE_ID, SESSION_ID))
+        when(attachmentMapper.countAssistantSessionAttachments(WORKSPACE_ID, SESSION_ID, 1L))
                 .thenReturn(AiChatAttachmentPolicy.MAX_ATTACHMENTS);
         UploadSource source = UploadSource.from(
                 "notes.txt", "text/plain", "content".getBytes(StandardCharsets.UTF_8));
@@ -129,7 +143,7 @@ class AiChatAttachmentServiceTest {
 
         verify(attachmentPolicy, never()).prepare(source);
         verify(writeOperations, never()).uploadAssistantSession(
-                anyInt(), anyInt(), any(), any());
+                anyInt(), anyInt(), any(), any(), any(Runnable.class));
     }
 
     @Test
@@ -152,7 +166,7 @@ class AiChatAttachmentServiceTest {
         uploaded.setFileName("notes.txt");
         uploaded.setContentType("text/plain");
         uploaded.setSize(7L);
-        when(chatMapper.getAccessibleSessionById(WORKSPACE_ID, USER_ID, SESSION_ID))
+        when(chatMapper.getAccessibleSessionById(WORKSPACE_ID, USER_ID, SESSION_ID, 1L))
                 .thenReturn(session);
         when(chatMapper.getSessionByIdForUpdate(WORKSPACE_ID, USER_ID, SESSION_ID))
                 .thenReturn(session);
@@ -160,17 +174,17 @@ class AiChatAttachmentServiceTest {
         when(uploadMalwareScanner.scan(prepared)).thenReturn(scanned);
         when(authService.getCurrentUser()).thenReturn(actor);
         when(writeOperations.uploadAssistantSession(
-                eq(WORKSPACE_ID), eq(SESSION_ID), eq(scanned), eq(actor)))
+                eq(WORKSPACE_ID), eq(SESSION_ID), eq(scanned), eq(actor), any(Runnable.class)))
                 .thenReturn(uploaded);
 
         service.upload(SESSION_ID, source);
 
         verify(attachmentMapper, times(2)).countAssistantSessionAttachments(
-                WORKSPACE_ID, SESSION_ID);
+                WORKSPACE_ID, SESSION_ID, 1L);
         InOrder admissionOrder = org.mockito.Mockito.inOrder(
                 chatMapper, uploadMalwareScanner);
         admissionOrder.verify(chatMapper).getAccessibleSessionById(
-                WORKSPACE_ID, USER_ID, SESSION_ID);
+                WORKSPACE_ID, USER_ID, SESSION_ID, 1L);
         admissionOrder.verify(uploadMalwareScanner).scan(prepared);
         admissionOrder.verify(chatMapper).getSessionByIdForUpdate(
                 WORKSPACE_ID, USER_ID, SESSION_ID);
@@ -194,7 +208,7 @@ class AiChatAttachmentServiceTest {
         User actor = mock(User.class);
         when(actor.getId()).thenReturn(USER_ID);
         when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(actor));
-        when(chatMapper.getAccessibleSessionById(WORKSPACE_ID, USER_ID, SESSION_ID))
+        when(chatMapper.getAccessibleSessionById(WORKSPACE_ID, USER_ID, SESSION_ID, 1L))
                 .thenReturn(session);
         UploadSource source = UploadSource.from(
                 "notes.txt", "text/plain", "content".getBytes(StandardCharsets.UTF_8));
@@ -209,7 +223,7 @@ class AiChatAttachmentServiceTest {
                 () -> service.upload(SESSION_ID, source));
 
         verify(writeOperations, never()).uploadAssistantSession(
-                anyInt(), anyInt(), any(), any());
+                anyInt(), anyInt(), any(), any(), any(Runnable.class));
         verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
     }
 
@@ -253,10 +267,11 @@ class AiChatAttachmentServiceTest {
 
         service.delete(SESSION_ID, ATTACHMENT_ID);
 
-        InOrder order = inOrder(workspaceService, managedObjectService, attachmentMapper, auditService);
+        InOrder order = inOrder(workspaceService, managedObjectService, organizationAuthority, attachmentMapper, auditService);
         order.verify(workspaceService).requirePermission(
                 WORKSPACE_ID, USER_ID, Permission.ATTACHMENT_QUARANTINE_MANAGE);
         order.verify(managedObjectService).deleteAttachmentAfterCommit(WORKSPACE_ID, MANAGED_URL);
+        order.verify(organizationAuthority).retain(1, 1L);
         order.verify(attachmentMapper).delete(WORKSPACE_ID, ATTACHMENT_ID);
         order.verify(auditService).recordStrict("malware.quarantine_deleted", "attachment",
                 ATTACHMENT_ID, null, "Deleted quarantined assistant attachment", null);
@@ -302,7 +317,7 @@ class AiChatAttachmentServiceTest {
         when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(actor));
         when(chatMapper.getSessionByIdForUpdate(WORKSPACE_ID, USER_ID, SESSION_ID))
                 .thenReturn(session);
-        when(attachmentMapper.getAssistantSessionAttachment(WORKSPACE_ID, SESSION_ID, ATTACHMENT_ID))
+        when(attachmentMapper.getAssistantSessionAttachment(WORKSPACE_ID, SESSION_ID, ATTACHMENT_ID, 1L))
                 .thenReturn(sessionAttachment(discoveredState));
         when(attachmentMapper.lockIdsByUrl(WORKSPACE_ID, MANAGED_URL))
                 .thenReturn(List.of(ATTACHMENT_ID));
@@ -327,6 +342,7 @@ class AiChatAttachmentServiceTest {
         AiChatSession session = new AiChatSession();
         session.setId(SESSION_ID);
         session.setWorkspaceId(WORKSPACE_ID);
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(USER_ID);
         session.setVisibility("private");
         session.setStatus("active");

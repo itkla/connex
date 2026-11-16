@@ -6,7 +6,7 @@ import RelationshipDecay from "@/app/components/overview/analytics/RelationshipD
 import type { WarmthDecayCounts } from "@/app/lib/types";
 
 vi.mock("next-intl", () => ({
-    useTranslations: () => (key: string, values?: Record<string, unknown>) => (
+    useTimeZone: () => "UTC", useTranslations: () => (key: string, values?: Record<string, unknown>) => (
         values ? `${key}(${JSON.stringify(values)})` : key
     ),
 }));

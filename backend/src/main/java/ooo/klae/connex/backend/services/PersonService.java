@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonFacets;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
@@ -16,7 +20,6 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -37,6 +40,7 @@ import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.StaleRecordException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -87,7 +91,8 @@ public class PersonService {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final RecordCreationAugmentationService recordCreationAugmentationService;
     private final ProviderCaptureMapper providerCaptureMapper;
-    private final AiRestrictionEpoch aiRestrictionEpoch;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService aiAgentPrivacyService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -102,20 +107,57 @@ public class PersonService {
 
     private static final int MAX_MATCHING_IDS = 1000;
 
+    /** Keeps the browser page and its total on one unfiltered organization ceiling. */
+    public PageResponse<Person> queryPersonsPage(String query, String sort, String dir, List<String> companies,
+            List<String> titles, boolean noCompany, MemberScope memberScope,
+            List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, int limit, int offset) {
+        return queryPersonsPage(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, null);
+    }
+
+    /** Applies workspace tag membership consistently to page rows and their count. */
+    public PageResponse<Person> queryPersonsPage(String query, String sort, String dir, List<String> companies,
+            List<String> titles, boolean noCompany, MemberScope memberScope,
+            List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, int limit, int offset, List<Integer> tagIds) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope, () -> new PageResponse<>(
+            getPersonsPageWithinPersonScope(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, scope, tagIds),
+            countPersonsWithinPersonScope(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, scope, tagIds)));
+    }
+
+    /** Shares the employer ceiling across every visibility-dependent browser facet. */
+    public PersonFacets getPersonFacets(WarmthFilter warmth) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope, () -> new PersonFacets(
+            distinctCompaniesWithinPersonScope(scope), distinctTitles(), hasPersonWithoutCompanyWithinPersonScope(scope),
+            countsByOwner(), countArchivedPersons(), countsByLifecycleStage(), countsByLeadSource(), countsByFirstResponseState(),
+            warmth == null ? null : countsByWarmthBandWithinPersonScope(warmth, scope)));
+    }
+
     /**
      * Retrieves all {@code Person} records in the active workspace.
      */
     public List<Person> getAllPersons() {
-        return personMapper.getAllPersons(workspaceService.getCurrentWorkspaceId());
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return personMapper.getAllPersons(workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson);
     }
 
     public List<Person> getPersonsByCompanyId(int companyId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return personMapper.getPersonsByCompanyId(workspaceId, companyId, null);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        return personMapper.getPersonsByCompanyId(workspaceId, personWorkspaceIdsJson, companyId, null);
     }
 
     public List<Person> getPersonsByTagId(int tagId) {
-        return personMapper.getPersonsByTagId(workspaceService.getCurrentWorkspaceId(), tagId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return personMapper.getPersonsByTagId(workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson, tagId);
     }
 
     public List<Person> getPersonsByDealId(int dealId) {
@@ -123,7 +165,8 @@ public class PersonService {
         if (!dealMapper.exists(workspaceId, dealId)) {
             throw new ResourceNotFoundException("Deal not found");
         }
-        return personMapper.getPersonsByDealId(workspaceId, dealId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        return personMapper.getPersonsByDealId(workspaceId, personWorkspaceIdsJson, dealId);
     }
 
     /**
@@ -137,10 +180,23 @@ public class PersonService {
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             boolean archived, WarmthFilter warmth, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return personMapper.getPersonsPage(workspaceId, query, sort, dir,
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope,
+            () -> getPersonsPageWithinPersonScope(query, sort, dir, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, limit, offset, scope, null));
+    }
+
+    private List<Person> getPersonsPageWithinPersonScope(String query, String sort, String dir, List<String> companies,
+            List<String> titles, boolean noCompany, MemberScope memberScope,
+            List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, int limit, int offset, RecordVisibilityScope scope, List<Integer> tagIds) {
+        String personWorkspaceIdsJson = scope.workspaceIdsJson();
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return personMapper.getPersonsPage(workspaceId, personWorkspaceIdsJson, query, sort, dir,
             companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
             leadSources, noLeadSource, firstResponseStates, noFirstResponse,
-            archived, warmth, limit, offset);
+            archived, warmth, limit, offset, tagIds);
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
@@ -148,9 +204,20 @@ public class PersonService {
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             boolean archived, WarmthFilter warmth) {
-        return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(),
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceService.getCurrentWorkspaceId(), scope,
+            () -> countPersonsWithinPersonScope(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, scope, null));
+    }
+
+    private long countPersonsWithinPersonScope(String query, List<String> companies, List<String> titles, boolean noCompany,
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, RecordVisibilityScope scope, List<Integer> tagIds) {
+        String personWorkspaceIdsJson = scope.workspaceIdsJson();
+        return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson,
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, tagIds);
     }
 
     /** How many contacts the active workspace currently holds archived. */
@@ -168,23 +235,33 @@ public class PersonService {
             boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             boolean archived, WarmthFilter warmth) {
-        if (!archived && (warmth == null || !warmth.restrictsRows()) && !hasMatchingIdFilter(
+        return getMatchingPersonIds(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, null);
+    }
+
+    /** Selects matching contacts with the same workspace tag predicate as the browser. */
+    public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
+            boolean noCompany, MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages,
+            boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, List<Integer> tagIds) {
+        if ((tagIds == null || tagIds.isEmpty()) && !archived && (warmth == null || !warmth.restrictsRows()) && !hasMatchingIdFilter(
                 query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
                 leadSources, noLeadSource, firstResponseStates, noFirstResponse)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         long total = personMapper.countPersons(
-            workspaceId, query, companies, titles, noCompany, memberScope,
+            workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, warmth);
+            firstResponseStates, noFirstResponse, archived, warmth, tagIds);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
         return personMapper.getPersonIdsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope,
+            workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, warmth, MAX_MATCHING_IDS);
+            firstResponseStates, noFirstResponse, archived, warmth, MAX_MATCHING_IDS, tagIds);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
@@ -205,7 +282,14 @@ public class PersonService {
     }
 
     public List<String> distinctCompanies() {
-        return personMapper.distinctCompanies(workspaceService.getCurrentWorkspaceId());
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceService.getCurrentWorkspaceId(), scope,
+            () -> distinctCompaniesWithinPersonScope(scope));
+    }
+
+    private List<String> distinctCompaniesWithinPersonScope(RecordVisibilityScope scope) {
+        String personWorkspaceIdsJson = scope.workspaceIdsJson();
+        return personMapper.distinctCompanies(workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson);
     }
 
     public List<String> distinctTitles() {
@@ -224,7 +308,14 @@ public class PersonService {
     }
 
     public boolean hasPersonWithoutCompany() {
-        return personMapper.hasPersonWithoutCompany(workspaceService.getCurrentWorkspaceId());
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceService.getCurrentWorkspaceId(), scope,
+            () -> hasPersonWithoutCompanyWithinPersonScope(scope));
+    }
+
+    private boolean hasPersonWithoutCompanyWithinPersonScope(RecordVisibilityScope scope) {
+        String personWorkspaceIdsJson = scope.workspaceIdsJson();
+        return personMapper.hasPersonWithoutCompany(workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson);
     }
 
     public List<FacetCount> countsByOwner() {
@@ -250,7 +341,14 @@ public class PersonService {
      */
     public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
         Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
-        return personMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), warmth);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceService.getCurrentWorkspaceId(), scope,
+            () -> countsByWarmthBandWithinPersonScope(warmth, scope));
+    }
+
+    private List<FacetCount> countsByWarmthBandWithinPersonScope(WarmthFilter warmth, RecordVisibilityScope scope) {
+        String personWorkspaceIdsJson = scope.workspaceIdsJson();
+        return personMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson, warmth);
     }
 
     /** How many active contacts sit in each first-response SLA state, for the browser's filter menu. */
@@ -262,10 +360,23 @@ public class PersonService {
      * Retrieves a workspace-scoped {@code Person} by ID, throwing if absent.
      */
     public Person getPersonById(int id) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getPersonByIdWithinVisibilityScope(id));
+    }
+
+    /** Reads only visible contact fields and masked employers for a bounded picker batch. */
+    public List<Person> getPersonReferences(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = personMapper.getPersonById(workspaceId, id);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return personMapper.getByIds(workspaceId, scope.workspaceIdsJson(), ids);
+    }
+
+    private Person getPersonByIdWithinVisibilityScope(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        Person person = personMapper.getPersonById(workspaceId, scope.workspaceIdsJson(), id);
         if (person == null) throw new ResourceNotFoundException("Contact not found");
-        Person hydrated = hydrateScopedRelationships(person, workspaceId);
+        Person hydrated = hydrateScopedRelationships(person, workspaceId, scope);
         referenceService.hydrateTasks(workspaceId, List.of(hydrated.getTasks()));
         if (hydrated.getActivities() != null && hydrated.getActivities().length > 0) {
             referenceService.hydrateActivities(workspaceId, List.of(hydrated.getActivities()));
@@ -276,6 +387,15 @@ public class PersonService {
         return hydrated;
     }
 
+    /** Returns a processable primary record without loading linked records or attached evidence. */
+    public Person getAssistantPrimaryPersonById(int id) {
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        Person person = personMapper.getAssistantPrimaryPersonById(
+                workspaceService.getCurrentWorkspaceId(), personWorkspaceIdsJson, id);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
+        return person;
+    }
+
     /**
      * Creates a new {@code Person} in the active workspace. The ID is auto-generated. When the
      * contact is created with a company, an opening employment-history row is recorded.
@@ -283,9 +403,15 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createWithinVisibilityScope(person, resolvedVisibilityScope));
+    }
+
+    private Person createWithinVisibilityScope(Person person, RecordVisibilityScope operationVisibilityScope) {
         lockCreatePermission();
         return createWithSource(
-            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, null);
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, null, operationVisibilityScope);
     }
 
     /**
@@ -298,6 +424,12 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person createReviewed(Person person, String duplicateReviewToken) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createReviewedWithinVisibilityScope(person, duplicateReviewToken, resolvedVisibilityScope));
+    }
+
+    private Person createReviewedWithinVisibilityScope(Person person, String duplicateReviewToken, RecordVisibilityScope operationVisibilityScope) {
         lockCreatePermission();
         duplicatePreflightService.requireReviewedPersonCreation(
             new PersonDuplicatePreflightRequest(
@@ -306,13 +438,38 @@ public class PersonService {
                 person.getPhone() == null ? List.of() : List.of(person.getPhone())),
             duplicateReviewToken);
         return createWithSource(
-            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, null);
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, null, operationVisibilityScope);
     }
 
     Person createReviewed(
             Person person,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createReviewedWithinVisibilityScope(person, duplicateReviewToken, augmentation, resolvedVisibilityScope));
+    }
+
+    private Person createReviewedWithinVisibilityScope(
+            Person person,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation, RecordVisibilityScope operationVisibilityScope) {
+        return createReviewedWithinVisibilityScope(person, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    Person createReviewed(
+            Person person,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation, MutationAdmission admission, RecordVisibilityScope resolvedVisibilityScope) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createReviewedWithinVisibilityScope(person, duplicateReviewToken, augmentation, admission, resolvedVisibilityScope));
+    }
+
+    private Person createReviewedWithinVisibilityScope(
+            Person person,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         duplicatePreflightService.requireReviewedPersonCreation(
             new PersonDuplicatePreflightRequest(
                 person.getName(),
@@ -321,9 +478,9 @@ public class PersonService {
             duplicateReviewToken);
         RecordCreationAugmentationService.PreparedAugmentation prepared =
             recordCreationAugmentationService.preparePerson(
-                companyIdOf(person), person.getReferrerPersonId(), augmentation);
+                companyIdOf(person), person.getReferrerPersonId(), augmentation, operationVisibilityScope);
         return createWithSource(
-            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, prepared, true);
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, prepared, true, admission, operationVisibilityScope);
     }
 
     /**
@@ -340,6 +497,15 @@ public class PersonService {
             Person person,
             String sourceRowRef,
             String duplicateReviewToken) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createFromBusinessCardWithinVisibilityScope(person, sourceRowRef, duplicateReviewToken, resolvedVisibilityScope));
+    }
+
+    private Person createFromBusinessCardWithinVisibilityScope(
+            Person person,
+            String sourceRowRef,
+            String duplicateReviewToken, RecordVisibilityScope operationVisibilityScope) {
         lockCreatePermission();
         duplicatePreflightService.requireReviewedPersonCreation(
             new PersonDuplicatePreflightRequest(
@@ -348,7 +514,7 @@ public class PersonService {
                 person.getPhone() == null ? List.of() : List.of(person.getPhone())),
             duplicateReviewToken);
         return createWithSource(
-            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef, null);
+            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef, null, operationVisibilityScope);
     }
 
     /**
@@ -379,11 +545,15 @@ public class PersonService {
         return person;
     }
 
-    /** Locks one currently processable contact for a mutation that retains a later commit fence. */
+    /**
+     * Locks one currently processable contact for a mutation that retains a later commit fence.
+     * The caller supplies the trusted organization ceiling captured before authorization locks;
+     * this helper retains the tenant lock without resolving control data again.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
-    public Person lockProcessablePersonForUpdate(int id) {
+    public Person lockProcessablePersonForUpdate(int id, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, id);
+        Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, personWorkspaceIdsJson, id);
         if (person == null
                 || person.getArchivedAt() != null
                 || person.getSuspendedAt() != null
@@ -393,11 +563,15 @@ public class PersonService {
         return person;
     }
 
-    /** Locks one currently processable contact for a linked write that does not mutate the contact. */
+    /**
+     * Locks one currently processable contact for a linked write that does not mutate the contact.
+     * The caller supplies the trusted organization ceiling captured before authorization locks;
+     * this helper retains the tenant lock without resolving control data again.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
-    public Person lockProcessablePersonForShare(int id) {
+    public Person lockProcessablePersonForShare(int id, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, id);
+        Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, personWorkspaceIdsJson, id);
         if (person == null
                 || person.getArchivedAt() != null
                 || person.getSuspendedAt() != null
@@ -417,16 +591,22 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     Person createFromBusinessCard(Person person, String sourceRowRef) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createFromBusinessCardWithinVisibilityScope(person, sourceRowRef, resolvedVisibilityScope));
+    }
+
+    private Person createFromBusinessCardWithinVisibilityScope(Person person, String sourceRowRef, RecordVisibilityScope operationVisibilityScope) {
         return createWithSource(
-            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef, null);
+            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef, null, operationVisibilityScope);
     }
 
     private Person createWithSource(
             Person person,
             IdentityAcquisitionSource source,
             String sourceRowRef,
-            RecordCreationAugmentationService.PreparedAugmentation prepared) {
-        return createWithSource(person, source, sourceRowRef, prepared, false);
+            RecordCreationAugmentationService.PreparedAugmentation prepared, RecordVisibilityScope operationVisibilityScope) {
+        return createWithSource(person, source, sourceRowRef, prepared, false, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
     }
 
     private Person createWithSource(
@@ -434,12 +614,12 @@ public class PersonService {
             IdentityAcquisitionSource source,
             String sourceRowRef,
             RecordCreationAugmentationService.PreparedAugmentation prepared,
-            boolean duplicateDecisionAlreadyLocked) {
+            boolean duplicateDecisionAlreadyLocked, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!duplicateDecisionAlreadyLocked) {
             duplicateDecisionLockService.lockCurrentOrganization();
         }
-        preserveHiddenCompanyAndValidateRequestedCompany(workspaceId, null, person);
+        preserveHiddenCompanyAndValidateRequestedCompany(workspaceId, null, person, operationVisibilityScope);
         if (source == IdentityAcquisitionSource.BUSINESS_CARD && person.getLeadSource() == null) {
             person.setLeadSource(PersonLeadSource.BUSINESS_CARD);
         }
@@ -449,6 +629,7 @@ public class PersonService {
         person.setOwnerId(authService.getCurrentUser().getId());
         person.setImageUrl(null);
         person.setCreatedAt(null);
+        admission.beforeMutation();
         personMapper.insert(person);
         identityIntakeService.recordPerson(
             workspaceId, person.getId(), person.getEmail(), person.getPhone(),
@@ -500,6 +681,25 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateWithinVisibilityScope(id, person, resolvedVisibilityScope));
+    }
+
+    private Person updateWithinVisibilityScope(int id, Person person, RecordVisibilityScope operationVisibilityScope) {
+        return updateWithinVisibilityScope(id, person, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person update(int id, Person person, MutationAdmission admission) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateWithinVisibilityScope(id, person, admission, resolvedVisibilityScope));
+    }
+
+    private Person updateWithinVisibilityScope(int id, Person person, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
@@ -507,17 +707,27 @@ public class PersonService {
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        if (person.getExpectedVersion() != null && person.getExpectedVersion() != before.getVersion()) {
+            throw new StaleRecordException(before.getVersion());
+        }
         preserveHiddenCompanyAndValidateRequestedCompany(
-            workspaceId, companyIdOf(before), person);
+            workspaceId, companyIdOf(before), person, operationVisibilityScope);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(before.getOwnerId());
         person.setImageUrl(before.getImageUrl());
-        personMapper.update(person);
+        admission.beforeMutation();
+        if (personMapper.update(person) == 0) {
+            Person current = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+            if (current == null || current.getArchivedAt() != null) {
+                throw new ResourceNotFoundException("Contact not found");
+            }
+            throw new StaleRecordException(current.getVersion());
+        }
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
         }
-        Person after = requireOwnedPerson(workspaceId, id);
+        Person after = requireOwnedPerson(workspaceId, id, operationVisibilityScope.workspaceIdsJson());
         identityIntakeService.recordPerson(
             workspaceId, id, after.getEmail(), after.getPhone(),
             IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
@@ -534,9 +744,8 @@ public class PersonService {
      * membership, if any, not from the unlocked existence check, which opens this transaction's read
      * view before any lock is held. A contact archived or deleted since that check is refused under
      * the lock, before anything is written (#1948). It runs at {@code READ_COMMITTED}, so the contact
-     * returned is a fresh read: when a concurrent change already set the same owner, this write
-     * leaves no newer row version, and a repeatable-read snapshot would show the owner from before
-     * that change (#1961).
+     * returned is a fresh read carrying the database-owned edit version. Even assigning the same
+     * owner advances that counter, so the response can seed a subsequent conditional edit.
      *
      * @param personId the contact in the current workspace
      * @param ownerId the new owner, or {@code null} to unassign
@@ -545,13 +754,22 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateOwner(int personId, Integer ownerId) {
+        return updateOwner(personId, ownerId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateOwner(int personId, Integer ownerId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireOwnedPerson(workspaceId, personId);
+        String personWorkspaceIdsJson = requireOwnedPersonScope(workspaceId, personId).workspaceIdsJson();
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        admission.beforeMutation();
         personMapper.updateOwner(workspaceId, personId, ownerId);
         auditService.record("person.updateOwner", "person", personId, before.getName(),
             "Updated owner on " + before.getName(),
@@ -560,14 +778,15 @@ public class PersonService {
         if (!Objects.equals(before.getOwnerId(), ownerId)) {
             ruleTriggers.publish(workspaceId, "person", personId, "person.owner_changed");
         }
-        return requireOwnedPerson(workspaceId, personId);
+        return requireOwnedPerson(workspaceId, personId, personWorkspaceIdsJson);
     }
 
     @Transactional
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateProfilePicture(int id, UploadSource source) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requireOwnedPerson(workspaceId, id);
+        String personWorkspaceIdsJson = requireOwnedPersonScope(workspaceId, id).workspaceIdsJson();
+        Person before = requirePerson(workspaceId, id, personWorkspaceIdsJson);
         StoredImage stored = managedObjectService.storePersonImage(workspaceId, id, source);
         int updated = personMapper.updateImageUrlIfCurrent(
             workspaceId, id, before.getImageUrl(), stored.url());
@@ -576,7 +795,7 @@ public class PersonService {
         }
         managedObjectService.deletePersonImageAfterCommit(
             before.getWorkspaceId(), id, before.getImageUrl());
-        Person after = requireOwnedPerson(workspaceId, id);
+        Person after = requireOwnedPerson(workspaceId, id, personWorkspaceIdsJson);
         auditService.record("person.updateAvatar", "person", id, before.getName(),
             "Updated profile picture for " + before.getName(),
             auditService.singleChange("imageUrl", before.getImageUrl(), after.getImageUrl()));
@@ -586,7 +805,8 @@ public class PersonService {
 
     public ManagedContent getProfilePictureContent(int id, String token) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requirePerson(workspaceId, id);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Person person = requirePerson(workspaceId, id, personWorkspaceIdsJson);
         return managedObjectService.openPersonImage(
             person.getWorkspaceId(), id, person.getImageUrl(), token);
     }
@@ -602,6 +822,7 @@ public class PersonService {
     public Person updateProvenance(
             int id, PersonLeadSource source, String detail, Integer referrerPersonId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
@@ -609,7 +830,7 @@ public class PersonService {
         String acceptedDetail = trimToNull(detail);
         validateProvenance(workspaceId, id, source, acceptedDetail, referrerPersonId);
         personMapper.updateProvenance(workspaceId, id, source, acceptedDetail, referrerPersonId);
-        Person after = requireOwnedPerson(workspaceId, id);
+        Person after = requireOwnedPerson(workspaceId, id, personWorkspaceIdsJson);
         Map<String, Object> diff = auditService.diff(before, after, PROVENANCE_AUDIT_FIELDS);
         if (diff != null) {
             auditService.record("person.provenance", "person", id, after.getName(),
@@ -671,12 +892,13 @@ public class PersonService {
             throw new BadRequestException("At least one evaluation flag must be provided");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
         }
         personMapper.updateEvaluationExclusions(workspaceId, id, riskExcluded, introExcluded);
-        Person after = requireOwnedPerson(workspaceId, id);
+        Person after = requireOwnedPerson(workspaceId, id, personWorkspaceIdsJson);
         auditService.record("person.updateEvaluation", "person", id, before.getName(),
             "Updated engine evaluation opt-outs for " + before.getName(),
             auditService.diff(before, after, EVALUATION_AUDIT_FIELDS));
@@ -684,14 +906,15 @@ public class PersonService {
     }
 
     /**
-     * Sets or clears the contact's processing and third-party-provision restrictions. Ceasing
+     * Patches supplied processing and third-party-provision flags under the owned-contact lock. Ceasing
      * third-party provision also revokes every standing cross-workspace share of the contact —
      * the restriction must stop provision already in flight, not just new grants.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
-    public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
+    public Person updateProcessingRestrictions(int id, Boolean requestedSuspended, Boolean requestedProvisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
         int orgId = locked.orgId();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
@@ -699,6 +922,8 @@ public class PersonService {
         if (before == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        boolean suspended = requestedSuspended != null ? requestedSuspended : before.getSuspendedAt() != null;
+        boolean provisionCeased = requestedProvisionCeased != null ? requestedProvisionCeased : before.getProvisionCeasedAt() != null;
         List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
             ? restrictionWorkspaceIds(orgId, workspaceId)
             : List.of();
@@ -707,12 +932,7 @@ public class PersonService {
             withdrawProviderCapture(workspaceId, id);
         }
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
-        int purgedAiOutputs = 0;
-        if (suspended || provisionCeased) {
-            aiRestrictionEpoch.bumpAll(restrictionWorkspaceIds);
-            purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
-        }
-        Person after = requireOwnedPerson(workspaceId, id);
+        Person after = requireOwnedPerson(workspaceId, id, personWorkspaceIdsJson);
         boolean wasVisible = before.getSuspendedAt() == null && before.getProvisionCeasedAt() == null;
         boolean isVisible = after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null;
         if (wasVisible != isVisible) {
@@ -725,6 +945,13 @@ public class PersonService {
         }
         if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
             providerCaptureMapper.releaseRestoredParticipantReviews(workspaceId, id);
+        }
+        int purgedAiOutputs = 0;
+        if (suspended || provisionCeased) {
+            aiAgentPrivacyService.invalidateAssistantOrganization(
+                    orgId, restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
+            var purgeScope = recordVisibilityScopeControlAccess.getFreshForWorkspace(workspaceId);
+            purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, purgeScope.workspaceIdsJson(), id);
         }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
         if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {
@@ -767,10 +994,10 @@ public class PersonService {
      * newly requested company must be visible (and therefore not archived).
      */
     private void preserveHiddenCompanyAndValidateRequestedCompany(
-            int workspaceId, Integer currentCompanyId, Person person) {
+            int workspaceId, Integer currentCompanyId, Person person, RecordVisibilityScope operationVisibilityScope) {
         Integer requestedCompanyId = companyIdOf(person);
         if (requestedCompanyId == null && currentCompanyId != null
-                && !companyMapper.exists(workspaceId, currentCompanyId)) {
+                && !companyMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), currentCompanyId)) {
             Company retainedCompany = new Company();
             retainedCompany.setId(currentCompanyId);
             person.setCompany(retainedCompany);
@@ -779,7 +1006,7 @@ public class PersonService {
         if (requestedCompanyId == null || Objects.equals(requestedCompanyId, currentCompanyId)) {
             return;
         }
-        if (!companyMapper.exists(workspaceId, requestedCompanyId)) {
+        if (!companyMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), requestedCompanyId)) {
             throw new BadRequestException("Company not found");
         }
     }
@@ -789,7 +1016,8 @@ public class PersonService {
      * is not visible to the active workspace.
      */
     public List<PersonEmployment> getEmploymentHistory(int id) {
-        requirePerson(workspaceService.getCurrentWorkspaceId(), id);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        requirePerson(workspaceService.getCurrentWorkspaceId(), id, personWorkspaceIdsJson);
         return employmentService.getHistory(id);
     }
 
@@ -807,17 +1035,18 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_DELETE)
     public Person archive(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
-        Person before = requireOwnedPerson(workspaceId, id);
+        Person before = requireOwnedPerson(workspaceId, id, personWorkspaceIdsJson);
         if (personMapper.archive(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Contact not found");
         }
         identityIntakeService.recordPersonVisibility(workspaceId, id);
         withdrawProviderCapture(workspaceId, id);
-        Person after = requireArchivedPerson(workspaceId, id);
+        Person after = requireArchivedPerson(workspaceId, id, personWorkspaceIdsJson);
         auditService.record("person.archive", "person", id, before.getName(),
             "Archived person " + before.getName(),
             auditService.singleChange("archivedAt", null, after.getArchivedAt()));
@@ -837,15 +1066,16 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_DELETE)
     public Person restore(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
-        Person before = requireArchivedPerson(workspaceId, id);
+        Person before = requireArchivedPerson(workspaceId, id, personWorkspaceIdsJson);
         if (personMapper.restore(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Contact not found");
         }
-        Person after = requireOwnedPerson(workspaceId, id);
+        Person after = requireOwnedPerson(workspaceId, id, personWorkspaceIdsJson);
         identityIntakeService.recordPerson(
             workspaceId, id, after.getEmail(), after.getPhone(),
             IdentityAcquisitionSource.BACKFILL, null);
@@ -859,8 +1089,8 @@ public class PersonService {
         return after;
     }
 
-    private Person requireArchivedPerson(int workspaceId, int id) {
-        Person person = personMapper.getOwnedArchivedPersonById(workspaceId, id);
+    private Person requireArchivedPerson(int workspaceId, int id, String personWorkspaceIdsJson) {
+        Person person = personMapper.getOwnedArchivedPersonById(workspaceId, personWorkspaceIdsJson, id);
         if (person == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
@@ -877,7 +1107,8 @@ public class PersonService {
      * Retrieves the tags associated with a person in the active workspace.
      */
     public List<Tag> getTagsByPersonId(int personId) {
-        requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        requirePerson(workspaceService.getCurrentWorkspaceId(), personId, personWorkspaceIdsJson);
         return tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
     }
 
@@ -887,10 +1118,18 @@ public class PersonService {
      */
     @RequirePermission(Permission.PERSON_UPDATE)
     public boolean addTag(int personId, int tagId) {
+        return addTag(personId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public boolean addTag(int personId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requireOwnedPerson(workspaceId, personId);
+        String personWorkspaceIdsJson = requireOwnedPersonScope(workspaceId, personId).workspaceIdsJson();
+        Person person = requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found");
+        admission.beforeMutation();
         if (personMapper.addTag(workspaceId, personId, tagId) != 1) {
             return false;
         }
@@ -908,9 +1147,17 @@ public class PersonService {
      */
     @RequirePermission(Permission.PERSON_UPDATE)
     public boolean removeTag(int personId, int tagId) {
+        return removeTag(personId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public boolean removeTag(int personId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requireOwnedPerson(workspaceId, personId);
+        String personWorkspaceIdsJson = requireOwnedPersonScope(workspaceId, personId).workspaceIdsJson();
+        Person person = requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        admission.beforeMutation();
         if (personMapper.removeTag(workspaceId, personId, tagId) != 1) {
             return false;
         }
@@ -926,7 +1173,8 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public void removeTagIfUnchanged(int personId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requireOwnedPerson(workspaceId, personId);
+        String personWorkspaceIdsJson = requireOwnedPersonScope(workspaceId, personId).workspaceIdsJson();
+        Person person = requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (personMapper.removeTag(workspaceId, personId, tagId) != 1) {
             throw new ConflictException("Person tag association changed and cannot be removed");
@@ -968,10 +1216,17 @@ public class PersonService {
      * Retrieves the deals associated with a person in the active workspace.
      */
     public List<Deal> getDealsByPersonId(int personId) {
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        String personWorkspaceIdsJson = scope.workspaceIdsJson();
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), scope, () -> getDealsByPersonIdWithinDealVisibility(personId, personWorkspaceIdsJson));
+    }
+
+    private List<Deal> getDealsByPersonIdWithinDealVisibility(int personId, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         return referenceService.hydrateDeals(
-            workspaceId, dealMapper.getDealsByPersonId(workspaceId, personId));
+            workspaceId, dealMapper.getDealsByPersonId(workspaceId, personWorkspaceIdsJson, personId));
     }
 
     /**
@@ -979,9 +1234,13 @@ public class PersonService {
      */
     public List<Activity> getActivitiesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
-        return referenceService.hydrateActivities(workspaceId,
-            activityMapper.getActivitiesByPersonId(workspaceId, personId));
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope, () -> {
+            String personWorkspaceIdsJson = scope.workspaceIdsJson();
+            requirePerson(workspaceId, personId, personWorkspaceIdsJson);
+            return referenceService.hydrateActivities(workspaceId,
+                activityMapper.getActivitiesByPersonId(workspaceId, personId));
+        });
     }
 
     /**
@@ -998,9 +1257,13 @@ public class PersonService {
 
     public List<Note> getNotesByPersonId(int personId, int limit, int offset, NotePageCursor before) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
-        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByPersonId(
-            workspaceId, personId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope, () -> {
+            String personWorkspaceIdsJson = scope.workspaceIdsJson();
+            requirePerson(workspaceId, personId, personWorkspaceIdsJson);
+            return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByPersonId(
+                workspaceId, personId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
+        });
     }
 
     /**
@@ -1008,8 +1271,12 @@ public class PersonService {
      */
     public List<Task> getTasksByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
-        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByPersonId(workspaceId, personId));
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope, () -> {
+            String personWorkspaceIdsJson = scope.workspaceIdsJson();
+            requirePerson(workspaceId, personId, personWorkspaceIdsJson);
+            return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByPersonId(workspaceId, personId));
+        });
     }
 
     /**
@@ -1017,7 +1284,8 @@ public class PersonService {
      */
     public List<CustomFieldEntryDto> getCustomFields(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         return customFieldValueService.getForEntity("person", personId);
     }
 
@@ -1028,7 +1296,8 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public List<CustomFieldEntryDto> updateCustomFields(int personId, Map<Integer, Object> values) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         return customFieldValueService.applyValues("person", personId, values);
     }
 
@@ -1039,7 +1308,8 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public List<CustomFieldEntryDto> updateCustomField(int personId, int definitionId, Object value) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         return customFieldValueService.applyValue("person", personId, definitionId, value);
     }
 
@@ -1050,22 +1320,30 @@ public class PersonService {
         return customFieldValueService.getForEntities("person", personIds);
     }
 
-    private Person requirePerson(int workspaceId, int personId) {
-        Person person = personMapper.getPersonById(workspaceId, personId);
+    private Person requirePerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
         if (person == null) throw new ResourceNotFoundException("Contact not found");
         return person;
     }
 
-    private Person requireOwnedPerson(int workspaceId, int personId) {
+    /** Keeps the owned-record refusal ahead of the operation's first control-scope read. */
+    private RecordVisibilityScope requireOwnedPersonScope(int workspaceId, int personId) {
         if (!personMapper.existsOwned(workspaceId, personId)) {
             throw new ResourceNotFoundException("Contact not found");
         }
-        return requirePerson(workspaceId, personId);
+        return recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
     }
 
-    private Person hydrateScopedRelationships(Person person, int workspaceId) {
+    private Person requireOwnedPerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
+        if (!personMapper.existsOwned(workspaceId, personId)) {
+            throw new ResourceNotFoundException("Contact not found");
+        }
+        return requirePerson(workspaceId, personId, personWorkspaceIdsJson);
+    }
+
+    private Person hydrateScopedRelationships(Person person, int workspaceId, RecordVisibilityScope scope) {
         person.setDeals(referenceService.hydrateDeals(
-            workspaceId, dealMapper.getDealsByPersonId(workspaceId, person.getId())).toArray(Deal[]::new));
+            workspaceId, dealMapper.getDealsByPersonId(workspaceId, scope.workspaceIdsJson(), person.getId())).toArray(Deal[]::new));
         person.setTags(tagMapper.getTagsByPersonId(workspaceId, person.getId()).toArray(Tag[]::new));
         person.setActivities(activityMapper.getActivitiesByPersonId(workspaceId, person.getId()).toArray(Activity[]::new));
         person.setTasks(taskMapper.getTasksByPersonId(workspaceId, person.getId()).toArray(Task[]::new));

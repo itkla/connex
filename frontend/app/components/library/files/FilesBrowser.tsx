@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import {
     ArrowDownTrayIcon,
@@ -42,6 +42,7 @@ import {
     getTags,
 } from '@/app/lib/api';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { RecordListState } from '@/app/components/records/RecordListState';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatFileSize } from '@/app/lib/utils';
 import type { Attachment, AttachmentFacets, AttachmentsPageParams, PageParams, Tag } from '@/app/lib/types';
@@ -113,6 +114,7 @@ function normalizeSort(v: string | null): SortKey {
 }
 
 export default function FilesBrowser() {
+    const timeZone = useTimeZone();
     const t = useTranslations('LibraryFiles');
     const tf = useTranslations('Filters');
     const locale = useLocale();
@@ -147,7 +149,7 @@ export default function FilesBrowser() {
         return p as Omit<AttachmentsPageParams, keyof PageParams>;
     }, [sort, source, kind, tagIds, orphaned]);
 
-    const { items, total, loading, page, setPage, size, setSize, query, setQuery, reload } = useServerRecords<
+    const { items, total, loading, error, page, setPage, size, setSize, query, setQuery, reload } = useServerRecords<
         Attachment,
         AttachmentsPageParams
     >(getAttachmentsPage, extraParams, {
@@ -239,6 +241,8 @@ export default function FilesBrowser() {
     );
     const filtersActive =
         query.trim() !== '' || kind !== 'all' || source !== 'all' || tagIds.length > 0 || orphaned;
+
+    const showEmptyLibrary = isEmptyLibrary && !loading && !error && items.length === 0 && !filtersActive;
 
     const clearFilters = () => {
         setQuery('');
@@ -355,7 +359,7 @@ export default function FilesBrowser() {
             {
                 key: 'modified',
                 label: t('detailAdded'),
-                render: (a) => <span className="text-muted-foreground">{formatDate(a.createdAt, locale)}</span>,
+                render: (a) => <span className="text-muted-foreground">{formatDate(a.createdAt, locale, timeZone)}</span>,
                 widthClass: 'w-32',
             },
             {
@@ -390,7 +394,7 @@ export default function FilesBrowser() {
                 widthClass: 'w-28',
             },
         ],
-        [t, locale],
+        [t, locale, timeZone],
     );
 
     const selectionActions = (
@@ -475,11 +479,8 @@ export default function FilesBrowser() {
                 </div>
             </Rise>
 
-            {isEmptyLibrary ? (
-                <Rise delay={0.06}>{libraryEmptyState}</Rise>
-            ) : (
-                <>
-                    <Rise delay={0.06}>
+            {!showEmptyLibrary ? (
+                <Rise delay={0.06}>
                     <FilterBar
                         reduce={reduce}
                         chips={chips}
@@ -566,50 +567,53 @@ export default function FilesBrowser() {
                             </FilterTrigger>
                         )}
                     </FilterBar>
-                    </Rise>
+                </Rise>
+            ) : null}
 
-                    <Rise delay={0.12}>
-                    <RecordsRenderView<Attachment>
-                        data={items}
-                        columns={columns}
-                        renderCard={(item) => (
-                            <FileCard
-                                attachment={item}
-                                kind={classifyKind(item.contentType, item.fileName)}
-                                locale={locale}
-                                reduce={reduce}
-                                t={t}
-                                selected={selectedIds.has(item.id)}
-                                selectionActive={selectedIds.size > 0}
-                                onToggleSelect={() => toggleSelect(item.id)}
-                                onOpen={() => setDetailFile(item)}
-                                onDelete={() => setDeleting(item)}
-                            />
-                        )}
-                        renderAvatar={(item) => (
-                            <FileGlyph attachment={item} kind={classifyKind(item.contentType, item.fileName)} />
-                        )}
-                        onRowClick={(item) => setDetailFile(item)}
-                        displayMode={view === 'list' ? 'table' : 'grid'}
-                        selectedIds={selectedIds}
-                        onSelectedIdsChange={(ids) => setSelectedIds(ids as Set<number>)}
-                        entityLabel={t('entityLabel')}
-                        selectionActions={selectionActions}
-                        loading={loading}
-                        emptyState={libraryEmptyState}
-                        filtersActive={filtersActive}
-                        onClearFilters={clearFilters}
-                        pagination={{
-                            page,
-                            pageSize: size,
-                            total,
-                            onPageChange: setPage,
-                            onPageSizeChange: setSize,
-                        }}
-                    />
-                    </Rise>
-                </>
-            )}
+            <Rise delay={showEmptyLibrary ? 0.06 : 0.12}>
+                <RecordListState error={error} loading={loading} hasRecords={items.length > 0} onRetry={reload}>
+                    {showEmptyLibrary ? libraryEmptyState : (
+                        <RecordsRenderView<Attachment>
+                            data={items}
+                            columns={columns}
+                            renderCard={(item) => (
+                                <FileCard
+                                    attachment={item}
+                                    kind={classifyKind(item.contentType, item.fileName)}
+                                    locale={locale}
+                                    reduce={reduce}
+                                    t={t}
+                                    selected={selectedIds.has(item.id)}
+                                    selectionActive={selectedIds.size > 0}
+                                    onToggleSelect={() => toggleSelect(item.id)}
+                                    onOpen={() => setDetailFile(item)}
+                                    onDelete={() => setDeleting(item)}
+                                />
+                            )}
+                            renderAvatar={(item) => (
+                                <FileGlyph attachment={item} kind={classifyKind(item.contentType, item.fileName)} />
+                            )}
+                            onRowClick={(item) => setDetailFile(item)}
+                            displayMode={view === 'list' ? 'table' : 'grid'}
+                            selectedIds={selectedIds}
+                            onSelectedIdsChange={(ids) => setSelectedIds(ids as Set<number>)}
+                            entityLabel={t('entityLabel')}
+                            selectionActions={selectionActions}
+                            loading={loading}
+                            emptyState={libraryEmptyState}
+                            filtersActive={filtersActive}
+                            onClearFilters={clearFilters}
+                            pagination={{
+                                page,
+                                pageSize: size,
+                                total,
+                                onPageChange: setPage,
+                                onPageSizeChange: setSize,
+                            }}
+                        />
+                    )}
+                </RecordListState>
+            </Rise>
 
             <DeleteRecordDialog
                 open={!!deleting}
@@ -696,6 +700,7 @@ function FileCard({
     onOpen: () => void;
     onDelete: () => void;
 }) {
+    const timeZone = useTimeZone();
     const Icon = KIND_ICON[kind];
     const isImage = kind === 'image';
 
@@ -729,7 +734,7 @@ function FileCard({
                     type="button"
                     onClick={onOpen}
                     title={attachment.fileName}
-                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-sm font-medium text-foreground transition-colors hover:text-brand"
+                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                 >
                     {attachment.fileName}
                 </button>
@@ -765,7 +770,7 @@ function FileCard({
 
             <div className="mt-auto flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
                 <OwnerChip attachment={attachment} t={t} className="min-w-0 flex-1" />
-                <span className="shrink-0">{formatDate(attachment.createdAt, locale)}</span>
+                <span className="shrink-0">{formatDate(attachment.createdAt, locale, timeZone)}</span>
             </div>
         </motion.div>
     );

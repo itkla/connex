@@ -22,7 +22,7 @@ public record WorkflowRunSummaryDto(
     boolean stepDetailAvailable
 ) {
 
-    /** Immutable version evidence for a canonical run. */
+    /** Immutable publication evidence captured by a run. */
     @JsonInclude(Include.ALWAYS)
     public record Version(
         long id,
@@ -53,6 +53,12 @@ public record WorkflowRunSummaryDto(
     public record Failure(
         String nodeId,
         String code,
-        String message
-    ) { }
+        String message,
+        Integer actionNumber,
+        String actionType
+    ) {
+        public Failure(String nodeId, String code, String message) {
+            this(nodeId, code, message, null, null);
+        }
+    }
 }

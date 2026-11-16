@@ -58,6 +58,11 @@ class TenantScopeArchTest {
     }
 
     /**
+     * Catalog-pinned account departure discovery (#1953) also spans workspaces: reference discovery
+     * binds the departing user, while active/open routing facts stay internal to the sole-named
+     * approver guard and never become response data. Subsequent cleanup uses exact workspace, row,
+     * and user keys without adding aggregate locks.
+     *
      * Scoped-mapper selects that legitimately do not bind {@code #{workspaceId}}.
      * Each is provably tenant-safe without it: the notification inbox is
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 —
@@ -77,9 +82,19 @@ class TenantScopeArchTest {
      * then read, locked, and mutated under a bound {@code #{workspaceId}}. The lease sweep carries
      * two of them because its reap must visit workspaces its settlement page never returns — a
      * workspace whose runs all settle cleanly holds no expired lease and still accumulates
-     * tombstones.
+     * tombstones. Mission account-erasure discovery likewise returns only workspace IDs for the
+     * exact departing owner in the pinned catalog; each subsequent purge is workspace-bound.
+     * Account erasure's session mutex read binds the departing user across all provenance sources
+     * and returns only session IDs from that catalog before any child provenance is cleared.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
+        "ooo.klae.connex.backend.mappers.AssignmentSweepMapper.findWatermark",
+        "ooo.klae.connex.backend.mappers.AssignmentSweepMapper.findReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.GoalMapper.findDepartureReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.ApprovalPolicyMapper.findActiveStepsForDepartureAnywhere",
+        "ooo.klae.connex.backend.mappers.ApprovalPolicyMapper.findDepartureReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.DocumentApprovalMapper.findOpenStepsForDepartureAnywhere",
+        "ooo.klae.connex.backend.mappers.DocumentApprovalMapper.findDepartureReferencesAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countsByCategory",
@@ -102,6 +117,8 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.AiRunLeaseMapper.workspaceIdsWithExpiredLeases",
         "ooo.klae.connex.backend.mappers.AiRunLeaseMapper.workspaceIdsWithReapableTombstones",
         "ooo.klae.connex.backend.mappers.AiChatMapper.workspaceIdsWithUnleasedStaleTurns",
+        "ooo.klae.connex.backend.mappers.AiChatMapper.lockSessionsForUserErasureAnywhere",
+        "ooo.klae.connex.backend.mappers.AiAgentRunMapper.ownerWorkspaceIdsAnywhere",
         "ooo.klae.connex.backend.mappers.TeamMapper.findReferencesForUserAnywhere",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",
         "ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.workspaceIdsWithDueTasks",
@@ -155,6 +172,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearMessageAuthorsAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearToolCallExecutorsAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearTurnRequestersAnywhere",
+        "ooo.klae.connex.backend.mappers.AiChatMapper.clearProposalSetRequestersAnywhere",
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.clearAuthorsAnywhere",
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.clearDeletersAnywhere",
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.clearThreadCreatorsAnywhere",
@@ -265,8 +283,9 @@ class TenantScopeArchTest {
 
             Map<String, Element> fragments = sqlFragments(doc);
             List<Element> selects = elementsByTag(doc, "select");
-            assertFalse(selects.isEmpty(),
-                "No <select> statements parsed from " + resource + " — the XML scan is misconfigured.");
+            assertTrue(!selects.isEmpty() || List.of("insert", "update", "delete").stream()
+                    .anyMatch(tag -> !elementsByTag(doc, tag).isEmpty()),
+                "No SQL statements parsed from " + resource + " — the XML scan is misconfigured.");
 
             for (Element select : selects) {
                 scanned++;

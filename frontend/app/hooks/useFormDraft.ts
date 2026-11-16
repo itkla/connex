@@ -31,12 +31,14 @@ type PendingDraft<T> = {
     data: T;
 };
 
-/** Persists a composer draft, and clears it, both scoped to one stable storage key. */
+/** Persists and clears a composer's draft while retaining its original user and workspace. */
 export type FormDraftControls<T> = {
     /** Schedules a debounced write of the current snapshot; call while the form holds unsaved edits. */
     persist: (snapshot: T) => void;
     /** Removes this composer's owned draft and cancels its pending write without clearing a newer owner. */
     clear: () => void;
+    /** After creation succeeds, clears the owned draft and uses the saved entity's scope for later edits. */
+    rekeyScope: (scope: string) => void;
 };
 
 /**
@@ -45,15 +47,20 @@ export type FormDraftControls<T> = {
  * workspace transitions preserve the origin-scoped snapshot; explicit clear cancels it before a successful
  * submit or confirmed discard can unmount the wrapper. The hook itself never decides *when* to persist or
  * clear, so a pristine open/close leaves any existing draft untouched for the resume banner to surface.
+ * An editor that creates its entity in place can explicitly rekey its scope after the save succeeds;
+ * changes to the caller's key parts alone never move a draft to another user or workspace.
  */
 export function useFormDraft<T>({ keyParts, version, initialKeyGeneration }: UseFormDraftOptions): FormDraftControls<T> {
     const { userId, workspaceId, formType, scope } = keyParts;
     const [origin] = useState(() => ({
+        userId,
+        workspaceId,
         key: draftKey({ userId, workspaceId, formType, scope }),
         version,
         scope,
         formType,
     }));
+    const originRef = useRef(origin);
 
     const timerRef = useRef<number | null>(null);
     const pendingRef = useRef<PendingDraft<T> | null>(null);
@@ -86,6 +93,7 @@ export function useFormDraft<T>({ keyParts, version, initialKeyGeneration }: Use
 
     const persist = useCallback(
         (snapshot: T) => {
+            const origin = originRef.current;
             const keyGeneration = advanceDraftKeyGeneration(origin.key);
             ownedKeyGenerationRef.current = keyGeneration;
             pendingRef.current = {
@@ -111,15 +119,22 @@ export function useFormDraft<T>({ keyParts, version, initialKeyGeneration }: Use
                 }
             }, DRAFT_DEBOUNCE_MS);
         },
-        [origin],
+        [],
     );
 
     const clear = useCallback(() => {
         cancel();
         const ownedKeyGeneration = ownedKeyGenerationRef.current;
         ownedKeyGenerationRef.current = null;
-        if (ownedKeyGeneration !== null) clearDraftIfGeneration(origin.key, ownedKeyGeneration);
-    }, [cancel, origin]);
+        if (ownedKeyGeneration !== null) clearDraftIfGeneration(originRef.current.key, ownedKeyGeneration);
+    }, [cancel]);
+
+    const rekeyScope = useCallback((scope: string) => {
+        const origin = originRef.current;
+        if (scope === origin.scope) return;
+        clear();
+        originRef.current = { ...origin, scope, key: draftKey({ ...origin, scope }) };
+    }, [clear]);
 
     useEffect(() => {
         const onPageHide = () => flush();
@@ -129,5 +144,5 @@ export function useFormDraft<T>({ keyParts, version, initialKeyGeneration }: Use
 
     useEffect(() => () => flush(), [flush]);
 
-    return { persist, clear };
+    return { persist, clear, rekeyScope };
 }

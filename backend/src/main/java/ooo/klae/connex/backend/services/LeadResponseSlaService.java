@@ -74,9 +74,20 @@ public class LeadResponseSlaService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public boolean startFirstResponseClock(int personId, Integer dueInHours) {
+        return startFirstResponseClock(personId, dueInHours, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public boolean startFirstResponseClock(int personId, Integer dueInHours, MutationAdmission admission) {
         int hours = requireDueInHours(dueInHours);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireAssessablePerson(workspaceId, personId);
+        for (long passId : passMapper.listOpenPassIds(workspaceId, personId).stream().sorted().toList()) {
+            passMapper.getOpenPassByIdForUpdate(workspaceId, personId, passId);
+        }
+        admission.beforeMutation();
         LocalDateTime startedAt = now();
         LocalDateTime dueAt = startedAt.plusHours(hours);
         if (personMapper.startFirstResponseClock(workspaceId, personId, startedAt, dueAt) == 0) {
@@ -197,16 +208,6 @@ public class LeadResponseSlaService {
         return person;
     }
 
-    private Person requireOwnedPerson(int workspaceId, int personId) {
-        Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null || person.getWorkspaceId() != workspaceId
-                || person.getArchivedAt() != null
-                || person.getSuspendedAt() != null
-                || person.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Contact not found");
-        }
-        return person;
-    }
 
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(Instant.now(clock), ZoneOffset.UTC);

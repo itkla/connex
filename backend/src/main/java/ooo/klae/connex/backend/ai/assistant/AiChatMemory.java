@@ -25,7 +25,14 @@ public record AiChatMemory(
         int inputTokens,
         int outputTokens,
         boolean nativeTools,
-        int parallelToolCalls) {
+        int parallelToolCalls,
+        AiAssistantToolResult missionContext) {
+
+    /** Creates memory without mission continuation data. */
+    public AiChatMemory(List<AiChatMessage> history, AiAssistantPromptBudget budget,
+            int inputTokens, int outputTokens, boolean nativeTools, int parallelToolCalls) {
+        this(history, budget, inputTokens, outputTokens, nativeTools, parallelToolCalls, null);
+    }
 
     /** Creates memory for the unchanged JSON-ReAct provider path. */
     public AiChatMemory(

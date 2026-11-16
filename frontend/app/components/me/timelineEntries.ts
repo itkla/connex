@@ -57,7 +57,7 @@ export const TIMELINE_CAMPAIGN_TOUCH_LIMIT = 50;
 export function commentsFromThreads(threads: RecordCommentThread[]): RecordComment[] {
     return threads
         .flatMap((thread) => thread.comments)
-        .filter((comment) => comment.deletedAt === null && comment.content !== null);
+        .filter((comment) => comment.deletedAt == null && comment.content != null);
 }
 
 /** The id of whoever the entry is attributed to, for the row's avatar. */

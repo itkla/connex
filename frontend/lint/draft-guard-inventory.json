@@ -72,6 +72,11 @@
             "guard": "own"
         },
         {
+            "file": "app/components/records/deals/DealStakeholders.tsx",
+            "surface": "Deal stakeholder editor",
+            "guard": "app/components/records/quick-edit/QuickEditSheetShell.tsx"
+        },
+        {
             "file": "app/components/records/deals/EditDealSheet.tsx",
             "surface": "Deal edit drawer",
             "guard": "app/components/records/deals/QuickEditDealSheet.tsx"

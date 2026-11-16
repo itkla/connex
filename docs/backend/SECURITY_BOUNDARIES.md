@@ -15,6 +15,12 @@ This document is the entry point for backend work that crosses authentication, a
 
 All authentication methods continue through `AuthService.establishAuthenticatedSession` so the servlet session is rotated and the client receives the non-authorizing opaque request identity exposed by `/api/auth/csrf`.
 
+[Privileged MFA](../PRIVILEGED_MFA.md#confinement-recheck-during-locked-workspace-authorization)
+defines account-wide filter confinement, the workspace-local recheck at locked authorization,
+shared exemptions, browser/PAT refusal contracts, deferred audit evidence and the precise
+in-flight residuals. Preserve the same-connection, root-first order in
+[LOCKING.md](LOCKING.md#servlet-filter-confinement-recheck-g1g5).
+
 - Never expose a principal id or servlet session id for client request correlation.
 - Preserve CSRF and secure-cookie posture outside the documented local-development profile.
 - Editing organization security/provider configuration remains organization-admin and recent-authentication/step-up gated where the existing domain requires it.
@@ -27,6 +33,115 @@ All authentication methods continue through `AuthService.establishAuthenticatedS
 Every tenant-owned query uses server-resolved tenant/workspace scope; every endpoint follows the owning domain's RBAC pattern. Sharing/permission changes require explicit other-tenant and unauthorized verification.
 
 Workspace teams are tenant-plane configuration. Reads require active workspace membership; every mutation requires the grantable `TEAM_MANAGE` permission and revalidates it from locked authorization rows before locking or changing a team. Team seats may name only active members of the same workspace. Path-addressed membership removal performs preliminary authorization against the path workspace before resolving its placement, then pins that workspace's catalog and tenant identity before opening the transaction, regardless of the active-header workspace. Active removal, pending-invitation decline, leave, fresh re-invitation, and account erasure delete team seats and clear manager references in the routed catalog without treating those configuration references as authored content.
+
+### Export authority
+
+`EXPORT_DATA` is additive to each domain's existing authority, visibility, privacy exclusions,
+and recent-passkey requirements. Workspace built-in owner/admin/member roles use independent
+export flags on their workspace; custom roles use their explicit permission rows. Organization
+owner/admin exports use organization export flags, independently of any active workspace.
+Only un-overlaid built-in workspace administrators/owners can change built-in export policy,
+under existing member-management locks and recent authentication. Organization policy mutations
+retain account → organization → membership lock order. Policy administration remains available
+after self-revocation, while custom-role grants keep their existing permission ceiling. Enabling
+owner exports must also leave an active, unreserved owner able to restore the proposed owner
+bundle. The policy change refuses under owner/overlay locks instead of silently adding export
+grants to custom roles; restore a built-in owner before retrying.
+
+| Export operation | Additional retained authority |
+| --- | --- |
+| GET `/api/exports/persons`, `/companies`, `/products`, `/deals`; POST `/api/exports/deals/segment` | Active workspace membership, scoped filters/privacy exclusions; existing step-up |
+| POST `/api/reports/{id}/export.csv`, `/snapshots/{snapshotId}/export.csv`, `/export-completion` | `REPORT_READ`, report visibility and underlying domain permissions, step-up |
+| POST and PUT `/api/reports/{id}/schedule` | Workspace `EXPORT_DATA` plus `REPORT_UPDATE`, report/domain read permissions, active eligible recipients, existing privileged-account step-up; locked grants are rechecked before saving |
+| Unattended report delivery | The saved run-as member's current workspace `EXPORT_DATA` and report/domain read permissions, checked before generation and again before email enqueueing; recipients keep their report/domain read requirements |
+| GET `/api/audit/export` | `AUDIT_READ`, bounded authorized scope, step-up |
+| GET `/api/orgs/{orgId}/audit/export` | Organization admin/owner, bounded organization-only audit scope, step-up |
+| POST and GET `/api/orgs/{orgId}/workspaces/{workspaceId}/export` | Organization admin/owner, target-workspace lifecycle, recent authentication at grant issuance, session-bound one-use grant at redemption |
+| POST `/api/campaigns/{id}/exports` | `CAMPAIGN_MANAGE`, `CONSENT_MANAGE`, consent/visibility/provider fences and step-up; status and reconciliation remain separately authorized |
+| POST `/api/orgs/{orgId}/support-bundle` | Organization admin/owner and recent authentication; entity-filtered workspace events also require that workspace's `AUDIT_READ` and `EXPORT_DATA` |
+
+Workspace ZIP issuance and redemption revalidate organization export policy under the existing
+organization root lock before grant/lease writes. Locked workspace authorization reads current
+policy with `FOR SHARE`; nonlocking snapshot authorization retains its consistent-read semantics.
+Ordinary attachments/document artifacts and statutory data-subject disclosure retain their own
+access/privacy contracts; they are not bulk-export endpoints. Existing export completion audit
+semantics and passkey step-up are unchanged. The current release-wide rollback floor is control V250;
+retain the [V247 invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247),
+then follow the [V248 export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
+
+Schedule reads and deletion retain their existing report permissions; withdrawing export access
+does not prevent stopping a saved delivery channel. A withdrawn run-as export grant skips the
+occurrence, advances its next run, records the reason in the audit log, and records the
+`export_permission_withdrawn` job phase. The enqueue-time check also catches withdrawal during
+snapshot generation. It does not cancel mail already queued after a successful final check.
+
+### Workspace invitation disclosure
+
+Both email invitation creation and the compatibility member-add route return the same token
+invitation for every address. Creation does not resolve recipient profiles to choose its response. Before acceptance,
+administrators see the addressed email, requested role, invitation status, expiry and revocation
+control; account ids, names, usernames, avatars and verification/account state are withheld.
+Member rosters, organization layout rosters, member search (including global user search) and
+reference hydration expose only active memberships. Profile-returning role mutations also require an active target.
+Authored reference labels for historical pending grants remain internal to mention persistence and
+assistant masking. Reader hydration and write-response reference projections filter pending targets;
+masking provenance never resolves or returns the recipient's account profile.
+
+Control V247 gives historical pending-membership grants a fixed deadline thirty days after its
+successful installation. NULL deadlines use that UTC cutover deadline until bounded runtime pages
+persist it. Recipient pending lists, invitation inbox listing/counts/direct lookup and the final
+activation claim require a future effective deadline; missing successful migration history fails
+closed. See [the cutover and backfill contract](../UPGRADING.md#historical-pending-invitation-expiry-control-v247). New internal pending grants expire after fourteen days. Administrators manage
+them as address-only invitations using opaque membership-generation references and see the actual
+deadline, including after expiry so they can resend. Revocation rechecks pending status and the same generation under membership-removal locks,
+uses a generic audit description and cannot remove a membership that has since accepted. A historical
+owner-role grant retains the owner-only revocation check. Resending
+supersedes the historical pending grant in the token-creation transaction. These historical grants
+retain their historical format without an inviter label; the new contract prevents new account probes
+but does not erase information disclosed before this change or conceal the historical invitation format.
+Invite-link redemption and removed-member rejoin policy are unchanged.
+
+Invitation creation also reports `emailDelivery`, uniformly for every addressed email: `ACCEPTED`
+means the SMTP server accepted submission, not confirmed inbox delivery; `SKIPPED` means no usable
+sender was available; `FAILED` means preparation or submission failed. None of these outcomes
+resolves a recipient's Connex account. The command refuses an enclosing transaction before
+invitation writes, then submits mail synchronously after its own transaction fully releases its
+resources. There is no memory-only dispatch queue; every completed creation request reports the submission
+outcome. The creator can share
+the returned link or explicitly replace the invitation after a failed submission. The mail service
+routes the target workspace, and SMTP starts after sender-resolution locks are released.
+
+Authentication return destinations use the same strict relative-path contract on the frontend
+and backend. Starts carrying `redirect` require exactly `Sec-Fetch-Site: same-origin`; absent,
+`none`, same-site and cross-site metadata are refused before registration/configuration reads.
+Only enabled OAuth registrations and enabled SAML ceremonies can admit a destination. A disabled
+SAML start cannot mutate an OAuth attempt, including on a social-only deployment.
+All attempt allocations also refuse cross-site subresource requests: `cross-site` metadata
+requires both `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. This guard covers every
+supported start method, SAML's query-form start, and repository allocation from other paths.
+Ordinary starts without destinations retain top-level cross-site and headerless-client support.
+
+Full authorization requests and their destinations are saved together in one immutable session
+map keyed by OAuth state or SAML RelayState. SAML records retain the AuthnRequest id for
+framework response correlation. Matching also checks the callback's registration. Unknown,
+duplicate or mismatched callback state does not remove another attempt or produce navigation.
+Only matching repository removal publishes request-local navigation before session replacement;
+success, linking and failure handlers never read a last-destination session slot.
+
+Attempts expire after ten minutes. Each save prunes expired entries, refuses duplicate live
+identities, evicts the earliest-expiring entry when full, and persists a fresh immutable map with
+at most four entries. Capacity never refuses a fresh start. Each removal also copies, prunes and
+replaces the map. No request can persist more than four entries; this bound does not rely on
+locking per-request Spring Session wrappers. Concurrent detached snapshots may drop another
+in-flight entry; its callback fails closed, and no destination or authorization is rebound.
+Evicted attempts fail closed in the same way. Legacy per-attempt attributes and singleton return
+state are ignored. Missing or invalid destinations retain the existing
+dashboard/onboarding fallback, and no caller-supplied origin becomes the redirect origin.
+
+Self-service registration accepts `skipInitialWorkspace` to suppress optional personal workspace
+creation while returning to invitation acceptance. This preference grants no workspace membership
+or invitation authority, changes no signup or verification policy, and is ignored by administrator
+account creation. Existing purpose-bound invitation cookies retain their narrow API paths.
 
 ## AI and model-provider egress
 
@@ -65,6 +180,9 @@ Audit/support events contain only their approved metadata envelope. Never add ra
 
 Audit records prove that an operation occurred; they do not become a shadow copy of customer data.
 
+[AUDIT.md](AUDIT.md) defines the execution-origin context keys, deferred capture, and disclosure
+contract. Automation provenance is separate from the member or system principal acting on its behalf.
+
 ## Review checklist
 
 - Server-resolved identity/tenant/organization is authoritative.
@@ -75,3 +193,21 @@ Audit records prove that an operation occurred; they do not become a shadow copy
 - Idempotency/proof/lease/generation state is scoped to the correct workspace/organization and fails closed.
 - Feature/capability/operator/customer gates remain independent and default to the documented posture.
 - Relevant security, tenancy, failure, and cross-workspace tests pass.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Business refusal codes
+
+Safety refusals use the existing exception `getCode()` and `GlobalExceptionHandler` envelope.
+The frontend selects catalogued EN/JA descriptions through `errorMessages.ts`; unknown codes
+retain status-based safe copy and never surface exception prose. Existing last-owner codes remain
+unchanged. Invitation domain checks return `INVITE_EMAIL_DOMAIN_NOT_ALLOWED` without disclosing
+allowlist contents. Passkey removal distinguishes `LAST_PASSKEY_REQUIRED` from
+`LAST_SUFFICIENT_PASSKEY_REQUIRED`. Unverified disclosure returns
+`DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED` only after organization authorization and request lookup.
+Organization grants use `ORG_MEMBER_ELIGIBILITY_REQUIRED` for every ineligible target, including
+unknown addresses and outsiders; explanations describe prerequisites without asserting account
+existence. Invitation creation retains its uniform email-bound flow and does not resolve recipient
+accounts to provide more specific advice.

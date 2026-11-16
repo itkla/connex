@@ -175,6 +175,19 @@
     )
   </select>
 
+  <select id="lockOrgExportMembershipForUpdate" resultType="java.lang.Integer">
+    SELECT user_id
+    FROM org_member
+    WHERE org_id = #{orgId} AND user_id = #{userId}
+      AND EXISTS (
+        SELECT 1 FROM organization
+        WHERE id = #{orgId} AND lifecycle_state = 'active'
+          AND ((org_member.org_role = 'owner' AND export_data_owner = TRUE)
+            OR (org_member.org_role = 'admin' AND export_data_admin = TRUE))
+      )
+    FOR UPDATE
+  </select>
+
   <select id="lockOrgAdminMembershipForUpdate" resultType="java.lang.Integer">
     SELECT user_id
     FROM org_member

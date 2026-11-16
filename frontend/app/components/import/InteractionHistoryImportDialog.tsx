@@ -1,5 +1,6 @@
 "use client";
 
+import { createServerPickerSearch } from '@/lib/server-picker-search';
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -12,13 +13,15 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import {
     commitInteractionHistoryImport,
     isFieldError,
+    isWorkspaceUnavailableError,
     previewInteractionHistoryImport,
     search,
 } from "@/app/lib/api";
-import { columnSamples, parseCsv, type ParsedCsv } from "@/app/lib/import";
+import { columnSamples, CsvEncodingError, parseCsv, type ParsedCsv } from "@/app/lib/import";
 import {
     buildHistoryImportMapping,
     historyImportFields,
@@ -122,6 +125,12 @@ export default function InteractionHistoryImportDialog({
     onOpenChange: (open: boolean) => void;
 }) {
     const t = useTranslations("importExport.history");
+    const tImport = useTranslations("importExport");
+    const showApiError = useApiErrorToast();
+    const reportFailure = (error: unknown, fallback: string) => {
+        if (isWorkspaceUnavailableError(error)) showApiError(error);
+        else toastError(firstFieldError(error, fallback));
+    };
     const { activeWorkspaceId } = useWorkspace();
     const [step, setStep] = useState<Step>("upload");
     const [kind, setKind] = useState<HistoryImportKind>("activities");
@@ -244,9 +253,9 @@ export default function InteractionHistoryImportDialog({
             setParsed(csv);
             initializeTargets(csv, kind);
             setStep("map");
-        } catch {
+        } catch (error) {
             if (operationGenerationRef.current === generation) {
-                setParseError(t("errors.parse"));
+                setParseError(error instanceof CsvEncodingError ? tImport("errorEncoding") : t("errors.parse"));
             }
         } finally {
             if (operationGenerationRef.current === generation) {
@@ -294,7 +303,7 @@ export default function InteractionHistoryImportDialog({
                 !controller.signal.aborted
                 && operationGenerationRef.current === generation
             ) {
-                toastError(firstFieldError(error, t("errors.preview")));
+                reportFailure(error, t("errors.preview"));
             }
         } finally {
             if (
@@ -337,7 +346,7 @@ export default function InteractionHistoryImportDialog({
             ) {
                 setReviewProof(null);
                 setReviewedKey(null);
-                toastError(firstFieldError(error, t("errors.commit")));
+                reportFailure(error, t("errors.commit"));
             }
         } finally {
             if (
@@ -378,6 +387,11 @@ export default function InteractionHistoryImportDialog({
                     <ResponsiveDialogTitle>{t("title")}</ResponsiveDialogTitle>
                     <ResponsiveDialogDescription>{t("description")}</ResponsiveDialogDescription>
                     <StepRail step={step} />
+                    {parsed && (step === "map" || step === "review") && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                            {tImport("detectedEncoding", { encoding: tImport(`encoding.${parsed.encoding}`) })}
+                        </p>
+                    )}
                 </ResponsiveDialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
@@ -924,7 +938,7 @@ function ContactLinker({
             value={null}
             inputValue={query}
             open
-            filter={null}
+            serverSearch={createServerPickerSearch(query, current || queryText.length < 2 ? { query, items: options } : null)}
             itemToStringLabel={(item: ContactOption) => item.label}
             onOpenChange={(next) => {
                 setOpen(next);
@@ -961,11 +975,11 @@ function ContactLinker({
             <ComboboxContent className="w-56 min-w-56">
                 <ComboboxEmpty className="justify-start px-2 py-2 text-xs">{status}</ComboboxEmpty>
                 <ComboboxList>
-                    {options.map((option) => (
+                    {(option: (typeof options)[number]) => (
                         <ComboboxItem key={option.id} value={option} className="text-xs">
                             {option.label}
                         </ComboboxItem>
-                    ))}
+                    )}
                 </ComboboxList>
             </ComboboxContent>
         </Combobox>

@@ -13,8 +13,10 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DealLineValueConsentException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DealValueMapper;
 
 /** Owns the canonical deal-value contract across manual and line-item-derived amounts. */
 @Service
@@ -29,6 +31,27 @@ public class DealValueService {
 
     private final DealMapper dealMapper;
     private final DealLineItemMapper dealLineItemMapper;
+    private final DealValueMapper dealValueMapper;
+
+    /** Requires consent against the locked manual amount before a line write can take it over. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void requireConfirmedLineValue(
+            Deal lockedDeal, boolean confirmed, BigDecimal expectedManualValue, String expectedCurrency) {
+        boolean stale = expectedManualValue != null && (!MANUAL.equals(lockedDeal.getValueSource())
+            || money(expectedManualValue).compareTo(money(lockedDeal.getValue())) != 0)
+            || expectedCurrency != null && !expectedCurrency.equalsIgnoreCase(lockedDeal.getCurrency());
+        if (stale) {
+            throw DealLineValueConsentException.stale();
+        }
+        if (MANUAL.equals(lockedDeal.getValueSource()) && money(lockedDeal.getValue()).signum() != 0 && !confirmed) {
+            throw DealLineValueConsentException.required();
+        }
+    }
+
+    /** Returns the prospective fallback, never a reconstruction of a historical manual amount. */
+    public BigDecimal priorManualValue(int workspaceId, int dealId) {
+        return dealValueMapper.getPriorManualValue(workspaceId, dealId);
+    }
 
     /** Returns the normalized authoritative value for the deal's current source. */
     @Transactional(readOnly = true)
@@ -58,11 +81,28 @@ public class DealValueService {
     /** Reconciles the locked deal after a line-item mutation. */
     @Transactional(propagation = Propagation.MANDATORY)
     public BigDecimal reconcileLineItems(int workspaceId, Deal lockedDeal) {
+        return reconcileLineItems(workspaceId, lockedDeal, false, null);
+    }
+
+    /** Reconciles a consented takeover, preserving the manual amount until the final line is removed. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal reconcileLineItems(
+            int workspaceId, Deal lockedDeal, boolean confirmed, BigDecimal expectedManualValue) {
         requireConsistentLineCurrency(workspaceId, lockedDeal);
         if (dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0) {
+            requireConfirmedLineValue(lockedDeal, confirmed, expectedManualValue, null);
+            if (MANUAL.equals(lockedDeal.getValueSource())) {
+                dealValueMapper.setPriorManualValue(workspaceId, lockedDeal.getId(), money(lockedDeal.getValue()));
+            }
             BigDecimal total = money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
             dealMapper.updateValueAndSource(workspaceId, lockedDeal.getId(), total, LINE_ITEMS);
             return total;
+        }
+        BigDecimal prior = dealValueMapper.getPriorManualValueForUpdate(workspaceId, lockedDeal.getId());
+        if (prior != null) {
+            dealMapper.updateValueAndSource(workspaceId, lockedDeal.getId(), money(prior), MANUAL);
+            dealValueMapper.setPriorManualValue(workspaceId, lockedDeal.getId(), null);
+            return money(prior);
         }
         dealMapper.updateValueSource(workspaceId, lockedDeal.getId(), MANUAL);
         return money(lockedDeal.getValue());
@@ -71,7 +111,8 @@ public class DealValueService {
     /**
      * Resolves the realized value a deal takes at the moment it wins, independently of how it got
      * there. A deal with line items derives the line-item total and rejects a differing submitted
-     * amount; a deal without them records exactly what was submitted, and zero when nothing was.
+     * amount; a deal without them records the submitted amount, defaulting to its current value
+     * only when the amount is omitted. An explicitly submitted zero remains zero.
      *
      * <p>The derived total never inherits the deal's stored {@code actual_value}. Path-independence
      * is the contract: winning, losing and winning again must land on the same figure as winning the
@@ -95,7 +136,7 @@ public class DealValueService {
             }
             return derived;
         }
-        return money(requestedActualValue);
+        return money(requestedActualValue == null ? lockedDeal.getValue() : requestedActualValue);
     }
 
     /**
@@ -113,17 +154,16 @@ public class DealValueService {
 
     /**
      * Reconciles and persists realized value for an outcome transition, on every route that can win
-     * or lose a deal — the close dialog, a form edit, a Kanban drag, a bulk stage change, a rule
+     * or lose a deal — the close action, a form edit, a Kanban drag, a bulk stage change, a rule
      * action and a CSV import all resolve the same figure here. Three cases:
      * <ul>
-     *   <li><b>Lost</b> — always zero, and any client-supplied amount is ignored. This is the whole
-     *       reason the reconciliation is centralized: {@code deal_metrics.closed_revenue} sums
-     *       {@code actual_value} across every closed deal, so a won-to-lost transition that kept the
-     *       won figure would inflate reported revenue by the full value of a deal the business
-     *       failed to win. Zeroing reads no line total, so it is also the one case that does not
+     *   <li><b>Lost</b> — always zero, and any client-supplied amount is ignored. Losing a deal
+     *       clears its prior win snapshot independently of how reports filter outcomes.
+     *       Zeroing reads no line total, so it is also the one case that does not
      *       consult line currency — refusing it would strand a deal at its won figure.</li>
      *   <li><b>Freshly won</b> — derives from the line-item total, or records the submitted amount
-     *       when the deal has no line items. The stored figure is never inherited, so winning a deal
+     *       when the deal has no line items, defaulting to its value when omitted. The stored
+     *       realized figure is never inherited, so winning a deal
      *       lands on the same value however often it was won and lost before.</li>
      *   <li><b>Already won, or still open</b> — realized value stays frozen at the win and only an
      *       explicit operator edit moves it.</li>
@@ -156,14 +196,16 @@ public class DealValueService {
     /**
      * Resolves the realized value a deal may be created with. A deal created lost or open records
      * zero, so the create endpoint cannot seed reported revenue with an arbitrary amount; a deal
-     * created already won keeps the supplied amount, which is the only figure available because a
-     * deal has no line items before it exists.
+     * created already won keeps the supplied amount, or defaults to its deal value when omitted.
      * @param won the outcome the new deal was reconciled to
+     * @param value the new deal's value
      * @param requestedActualValue the realized value the caller supplied, or null when omitted
      * @return the realized value the new deal may be inserted with
      */
-    public BigDecimal resolveRealizedValueForNewDeal(Boolean won, BigDecimal requestedActualValue) {
-        return Boolean.TRUE.equals(won) ? money(requestedActualValue) : money(null);
+    public BigDecimal resolveRealizedValueForNewDeal(Boolean won, BigDecimal value, BigDecimal requestedActualValue) {
+        return Boolean.TRUE.equals(won)
+            ? money(requestedActualValue == null ? value : requestedActualValue)
+            : money(null);
     }
 
     /**

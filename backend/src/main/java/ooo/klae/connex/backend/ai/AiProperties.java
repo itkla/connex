@@ -40,6 +40,23 @@ public class AiProperties {
      */
     private boolean enabled = false;
 
+    /** Disabled until the complete V232 writer/read/privacy rollout has finished. */
+    private boolean missionsEnabled = false;
+
+    /** Operator acknowledgment that all serving readers and writers run on one drained JVM. */
+    private boolean missionsSingleJvmConfirmed = false;
+
+    /** Exact probed endpoint/model capability declarations; absence refuses missions. */
+    private List<MissionCapability> missionCapabilities = new ArrayList<>();
+
+    @Data
+    public static class MissionCapability {
+        private String provider;
+        private String endpoint;
+        private String model;
+        private String capability = "none";
+    }
+
     /**
      * Optional per-feature switches. A feature is enabled when the master {@link #enabled} switch
      * is true and its entry is not explicitly false; an absent entry therefore defaults on while

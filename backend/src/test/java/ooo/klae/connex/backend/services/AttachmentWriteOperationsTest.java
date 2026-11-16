@@ -66,12 +66,17 @@ class AttachmentWriteOperationsTest {
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private ShareMapper shareMapper;
 
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationAuthority =
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard =
+            new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(organizationAuthority);
     private AttachmentWriteOperations operations;
 
     @BeforeEach
     void setUp() {
         operations = new AttachmentWriteOperations(
             attachmentMapper,
+            privacyGuard,
             aiChatMapper,
             companyMapper,
             personMapper,
@@ -81,7 +86,52 @@ class AttachmentWriteOperationsTest {
             managedObjectService,
             workspaceService,
             workspaceMapper,
-            shareMapper);
+            shareMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void plainAttachmentCreationSkipsVisibilityScopeForNoteTargets(boolean managed) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(5)) {
+            org.mockito.Mockito.lenient().when(fixture.control.findOrganizationWorkspacesForShare(5))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                operations, "recordVisibilityScopeControlAccess", fixture.scopes);
+            Attachment attachment = attachment("note", 41, "https://example.com/file.pdf");
+            attachment.setId(77);
+            when(noteMapper.exists(5, 41)).thenReturn(true);
+            when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
+
+            assertEquals(attachment, managed
+                ? operations.createManaged(5, attachment)
+                : operations.createExternal(5, attachment));
+
+            org.mockito.Mockito.verifyNoInteractions(fixture.control, companyMapper);
+            verify(attachmentMapper).insert(attachment);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void personAttachmentResolvesOneScopeBeforeValidationAndInsert(boolean managed) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(5)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                operations, "recordVisibilityScopeControlAccess", fixture.scopes);
+            Attachment attachment = attachment("person", 41, "https://example.com/file.pdf");
+            attachment.setId(77);
+            when(personMapper.exists(5, "[5,15]", 41)).thenReturn(true);
+            when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
+
+            assertEquals(attachment, managed
+                ? operations.createManaged(5, attachment) : operations.createExternal(5, attachment));
+
+            var order = org.mockito.Mockito.inOrder(fixture.control, personMapper, attachmentMapper);
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(5);
+            order.verify(personMapper).exists(5, "[5,15]", 41);
+            order.verify(attachmentMapper).insert(attachment);
+            verify(fixture.control).findOrganizationWorkspacesForShare(5);
+            org.mockito.Mockito.verifyNoInteractions(companyMapper);
+        }
     }
 
     @Test
@@ -89,7 +139,7 @@ class AttachmentWriteOperationsTest {
         Attachment attachment = attachment("company", 41, "https://example.com/file.pdf");
         attachment.setWorkspaceId(999);
         attachment.setId(77);
-        when(companyMapper.exists(5, 41)).thenReturn(true);
+        when(companyMapper.exists(5, "[7,8,9]", 41)).thenReturn(true);
         when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
 
         Attachment created = operations.createExternal(5, attachment);
@@ -102,7 +152,7 @@ class AttachmentWriteOperationsTest {
     @Test
     void createExternalRejectsMissingTargetsBeforeInsert() {
         Attachment missing = attachment("person", 42, "https://example.com/missing.pdf");
-        when(personMapper.exists(5, 42)).thenReturn(false);
+        when(personMapper.exists(5, "[7,8,9]", 42)).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class,
             () -> operations.createExternal(5, missing));
@@ -114,7 +164,7 @@ class AttachmentWriteOperationsTest {
     void createExternalRefusesCaseVariantOfManagedReferenceAsDuplicate() {
         String token = "550e8400-e29b-41d4-a716-446655440000.pdf";
         Attachment alias = attachment("company", 41, "/API/Attachments/Content/" + token);
-        when(companyMapper.exists(5, 41)).thenReturn(true);
+        when(companyMapper.exists(5, "[7,8,9]", 41)).thenReturn(true);
         when(attachmentMapper.countUrl(5, "/api/attachments/content/" + token)).thenReturn(1);
 
         assertThrows(ConflictException.class, () -> operations.createExternal(5, alias));
@@ -130,7 +180,7 @@ class AttachmentWriteOperationsTest {
     void createExternalCanonicalizesSchemeAndHostPreservingPathBytes(String submitted, String canonical) {
         Attachment attachment = attachment("company", 41, submitted);
         attachment.setId(77);
-        when(companyMapper.exists(5, 41)).thenReturn(true);
+        when(companyMapper.exists(5, "[7,8,9]", 41)).thenReturn(true);
         when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
 
         Attachment created = operations.createExternal(5, attachment);
@@ -252,8 +302,8 @@ class AttachmentWriteOperationsTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         stubLockedAuthority(Map.of(7, Set.of(Permission.ATTACHMENT_CREATE)));
         switch (type) {
-            case "company" -> when(companyMapper.exists(5, 43)).thenReturn(true);
-            case "person" -> when(personMapper.exists(5, 43)).thenReturn(true);
+            case "company" -> when(companyMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
+            case "person" -> when(personMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
             case "deal" -> when(dealMapper.exists(5, 43)).thenReturn(true);
             default -> throw new IllegalArgumentException(type);
         }
@@ -273,13 +323,13 @@ class AttachmentWriteOperationsTest {
         if ("company".equals(type)) {
             Company shared = new Company();
             shared.setWorkspaceId(6);
-            when(companyMapper.exists(5, 43)).thenReturn(true);
-            when(companyMapper.getVisibleCompanyByIdForUpdate(5, 43)).thenReturn(shared);
+            when(companyMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
+            when(companyMapper.getVisibleCompanyByIdForUpdate(5, "[7,8,9]", 43)).thenReturn(shared);
         } else {
             Person shared = new Person();
             shared.setWorkspaceId(6);
-            when(personMapper.exists(5, 43)).thenReturn(true);
-            when(personMapper.getVisiblePersonByIdForUpdate(5, 43)).thenReturn(shared);
+            when(personMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
+            when(personMapper.getVisiblePersonByIdForUpdate(5, "[7,8,9]", 43)).thenReturn(shared);
         }
         ScannedUpload scanned = mock(ScannedUpload.class);
         stubAdmittedStorage(scanned);
@@ -289,12 +339,12 @@ class AttachmentWriteOperationsTest {
         if ("company".equals(type)) {
             var order = inOrder(managedObjectService, companyMapper, shareMapper);
             order.verify(managedObjectService).storeInspectedAttachment(eq(5), eq(scanned), any(Runnable.class));
-            order.verify(companyMapper).getVisibleCompanyByIdForUpdate(5, 43);
+            order.verify(companyMapper).getVisibleCompanyByIdForUpdate(5, "[7,8,9]", 43);
             order.verify(shareMapper).lockCompanyShareForWorkspace(43, 5);
         } else {
             var order = inOrder(managedObjectService, personMapper, shareMapper);
             order.verify(managedObjectService).storeInspectedAttachment(eq(5), eq(scanned), any(Runnable.class));
-            order.verify(personMapper).getVisiblePersonByIdForUpdate(5, 43);
+            order.verify(personMapper).getVisiblePersonByIdForUpdate(5, "[7,8,9]", 43);
             order.verify(shareMapper).lockPersonShareForWorkspace(43, 5);
         }
         verify(attachmentMapper, never()).insert(any(Attachment.class));
@@ -327,7 +377,7 @@ class AttachmentWriteOperationsTest {
             new MalwareScanReport(MalwareScanVerdict.CLEAN, null, null, "test-database", false));
         StoredBinary stored = new StoredBinary(
             "/api/attachments/content/token.jpg", "image.jpg", "image/jpeg", content.length);
-        when(aiChatMapper.sessionExists(5, 43)).thenReturn(true);
+        when(aiChatMapper.sessionExists(5, 43, 1L)).thenReturn(true);
         when(managedObjectService.storeInspectedAttachment(5, scanned)).thenReturn(stored);
         AtomicReference<Attachment> insertedAttachment = new AtomicReference<>();
         doAnswer(invocation -> {
@@ -339,7 +389,14 @@ class AttachmentWriteOperationsTest {
         when(attachmentMapper.getCreatedById(5, 77))
             .thenAnswer(invocation -> insertedAttachment.get());
 
-        Attachment attachment = operations.uploadAssistantSession(5, 43, scanned, uploader);
+        when(organizationAuthority.organizationId(5)).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        Runnable privacyAdmission = mock(Runnable.class);
+        Attachment attachment = operations.uploadAssistantSession(5, 43, scanned, uploader, privacyAdmission);
+        var order = inOrder(managedObjectService, privacyAdmission, attachmentMapper);
+        order.verify(managedObjectService).storeInspectedAttachment(5, scanned);
+        order.verify(privacyAdmission).run();
+        order.verify(attachmentMapper).insert(any(Attachment.class));
 
         assertEquals(content.length, attachment.getSize());
         assertEquals("clean", attachment.getScanState());
@@ -355,7 +412,7 @@ class AttachmentWriteOperationsTest {
     void createRejectsMissingAuthoritativeReload() {
         Attachment attachment = attachment("company", 41, "https://example.com/file.pdf");
         attachment.setId(77);
-        when(companyMapper.exists(5, 41)).thenReturn(true);
+        when(companyMapper.exists(5, "[7,8,9]", 41)).thenReturn(true);
         when(attachmentMapper.getCreatedById(5, 77)).thenReturn(null);
 
         assertThrows(IllegalStateException.class,
@@ -386,7 +443,8 @@ class AttachmentWriteOperationsTest {
                 int.class,
                 int.class,
                 ScannedUpload.class,
-                User.class)
+                User.class,
+                Runnable.class)
             .getAnnotation(Transactional.class));
     }
 

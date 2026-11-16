@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.ai.egress.AiSseEventReader;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.openai.OpenAiSseAccumulator;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
@@ -177,6 +178,7 @@ public class AzureOpenAiClient {
         AiEgressGuard.requireFetchableHost(host, false);
         beforeSend.run();
         AiCompletionResult result = spec.body(body).exchange((request, response) -> {
+            AiProviderDispatch.responded(beforeSend);
             if (response.getStatusCode().isError()) {
                 throw new AiProviderRequestRejectedException(
                         "Azure OpenAI", response.getStatusCode().value());
@@ -221,9 +223,11 @@ public class AzureOpenAiClient {
         AiEgressGuard.requireFetchableHost(host, false);
         beforeSend.run();
         AzureOpenAiResponse response = spec.body(body)
-                .exchange((request, providerResponse) -> new AzureOpenAiResponse(
-                        providerResponse.getStatusCode().value(),
-                        readBounded(providerResponse.getBody())));
+                .exchange((request, providerResponse) -> {
+                    AiProviderDispatch.responded(beforeSend);
+                    return new AzureOpenAiResponse(providerResponse.getStatusCode().value(),
+                            readBounded(providerResponse.getBody()));
+                });
         requireRemainingDeadline(deadline);
         return response;
     }

@@ -67,6 +67,8 @@ public class AuthService {
      * delegates to {@link #register}. A non-{@code open} mode (reserved for locked-down on-prem)
      * refuses anonymous self-service signup, while the permission-gated admin create path
      * ({@code UserController.createUser}) calls {@link #register} directly and is unaffected.
+     * A workspace-joining registration can skip optional personal workspace creation without
+     * granting any invitation authority or changing verification requirements.
      */
     @Transactional
     public User registerSelfService(RegisterDto request, String requestIp) {
@@ -127,9 +129,8 @@ public class AuthService {
             user.setTimezone(TimezoneSupport.validateIana(request.getTimezone(), "UTC"));
             user.setPasswordHash(passwordCredentialService.encode(request.getPassword(), flow, null));
             userMapper.insert(user);
-            // New users get their own owned workspace unless the instance restricts creation
-            // (invite-only mode), in which case they onboard by accepting an invite.
-            if (workspaceService.isSelfServiceCreationAllowed()) {
+            if (workspaceService.isSelfServiceCreationAllowed()
+                    && (flow != PasswordScreeningFlow.SELF_REGISTRATION || !request.isSkipInitialWorkspace())) {
                 workspaceService.createWorkspace(user.getDisplayName() + "'s Workspace", user.getId());
             }
             auditService.record("auth.register", "user", user.getId(), user.getDisplayName(), "User registered", null);

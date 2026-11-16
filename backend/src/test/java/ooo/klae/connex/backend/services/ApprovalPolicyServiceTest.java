@@ -29,6 +29,8 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ApprovalPolicyImpactDto;
+import ooo.klae.connex.backend.dto.ApprovalPolicyDto;
+import ooo.klae.connex.backend.exceptions.InvalidApprovalCurrencyException;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
@@ -77,6 +79,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         p.setBillingFrequency("one_time");
         Product product = productService.create(p);
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setProductId(product.getId());
         r.setQuantity(new BigDecimal(quantity));
         if (discountType != null) {
@@ -99,6 +102,57 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
 
     private DealDocumentDto quote(Deal deal) {
         return documentService.generate(deal.getId(), template("quote").getId());
+    }
+
+    @Test
+    void invalidStoredCurrencyRemainsVisibleAndCanBeExplicitlyCorrected() {
+        ApprovalPolicy saved = policy(null, "JPY", "100", null);
+        jdbcTemplate.update("UPDATE approval_policy SET currency = ? WHERE workspace_id = ? AND id = ?",
+            "X-LOCAL", saved.getWorkspaceId(), saved.getId());
+        ApprovalPolicy invalid = policyService.getAll().stream()
+            .filter(candidate -> candidate.getId() == saved.getId()).findFirst().orElseThrow();
+        assertFalse(ApprovalPolicyDto.from(invalid).isCurrencyValid());
+        invalid.setName("Updated legacy policy");
+        policyService.impact(saved.getId(), invalid);
+        assertEquals("X-LOCAL", policyService.update(saved.getId(), invalid, false, null).getCurrency());
+        invalid.setCurrency(" jpy ");
+        ApprovalPolicy corrected = policyService.update(saved.getId(), invalid, false, null);
+        assertEquals("JPY", corrected.getCurrency());
+        assertTrue(ApprovalPolicyDto.from(corrected).isCurrencyValid());
+    }
+
+    @Test
+    void invalidApplicablePolicyDoesNotHideDraftOrFinalDocumentSnapshots() {
+        Deal deal = jpyDeal();
+        addLine(deal, "500", "1", null, null);
+        DealDocumentDto finalized = quote(deal);
+        documentService.updateStatus(deal.getId(), finalized.id(), "final");
+        DealDocumentDto draft = quote(deal);
+        ApprovalPolicy saved = policy(null, "JPY", "100", null);
+        jdbcTemplate.update("UPDATE approval_policy SET currency = ? WHERE workspace_id = ? AND id = ?",
+            "YEN", saved.getWorkspaceId(), saved.getId());
+        jdbcTemplate.update("UPDATE deal_document SET currency = ?, content = REPLACE(content, ?, ?) WHERE workspace_id = ? AND deal_id = ?",
+            "YEN", "JPY", "YEN", workspace.getId(), deal.getId());
+        List<DealDocumentDto> documents = documentService.getForDeal(deal.getId());
+        assertEquals(2, documents.size());
+        DealDocumentDto blocked = documents.stream().filter(doc -> doc.id() == draft.id()).findFirst().orElseThrow();
+        assertTrue(blocked.requiresApproval());
+        assertEquals(InvalidApprovalCurrencyException.CODE, blocked.approvalConfigurationError());
+        assertNull(documents.stream().filter(doc -> doc.id() == finalized.id()).findFirst().orElseThrow().approvalConfigurationError());
+        assertThrows(InvalidApprovalCurrencyException.class,
+            () -> documentService.updateStatus(deal.getId(), draft.id(), "final"));
+    }
+
+    @Test
+    void unsupportedCurrencyIsRefusedBeforePersistence() {
+        assertThrows(BadRequestException.class, () -> policy(null, "yen", "100", null));
+        ApprovalPolicy saved = policy(null, "JPY", "100", null);
+        ApprovalPolicy invalid = copyPolicy(saved);
+        invalid.setCurrency("yen");
+        assertThrows(BadRequestException.class, () -> policyService.impact(saved.getId(), invalid));
+        assertThrows(BadRequestException.class, () -> policyService.update(saved.getId(), invalid, false, null));
+        assertEquals("JPY", policyService.getAll().stream()
+            .filter(candidate -> candidate.getId() == saved.getId()).findFirst().orElseThrow().getCurrency());
     }
 
     @Test
@@ -199,6 +253,26 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         Deal mild = jpyDeal();
         addLine(mild, "100.00", "2", "percent", "10");
         assertFalse(quote(mild).requiresApproval());
+    }
+
+    @Test
+    void editableDiscountAndTaxPersistIntoTotalsAndTriggerApproval() {
+        policy(null, "JPY", null, "20");
+        Deal deal = jpyDeal();
+        DealLineItemRequest request = new DealLineItemRequest();
+        request.setName("Discounted service");
+        request.setUnitPrice(new BigDecimal("120.50"));
+        request.setQuantity(new BigDecimal("2.5"));
+        request.setDiscountType("percent");
+        request.setDiscountValue(new BigDecimal("20"));
+        request.setTaxRate(new BigDecimal("10"));
+        request.setConfirmValueReplacement(true);
+        var saved = lineItemService.create(deal.getId(), request);
+
+        assertEquals(0, new BigDecimal("265.10").compareTo(saved.totals().grandTotal()));
+        assertEquals(0, new BigDecimal("24.10").compareTo(saved.totals().tax()));
+        assertEquals("percent", lineItemService.getForDeal(deal.getId()).items().getFirst().getDiscountType());
+        assertTrue(quote(deal).requiresApproval());
     }
 
     @Test

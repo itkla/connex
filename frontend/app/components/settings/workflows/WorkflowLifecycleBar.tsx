@@ -13,6 +13,7 @@ import {
 import { Loader2Icon, Redo2Icon, Undo2Icon } from "lucide-react";
 
 import type { WorkflowExecutionMode, WorkflowValidation } from "@/app/lib/types";
+import { workflowIsReadyToPublish } from "@/app/components/settings/workflows/workflowValidation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,9 +26,11 @@ export default function WorkflowLifecycleBar({
     activeVersionNumber,
     hasActiveVersion,
     enabled,
+    executionAvailable,
     executionMode,
     archived,
     dirty,
+    validationDirty,
     validation,
     canUndo,
     canRedo,
@@ -51,9 +54,11 @@ export default function WorkflowLifecycleBar({
     activeVersionNumber: number | null;
     hasActiveVersion: boolean;
     enabled: boolean;
+    executionAvailable: boolean;
     executionMode: WorkflowExecutionMode;
     archived: boolean;
     dirty: boolean;
+    validationDirty: boolean;
     validation: WorkflowValidation | null;
     canUndo: boolean;
     canRedo: boolean;
@@ -74,7 +79,7 @@ export default function WorkflowLifecycleBar({
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const validationCurrent = validation?.draftRevision === revision;
-    const canPublish = !readOnly && !dirty && validationCurrent && validation.canPublish;
+    const canPublish = !readOnly && !validationDirty && validationCurrent && workflowIsReadyToPublish(validation);
     const permissionLabel = (permission: string) => {
         switch (permission) {
             case "TASK_CREATE":
@@ -114,11 +119,11 @@ export default function WorkflowLifecycleBar({
                         <Redo2Icon className="size-4" />
                     </Button>
                 </div>
-                <Button variant="outline" size="sm" onClick={onOpenSimulation} disabled={dirty || revision < 0 || readOnly}>
+                <Button variant="outline" size="sm" onClick={onOpenSimulation} disabled={validationDirty || revision < 0 || readOnly}>
                     <BeakerIcon className="size-4" />
                     {t("previewAction")}
                 </Button>
-                <Button variant="outline" size="sm" onClick={onValidate} disabled={dirty || revision < 0 || readOnly || busyAction !== null}>
+                <Button variant="outline" size="sm" onClick={onValidate} disabled={validationDirty || revision < 0 || readOnly || busyAction !== null}>
                     {busyAction === "validate" ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : <CheckCircleIcon className="size-4" />}
                     {t("validate")}
                 </Button>
@@ -141,6 +146,12 @@ export default function WorkflowLifecycleBar({
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 pl-10 text-xs text-muted-foreground">
                 {archived ? <Badge variant="outline">{t("archivedState")}</Badge> : null}
+                {!executionAvailable && !archived ? (
+                    <>
+                        <Badge variant="outline" className="text-destructive">{t("unavailableBadge")}</Badge>
+                        <span className="text-destructive">{t("executionUnavailable")}</span>
+                    </>
+                ) : null}
                 <span>{t("draftRevision", { revision })}</span>
                 <span aria-hidden>/</span>
                 <span>
@@ -174,7 +185,7 @@ export default function WorkflowLifecycleBar({
                         {t("runs.view")}
                     </Button>
                     {!archived && hasActiveVersion ? (
-                        <Button variant="ghost" size="xs" onClick={onToggleEnabled} disabled={busyAction !== null}>
+                        <Button variant="ghost" size="xs" onClick={onToggleEnabled} disabled={busyAction !== null || (!enabled && !executionAvailable)}>
                             <ArrowPathIcon className="size-3.5" />
                             {enabled ? t("disable") : t("enable")}
                         </Button>

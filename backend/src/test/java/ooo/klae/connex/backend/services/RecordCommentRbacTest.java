@@ -15,6 +15,8 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.tenant.Permission;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class RecordCommentRbacTest extends AbstractServiceTest {
 
@@ -22,6 +24,7 @@ class RecordCommentRbacTest extends AbstractServiceTest {
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void createWithoutCommentCreateIsForbidden() {
         Person person = newPerson(newCompany());
@@ -33,6 +36,7 @@ class RecordCommentRbacTest extends AbstractServiceTest {
             "person", person.getId(), "Denied", token()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void reactionWithoutCommentCreateIsForbidden() {
         Person person = newPerson(newCompany());
@@ -46,6 +50,7 @@ class RecordCommentRbacTest extends AbstractServiceTest {
             thread.getComments().getFirst().getId(), "heart"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void nonAuthorWithoutCommentModerateCannotDelete() {
         Person person = newPerson(newCompany());
@@ -59,6 +64,7 @@ class RecordCommentRbacTest extends AbstractServiceTest {
             () -> recordCommentService.deleteComment(thread.getComments().get(0).getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void authorWithoutCommentModerateCanDeleteOwnComment() {
         Person person = newPerson(newCompany());

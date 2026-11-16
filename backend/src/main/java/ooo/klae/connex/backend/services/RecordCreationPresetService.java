@@ -50,6 +50,7 @@ public class RecordCreationPresetService {
     private final RecordCreationTemplateResolver resolver;
     private final RecordCreationFieldRegistry fieldRegistry;
     private final WorkspaceService workspaceService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @RequirePermission(Permission.PERSON_CREATE)
     public RecordCreationPresetCatalogDto persons(
@@ -83,8 +84,15 @@ public class RecordCreationPresetService {
             RecordCreationRecordType recordType,
             RecordCreationEntryPoint entryPoint,
             RecordCreationContextDto context) {
+        return catalog(recordType, entryPoint, context,
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson());
+    }
+
+    RecordCreationPresetCatalogDto catalog(
+            RecordCreationRecordType recordType, RecordCreationEntryPoint entryPoint,
+            RecordCreationContextDto context, String orgWorkspaceIdsJson) {
         Objects.requireNonNull(entryPoint, "entryPoint");
-        ResolutionSnapshot snapshot = snapshot(recordType, context, false, null);
+        ResolutionSnapshot snapshot = snapshot(recordType, context, false, null, orgWorkspaceIdsJson);
         return new RecordCreationPresetCatalogDto(
             recordType,
             entryPoint,
@@ -95,11 +103,10 @@ public class RecordCreationPresetService {
             snapshot.warnings());
     }
 
+
     ResolutionSnapshot snapshot(
-            RecordCreationRecordType recordType,
-            RecordCreationContextDto context,
-            boolean includeArchived,
-            Integer excludedRootId) {
+            RecordCreationRecordType recordType, RecordCreationContextDto context, boolean includeArchived,
+            Integer excludedRootId, String orgWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordCreationTemplateSet set = templateMapper.getSet(workspaceId, recordType.name());
         int setRevision = set == null ? 0 : set.getRevision();
@@ -115,10 +122,10 @@ public class RecordCreationPresetService {
                 templateMapper.getCurrentVersion(workspaceId, root.getId());
             versions.put(root.getId(), version);
             if (version != null) {
-                resolved.put(root.getId(), resolver.resolveWorkspace(root, version, context));
+                resolved.put(root.getId(), resolver.resolveWorkspace(root, version, context, orgWorkspaceIdsJson));
             }
         }
-        ResolvedCreationTemplateDto system = resolver.resolveSystem(recordType, context);
+        ResolvedCreationTemplateDto system = resolver.resolveSystem(recordType, context, orgWorkspaceIdsJson);
         String selected = selected(set, roots, resolved, system, excludedRootId);
         List<ResolvedCreationTemplateDto> runtimeTemplates = new ArrayList<>();
         List<RecordCreationWarningDto> warnings = new ArrayList<>();
@@ -155,11 +162,11 @@ public class RecordCreationPresetService {
             partial);
     }
 
+
     String selectedTemplateId(
-            RecordCreationRecordType recordType,
-            RecordCreationContextDto context,
-            Integer excludedRootId) {
-        return snapshot(recordType, context, false, excludedRootId).selectedTemplateId();
+            RecordCreationRecordType recordType, RecordCreationContextDto context,
+            Integer excludedRootId, String orgWorkspaceIdsJson) {
+        return snapshot(recordType, context, false, excludedRootId, orgWorkspaceIdsJson).selectedTemplateId();
     }
 
     private String selected(

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -10,13 +11,16 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -29,6 +33,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 
 @ExtendWith(MockitoExtension.class)
 class WorkspaceProvisioningLockOrderTest {
+    @Mock private ApplicationEventPublisher applicationEvents;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private UserMapper userMapper;
     @Mock private OrganizationMapper organizationMapper;
@@ -43,7 +48,10 @@ class WorkspaceProvisioningLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
 
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService workspaceService;
 
     @Test
@@ -53,6 +61,62 @@ class WorkspaceProvisioningLockOrderTest {
         assertThrows(ResourceNotFoundException.class, () -> workspaceService.provisionWorkspace("Acme", 9));
 
         verifyNoInteractions(organizationMapper, workspaceMapper, orgMemberService, auditService);
+    }
+
+    @Test
+    void provisionWorkspaceRevalidatesTheOriginUnderTheExistingOwnerRootBeforeCreatingAnything() {
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(tenantContext.isResolved()).thenReturn(true);
+        when(tenantContext.getUserId()).thenReturn(9);
+        when(tenantContext.getWorkspaceId()).thenReturn(7);
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class,
+            () -> workspaceService.provisionWorkspace("Acme", 9));
+
+        assertEquals("Not a member of workspace 7", failure.getMessage());
+        InOrder order = inOrder(userMapper, workspaceMapper);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(workspaceMapper).getRole(7, 9);
+        order.verifyNoMoreInteractions();
+        verifyNoInteractions(organizationMapper, orgMemberService, auditService);
+    }
+
+    /**
+     * Founding records the founder and covers the founder's passkeys only while holding the owner's
+     * account row, which passkey registration takes exclusively (#1534).
+     */
+    @Test
+    void foundingHoldsTheOwnersAccountRowBeforeRecordingTheFounder() {
+        Organization organization = new Organization();
+        organization.setId(3);
+        organization.setName("Acme");
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Organization.class).setId(3);
+            return 1;
+        }).when(organizationMapper).insert(org.mockito.ArgumentMatchers.any());
+        when(orgMemberService.addFoundingOwner(3, 9)).thenReturn(2);
+        when(organizationMapper.lockActiveByIdForShare(3)).thenReturn(3);
+        when(organizationMapper.getById(3)).thenReturn(organization);
+        when(orgMemberService.orgRoleOf(3, 9)).thenReturn("owner");
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Workspace.class).setId(7);
+            return 1;
+        }).when(workspaceMapper).insert(org.mockito.ArgumentMatchers.any());
+
+        workspaceService.provisionWorkspace("Acme", 9);
+
+        InOrder order = inOrder(userMapper, organizationMapper, orgMemberService);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(organizationMapper).insert(org.mockito.ArgumentMatchers.any());
+        order.verify(orgMemberService).addFoundingOwner(3, 9);
+        verify(auditService).record(
+            org.mockito.ArgumentMatchers.eq("org.member.founding_owner"),
+            org.mockito.ArgumentMatchers.eq("organization"),
+            org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.eq("Founding organization owner granted"),
+            org.mockito.ArgumentMatchers.eq(java.util.Map.of("userId", 9, "foundingPasskeys", 2)));
     }
 
     @Test

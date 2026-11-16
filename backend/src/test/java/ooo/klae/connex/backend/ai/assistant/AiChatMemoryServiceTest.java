@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationService;
@@ -67,7 +68,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(
                 101, 1, "user", "EARLY " + "quarterly planning preference ".repeat(200));
         AiChatMessage middle = message(
@@ -144,7 +145,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(
                 101, 1, "user",
                 "EARLY_FACT_BEGIN " + "quarterly planning preference ".repeat(200)
@@ -283,7 +284,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage initiating = message(104, 4, "user", "Summarize the pipeline");
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
@@ -348,7 +349,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
@@ -432,7 +433,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(16_384, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         String content = "a".repeat(60_000);
         AiChatMessage initiating = message(104, 4, "user", content);
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -474,7 +475,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         String originalContent = "界".repeat(16_000);
         AiChatMessage initiating = message(104, 4, "user", originalContent);
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -530,7 +531,7 @@ class AiChatMemoryServiceTest {
         when(clock.instant()).thenReturn(start, start, start, start, start, deadline);
         MemoryFixture fixture = memoryFixture(1_024, clock);
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -581,7 +582,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         String oversizedContent = "OVERSIZED_PRIVATE_HISTORY_" + "x".repeat(25_000);
         AiChatMessage oversized = message(101, 1, "user", oversizedContent);
         AiChatMessage initiating = message(102, 2, "user", "Continue");
@@ -673,7 +674,116 @@ class AiChatMemoryServiceTest {
             AiAssistantStepSchema stepSchema) {
     }
 
+    @Test
+    void twoCompactionTransactionsAndContextReadsShareOneScope() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(3)) {
+            Instant now = Instant.parse("2026-08-12T00:00:00Z");
+            AiAssistantToolExecutor executor = mock(AiAssistantToolExecutor.class);
+            when(executor.pageContext(any(), any())).thenAnswer(call -> {
+                assertEquals(List.of(3, 13), operation.scopes.getForWorkspace(3).workspaceIds());
+                return new AiAssistantToolResult(Map.of(), List.of());
+            });
+            MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC), operation.scopes, executor);
+            AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                    3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
+            AiChatMessage early = message(
+                    101, 1, "user",
+                    "EARLY_FACT_BEGIN " + "quarterly planning preference ".repeat(200)
+                            + "EARLY_FACT_END");
+            early.setStructuredJson(
+                    "{\"kind\":\"user_message\",\"resources\":[],"
+                            + "\"identifiers\":[{\"kind\":\"person\","
+                            + "\"value\":\"quarterly planning\"}]}");
+            AiChatMessage recent = message(
+                    103, 3, "assistant",
+                    "RECENT_ANSWER_BEGIN " + "grounded relationship update ".repeat(1_100)
+                            + "RECENT_ANSWER_END");
+            AiChatMessage middle = message(
+                    102, 2, "user",
+                    "MIDDLE_FACT_BEGIN " + "second batch continuity ".repeat(200)
+                            + "MIDDLE_FACT_END");
+            AiChatMessage initiating = message(
+                    104, 4, "user", "What did I prefer at the start?");
+            String firstSummaryContent = "The user prefers quarterly planning. "
+                    + "Retained context ".repeat(200);
+            AiChatMessage firstStoredSummary = message(
+                    105, 5, "system", firstSummaryContent);
+            firstStoredSummary.setStructuredJson(
+                    "{\"kind\":\"history_summary\",\"sourceFromSeq\":1,"
+                            + "\"throughSeq\":1,\"resources\":[],"
+                            + "\"identifiers\":[{\"kind\":\"person\","
+                            + "\"value\":\"quarterly planning\"}]}");
+            AiChatMessage storedSummary = message(
+                    105, 5, "system",
+                    "The user prefers quarterly planning and retained the second-batch fact.");
+            storedSummary.setStructuredJson(
+                    "{\"kind\":\"history_summary\",\"sourceFromSeq\":1,"
+                            + "\"throughSeq\":2,\"resources\":[],"
+                            + "\"identifiers\":[{\"kind\":\"person\","
+                            + "\"value\":\"quarterly planning\"}]}");
+            when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                    .thenReturn(new AiProviderCapabilities(
+                            AiStructuredOutputEnforcement.JSON_SCHEMA,
+                            AiReasoningMode.TAGGED,
+                            200_000,
+                            50_000));
+            when(fixture.invocationService().serializedPromptBytes(
+                    any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
+                    eq(AiReasoningMode.TAGGED)))
+                    .thenReturn(8_192);
+            when(fixture.persistenceService().loadHistory(turn, 100))
+                    .thenReturn(List.of(early, middle, recent, initiating));
+            when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
+            when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 4, 500))
+                    .thenReturn(List.of(early));
+            when(fixture.persistenceService().loadCompactionCandidates(turn, 1, 4, 500))
+                    .thenReturn(List.of(middle));
+            when(fixture.persistenceService().loadCompactionCandidates(turn, 2, 4, 500))
+                    .thenReturn(List.of());
+            when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+            when(fixture.invocationService().completeStructuredRepairable(
+                    any(AiInvocation.class),
+                    eq(AiAssistantSummary.class),
+                    same(fixture.summaryGuard()),
+                    same(fixture.summarySchema().responseSchema()),
+                    same(fixture.admission()), any(Runnable.class)))
+                    .thenReturn(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(
+                                    new AiAssistantSummary(firstSummaryContent),
+                                    0, 19, 7, "end_turn"),
+                            Optional.empty()),
+                            new AiStructuredRepairAttempt<>(
+                                    new AiStructuredOutcome.Parsed<>(
+                                            new AiAssistantSummary(
+                                                    "The user prefers quarterly planning and retained the second-batch fact."),
+                                            0, 23, 9, "end_turn"),
+                                    Optional.empty()));
+            when(fixture.persistenceService().upsertHistorySummary(
+                    same(turn), isNull(), eq(0), anyString(), anyString(), eq(19), eq(7)))
+                    .thenAnswer(call -> new org.springframework.transaction.support.TransactionTemplate(operation.transactions)
+                        .execute(status -> firstStoredSummary));
+            when(fixture.persistenceService().upsertHistorySummary(
+                    same(turn), eq(105), eq(1), anyString(), anyString(), eq(23), eq(9)))
+                    .thenAnswer(call -> new org.springframework.transaction.support.TransactionTemplate(operation.transactions)
+                        .execute(status -> storedSummary));
+
+            AiChatMemory memory = fixture.service().prepare(
+                    turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
+            assertEquals(2, operation.transactions.beginCount());
+            assertEquals(42, memory.inputTokens());
+            verify(executor, times(2)).pageContext(any(), any());
+            verify(operation.control).findOrganizationWorkspacesForShare(3);
+        }
+    }
+
     private static MemoryFixture memoryFixture(int outputTokenLimit, Clock clock) {
+        return memoryFixture(outputTokenLimit, clock,
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), emptyToolExecutor());
+    }
+
+    private static MemoryFixture memoryFixture(int outputTokenLimit, Clock clock,
+            ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess scopes,
+            AiAssistantToolExecutor executor) {
         AiInvocationService invocationService = mock(AiInvocationService.class);
         AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
         AiInvocationAdmissionService.DirectAdmission admission =
@@ -690,8 +800,8 @@ class AiChatMemoryServiceTest {
         AiAssistantStepSchema stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
         AiChatMemoryService service = new AiChatMemoryService(
                 invocationService, admissionService, properties, assembler, catalog,
-                emptyToolExecutor(), summaryGuard, summarySchema, stepSchema, persistenceService,
-                governanceService, objectMapper, clock);
+                executor, summaryGuard, summarySchema, stepSchema, persistenceService,
+                governanceService, objectMapper, clock, scopes);
         return new MemoryFixture(
                 service, invocationService, admissionService, admission, persistenceService,
                 governanceService, objectMapper, assembler, summaryGuard, summarySchema, stepSchema);
@@ -785,9 +895,9 @@ class AiChatMemoryServiceTest {
                 persistenceService,
                 governanceService,
                 objectMapper,
-                clock);
+                clock, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -833,5 +943,250 @@ class AiChatMemoryServiceTest {
                 any(), any(), anyInt(), anyString(), anyString(), anyInt(), anyInt());
     }
 
+    @Test
+    void aWarnedSummaryIsNeverPersistedOrRepaired() {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
+        AiInvocationAdmissionService.DirectAdmission admission =
+                mock(AiInvocationAdmissionService.DirectAdmission.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiAssistantToolExecutor toolExecutor = emptyToolExecutor();
+        AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(1_024);
+        var objectMapper = JsonMapper.builder().build();
+        var assembler = new AiAssistantPromptAssembler(
+                objectMapper, new AiAssistantToolCatalog());
+        var summaryGuard = new AiAssistantSummaryGuard();
+        var summarySchema = new AiAssistantSummarySchema(objectMapper);
+        var stepSchema = new AiAssistantStepSchema(
+                objectMapper, new AiAssistantToolCatalog());
+        Clock clock = mock(Clock.class);
+        Instant start = Instant.parse("2026-08-12T00:00:00Z");
+        Instant deadline = start.plusSeconds(70);
+        when(clock.instant()).thenReturn(start);
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService,
+                admissionService,
+                properties,
+                assembler,
+                new AiAssistantToolCatalog(),
+                toolExecutor,
+                summaryGuard,
+                summarySchema,
+                stepSchema,
+                persistenceService,
+                governanceService,
+                objectMapper,
+                clock, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
+        AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
+        AiChatMessage initiating = message(102, 2, "user", "Continue");
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        200_000,
+                        50_000));
+        when(invocationService.serializedPromptBytes(
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
+                eq(AiReasoningMode.TAGGED)))
+                .thenReturn(8_192);
+        when(persistenceService.loadHistory(turn, 100))
+                .thenReturn(List.of(early, initiating));
+        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+        when(persistenceService.loadCompactionCandidates(turn, 0, 2, 500))
+                .thenReturn(List.of(early));
+        when(admissionService.acquireDirect()).thenReturn(admission);
+        when(governanceService.isEnabled(turn.workspaceId())).thenReturn(true);
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class),
+                eq(AiAssistantSummary.class),
+                same(summaryGuard),
+                same(summarySchema.responseSchema()),
+                same(admission),
+                any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    Runnable providerGuard = invocation.getArgument(5, Runnable.class);
+                    providerGuard.run();
+                    return new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(
+                                    new AiAssistantSummary("[unknown reference]"),
+                                    1, 7, 3, "end_turn"),
+                            Optional.empty());
+                });
+
+        AiAssistantLoopException exception = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.prepare(turn, new MaskingContext(), deadline, NO_STOP));
+
+        assertEquals("summary_compaction_failed", exception.terminalReason());
+        verify(invocationService, times(1)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantSummary.class), same(summaryGuard),
+                same(summarySchema.responseSchema()), same(admission), any(Runnable.class));
+        verify(persistenceService, never()).upsertHistorySummary(
+                any(), any(), anyInt(), anyString(), anyString(), anyInt(), anyInt());
+    }
+
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 600})
+    void memberSummaryProvenancePersistsRawLabelsAndReplaysInAFreshContext(int emojiCount) {
+        String member = emojiCount == 0 ? "Member Continuity" : "😀".repeat(emojiCount);
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
+        AiChatMessage early = message(101, 1, "user", member + " " + "history ".repeat(4_000));
+        AiChatMessage initiating = message(102, 2, "user", "Continue");
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+                new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+        when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+                argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(early, initiating));
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 2, 500)).thenReturn(List.of(early));
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.invocationService().completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantSummary.class),
+                same(fixture.summaryGuard()), same(fixture.summarySchema().responseSchema()), same(fixture.admission()), any(Runnable.class)))
+                .thenAnswer(call -> {
+                    AiInvocation invocation = call.getArgument(0);
+                    assertFalse(promptText(invocation.prompt()).contains(member));
+                    assertTrue(promptText(invocation.prompt()).contains("{{M1}}"));
+                    invocation.context().exposeDispatchedPayload(promptText(invocation.prompt()));
+                    return new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantSummary(member + " has a followup."), 0, 11, 4, "stop",
+                            java.util.Map.of("/summary", List.of(member))), Optional.empty());
+                });
+        when(fixture.persistenceService().upsertHistorySummary(same(turn), isNull(), eq(0), anyString(), anyString(), eq(11), eq(4)))
+                .thenAnswer(call -> {
+                    AiChatMessage summary = message(103, 3, "system", call.getArgument(3));
+                    summary.setStructuredJson(call.getArgument(4));
+                    return summary;
+                });
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        AiChatMemory memory = fixture.service().prepare(turn, context, now.plusSeconds(70), NO_STOP);
+        AiChatMessage summary = memory.history().getFirst();
+        assertTrue(summary.getStructuredJson().contains("\"kind\":\"member\""));
+        var metadata = tools.jackson.databind.json.JsonMapper.builder().build().readTree(summary.getStructuredJson());
+        assertEquals(0, metadata.path("identifiers").size());
+        assertEquals(member, metadata.path("memberIdentifiers").get(0).path("value").asString());
+        assertTrue(summary.getStructuredJson().contains(member));
+        assertFalse(summary.getStructuredJson().contains("{{M1}}"));
+        MaskingContext fresh = new MaskingContext();
+        String replay = promptText(fixture.assembler().assembleSummary(summary, List.of(), fresh, new AiChatResourceRegistry(fresh)));
+        assertFalse(replay.contains(member));
+        assertTrue(replay.contains("{{M1}}"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void rawSummaryMentionsPreserveProvenanceButLetterAdjacentLatinContainmentIsNotAMention(boolean mention, boolean unmasked) {
+        String summaryText = mention ? "Bob_team" : "xBob client";
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
+        AiChatMessage early = message(101, 1, "user", "Prior discussion " + "history ".repeat(4_000));
+        AiChatMessage initiating = message(102, 2, "user", "Continue");
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+                new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+        when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+                argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(early, initiating));
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 2, 500)).thenReturn(List.of(early));
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.invocationService().completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantSummary.class),
+                same(fixture.summaryGuard()), same(fixture.summarySchema().responseSchema()), same(fixture.admission()), any(Runnable.class)))
+                .thenAnswer(call -> {
+                    AiInvocation invocation = call.getArgument(0);
+                    assertFalse(promptText(invocation.prompt()).contains("Bob"));
+                    assertFalse(promptText(invocation.prompt()).contains("{{M1}}"));
+                    var rawSummary = tools.jackson.databind.json.JsonMapper.builder().build()
+                            .createObjectNode().put("summary", summaryText);
+                    var provenance = new java.util.LinkedHashMap<String, List<String>>();
+                    ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(rawSummary, invocation.context(),
+                            (path, label) -> provenance.put(path, List.of(label)));
+                    return new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantSummary(summaryText), 0, 11, 4, "stop",
+                            provenance), Optional.empty());
+                });
+        when(fixture.persistenceService().upsertHistorySummary(same(turn), isNull(), eq(0), anyString(), anyString(), eq(11), eq(4)))
+                .thenAnswer(call -> {
+                    AiChatMessage summary = message(103, 3, "system", call.getArgument(3));
+                    summary.setStructuredJson(call.getArgument(4));
+                    return summary;
+                });
+        MaskingContext context = new MaskingContext(unmasked
+                ? ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED : ooo.klae.connex.backend.ai.AiPrivacyMode.MASKED);
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        AiChatMemory memory = fixture.service().prepare(turn, context, now.plusSeconds(70), NO_STOP);
+        assertEquals(mention && !unmasked ? List.of(Map.entry("{{M1}}", "Bob")) : List.of(), context.tokenBindings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+        AiChatMessage summary = memory.history().getFirst();
+        var metadata = tools.jackson.databind.json.JsonMapper.builder().build().readTree(summary.getStructuredJson());
+        assertEquals(0, metadata.path("identifiers").size());
+        assertEquals(mention ? 1 : 0, metadata.path("memberIdentifiers").size());
+        if (mention) {
+            assertEquals("Bob", metadata.path("memberIdentifiers").get(0).path("value").asString());
+        }
+        assertFalse(summary.getStructuredJson().contains("{{M1}}"));
+        MaskingContext fresh = new MaskingContext();
+        fresh.registerMemberCandidate("Renamed Bob");
+        String replay = promptText(fixture.assembler().assembleSummary(summary, List.of(), fresh, new AiChatResourceRegistry(fresh)));
+        if (mention) {
+            assertFalse(replay.contains("Bob"));
+            assertTrue(replay.contains("{{M1}}_team"));
+        } else {
+            assertTrue(replay.contains(summaryText));
+            assertFalse(replay.contains("{{M1}}"));
+        }
+    }
+
+    @Test
+    void historyThatNeedsNoCompactionNeverTouchesTheScopeBoundary() {
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC), scopes, emptyToolExecutor());
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+            3, 12, 5, 7, 101, 1, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false,
+            AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+            new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+        when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+            argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+        AiChatMessage initiating = message(101, 1, "user", "Summarize today");
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        assertEquals(List.of(initiating), fixture.service().prepare(
+            turn, new MaskingContext(), now.plusSeconds(70), NO_STOP).history());
+        verifyNoInteractions(scopes);
+    }
+
+    @Test
+    void emptyCompactionCandidatesSkipTheScopeEvenWhenControlReadsFail() {
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(3)) {
+            when(operation.control.findOrganizationWorkspacesForShare(3))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC),
+                operation.scopes, emptyToolExecutor());
+            AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false,
+                AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
+            when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+                new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+            when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+                argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+            AiChatMessage historical = message(101, 1, "assistant", "Historical context ".repeat(10_000));
+            AiChatMessage initiating = message(102, 2, "user", "Summarize today");
+            when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(historical, initiating));
+
+            assertEquals(List.of(initiating), fixture.service().prepare(
+                turn, new MaskingContext(), now.plusSeconds(70), NO_STOP).history());
+
+            verify(fixture.persistenceService()).loadCompactionCandidates(eq(turn), eq(0), anyInt(), eq(500));
+            verifyNoInteractions(operation.control);
+        }
+    }
 
 }

@@ -1,4 +1,5 @@
 import { formatDate } from '@/app/lib/utils';
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import type { Product } from '@/app/lib/types';
 
 /** Localized copy lookup, as `useTranslations('ProductsBrowser')` returns it. */
@@ -8,7 +9,7 @@ type ProductTranslator = (key: string, values?: Record<string, string>) => strin
 export function formatTaxRate(product: Product, locale: string): string {
     return product.taxRate == null
         ? '—'
-        : `${new Intl.NumberFormat(locale).format(product.taxRate)}%`;
+        : `${getNumberFormatter(locale).format(product.taxRate)}%`;
 }
 
 /** When the product can be sold, stated as a range, an open end, or no limit at all. */

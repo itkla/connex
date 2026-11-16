@@ -39,6 +39,6 @@ public class ConsentController {
     public ContactChannelConsentDto set(
             @Positive @PathVariable int id,
             @Valid @RequestBody ContactChannelConsentRequest request) {
-        return consentService.setForPerson(id, request);
+        return consentService.setForPersonConditionally(id, request);
     }
 }

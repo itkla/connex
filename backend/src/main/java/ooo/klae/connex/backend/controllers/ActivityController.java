@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.controllers;
 
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -15,6 +16,7 @@ import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -87,18 +89,9 @@ public class ActivityController {
     public PageResponse<ActivityDto> getActivitiesPage(
         @RequestParam(defaultValue = "1") int page,
         @RequestParam(defaultValue = "25") int size,
-        @RequestParam(required = false) Integer personId,
-        @RequestParam(required = false) Integer dealId,
-        @RequestParam(required = false) Integer createdById
+        @Valid @ModelAttribute ActivityListFilter filter
     ) {
-        Integer selectedPersonId = personId;
-        Integer selectedDealId = selectedPersonId == null ? dealId : null;
-        Integer selectedCreatedById = selectedPersonId == null && selectedDealId == null ? createdById : null;
-        PageBounds bounds = PageBounds.of(page, size);
-        List<ActivityDto> items = activityService.getActivitiesPage(
-            selectedPersonId, selectedDealId, selectedCreatedById, bounds.size(), bounds.offset())
-            .stream().map(ActivityDto::from).toList();
-        return new PageResponse<>(items, activityService.countActivities(selectedPersonId, selectedDealId, selectedCreatedById));
+        return activityService.getListPage(filter, PageBounds.of(page, size));
     }
 
     /**

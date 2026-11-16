@@ -1,7 +1,9 @@
 "use client";
 
+import { useDetailSectionData } from "@/app/hooks/useDetailSections";
+
 import { useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,7 @@ import {
 } from "@/app/lib/types";
 import { canCreateExport, type CampaignAccess } from "@/app/lib/campaignAccess";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { usePermissionCheck } from "@/app/hooks/usePermissions";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
@@ -63,12 +66,15 @@ export default function CampaignExportPanel({
     access: CampaignAccess;
     deliveryAvailability: CapabilityAvailability;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("CampaignExports");
+    const exportPermission = usePermissionCheck("EXPORT_DATA");
+    const canExportData = exportPermission === "granted";
     const tCapability = useTranslations("CapabilityUnavailable");
     const showApiError = useApiErrorToast("CampaignExports");
     const locale = useLocale();
 
-    const [exports, setExports] = useState<CampaignAudienceExport[]>(initialExports);
+    const [exports, setExports] = useDetailSectionData("campaignExports", initialExports);
     const [exportSnapshot, setExportSnapshot] = useState<string>("");
     const [exportConnector, setExportConnector] = useState<string>("");
     const [isCreatingExport, setIsCreatingExport] = useState(false);
@@ -96,6 +102,7 @@ export default function CampaignExportPanel({
         connector === "http_list" ? t("connectorHttpList") : connector;
 
     const createExport = async () => {
+        if (!canExportData) return;
         const snapshotVersion = Number(exportSnapshot);
         if (!snapshotVersion || !exportConnector) return;
         if (chosenSnapshot?.channel !== "email") {
@@ -180,7 +187,12 @@ export default function CampaignExportPanel({
                         <p className="text-sm text-muted-foreground">{t("exportUnavailable")}</p>
                     </div>
                 ) : null}
-                {canPushExport && (
+                {canPushExport && !canExportData && (
+                    <p className="text-sm text-muted-foreground">
+                        {t(exportPermission === "denied" ? "exportPermissionDenied" : "exportPermissionUnavailable")}
+                    </p>
+                )}
+                {canPushExport && canExportData && (
                     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="grid gap-1.5">
@@ -229,7 +241,7 @@ export default function CampaignExportPanel({
                                 <span className="text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
                                     {t("eligible")}
                                 </span>
-                                <span className="tabular-nums text-sm font-semibold text-brand-hover">
+                                <span className="tabular-nums text-sm font-semibold text-brand-text">
                                     {t("eligibleIncluded", {
                                         count: chosenSnapshot.estimatedIncluded.toLocaleString(locale),
                                     })}
@@ -291,7 +303,7 @@ export default function CampaignExportPanel({
                                         )}
                                     </div>
                                     <span className="shrink-0 text-xs text-muted-foreground">
-                                        {formatDate(entry.createdAt, locale)}
+                                        {formatDate(entry.createdAt, locale, timeZone)}
                                     </span>
                                 </div>
 

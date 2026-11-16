@@ -37,6 +37,18 @@ public class AiChatRealtimeDispatcher {
         }
     }
 
+    /** Sends committed cutoff metadata independently of session deletion or former audiences. */
+    public void workspacePrivacyNow(int workspaceId, long cutoffGeneration) {
+        try {
+            AiChatRealtimePublisher publisher = realtimePublisher.getIfAvailable();
+            if (publisher != null) {
+                publisher.invalidateWorkspace(workspaceId, cutoffGeneration);
+            }
+        } catch (RuntimeException unavailableDelivery) {
+            return;
+        }
+    }
+
     private void userNow(int userId, AiChatStepFrameDto frame) {
         try {
             AiChatRealtimePublisher publisher = realtimePublisher.getIfAvailable();

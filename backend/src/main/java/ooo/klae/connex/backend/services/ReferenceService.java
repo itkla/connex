@@ -1,14 +1,14 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.ArrayDeque;
+import static ooo.klae.connex.backend.services.ReferenceContentReader.canonicalReferenceType;
+import static ooo.klae.connex.backend.services.ReferenceContentReader.normalizeReferenceSyntax;
+import static ooo.klae.connex.backend.services.ReferenceContentReader.parseReferenceTarget;
+
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Deque;
-import java.util.HashMap;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -19,7 +19,6 @@ import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.util.HtmlUtils;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
@@ -36,6 +35,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.ReferenceContentReader.ReferenceTarget;
 
 import lombok.RequiredArgsConstructor;
 
@@ -64,6 +64,8 @@ public class ReferenceService {
     private final ActivityMapper activityMapper;
     private final WorkspaceMapper workspaceMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
     public static final String SOURCE_ACTIVITY = "activity";
@@ -88,11 +90,6 @@ public class ReferenceService {
     private static final Pattern TOKEN = Pattern.compile(
         "\\[([^\\]]+)\\]\\(" + REFERENCE_TYPE_PATTERN
             + REFERENCE_SEPARATOR + "(\\d+)\\)");
-    private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
-        "(?im)^[ \\t]{0,3}+\\[(?:\\\\.|[^\\]\\\\])++\\]:[ \\t]*+"
-            + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
-            + ":(\\d+)>?(?:[ \\t].*)?$");
-
     /**
      * Reader-scoped prose and structured references after invisible targets are removed.
      * @param content reader-safe prose
@@ -104,22 +101,11 @@ public class ReferenceService {
         }
     }
 
-    private record ReferenceTarget(String type, int id) {
-    }
-
-    private record MarkdownTargets(List<ReferenceTarget> targets, Set<String> unparseableTypes) {
-        private MarkdownTargets {
-            targets = List.copyOf(targets);
-            unparseableTypes = Set.copyOf(unparseableTypes);
-        }
-
-        private boolean isEmpty() {
-            return targets.isEmpty() && unparseableTypes.isEmpty();
-        }
-
-        private boolean hasUnparseableTarget() {
-            return !unparseableTypes.isEmpty();
-        }
+    /**
+     * One authored or decoded member label and its possible user targets, without authorization.
+     * Reader-produced target sets are unmodifiable and shared across labels using the same target group.
+     */
+    public record MemberReference(String label, Set<Integer> memberIds) {
     }
 
     /**
@@ -140,6 +126,11 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, String sourceType, int sourceId, String content) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> syncReferencesWithinVisibilityScope(workspaceId, sourceType, sourceId, content));
+    }
+
+    private List<Integer> syncReferencesWithinVisibilityScope(int workspaceId, String sourceType, int sourceId, String content) {
         List<EntityReference> previous = entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId);
         Set<Integer> before = mentionedMemberIds(previous);
         int currentUserId = workspaceService.getCurrentUserId();
@@ -168,6 +159,11 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, int noteId, String content) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> syncReferencesWithinVisibilityScope(workspaceId, noteId, content));
+    }
+
+    private List<Integer> syncReferencesWithinVisibilityScope(int workspaceId, int noteId, String content) {
         return syncReferences(workspaceId, SOURCE_NOTE, noteId, content);
     }
 
@@ -181,6 +177,12 @@ public class ReferenceService {
      */
     public List<EntityReference> referencesFor(int workspaceId, String sourceType, int sourceId) {
         return entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId);
+    }
+
+    /** Projects stored references for reader responses without disclosing pending memberships. */
+    public List<EntityReference> referencesForReader(int workspaceId, String sourceType, int sourceId) {
+        return redactInvisibleTargets(workspaceId, List.of(new ReaderVisibleContent(
+            null, referencesFor(workspaceId, sourceType, sourceId)))).getFirst().references();
     }
 
     /**
@@ -230,17 +232,39 @@ public class ReferenceService {
         if (notes == null || notes.isEmpty()) {
             return notes;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes, false));
+    }
+
+    /** Preserves authored pending-member labels for internal masking, never for reader projection. */
+    public List<Note> hydrateForMasking(int workspaceId, List<Note> notes) {
+        if (notes == null || notes.isEmpty()) {
+            return notes;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes, true));
+    }
+
+    private List<Note> hydrateWithinVisibilityScope(int workspaceId, List<Note> notes, boolean forMasking) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_NOTE, notes.stream().map(Note::getId).toList());
         for (Note note : notes) {
             note.setReferences(bySource.getOrDefault(note.getId(), List.of()));
         }
-        redactInvisibleReferences(workspaceId, notes);
+        redactInvisibleReferences(workspaceId, notes, forMasking);
         return notes;
     }
 
     /** Hydrates a SQL-bounded note page and truncates content only after reader-specific redaction. */
     public List<Note> hydrateNotePreviews(int workspaceId, List<Note> notes) {
+        if (notes == null || notes.isEmpty()) {
+            return notes == null ? List.of() : notes;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateNotePreviewsWithinVisibilityScope(workspaceId, notes));
+    }
+
+    private List<Note> hydrateNotePreviewsWithinVisibilityScope(int workspaceId, List<Note> notes) {
         List<Note> hydrated = hydrate(workspaceId, notes);
         if (hydrated == null) {
             return List.of();
@@ -266,13 +290,27 @@ public class ReferenceService {
         if (tasks == null || tasks.isEmpty()) {
             return tasks;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks, false));
+    }
+
+    /** Preserves authored pending-member labels for internal masking, never for reader projection. */
+    public List<Task> hydrateTasksForMasking(int workspaceId, List<Task> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return tasks;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks, true));
+    }
+
+    private List<Task> hydrateTasksWithinVisibilityScope(int workspaceId, List<Task> tasks, boolean forMasking) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_TASK, tasks.stream().map(Task::getId).toList());
         for (Task task : tasks) {
             task.setReferences(bySource.getOrDefault(task.getId(), List.of()));
         }
         redactInvisibleTargets(workspaceId, tasks,
-            Task::getReferences, Task::setReferences, Task::getDescription, Task::setDescription);
+            Task::getReferences, Task::setReferences, Task::getDescription, Task::setDescription, forMasking);
         return tasks;
     }
 
@@ -287,6 +325,11 @@ public class ReferenceService {
         if (deals == null || deals.isEmpty()) {
             return deals;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateDealsWithinVisibilityScope(workspaceId, deals));
+    }
+
+    private List<Deal> hydrateDealsWithinVisibilityScope(int workspaceId, List<Deal> deals) {
         Map<Integer, List<EntityReference>> bySource = referencesBySource(
             workspaceId, SOURCE_DEAL, deals.stream().map(Deal::getId).toList());
         List<ReaderVisibleContent> visible = redactInvisibleTargets(
@@ -317,13 +360,28 @@ public class ReferenceService {
         if (activities == null || activities.isEmpty()) {
             return activities;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities, false));
+    }
+
+    /** Preserves authored pending-member labels for internal masking, never for reader projection. */
+    public List<Activity> hydrateActivitiesForMasking(int workspaceId, List<Activity> activities) {
+        if (activities == null || activities.isEmpty()) {
+            return activities;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities, true));
+    }
+
+    private List<Activity> hydrateActivitiesWithinVisibilityScope(
+            int workspaceId, List<Activity> activities, boolean forMasking) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_ACTIVITY, activities.stream().map(Activity::getId).toList());
         for (Activity activity : activities) {
             activity.setReferences(bySource.getOrDefault(activity.getId(), List.of()));
         }
         redactInvisibleTargets(workspaceId, activities,
-            Activity::getReferences, Activity::setReferences, Activity::getNotes, Activity::setNotes);
+            Activity::getReferences, Activity::setReferences, Activity::getNotes, Activity::setNotes, forMasking);
         return activities;
     }
 
@@ -362,35 +420,52 @@ public class ReferenceService {
      */
     public List<ReaderVisibleContent> redactInvisibleTargets(
             int workspaceId, List<ReaderVisibleContent> items) {
+        return redactInvisibleTargets(workspaceId, items, false);
+    }
+
+    private List<ReaderVisibleContent> redactInvisibleTargets(
+            int workspaceId, List<ReaderVisibleContent> items, boolean forMasking) {
         if (items == null || items.isEmpty()) {
             return List.of();
         }
         Set<ReferenceTarget> targets = new HashSet<>();
+        List<ReferenceContentReader.Reading> readings = new ArrayList<>();
         boolean containsTarget = false;
         for (ReaderVisibleContent item : items) {
             for (EntityReference reference : item.references()) {
                 containsTarget = true;
                 targets.add(new ReferenceTarget(reference.getRefType(), reference.getRefId()));
             }
-            MarkdownTargets markdownTargets = markdownTargets(item.content());
-            if (!markdownTargets.isEmpty()) {
+            var reading = ReferenceContentReader.read(item.content());
+            readings.add(reading);
+            if (!reading.complete() || !reading.isEmpty()) {
                 containsTarget = true;
-                targets.addAll(markdownTargets.targets());
+                targets.addAll(reading.targets());
             }
         }
         if (!containsTarget) {
             return List.copyOf(items);
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(workspaceId,
+            () -> redactInvisibleTargetsWithinVisibilityScope(workspaceId, items, targets, readings, forMasking));
+    }
+
+    private List<ReaderVisibleContent> redactInvisibleTargetsWithinVisibilityScope(
+            int workspaceId, List<ReaderVisibleContent> items, Set<ReferenceTarget> targets,
+            List<ReferenceContentReader.Reading> readings, boolean forMasking) {
         int currentUserId = workspaceService.getCurrentUserId();
-        Set<ReferenceTarget> visible = visibleTargets(workspaceId, targets, currentUserId);
-        return items.stream()
-            .map(item -> new ReaderVisibleContent(
-                redactTokens(item.content(), visible),
+        Set<ReferenceTarget> visible = visibleTargets(workspaceId, targets, currentUserId, forMasking);
+        List<ReaderVisibleContent> redacted = new ArrayList<>();
+        for (int index = 0; index < items.size(); index++) {
+            ReaderVisibleContent item = items.get(index);
+            redacted.add(new ReaderVisibleContent(
+                redactTokens(item.content(), visible, readings.get(index)),
                 item.references().stream()
                     .filter(reference -> visible.contains(
                         new ReferenceTarget(reference.getRefType(), reference.getRefId())))
-                    .toList()))
-            .toList();
+                    .toList()));
+        }
+        return List.copyOf(redacted);
     }
 
     private List<EntityReference> resolve(
@@ -400,6 +475,7 @@ public class ReferenceService {
         }
         Map<String, EntityReference> unique = new LinkedHashMap<>();
         Matcher matcher = TOKEN.matcher(normalizeReferenceSyntax(content));
+        String personWorkspaceIdsJson = null;
         while (matcher.find() && unique.size() < MAX_REFERENCES) {
             String type = matcher.group(2);
             int refId;
@@ -408,7 +484,10 @@ public class ReferenceService {
             } catch (NumberFormatException ignored) {
                 continue;
             }
-            if (!isVisible(workspaceId, type, refId, currentUserId)) {
+            if (personWorkspaceIdsJson == null && Set.of(TYPE_PERSON, TYPE_COMPANY).contains(type)) {
+                personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            }
+            if (!isResolvable(workspaceId, type, refId, currentUserId, personWorkspaceIdsJson)) {
                 continue;
             }
             String key = type + ":" + refId;
@@ -420,12 +499,12 @@ public class ReferenceService {
         return new ArrayList<>(unique.values());
     }
 
-    private boolean isVisible(int workspaceId, String type, int refId, int currentUserId) {
+    private boolean isResolvable(int workspaceId, String type, int refId, int currentUserId, String personWorkspaceIdsJson) {
         return switch (type) {
             case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
-            case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
+            case TYPE_PERSON -> personMapper.exists(workspaceId, personWorkspaceIdsJson, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
-            case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
+            case TYPE_COMPANY -> companyMapper.exists(workspaceId, personWorkspaceIdsJson, refId);
             case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
             case TYPE_FILE -> !attachmentMapper.getVisibleIdsIn(
                 workspaceId, List.of(refId), currentUserId).isEmpty();
@@ -433,6 +512,30 @@ public class ReferenceService {
             case TYPE_ACTIVITY -> activityMapper.exists(workspaceId, refId);
             default -> false;
         };
+    }
+
+    /** Resolves distinct active member ids in bounded, workspace-scoped batches. */
+    public Set<Integer> visibleMemberIds(int workspaceId, Collection<Integer> memberIds) {
+        return memberIdsIn(workspaceId, memberIds, false);
+    }
+
+    /** Resolves scoped membership ids solely for authored masking labels, without profile lookup. */
+    public Set<Integer> memberIdsForMasking(int workspaceId, Collection<Integer> memberIds) {
+        return memberIdsIn(workspaceId, memberIds, true);
+    }
+
+    private Set<Integer> memberIdsIn(int workspaceId, Collection<Integer> memberIds, boolean forMasking) {
+        if (memberIds == null || memberIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Integer> ids = memberIds.stream().filter(id -> id != null && id > 0).distinct().toList();
+        Set<Integer> visible = new HashSet<>();
+        for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
+            List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
+            visible.addAll(forMasking ? workspaceMapper.getMemberIdsIncludingPending(workspaceId, batch)
+                : workspaceMapper.getActiveMemberIdsIn(workspaceId, batch));
+        }
+        return Set.copyOf(visible);
     }
 
     /**
@@ -448,8 +551,13 @@ public class ReferenceService {
         if (canonicalType == null || refId <= 0) {
             throw new ResourceNotFoundException("Reference target not found");
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> requireVisibleTargetWithinVisibilityScope(workspaceId, canonicalType, refId, currentUserId));
+    }
+
+    private String requireVisibleTargetWithinVisibilityScope(int workspaceId, String canonicalType, int refId, int currentUserId) {
         ReferenceTarget target = new ReferenceTarget(canonicalType, refId);
-        if (!visibleTargets(workspaceId, Set.of(target), currentUserId).contains(target)) {
+        if (!visibleTargets(workspaceId, Set.of(target), currentUserId, false).contains(target)) {
             throw new ResourceNotFoundException("Reference target not found");
         }
         return canonicalType;
@@ -458,9 +566,9 @@ public class ReferenceService {
     /**
      * Removes reference targets and content tokens that the current reader cannot see.
      */
-    private void redactInvisibleReferences(int workspaceId, List<Note> notes) {
+    private void redactInvisibleReferences(int workspaceId, List<Note> notes, boolean forMasking) {
         redactInvisibleTargets(workspaceId, notes,
-            Note::getReferences, Note::setReferences, Note::getContent, Note::setContent);
+            Note::getReferences, Note::setReferences, Note::getContent, Note::setContent, forMasking);
     }
 
     /**
@@ -481,10 +589,11 @@ public class ReferenceService {
             Function<T, List<EntityReference>> getReferences,
             BiConsumer<T, List<EntityReference>> setReferences,
             Function<T, String> getContent,
-            BiConsumer<T, String> setContent) {
+            BiConsumer<T, String> setContent,
+            boolean forMasking) {
         List<ReaderVisibleContent> redacted = redactInvisibleTargets(workspaceId, items.stream()
             .map(item -> new ReaderVisibleContent(getContent.apply(item), getReferences.apply(item)))
-            .toList());
+            .toList(), forMasking);
         for (int index = 0; index < items.size(); index++) {
             T item = items.get(index);
             ReaderVisibleContent visible = redacted.get(index);
@@ -493,17 +602,29 @@ public class ReferenceService {
         }
     }
 
-    private static String redactTokens(String content, Set<ReferenceTarget> visibleTargets) {
+    /** Redacts internal links outside an already authorized primary without fetching linked records. */
+    public static String redactMissionReferences(String content, String kind, int id) {
+        if (kind == null || !Set.of("person", "company", "deal").contains(kind) || id <= 0) {
+            throw new IllegalArgumentException("Invalid mission reference scope");
+        }
+        return redactTokens(content, Set.of(new ReferenceTarget(kind, id)), ReferenceContentReader.read(content));
+    }
+
+    private static String redactTokens(String content, Set<ReferenceTarget> visibleTargets,
+            ReferenceContentReader.Reading reading) {
         if (content == null) {
             return null;
+        }
+        if (!reading.complete()) {
+            return "(unavailable reference)";
         }
         String redacted = TOKEN.matcher(content).replaceAll(match ->
             parseReferenceTarget(match.group(2), match.group(3))
                 .filter(visibleTargets::contains)
                 .map(ignored -> Matcher.quoteReplacement(match.group()))
                 .orElseGet(() -> redactionPlaceholder(match.group(2))));
-        MarkdownTargets targets = markdownTargets(redacted);
-        if (targets.hasUnparseableTarget()) {
+        var targets = redacted.equals(content) ? reading : ReferenceContentReader.read(redacted);
+        if (!targets.complete() || !targets.unparseableTypes().isEmpty()) {
             return "(unavailable reference)";
         }
         Optional<ReferenceTarget> invisible = targets.targets().stream()
@@ -520,185 +641,48 @@ public class ReferenceService {
     }
 
     /**
-     * Collects every internal target an untrusted body reaches through inline destinations and
-     * link-reference definitions.
-     *
-     * <p>Every repetition in that pattern is possessive so a hostile body cannot drive backtracking,
-     * and each is unambiguous in context, so refusing to give characters back does not change what
-     * it matches: no label alternative can consume a bare {@code ]}, and no indent run can be
-     * followed by a space or tab that the next required token would accept. Its trailing
-     * description is {@code [ \t].*} rather than {@code [ \t]+.*} because {@code .} already covers
-     * further spaces and tabs.
-     *
-     * @param content the raw reader-visible body
-     * @return the referenced targets and whether any target was unparseable
+     * Reads conservative authored member labels from reader-authorized prose. This compatibility
+     * view does not establish AI admission; use {@link #memberReferenceReading} for completeness
+     * and additional rendered spellings before projecting prose to a provider.
      */
-    private static MarkdownTargets markdownTargets(String content) {
-        if (content == null || content.isBlank()) {
-            return new MarkdownTargets(List.of(), Set.of());
-        }
-        String normalized = normalizeReferenceSyntax(content);
-        List<ReferenceTarget> targets = new ArrayList<>();
-        Set<String> unparseableTypes = new HashSet<>();
-        collectInlineTargets(normalized, targets, unparseableTypes);
-        collectReferenceTargets(REFERENCE_DEFINITION.matcher(normalized), targets, unparseableTypes);
-        return new MarkdownTargets(targets, unparseableTypes);
+    static List<String> memberLabelsFromReaderVisibleContent(String readerVisibleContent) {
+        return memberReferencesInContent(readerVisibleContent).stream()
+                .map(MemberReference::label).distinct().toList();
     }
 
-    private static String normalizeReferenceSyntax(String content) {
-        return HtmlUtils.htmlUnescape(content.replace("&colon;", ":")).replace("\\:", ":");
+    /**
+     * Reads member labels from original prose without authorization. Callers must authorize each
+     * shared target group and use {@link #memberReferenceReading} when completeness is required.
+     */
+    static List<MemberReference> memberReferencesInContent(String content) {
+        return ReferenceContentReader.read(content).memberReferences();
     }
 
-    private static void collectReferenceTargets(
-            Matcher matcher, List<ReferenceTarget> targets, Set<String> unparseableTypes) {
-        while (matcher.find()) {
-            Optional<ReferenceTarget> target = parseReferenceTarget(matcher.group(1), matcher.group(2));
-            if (target.isPresent()) {
-                targets.add(target.get());
-            } else {
-                String type = canonicalReferenceType(matcher.group(1));
-                if (type != null) {
-                    unparseableTypes.add(type);
-                }
-            }
+    /** Source and rendered member provenance with completeness and representable member targets. */
+    public record MemberReferenceReading(List<MemberReference> references, boolean complete) {
+        public MemberReferenceReading {
+            references = List.copyOf(references);
         }
     }
 
-    private static void collectInlineTargets(
-            String content, List<ReferenceTarget> targets, Set<String> unparseableTypes) {
-        int[] labelEnds = matchingLabelEnds(content);
-        for (int index = 0; index < content.length(); index++) {
-            if (content.charAt(index) != '[' || isEscaped(content, index)) {
-                continue;
-            }
-            int labelEnd = labelEnds[index];
-            if (labelEnd < 0) {
-                continue;
-            }
-            int destinationStart = skipWhitespace(content, labelEnd + 1);
-            if (destinationStart >= content.length() || content.charAt(destinationStart) != '(') {
-                index = labelEnd;
-                continue;
-            }
-            destinationStart = skipWhitespace(content, destinationStart + 1);
-            if (destinationStart < content.length() && content.charAt(destinationStart) == '<') {
-                destinationStart++;
-            }
-            int typeEnd = destinationStart;
-            while (typeEnd < content.length() && Character.isLetter(content.charAt(typeEnd))) {
-                typeEnd++;
-            }
-            if (typeEnd == destinationStart || typeEnd >= content.length()
-                    || content.charAt(typeEnd) != ':') {
-                index = labelEnd;
-                continue;
-            }
-            String type = canonicalReferenceType(content.substring(destinationStart, typeEnd));
-            if (type == null) {
-                index = labelEnd;
-                continue;
-            }
-            int idStart = typeEnd + 1;
-            int idEnd = idStart;
-            while (idEnd < content.length() && Character.isDigit(content.charAt(idEnd))) {
-                idEnd++;
-            }
-            if (idEnd == idStart) {
-                unparseableTypes.add(type);
-            } else {
-                Optional<ReferenceTarget> target = parseReferenceTarget(
-                    type, content.substring(idStart, idEnd));
-                if (target.isPresent()) {
-                    targets.add(target.get());
-                } else {
-                    unparseableTypes.add(type);
-                }
-            }
-            index = labelEnd;
-        }
+    /** Reads original prose without truncation, including compatibility candidates on incomplete input. */
+    public static MemberReferenceReading memberReferenceReading(String content) {
+        var reading = ReferenceContentReader.read(content);
+        return new MemberReferenceReading(reading.maskingReferences(),
+                reading.complete() && reading.memberTargetsComplete());
     }
 
-    private static int[] matchingLabelEnds(String content) {
-        int[] labelEnds = new int[content.length()];
-        Arrays.fill(labelEnds, -1);
-        int[] closingBacktickRuns = closingBacktickRuns(content);
-        Deque<Integer> labelStarts = new ArrayDeque<>();
-        int precedingBackslashes = 0;
-        for (int index = 0; index < content.length(); index++) {
-            char value = content.charAt(index);
-            if (value == '\\') {
-                precedingBackslashes++;
-                continue;
-            }
-            boolean escaped = precedingBackslashes % 2 == 1;
-            precedingBackslashes = 0;
-            if (escaped) {
-                continue;
-            }
-            if (value == '`') {
-                int delimiterLength = backtickRunLength(content, index);
-                int closingDelimiter = closingBacktickRuns[index];
-                if (closingDelimiter >= 0) {
-                    index = closingDelimiter + delimiterLength - 1;
-                } else {
-                    index += delimiterLength - 1;
-                }
-            } else if (value == '[') {
-                labelStarts.push(index);
-            } else if (value == ']' && !labelStarts.isEmpty()) {
-                labelEnds[labelStarts.pop()] = index;
-            }
-        }
-        return labelEnds;
+    /** Tests the shared code-point bound before storing member provenance. */
+    public static boolean memberLabelWithinLimit(String label) {
+        return ReferenceContentReader.memberLabelWithinLimit(label);
     }
 
-    private static int backtickRunLength(String content, int start) {
-        int end = start;
-        while (end < content.length() && content.charAt(end) == '`') {
-            end++;
-        }
-        return end - start;
-    }
-
-    private static int[] closingBacktickRuns(String content) {
-        int[] closingRuns = new int[content.length()];
-        Arrays.fill(closingRuns, -1);
-        Map<Integer, Integer> nextRunByLength = new HashMap<>();
-        for (int end = content.length() - 1; end >= 0;) {
-            if (content.charAt(end) != '`') {
-                end--;
-                continue;
-            }
-            int start = end;
-            while (start > 0 && content.charAt(start - 1) == '`') {
-                start--;
-            }
-            int delimiterLength = end - start + 1;
-            closingRuns[start] = nextRunByLength.getOrDefault(delimiterLength, -1);
-            nextRunByLength.put(delimiterLength, start);
-            end = start - 1;
-        }
-        return closingRuns;
-    }
-
-    private static boolean isEscaped(String content, int index) {
-        int backslashes = 0;
-        for (int cursor = index - 1; cursor >= 0 && content.charAt(cursor) == '\\'; cursor--) {
-            backslashes++;
-        }
-        return backslashes % 2 == 1;
-    }
-
-    private static int skipWhitespace(String content, int index) {
-        int cursor = index;
-        while (cursor < content.length() && Character.isWhitespace(content.charAt(cursor))) {
-            cursor++;
-        }
-        return cursor;
+    static boolean memberRuleLine(CharSequence content, int start, int end) {
+        return ReferenceContentReader.memberRuleLine(content, start, end);
     }
 
     private Set<ReferenceTarget> visibleTargets(
-            int workspaceId, Set<ReferenceTarget> targets, int currentUserId) {
+            int workspaceId, Set<ReferenceTarget> targets, int currentUserId, boolean forMasking) {
         if (targets.isEmpty()) {
             return Set.of();
         }
@@ -710,10 +694,12 @@ public class ReferenceService {
             }
         }
         Set<ReferenceTarget> visible = new HashSet<>();
+        String personWorkspaceIdsJson = idsByType.containsKey(TYPE_PERSON) || idsByType.containsKey(TYPE_COMPANY)
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
         idsByType.forEach((type, ids) -> {
             for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
                 List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
-                for (int id : visibleIds(workspaceId, type, batch, currentUserId)) {
+                for (int id : visibleIds(workspaceId, type, batch, currentUserId, personWorkspaceIdsJson, forMasking)) {
                     visible.add(new ReferenceTarget(type, id));
                 }
             }
@@ -722,47 +708,19 @@ public class ReferenceService {
     }
 
     private List<Integer> visibleIds(
-            int workspaceId, String type, List<Integer> ids, int currentUserId) {
+            int workspaceId, String type, List<Integer> ids, int currentUserId, String personWorkspaceIdsJson,
+            boolean forMasking) {
         return switch (type) {
-            case TYPE_USER -> workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids);
-            case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_USER -> forMasking ? workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids)
+                : workspaceMapper.getActiveMemberIdsIn(workspaceId, ids);
+            case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);
             case TYPE_DEAL -> dealMapper.getVisibleIdsIn(workspaceId, ids);
-            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);
             case TYPE_NOTE -> noteMapper.getVisibleNoteIdsIn(workspaceId, ids, currentUserId);
             case TYPE_FILE -> attachmentMapper.getVisibleIdsIn(workspaceId, ids, currentUserId);
             case TYPE_TASK -> taskMapper.getVisibleIdsIn(workspaceId, ids);
             case TYPE_ACTIVITY -> activityMapper.getVisibleIdsIn(workspaceId, ids);
             default -> List.of();
-        };
-    }
-
-    private static Optional<ReferenceTarget> parseReferenceTarget(String type, String value) {
-        String canonicalType = canonicalReferenceType(type);
-        if (canonicalType == null) {
-            return Optional.empty();
-        }
-        try {
-            int id = Integer.parseInt(value);
-            return id > 0 ? Optional.of(new ReferenceTarget(canonicalType, id)) : Optional.empty();
-        } catch (NumberFormatException exception) {
-            return Optional.empty();
-        }
-    }
-
-    private static String canonicalReferenceType(String value) {
-        if (value == null) {
-            return null;
-        }
-        return switch (value.toLowerCase(Locale.ROOT)) {
-            case TYPE_USER -> TYPE_USER;
-            case TYPE_PERSON -> TYPE_PERSON;
-            case TYPE_DEAL -> TYPE_DEAL;
-            case TYPE_COMPANY -> TYPE_COMPANY;
-            case TYPE_NOTE -> TYPE_NOTE;
-            case TYPE_FILE -> TYPE_FILE;
-            case TYPE_TASK -> TYPE_TASK;
-            case TYPE_ACTIVITY -> TYPE_ACTIVITY;
-            default -> null;
         };
     }
 
@@ -806,9 +764,22 @@ public class ReferenceService {
             TYPE_NOTE.equals(match.group(2))
                 ? "a note"
                 : "@" + Matcher.quoteReplacement(match.group(1)));
-        MarkdownTargets targets = markdownTargets(redacted);
+        var targets = ReferenceContentReader.read(content);
+        if (!targets.complete() || !targets.unexplainedTargets().isEmpty() || !targets.unparseableTypes().isEmpty()) {
+            return targets.complete() && (targets.unparseableTypes().contains(TYPE_NOTE)
+                    || targets.targets().stream().anyMatch(target -> TYPE_NOTE.equals(target.type())))
+                    ? "a note" : "(unavailable reference)";
+        }
+        if (!redacted.equals(content)) {
+            targets = ReferenceContentReader.read(redacted);
+        }
+        if (!targets.complete() || !targets.unexplainedTargets().isEmpty() || !targets.unparseableTypes().isEmpty()) {
+            return targets.complete() && (targets.unparseableTypes().contains(TYPE_NOTE)
+                    || targets.targets().stream().anyMatch(target -> TYPE_NOTE.equals(target.type())))
+                    ? "a note" : "(unavailable reference)";
+        }
         boolean containsNote = targets.targets().stream()
             .anyMatch(target -> TYPE_NOTE.equals(target.type()));
-        return containsNote || targets.unparseableTypes().contains(TYPE_NOTE) ? "a note" : redacted;
+        return containsNote ? "a note" : redacted;
     }
 }

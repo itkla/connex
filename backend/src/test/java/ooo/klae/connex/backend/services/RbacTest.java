@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,6 +23,9 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class RbacTest extends AbstractServiceTest {
 
@@ -29,6 +33,63 @@ class RbacTest extends AbstractServiceTest {
     @Autowired RoleService roleService;
     @Autowired RoleMapper roleMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void exportPolicyCanBeWithdrawnAndRestoredWithoutChangingOtherWorkspaceOrDomainAuthority() {
+        var workspace = workspaceService.createWorkspace("Export policy", currentUser.getId());
+        var other = workspaceService.createWorkspace("Other export policy", currentUser.getId());
+        User admin = newUser();
+        User member = newUser();
+        workspaceMapper.addMember(workspace.getId(), admin.getId(), "admin");
+        workspaceMapper.addMember(workspace.getId(), member.getId(), "member");
+        workspaceMapper.addMember(other.getId(), member.getId(), "member");
+        authenticateAs(admin, workspace.getId());
+        approveForStepUp(admin);
+        assertTrue(workspaceService.permissionsFor(workspace.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        roleService.updateBuiltInExportPermission(workspace.getId(), admin.getId(), "member", false);
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        assertTrue(workspaceService.permissionsFor(workspace.getId(), member.getId()).contains(Permission.PERSON_CREATE));
+        assertTrue(workspaceService.permissionsFor(other.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        assertFalse(workspaceService.lockedMemberPermissionsFor(workspace.getId(), member.getId()).contains(Permission.EXPORT_DATA));
+        roleService.updateBuiltInExportPermission(workspace.getId(), admin.getId(), "admin", false);
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), admin.getId()).contains(Permission.EXPORT_DATA));
+        roleService.updateBuiltInExportPermission(workspace.getId(), admin.getId(), "admin", true);
+        assertTrue(workspaceService.permissionsFor(workspace.getId(), admin.getId()).contains(Permission.EXPORT_DATA));
+        authenticateAs(member, workspace.getId());
+        approveForStepUp(member);
+        assertThrows(ForbiddenException.class, () -> roleService.updateBuiltInExportPermission(
+            workspace.getId(), member.getId(), "member", true));
+    }
+
+    @Test
+    void newCustomRolesDoNotReceiveAnExportGrantAndCannotUseBuiltInPolicyRecovery() {
+        var workspace = workspaceService.createWorkspace("Custom export policy", currentUser.getId());
+        WorkspaceRole role = roleService.createRole(workspace.getId(), currentUser.getId(), "No export", null);
+        assertFalse(role.getPermissions().contains("EXPORT_DATA"));
+        User delegate = newUser();
+        workspaceMapper.addMember(workspace.getId(), delegate.getId(), "admin");
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("ROLE_MANAGE", "MEMBER_MANAGE"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), delegate.getId(), role.getId());
+        authenticateAs(delegate, workspace.getId());
+        approveForStepUp(delegate);
+        assertThrows(ForbiddenException.class, () -> roleService.updateBuiltInExportPermission(
+            workspace.getId(), delegate.getId(), "member", true));
+        assertThrows(ForbiddenException.class, () -> roleService.updateRole(workspace.getId(),
+            delegate.getId(), role.getId(), "Escalation", List.of("ROLE_MANAGE", "MEMBER_MANAGE", "EXPORT_DATA")));
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), delegate.getId()).contains(Permission.EXPORT_DATA));
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Test
+    void ownerRecoveryUsesTheEffectiveBuiltInOwnerBundleAfterExportWithdrawal() {
+        var workspace = workspaceService.createWorkspace("Owner export recovery", currentUser.getId());
+        roleService.updateBuiltInExportPermission(workspace.getId(), currentUser.getId(), "owner", false);
+        var permissions = Permission.grantableNames().stream().filter(name -> !name.equals("EXPORT_DATA")).toList();
+        WorkspaceRole role = roleService.createRole(workspace.getId(), currentUser.getId(), "Owner without export", permissions);
+        assertDoesNotThrow(() -> workspaceService.assignCustomRole(
+            workspace.getId(), currentUser.getId(), currentUser.getId(), role.getId()));
+        assertFalse(workspaceService.permissionsFor(workspace.getId(), currentUser.getId()).contains(Permission.EXPORT_DATA));
+    }
 
     @Test
     void builtInRolesMapToExpectedPermissions() {
@@ -81,6 +142,7 @@ class RbacTest extends AbstractServiceTest {
                 Permission.TEAM_MANAGE)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customRoleReplacesBuiltInPermissions() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Custom WS", currentUser.getId());
@@ -100,11 +162,13 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.requirePermission(ws.getId(), member.getId(), Permission.COMPANY_CREATE));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customOverlayRemovesAdministratorAndOwnerExceptions() {
         tenantContext.clear();
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Effective Admin WS", currentUser.getId());
         authenticateAs(currentUser, ws.getId());
+        approveForStepUp(currentUser);
         User member = newUser();
         User admin = newUser();
         workspaceMapper.addMember(ws.getId(), member.getId(), "member");
@@ -125,6 +189,7 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.requireRole(ws.getId(), currentUser.getId(), WorkspaceService.Role.OWNER));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aiSessionAdminIsGrantableToACustomRole() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
@@ -143,6 +208,7 @@ class RbacTest extends AbstractServiceTest {
             workspaceService.permissionsFor(ws.getId(), member.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void deletingAnAssignedCustomRoleRequiresExplicitReassignment() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Revert WS", currentUser.getId());
@@ -166,11 +232,13 @@ class RbacTest extends AbstractServiceTest {
         assertTrue(perms.contains(Permission.DEAL_DELETE));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customRoleRoundTripDoesNotAuthorizeALegacyPendingAdminGrant() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Legacy Pending Grant WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleManager = roleService.createRole(
             ws.getId(), currentUser.getId(), "Pending Role Manager",
@@ -186,9 +254,15 @@ class RbacTest extends AbstractServiceTest {
                 + "WHERE workspace_id = ? AND user_id = ?",
             ws.getId(), pending.getId());
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
-        workspaceService.assignCustomRole(
-            ws.getId(), delegate.getId(), pending.getId(), emptyRole.getId());
+        assertThrows(ResourceNotFoundException.class, () -> workspaceService.assignCustomRole(
+            ws.getId(), delegate.getId(), pending.getId(), emptyRole.getId()));
+        assertNull(workspaceMapper.getMember(ws.getId(), pending.getId()).getRoleId());
+        workspaceMapper.setMemberCustomRole(ws.getId(), pending.getId(), emptyRole.getId());
+        assertEquals(Integer.valueOf(0), jdbcTemplate.queryForObject(
+            "SELECT grant_authorization_version FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+            Integer.class, ws.getId(), pending.getId()));
 
         assertThrows(
             BadRequestException.class,
@@ -220,6 +294,7 @@ class RbacTest extends AbstractServiceTest {
                 List.of("SSO_MANAGE")));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void inertPermissionRowsDoNotReadBackOrAuthorize() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Stale Inert Permission WS", currentUser.getId());
@@ -248,6 +323,7 @@ class RbacTest extends AbstractServiceTest {
             () -> roleService.createRole(ws.getId(), currentUser.getId(), "No Step Up", List.of()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void adminCannotDemoteAnOwnerWithoutOwnerRole() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Owner Guard WS", currentUser.getId());
@@ -263,15 +339,18 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.changeMemberRole(ws.getId(), currentUser.getId(), coOwner.getId(), "member"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void roleManageCannotMintRoleGrantingPermissionsActorLacks() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Ceiling WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
             List.of("ROLE_MANAGE", "PERSON_CREATE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertThrows(ForbiddenException.class,
             () -> roleService.createRole(ws.getId(), delegate.getId(), "SuperRole", List.of("MEMBER_MANAGE")));
@@ -279,10 +358,12 @@ class RbacTest extends AbstractServiceTest {
             () -> roleService.createRole(ws.getId(), delegate.getId(), "NarrowRole", List.of("PERSON_CREATE")));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void roleManageCannotSelfAssignRoleBroaderThanActor() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Assign Ceiling WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
             List.of("ROLE_MANAGE"));
@@ -290,20 +371,24 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceRole superRole = roleService.createRole(ws.getId(), currentUser.getId(), "Super",
             List.of("MEMBER_MANAGE", "WORKSPACE_SETTINGS"));
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.assignCustomRole(ws.getId(), delegate.getId(), delegate.getId(), superRole.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberManageDelegateCannotPromoteToBuiltInAdmin() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Promote Ceiling WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole hrRole = roleService.createRole(ws.getId(), currentUser.getId(), "HR",
             List.of("MEMBER_MANAGE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), hrRole.getId());
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertEquals(3, roleService.builtInRoles(ws.getId(), delegate.getId()).size());
         assertThrows(ForbiddenException.class,
@@ -312,13 +397,16 @@ class RbacTest extends AbstractServiceTest {
         assertFalse(workspaceService.permissionsFor(ws.getId(), delegate.getId()).contains(Permission.WORKSPACE_SETTINGS));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customOwnerOverlayKeepsRawOwnerVisibleAndProtected() {
         tenantContext.clear();
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Custom Owner Guard WS", currentUser.getId());
         authenticateAs(currentUser, ws.getId());
+        approveForStepUp(currentUser);
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole memberManager = roleService.createRole(
             ws.getId(), currentUser.getId(), "Member Manager",
@@ -341,17 +429,20 @@ class RbacTest extends AbstractServiceTest {
         assertEquals("owner", owner.getBuiltInRole());
 
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
         assertThrows(
             ForbiddenException.class,
             () -> workspaceService.removeMember(ws.getId(), delegate.getId(), currentUser.getId()));
         assertTrue(workspaceMapper.isMember(ws.getId(), currentUser.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void nonOwnerRoleManagerCannotAssignCustomRoleToOwner() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Owner Overlay Assignment WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleManager = roleService.createRole(
             ws.getId(), currentUser.getId(), "Role Manager",
@@ -362,6 +453,7 @@ class RbacTest extends AbstractServiceTest {
             ws.getId(), currentUser.getId(), "Contact Creator",
             List.of(Permission.PERSON_CREATE.name()));
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertThrows(
             ForbiddenException.class,

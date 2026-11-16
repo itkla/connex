@@ -144,7 +144,8 @@ class SegmentMapperXmlTest {
         assertTrue(sql.contains("visible_company.id = person.company_id"));
         assertTrue(sql.contains("visible_company.workspace_id = ?"));
         assertTrue(sql.contains("visible_share.workspace_id = ?"));
-        assertTrue(sql.contains("owner_workspace.org_id = viewer_workspace.org_id"));
+        assertTrue(sql.contains("JOIN JSON_TABLE( ?, '$[*]' COLUMNS(id INT PATH '$') ) org_workspace"
+            + " ON org_workspace.id = visible_company.workspace_id"));
     }
 
     private static void assertTagBoundary(String sql, String junction) {

@@ -42,6 +42,7 @@ import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 
 /**
@@ -204,6 +205,7 @@ public class FixedAiProviderClient {
             beforeSend.run();
             try {
                 Response response = pinned.httpClient().execute(request, providerResponse -> {
+                    AiProviderDispatch.responded(beforeSend);
                     HttpEntity entity = providerResponse.getEntity();
                     byte[] responseBody = entity == null
                             ? new byte[0]
@@ -269,6 +271,7 @@ public class FixedAiProviderClient {
             beforeSend.run();
             try {
                 StreamResponse<T> response = pinned.httpClient().execute(request, providerResponse -> {
+                    AiProviderDispatch.responded(beforeSend);
                     HttpEntity entity = providerResponse.getEntity();
                     int status = providerResponse.getCode();
                     if (status >= 200 && status <= 299 && entity != null) {

@@ -29,6 +29,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class RecordCommentEditTest extends AbstractServiceTest {
 
@@ -62,6 +64,7 @@ class RecordCommentEditTest extends AbstractServiceTest {
         assertEquals(thread.getVersion(), persistedThread.getVersion());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void nonAuthorCannotEditEvenWithModerationPermission() {
         RecordCommentThread thread = newThread("Author content");

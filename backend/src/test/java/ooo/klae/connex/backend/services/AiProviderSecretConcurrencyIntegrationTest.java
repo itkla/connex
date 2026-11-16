@@ -237,7 +237,8 @@ class AiProviderSecretConcurrencyIntegrationTest {
                 organizationMapper,
                 new SecretStoreCrypto(properties),
                 properties,
-                auditService);
+                auditService,
+                new AutomationScope());
         String credentialRef = oldStore.put(
                 SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL,
                 organization.getId(),

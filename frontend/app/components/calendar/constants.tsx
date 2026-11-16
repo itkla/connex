@@ -10,7 +10,7 @@ import type { CalendarEventKind } from '@/app/lib/calendar';
 
 /** Tinted surface + readable ink per kind — month desktop chips and timeline blocks. */
 export const KIND_CHIP_CLASS: Record<CalendarEventKind, string> = {
-    task: 'bg-brand-light text-brand-dark',
+    task: 'bg-brand-light text-brand-text',
     activity: 'bg-chart-2/15 text-foreground',
     deal: 'bg-chart-open/20 text-foreground',
     note: 'bg-muted text-foreground',

@@ -1,8 +1,8 @@
 package ooo.klae.connex.backend.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import ooo.klae.connex.backend.validation.ValidPasswordCharacters;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
@@ -14,6 +14,6 @@ public class ResetPasswordRequest {
 
     @NotBlank
     @Size(min = 8, max = 72, message = "Password must be between 8 and 72 characters")
-    @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,}$", message = "Password must contain at least one lowercase letter, one uppercase letter, one number, and one special character")
+    @ValidPasswordCharacters
     private String newPassword;
 }

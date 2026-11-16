@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 
@@ -13,6 +15,7 @@ import ooo.klae.connex.backend.beans.PersonLifecycleStage;
  */
 public record PersonLifecycleDto(
     Integer personId,
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY) Long version,
     PersonLifecycleStage stage,
     LocalDateTime changedAt,
     String disqualifiedReason,
@@ -38,6 +41,7 @@ public record PersonLifecycleDto(
         }
         return new PersonLifecycleDto(
             person.getId(),
+            person.getVersion(),
             person.getLifecycleStage(),
             person.getLifecycleChangedAt(),
             person.getDisqualifiedReason(),

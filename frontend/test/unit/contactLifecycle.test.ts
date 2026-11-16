@@ -24,6 +24,8 @@ describe('disqualificationReasonLabel', () => {
     it('uses the localized built-in label when no stored label exists', () => {
         expect(disqualificationReasonLabel('NO_FIT', null, translate))
             .toBe('translated:reason.NO_FIT');
+        expect(disqualificationReasonLabel('NO_FIT', undefined, translate))
+            .toBe('translated:reason.NO_FIT');
     });
 
     it('prefers a workspace-authored label', () => {

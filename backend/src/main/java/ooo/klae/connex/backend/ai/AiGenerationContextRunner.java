@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
@@ -32,7 +33,8 @@ public class AiGenerationContextRunner {
         LocaleContext previous = LocaleContextHolder.getLocaleContext();
         LocaleContextHolder.setLocale(Objects.requireNonNull(locale, "locale"));
         try {
-            automationExecutor.runAs(workspaceId, principal, role, () -> {
+            automationExecutor.runAs(workspaceId, principal, role,
+                AutomationScope.Origin.task(AutomationScope.Source.AI_GENERATION, "user"), () -> {
                 work.run();
                 return null;
             });

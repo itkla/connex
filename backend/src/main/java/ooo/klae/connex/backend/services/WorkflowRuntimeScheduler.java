@@ -27,6 +27,7 @@ public class WorkflowRuntimeScheduler {
     private static final Logger log = LoggerFactory.getLogger(WorkflowRuntimeScheduler.class);
     private static final String DEFAULT_CATALOG = "default";
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final WorkflowTriggerOutboxMapper outboxMapper;
     private final WorkflowRuntimeClaimTransaction claimTransaction;
     private final WorkflowTriggerOutboxWorker outboxWorker;
@@ -121,6 +122,11 @@ public class WorkflowRuntimeScheduler {
     }
 
     private int processWorkspace(int workspaceId, int budget) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> processWorkspaceWithinScope(workspaceId, budget));
+    }
+
+    private int processWorkspaceWithinScope(int workspaceId, int budget) {
         int processed = manualRunRecoveryService.dispatchPending(workspaceId, budget);
         for (; processed < budget; processed++) {
             WorkflowWorkClaim claim = claimTransaction.claimNext(workspaceId);

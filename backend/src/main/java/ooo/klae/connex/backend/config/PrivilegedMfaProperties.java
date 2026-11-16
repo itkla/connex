@@ -30,6 +30,7 @@ public class PrivilegedMfaProperties {
     private static final Duration MAX_RECOVERY_WINDOW = Duration.ofHours(1);
 
     private String enforced = "true";
+    private String attestationEnforced = "true";
     private String changeActor = DEFAULT_ACTOR;
     private String recoveryTokenSha256 = "";
     private String recoveryExpiresAt = "";
@@ -49,6 +50,36 @@ public class PrivilegedMfaProperties {
 
     public void setEnforced(String enforced) {
         this.enforced = enforced;
+    }
+
+    /**
+     * Whether per-organization attestation of privileged passkeys is enforced (#1534). Defaults on
+     * unless configured {@code false}, ignoring case; an opt-out requires an accountable actor.
+     * {@link #validate(Clock)} refuses any value other than {@code true} or {@code false}, so a
+     * mistyped value cannot silently leave it off.
+     *
+     * @return true when an unattested privileged account is confined and privileged step-ups must
+     *     be signed by an attested passkey
+     */
+    public boolean isAttestationEnforced() {
+        return !"false".equalsIgnoreCase(normalize(attestationEnforced));
+    }
+
+    /**
+     * The attestation-enforcement value as configured, for the startup policy audit.
+     *
+     * @return the trimmed configured value
+     */
+    public String configuredAttestationEnforcedValue() {
+        return normalize(attestationEnforced);
+    }
+
+    public String getAttestationEnforced() {
+        return attestationEnforced;
+    }
+
+    public void setAttestationEnforced(String attestationEnforced) {
+        this.attestationEnforced = attestationEnforced;
     }
 
     public String getChangeActor() {
@@ -92,9 +123,18 @@ public class PrivilegedMfaProperties {
     }
 
     public void validate(Clock clock) {
+        String attestation = normalize(attestationEnforced);
+        if (!"true".equalsIgnoreCase(attestation) && !"false".equalsIgnoreCase(attestation)) {
+            throw new IllegalStateException(
+                    "Privileged MFA attestation enforcement must be true or false");
+        }
         if (!isEnforced() && DEFAULT_ACTOR.equals(getChangeActor())) {
             throw new IllegalStateException(
                     "Disabling privileged MFA requires an accountable change actor");
+        }
+        if (!isAttestationEnforced() && DEFAULT_ACTOR.equals(getChangeActor())) {
+            throw new IllegalStateException(
+                    "Disabling privileged MFA attestation enforcement requires an accountable change actor");
         }
         validateRecoveryStructure();
         if (normalize(recoveryTokenSha256).isEmpty()) {

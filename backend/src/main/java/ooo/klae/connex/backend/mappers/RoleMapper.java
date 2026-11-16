@@ -15,9 +15,26 @@ import ooo.klae.connex.backend.beans.WorkspaceRole;
 public interface RoleMapper {
     int insertRole(WorkspaceRole role);
     List<WorkspaceRole> findRolesByWorkspace(int workspaceId);
+    /** Reads all role roots and permission sets in one workspace with one query, without locks. */
+    List<WorkspaceRole> findAuthorityRolesByWorkspace(int workspaceId);
     WorkspaceRole findRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Locks and returns every permission row of one custom role, inert ones included, by an equality on
+     * the role that MySQL runs as a lookup of that role's rows alone (#1578). Callers lock the role with
+     * {@link #lockRole} first and drop the permissions {@code Permission.isGrantable} rejects.
+     * @param workspaceId the owning workspace
+     * @param roleId the custom role
+     * @return the role's permission names in ascending order
+     */
     List<String> lockPermissions(
+        @Param("workspaceId") int workspaceId,
+        @Param("roleId") int roleId);
+    /**
+     * Retains current local role/permission rows shared for report administrator confinement. Shared
+     * mode avoids upgrading the report-deletion fence that already retains all assigned roles shared.
+     */
+    List<String> lockPermissionsForShare(
         @Param("workspaceId") int workspaceId,
         @Param("roleId") int roleId);
     int updateRoleName(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("name") String name);

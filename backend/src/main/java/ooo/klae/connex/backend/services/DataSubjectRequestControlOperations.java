@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AuditEntryDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.DisclosureIdentityVerificationRequiredException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -58,6 +59,10 @@ public class DataSubjectRequestControlOperations {
     private final OrgMemberService orgMemberService;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
+    private final ooo.klae.connex.backend.mappers.AiAgentDsrControlMapper missionPurgeMapper;
+    private final tools.jackson.databind.ObjectMapper missionJson;
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
+    private final ooo.klae.connex.backend.ai.AiRestrictionEpoch restrictionEpoch;
 
     @Transactional(readOnly = true)
     public List<DataSubjectRequestDto> list(int orgId, int actorId, String status, int limit, int offset) {
@@ -161,7 +166,7 @@ public class DataSubjectRequestControlOperations {
             throw new BadRequestException("Disclosure can only be assembled for a disclosure-type request");
         }
         if (request.getIdentityVerifiedAt() == null) {
-            throw new BadRequestException(
+            throw new DisclosureIdentityVerificationRequiredException(
                 "Identity verification must be recorded before disclosure can be assembled");
         }
         Integer workspaceId = request.getSubjectWorkspaceId();
@@ -180,12 +185,140 @@ public class DataSubjectRequestControlOperations {
         return new DisclosureControlData(request, workspaces, auditTrail, auditTrailTotal);
     }
 
+    /** Reads the immutable organization workspace scope before acquiring its ordered roots. */
+    @Transactional(readOnly = true)
+    public List<Integer> missionPurgeWorkspaceIds(int orgId, int actorId) {
+        orgMemberService.requireOrgAdmin(orgId, actorId);
+        return workspaceMapper.findByOrgId(orgId).stream().map(Workspace::getId).sorted().toList();
+    }
+
+    /** Replays an accepted key under current administrator access without reusing its snapshot. */
+    @Transactional(readOnly = true)
+    public ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance missionPurgeByKey(
+            int orgId, long requestId, int actorId, String key) {
+        orgMemberService.requireOrgAdmin(orgId, actorId);
+        findRequest(orgId, requestId);
+        var row = missionPurgeMapper.findAcceptanceByKey(orgId, requestId, key);
+        return row == null ? null : ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(row, missionJson);
+    }
+
+    /** Commits C1 under the established linked-person proof and request serialization boundary. */
     @Transactional
-    public void recordDisclosureAudit(int orgId, long requestId, int personId, int workspaceId) {
-        auditService.recordStrict("appi.subject_request.disclosure", "organization", orgId,
-            requestLabel(requestId), "Subject-scoped disclosure export assembled",
-            Map.of("requestId", requestId, "subjectPersonId", personId,
-                "subjectWorkspaceId", workspaceId));
+    public ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance acceptMissionPurge(
+            int orgId, long requestId, int actorId,
+            ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest request,
+            List<Integer> workspaceIds, int provenWorkspaceId, int provenPersonId) {
+        lockMutationRoots(orgId, actorId, new TreeSet<>(workspaceIds));
+        requireCurrentMutationAccess(orgId, actorId);
+        DataSubjectRequest locked = dataSubjectRequestMapper.findByIdForUpdate(orgId, requestId);
+        if (locked == null) {
+            throw new ResourceNotFoundException("Data-subject request not found");
+        }
+        var existing = missionPurgeMapper.findAcceptanceByKey(orgId, requestId, request.idempotencyKey());
+        if (existing != null) {
+            var replay = ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(existing, missionJson);
+            replay.requireAcknowledgments(request.scopeAcknowledgement(), request.cutoffPolicyAcknowledgement());
+            return replay;
+        }
+        if (!DataSubjectRequestSnapshot.token(locked).equals(request.snapshotToken())
+                || !Integer.valueOf(provenWorkspaceId).equals(locked.getSubjectWorkspaceId())
+                || !Integer.valueOf(provenPersonId).equals(locked.getSubjectPersonId())) {
+            throw new ConflictException("dsr_snapshot_conflict");
+        }
+        if (locked.getIdentityVerifiedAt() == null || locked.getSubjectWorkspaceId() == null
+                || locked.getSubjectPersonId() == null || !workspaceIds.contains(locked.getSubjectWorkspaceId())) {
+            throw new BadRequestException("A verified linked subject is required");
+        }
+        List<Integer> current = workspaceMapper.findByOrgId(orgId).stream().map(Workspace::getId).sorted().toList();
+        if (!current.equals(workspaceIds)) {
+            throw new ConflictException("dsr_workspace_scope_conflict");
+        }
+        String operationId = java.util.UUID.randomUUID().toString();
+        boolean allChats = ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.ASSISTANT_SCOPE
+                .equals(request.scopeAcknowledgement());
+        if (allChats) {
+            restrictionEpoch.retainWriteFencesUntilTransactionCompletion(workspaceIds);
+        }
+        var operation = allChats ? assistantPrivacyService.invalidateOrganization(
+                orgId, java.util.UUID.fromString(operationId), "dsr", requestId, null) : null;
+        var accepted = operation == null
+                ? new ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance(
+                    0, orgId, requestId, operationId, request.idempotencyKey(), workspaceIds,
+                    java.time.Instant.now().toString())
+                : new ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance(
+                    0, orgId, requestId, operationId, request.idempotencyKey(), workspaceIds,
+                    java.time.Instant.now().toString(), 2, request.scopeAcknowledgement(),
+                    request.cutoffPolicyAcknowledgement(), operation.getCutoffGeneration(),
+                    operation.getInvalidatedGeneration());
+        auditService.recordStrictScoped(
+                ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.ACCEPTED,
+                "organization", orgId, null, orgId, "Mission holdings purge",
+                "Conservative mission holdings erasure accepted", accepted.metadata());
+        var saved = missionPurgeMapper.findAcceptanceByKey(orgId, requestId, request.idempotencyKey());
+        if (saved == null || !missionJson.readTree(saved.getChanges()).equals(missionJson.readTree(missionJson.writeValueAsString(accepted.metadata())))) {
+            throw new IllegalStateException("Mission purge acceptance audit did not preserve its contract");
+        }
+        if (allChats) {
+            assistantPrivacyService.attachAcceptanceAudit(orgId, operationId, saved.getId());
+        }
+        return ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(saved, missionJson);
+    }
+
+    /** Reads one accepted operation after checking current organization-administrator authority. */
+    @Transactional(readOnly = true)
+    public ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance missionPurgeOperation(
+            int orgId, long requestId, int actorId, String operationId) {
+        orgMemberService.requireOrgAdmin(orgId, actorId);
+        findRequest(orgId, requestId);
+        var row = missionPurgeMapper.findAcceptance(orgId, requestId, operationId);
+        if (row == null) {
+            throw new ResourceNotFoundException("Mission holdings purge not found");
+        }
+        return ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(row, missionJson);
+    }
+
+    /** Appends C2 once using the original C1 authority; this never edits the human DSR status. */
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    public void completeMissionPurge(ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance accepted) {
+        var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof ooo.klae.connex.backend.beans.User actor) {
+            userMapper.lockByIdForShare(actor.getId());
+        }
+        List<Integer> workspaceIds = accepted.schemaVersion() == 1 ? accepted.workspaceIds()
+                : java.util.stream.Stream.concat(accepted.workspaceIds().stream(),
+                    assistantPrivacyService.operationWorkspaceIds(accepted.orgId(), accepted.operationId()).stream())
+                    .distinct().sorted().toList();
+        for (int workspaceId : workspaceIds) {
+            var workspace = tenantLifecycleControlMapper.lockWorkspaceForShare(workspaceId);
+            if (workspace == null ? accepted.schemaVersion() != 2
+                    || assistantPrivacyService.deletedWorkspaceVerifiedAt(
+                        accepted.orgId(), accepted.operationId(), workspaceId) == null
+                    : workspace.orgId() != accepted.orgId()
+                        || accepted.schemaVersion() == 2 && !"active".equals(workspace.lifecycleState())) {
+                throw new ConflictException("dsr_lifecycle_evidence_required");
+            }
+        }
+        if (tenantLifecycleControlMapper.lockActiveOrganizationForShare(accepted.orgId()) == null
+                || dataSubjectRequestMapper.findByIdForUpdate(accepted.orgId(), accepted.requestId()) == null) {
+            throw new ConflictException("dsr_lifecycle_evidence_required");
+        }
+        if (missionPurgeMapper.findCompletion(accepted.orgId(), accepted.requestId(), accepted.operationId()) != null) {
+            return;
+        }
+        if (accepted.schemaVersion() == 2
+                && !assistantPrivacyService.reconcileCompletion(accepted.orgId(), accepted.operationId())) {
+            throw new ConflictException("dsr_lifecycle_evidence_required");
+        }
+        auditService.recordStrictScoped(
+                ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.COMPLETED,
+                "organization", accepted.orgId(), null, accepted.orgId(), "Mission holdings purge",
+                "Conservative mission holdings erasure verified", accepted.metadata());
+        var completion = missionPurgeMapper.findCompletion(accepted.orgId(), accepted.requestId(), accepted.operationId());
+        if (completion == null
+                || !missionJson.readTree(completion.getChanges()).equals(missionJson.readTree(missionJson.writeValueAsString(accepted.metadata())))) {
+            throw new IllegalStateException("Mission purge completion audit did not preserve its contract");
+        }
     }
 
     private void lockMutationRoots(int orgId, int actorId, Set<Integer> workspaceIds) {

@@ -35,8 +35,13 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.integration.SoftwarePasskeys.SoftwarePasskey;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
+import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
@@ -51,6 +56,8 @@ class NeverEnrolledBreakGlassIntegrationTest extends AbstractPrivilegedMfaRecove
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private AuthService authService;
+    @Autowired private PrivilegedAccountService privilegedAccountService;
+    @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired private WebAuthnService webAuthnService;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PasswordEncoder passwordEncoder;
@@ -107,6 +114,57 @@ class NeverEnrolledBreakGlassIntegrationTest extends AbstractPrivilegedMfaRecove
                         .contentType("application/json")
                         .content("{\"currentPassword\":\"" + PASSWORD + "\",\"recoveryToken\":\"wrong\"}"))
                 .andExpect(status().isForbidden());
+    }
+
+    /** A workspace-only owner with no cutover passkey has operator recovery as its approval path. */
+    @Test
+    void aWorkspaceOnlyOwnerWithoutCutoverCoverageIsSatisfiedByBreakGlassReplacement() throws Exception {
+        String configured = privilegedMfaProperties.getAttestationEnforced();
+        try {
+            privilegedMfaProperties.setAttestationEnforced("true");
+            User owner = privilegedPasswordAccount();
+            assertFalse(webAuthnService.hasPasskey(owner.getId()));
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM org_member WHERE user_id = ?", Integer.class, owner.getId()));
+            SoftwarePasskey uncovered = SoftwarePasskeys.register(
+                    webAuthnService, userMapper, owner, new EnrollmentEvidence(null, null), "Uncovered");
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM privileged_credential_attestation WHERE credential_row_id = ?",
+                    Integer.class, uncovered.rowId()));
+            assertEquals(PrivilegedMfaStanding.ATTESTATION_REQUIRED,
+                    privilegedAccountService.enforcedStanding(owner.getId()));
+            MockHttpSession session = authenticatedSession(owner);
+            String recoveryToken = issueRecoveryToken(owner);
+
+            mockMvc.perform(post("/api/auth/webauthn/recover")
+                            .session(session)
+                            .with(csrf().asHeader())
+                            .contentType("application/json")
+                            .content("{\"currentPassword\":\"" + PASSWORD + "\",\"recoveryToken\":\""
+                                    + recoveryToken + "\"}"))
+                    .andExpect(status().isOk());
+
+            assertFalse(webAuthnService.hasPasskey(owner.getId()));
+            assertEquals(PrivilegedMfaStanding.ENROLLMENT_REQUIRED,
+                    privilegedAccountService.enforcedStanding(owner.getId()));
+            MockHttpServletRequest enrollment = new MockHttpServletRequest(context.getServletContext());
+            enrollment.setSession(session);
+            String sessionPrimaryId = sessionSecurityService.sessionPrimaryId(enrollment);
+            assertNotNull(sessionPrimaryId);
+            SoftwarePasskey replacement = SoftwarePasskeys.register(webAuthnService, userMapper, owner,
+                    new EnrollmentEvidence(sessionPrimaryId, null), "Replacement");
+
+            assertEquals("BREAK_GLASS", jdbcTemplate.queryForObject(
+                    "SELECT privileged_assurance FROM webauthn_credential WHERE id = ?",
+                    String.class, replacement.rowId()));
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM privileged_credential_attestation WHERE credential_row_id = ?",
+                    Integer.class, replacement.rowId()));
+            assertEquals(PrivilegedMfaStanding.SATISFIED,
+                    privilegedAccountService.enforcedStanding(owner.getId()));
+        } finally {
+            privilegedMfaProperties.setAttestationEnforced(configured);
+        }
     }
 
     /**

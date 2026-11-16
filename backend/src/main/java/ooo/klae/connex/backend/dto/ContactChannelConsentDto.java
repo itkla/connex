@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
  * @param evidenceRef optional evidence reference
  * @param capturedAt optional capture timestamp
  * @param updatedAt last update timestamp
+ * @param version database-owned mutation token, starting at one
  */
 public record ContactChannelConsentDto(
         int id,
@@ -23,5 +24,6 @@ public record ContactChannelConsentDto(
         String source,
         String evidenceRef,
         LocalDateTime capturedAt,
-        LocalDateTime updatedAt) {
+        LocalDateTime updatedAt,
+        long version) {
 }

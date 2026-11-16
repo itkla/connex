@@ -1,18 +1,22 @@
 "use client";
 
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import type { Workspace } from "@/app/lib/types";
 import {
     acceptWorkspace,
     declineWorkspace,
     getPendingWorkspaces,
     leaveWorkspace,
+    privilegedMfaConfinementDestination,
 } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -29,10 +33,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import OwnershipConfinementDialog from "@/app/components/account/OwnershipConfinementDialog";
 
 export default function MembershipPanel() {
     const t = useTranslations("AccountInvites");
     const showApiError = useApiErrorToast("AccountInvites");
+    const format = useFormatter();
     const router = useRouter();
     const { activeWorkspaceId, activeWorkspace, runSelectionChange, switching } = useWorkspace();
 
@@ -41,6 +47,8 @@ export default function MembershipPanel() {
     const [busyId, setBusyId] = useState<number | null>(null);
     const [leaveOpen, setLeaveOpen] = useState(false);
     const [leaving, setLeaving] = useState(false);
+    const ownershipOffers = useSelfOwnershipOffers();
+    const { offers, busyOfferId, scopeLabel } = ownershipOffers;
 
     useEffect(() => {
         let cancelled = false;
@@ -69,7 +77,7 @@ export default function MembershipPanel() {
                 publishActiveWorkspace(accepted.id);
                 setPending((prev) => prev.filter((w) => w.id !== workspace.id));
                 toastSuccess(t("accepted", { workspace: workspace.name }));
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => router.refresh());
             });
         } catch (err) {
             showApiError(err, "acceptFailed");
@@ -99,8 +107,12 @@ export default function MembershipPanel() {
                 const selection = await leaveWorkspace(activeWorkspaceId);
                 publishActiveWorkspace(selection.activeWorkspaceId);
                 toastSuccess(t("left"));
-                router.replace(selection.activeWorkspaceId !== null ? "/dashboard" : "/onboarding");
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => {
+                    router.replace(selection.activeWorkspaceId === null
+                        ? "/onboarding"
+                        : privilegedMfaConfinementDestination() ?? "/dashboard");
+                    router.refresh();
+                });
             });
         } catch (err) {
             showApiError(err, "leaveFailed");
@@ -111,6 +123,47 @@ export default function MembershipPanel() {
 
     return (
         <div className="space-y-10">
+            {offers.length > 0 && (
+                <Rise className="space-y-3">
+                    <div>
+                        <SectionHeader title={t("ownershipTitle")} />
+                        <p className="px-6 text-sm text-muted-foreground">{t("ownershipSubtitle")}</p>
+                    </div>
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                        {offers.map((offer) => {
+                            const busy = busyOfferId === offer.id;
+                            const scope = scopeLabel(offer);
+                            const expires = format.dateTime(new Date(parseMysqlDateTime(offer.expiresAt)), { dateStyle: "medium" });
+                            return (
+                                <li key={offer.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                                    <Avatar>
+                                        <AvatarFallback className="bg-brand-light font-medium text-brand-text">
+                                            {scope.trim().charAt(0).toUpperCase() || "?"}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium text-foreground">
+                                            {t("ownershipOfferTitle", { scope })}
+                                        </p>
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {offer.offerorDisplayName
+                                                ? t("ownershipOfferMeta", { name: offer.offerorDisplayName, date: expires })
+                                                : t("ownershipOfferExpires", { date: expires })}
+                                        </p>
+                                    </div>
+                                    <Button size="toolbar" variant="outline" disabled={busy} onClick={() => ownershipOffers.decline(offer)}>
+                                        {t("decline")}
+                                    </Button>
+                                    <Button size="toolbar" variant="brand" disabled={busy} onClick={() => ownershipOffers.accept(offer)}>
+                                        {busy ? <Loader2Icon className="size-4 animate-spin" /> : t("accept")}
+                                    </Button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </Rise>
+            )}
+
             <Rise className="space-y-3">
                 <div>
                     <SectionHeader title={t("pendingTitle")} />
@@ -135,7 +188,7 @@ export default function MembershipPanel() {
                             return (
                                 <li key={workspace.id} className="flex items-center gap-3 px-4 py-3">
                                     <Avatar>
-                                        <AvatarFallback className="bg-brand-light font-medium text-brand-dark">
+                                        <AvatarFallback className="bg-brand-light font-medium text-brand-text">
                                             {workspace.name.trim().charAt(0).toUpperCase() || "?"}
                                         </AvatarFallback>
                                     </Avatar>
@@ -180,6 +233,8 @@ export default function MembershipPanel() {
                     </Button>
                 </div>
             </Rise>
+
+            <OwnershipConfinementDialog offers={ownershipOffers} />
 
             <Dialog open={leaveOpen} onOpenChange={(open) => !leaving && setLeaveOpen(open)}>
                 <DialogContent>

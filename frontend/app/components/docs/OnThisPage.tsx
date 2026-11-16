@@ -54,7 +54,7 @@ export default function OnThisPage({ headings }: { headings: DocHeading[] }) {
                                     heading.level === 3 ? "pl-7" : "pl-4"
                                 } ${
                                     active
-                                        ? "border-brand font-medium text-brand-dark"
+                                        ? "border-brand font-medium text-brand-text"
                                         : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
                                 }`}
                             >

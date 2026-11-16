@@ -144,7 +144,7 @@
     ORDER BY interaction.occurred_at DESC, interaction.id DESC, participant.id
   </select>
 
-  <select id="findNoteIds" resultType="int">
+  <select id="findNoteIds" flushCache="true" useCache="false" resultType="int">
     SELECT n.id
     FROM person p
     JOIN note n ON n.person_id = p.id AND n.workspace_id IN
@@ -153,7 +153,9 @@
       </foreach>
     <!-- A statutory disclosure must be complete: subject notes are never filtered by visibility class. -->
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    <if test="afterId != null">AND n.id &gt; #{afterId}</if>
     ORDER BY n.id
+    LIMIT 100
   </select>
 
   <select id="findNotePage" flushCache="true" useCache="false"

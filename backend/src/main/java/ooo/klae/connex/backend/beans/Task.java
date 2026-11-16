@@ -11,7 +11,8 @@ import lombok.NoArgsConstructor;
 
 /**
  * Represents a to-do item assigned to a {@link User} and optionally linked to a {@link Person} or {@link Deal}.
- * Tasks have a due date and a completion status.
+ * Tasks have a due date and a completion status; completedAt records the current completion
+ * and is cleared when a task is reopened. Historical completions may have no recorded instant.
  * Mapped via {@code TaskMapper} / {@code TaskMapper.xml}.
  */
 
@@ -32,6 +33,7 @@ public class Task {
     private Person person; // target contact
     @JsonIdentityReference(alwaysAsId = true)
     private Deal deal;
+    private String completedAt;
     private String createdAt;
     private String updatedAt;
     private List<EntityReference> references;

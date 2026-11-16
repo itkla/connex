@@ -1,7 +1,7 @@
 'use client';
 
 import { ChevronRightIcon, InboxIcon } from '@heroicons/react/24/outline';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import CaptureReviewDialog from '@/app/components/account/connected-capture/CaptureReviewDialog';
 import type {
@@ -63,10 +63,11 @@ export default function CaptureReviewQueue({
     onPageChange: (page: number) => void;
     onSelect: (review: CaptureReviewItem | null) => void;
     onRetry: () => void;
-    onDecide: (review: CaptureReviewItem, decision: CaptureReviewDecision) => Promise<boolean>;
+    onDecide: (review: CaptureReviewItem, decision: CaptureReviewDecision, init?: RequestInit) => Promise<boolean>;
     onApprove: (review: CaptureReviewItem) => Promise<boolean>;
-    onPreflight: (request: PersonDuplicatePreflightRequest) => Promise<DuplicatePreflightResponse>;
+    onPreflight: (request: PersonDuplicatePreflightRequest, init?: RequestInit) => Promise<DuplicatePreflightResponse>;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AccountCaptureReviews');
     const tConnections = useTranslations('AccountConnections');
     const locale = useLocale();
@@ -95,7 +96,7 @@ export default function CaptureReviewQueue({
                             busy={busy}
                             canCreatePeople={canCreatePeople}
                             onBack={() => onSelect(null)}
-                            onDecide={(decision) => onDecide(selected, decision)}
+                            onDecide={(decision, init) => onDecide(selected, decision, init)}
                             onApprove={() => onApprove(selected)}
                             onPreflight={onPreflight}
                         />
@@ -146,7 +147,7 @@ export default function CaptureReviewQueue({
                                                         || t('untitled')}
                                                 </p>
                                                 <p className="mt-0.5 text-xs text-muted-foreground">
-                                                    {formatDateTime(review.occurredAt, locale)}
+                                                    {formatDateTime(review.occurredAt, locale, timeZone)}
                                                 </p>
                                             </div>
                                             <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />

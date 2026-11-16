@@ -29,9 +29,12 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.core.exc.StreamConstraintsException;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException;
 import ooo.klae.connex.backend.connectedaccounts.nativeflow.NativeConnectException;
+import ooo.klae.connex.backend.config.RequestTransactionCommitListener;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationErrorDto;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
@@ -83,6 +86,11 @@ public class GlobalExceptionHandler {
             .body(body);
     }
 
+    @ExceptionHandler(AiAgentGoneException.class)
+    public ResponseEntity<Map<String, String>> handleAiAgentGone(AiAgentGoneException ex) {
+        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("code", ex.getMessage(), "message", ex.getMessage()));
+    }
+
     @ExceptionHandler(BusinessCardImportResultGoneException.class)
     public ResponseEntity<Map<String, String>> businessCardImportResultGone(
             BusinessCardImportResultGoneException ex) {
@@ -94,6 +102,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> badRequest(BadRequestException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(codedError(ex.getCode(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(ImportValidationException.class)
+    public ResponseEntity<Map<String, Object>> importValidation(ImportValidationException ex) {
+        Map<String, Object> body = new LinkedHashMap<>(codedError(ex.getCode(), ex.getMessage()));
+        if (!ex.getFieldErrors().isEmpty()) body.put("fieldErrors", ex.getFieldErrors());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     @ExceptionHandler(NativeConnectException.class)
@@ -247,6 +262,35 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Encrypted secret is unavailable");
     }
 
+    @ExceptionHandler(AiAgentUnavailableException.class)
+    public ResponseEntity<Map<String, String>> missionUnavailable(AiAgentUnavailableException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("code", "mission_unavailable", "message", "mission_unavailable"));
+    }
+
+    @ExceptionHandler(AiPrivacyInitializationPendingException.class)
+    public ResponseEntity<Map<String, String>> privacyInitializationPending(
+            AiPrivacyInitializationPendingException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header("Retry-After", "60")
+                .body(Map.of("code", "ai_privacy_initialization_pending",
+                        "message", "Chat privacy initialization is pending. Retry after reconciliation."));
+    }
+
+    /** Never appends an error suffix or closing delimiters to an interrupted committed export. */
+    @ExceptionHandler(DataSubjectDisclosureStreamException.class)
+    public ResponseEntity<String> disclosureStream(DataSubjectDisclosureStreamException ex,
+            HttpServletResponse response) {
+        if (response.isCommitted()) {
+            return null;
+        }
+        response.resetBuffer();
+        for (String header : java.util.List.of("X-Disclosure-Note-Count", "X-Disclosure-Notes-SHA256",
+                "X-Disclosure-Byte-Length", "X-Disclosure-SHA256")) {
+            response.setHeader(header, null);
+        }
+        response.setContentType(null);
+        return serviceUnavailable(new ServiceUnavailableException("Disclosure release failed", ex));
+    }
+
     @ExceptionHandler(ServiceUnavailableException.class)
     public ResponseEntity<String> serviceUnavailable(ServiceUnavailableException ex) {
         log.warn("Refusing request this deployment cannot serve safely: exception={} detail={}",
@@ -265,9 +309,52 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
 
+    /**
+     * A role edit that would leave members without a passkey approved in the organization (#1534):
+     * {@code 409} with how many, so the client can ask the actor to acknowledge it.
+     */
+    @ExceptionHandler(PrivilegedMfaConfinementAcknowledgementRequiredException.class)
+    public ResponseEntity<Map<String, Object>> confinementAcknowledgementRequired(
+            PrivilegedMfaConfinementAcknowledgementRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "code", ex.getCode(),
+                "message", ex.getMessage(),
+                "affectedCount", ex.getAffectedCount()));
+    }
+
+    @ExceptionHandler(AiAssistantProposalExpiredException.class)
+    public ResponseEntity<Map<String, String>> proposalExpired(AiAssistantProposalExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "code", "AI_PROPOSAL_EXPIRED", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(StaleRecordException.class)
+    public ResponseEntity<Map<String, Object>> staleRecord(StaleRecordException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+            "code", "STALE_RECORD", "message", ex.getMessage(), "currentVersion", ex.getCurrentVersion()));
+    }
+
+    @ExceptionHandler(InvalidApprovalCurrencyException.class)
+    public ResponseEntity<Map<String, String>> invalidApprovalCurrency(InvalidApprovalCurrencyException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(codedError(InvalidApprovalCurrencyException.CODE, ex.getMessage()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<Map<String, String>> conflict(ConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(DealLineValueConsentException.class)
+    public ResponseEntity<Map<String, String>> lineValueConsent(DealLineValueConsentException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Map.of("code", ex.getCode(), "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(SoleDocumentApproverException.class)
+    public ResponseEntity<Map<String, String>> soleDocumentApprover(SoleDocumentApproverException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Map.of("code", ex.getCode(), "message", ex.getMessage()));
     }
 
     @ExceptionHandler(OpenDataSubjectRequestException.class)
@@ -377,7 +464,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Malformed request body");
     }
 
+    /** Maps exact lock contention to a retryable conflict, preserving all other internal errors. */
     @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, String>> unexpectedFailure(Exception ex, HttpServletRequest request) {
+        if (!DatabaseFailureClassifier.isLockContention(ex)
+                || RequestTransactionCommitListener.committedDuringRequest()) {
+            return internalError(ex, request);
+        }
+        log.warn("Request conflict: exception={} detail={}", ex.getClass().getName(), stackDetail(ex));
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Map.of("message", "The request conflicts with another operation; try again"));
+    }
+
     public ResponseEntity<Map<String, String>> internalError(Exception ex, HttpServletRequest request) {
         String correlationId = CorrelationIds.current();
         String detail = stackDetail(ex);

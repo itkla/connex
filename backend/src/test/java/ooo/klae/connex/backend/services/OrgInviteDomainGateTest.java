@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +13,8 @@ import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The organization allowlist is the ceiling on every workspace invite/join path (#316, Option B):
@@ -36,6 +39,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         workspaceId = ws.getId();
         orgId = workspaceService.getOrgId(workspaceId);
         authenticateAs(currentUser, workspaceId);
+        approveForStepUp(currentUser);
     }
 
     private User register(String email) {
@@ -50,70 +54,82 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         return user;
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void createInvite_isConstrainedByTheOrgAllowlist() {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
 
-        assertThrows(ForbiddenException.class,
-            () -> inviteService.createInvite(workspaceId, currentUser, "bob@other.com", "member"));
-        InviteResultDto ok = inviteService.createInvite(workspaceId, currentUser, "bob@acme.com", "member");
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
+            () -> afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@other.com", "member")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
+        InviteResultDto ok = afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@acme.com", "member"));
         assertTrue(ok.getInvite() != null);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void createInvite_isUnrestrictedWhenTheOrgHasNoAllowlist() {
-        InviteResultDto ok = inviteService.createInvite(workspaceId, currentUser, "bob@anywhere.com", "member");
+        InviteResultDto ok = afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, "bob@anywhere.com", "member"));
         assertTrue(ok.getInvite() != null, "an org with no allowlist must not gate invites");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void addExistingMember_isConstrainedByTheOrgAllowlist() {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
         User outsider = register("outsider-" + unique() + "@other.com");
         User insider = register("insider-" + unique() + "@acme.com");
 
-        assertThrows(ForbiddenException.class,
-            () -> inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member"));
-        inviteService.addExistingMember(workspaceId, currentUser.getId(), insider.getEmail(), "member");
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
+            () -> afterFixtureCommit(() -> inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
+        afterFixtureCommit(() -> inviteService.addExistingMember(workspaceId, currentUser.getId(), insider.getEmail(), "member"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void acceptInvite_appliesTheOrgCeilingAtAcceptTime() {
         String email = "newcomer-" + unique() + "@acme.com";
-        InviteResultDto invite = inviteService.createInvite(workspaceId, currentUser, email, "member");
+        InviteResultDto invite = afterFixtureCommit(() -> inviteService.createInvite(workspaceId, currentUser, email, "member"));
         User invitee = register(email);
 
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "different.com");
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> inviteService.acceptInvite(invite.getInvite().getToken(), invitee),
             "a policy tightened after the invite must block acceptance");
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_isBlockedByTheOrgGateEvenWithNoWorkspaceList() {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
         InviteLinkDto link = inviteLinkService.createLink(workspaceId, currentUser, "member", null, null);
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> inviteLinkService.redeemLink(link.getToken(), register("out-" + unique() + "@other.com")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
         User insider = register("in-" + unique() + "@acme.com");
         inviteLinkService.redeemLink(link.getToken(), insider);
         assertTrue(workspaceMapper.isMember(workspaceId, insider.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void approveMembership_reAppliesTheOrgCeilingAtActivation() {
         User outsider = register("pending-" + unique() + "@other.com");
-        inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member");
+        workspaceService.addPendingMember(workspaceId, currentUser, outsider, "member");
 
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> workspaceService.approveMembership(workspaceId, outsider.getId()),
             "a pending member whose domain the org disallowed after the invite cannot activate");
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_isUnrestrictedWhenBothListsEmpty() {
         InviteLinkDto link = inviteLinkService.createLink(workspaceId, currentUser, "member", null, null);

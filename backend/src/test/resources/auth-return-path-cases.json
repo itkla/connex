@@ -1,0 +1,214 @@
+[
+  {
+    "input": "/invite",
+    "expected": "/invite"
+  },
+  {
+    "input": "/invite-link",
+    "expected": "/invite-link"
+  },
+  {
+    "input": "/settings/workspace/people?tab=all#members",
+    "expected": "/settings/workspace/people?tab=all#members"
+  },
+  {
+    "input": "/records/../invite",
+    "expected": "/invite"
+  },
+  {
+    "input": "/a/./b",
+    "expected": "/a/b"
+  },
+  {
+    "input": "/a/%2e%2e/invite",
+    "expected": "/invite"
+  },
+  {
+    "input": "/%69nvite",
+    "expected": "/invite"
+  },
+  {
+    "input": "/records?name=a%26b&label=a%20b",
+    "expected": "/records?name=a%26b&label=a%20b"
+  },
+  {
+    "input": "/records?next=https://example.test",
+    "expected": "/records?next=https://example.test"
+  },
+  {
+    "input": "/records/%E6%97%A5%E6%9C%AC",
+    "expected": "/records/%E6%97%A5%E6%9C%AC"
+  },
+  {
+    "input": "",
+    "expected": null
+  },
+  {
+    "input": "invite",
+    "expected": null
+  },
+  {
+    "input": "https://connex.invalid/invite",
+    "expected": null
+  },
+  {
+    "input": "https://elsewhere.test/invite",
+    "expected": null
+  },
+  {
+    "input": "//host/invite",
+    "expected": null
+  },
+  {
+    "input": "/\\host",
+    "expected": null
+  },
+  {
+    "input": "/in\\vite",
+    "expected": null
+  },
+  {
+    "input": "/%2f%2fhost",
+    "expected": null
+  },
+  {
+    "input": "/%2F%2Fhost",
+    "expected": null
+  },
+  {
+    "input": "/%5chost",
+    "expected": null
+  },
+  {
+    "input": "/%5Chost",
+    "expected": null
+  },
+  {
+    "input": "/in\nvite",
+    "expected": null
+  },
+  {
+    "input": "/invite\u0000",
+    "expected": null
+  },
+  {
+    "input": "/invite\r",
+    "expected": null
+  },
+  {
+    "input": "/in\tvite",
+    "expected": null
+  },
+  {
+    "input": "/invite",
+    "expected": null
+  },
+  {
+    "input": "/invite",
+    "expected": null
+  },
+  {
+    "input": "/invite?next=%2fhost",
+    "expected": null
+  },
+  {
+    "input": "/invite#%5chost",
+    "expected": null
+  },
+  {
+    "input": "/invite?x=%00",
+    "expected": null
+  },
+  {
+    "input": "/invite#%1f",
+    "expected": null
+  },
+  {
+    "input": "/invite%7f",
+    "expected": null
+  },
+  {
+    "input": "/invite%C2%85",
+    "expected": null
+  },
+  {
+    "input": "/%252f%252fhost",
+    "expected": null
+  },
+  {
+    "input": "/%255chost",
+    "expected": null
+  },
+  {
+    "input": "/invite%2500",
+    "expected": null
+  },
+  {
+    "input": "/invite%25C2%2585",
+    "expected": null
+  },
+  {
+    "input": "/invite%",
+    "expected": null
+  },
+  {
+    "input": "/invite%zz",
+    "expected": null
+  },
+  {
+    "input": "/invite%FF",
+    "expected": null
+  },
+  {
+    "input": "/.%2f/host",
+    "expected": null
+  },
+  {
+    "input": "/a/..//host",
+    "expected": null
+  },
+  {
+    "input": "/invite ",
+    "expected": null
+  },
+  {
+    "input": "/invite\"",
+    "expected": null
+  },
+  {
+    "input": "/invite<",
+    "expected": null
+  },
+  {
+    "input": "/invite>",
+    "expected": null
+  },
+  {
+    "input": "/invite^",
+    "expected": null
+  },
+  {
+    "input": "/invite`",
+    "expected": null
+  },
+  {
+    "input": "/invite{",
+    "expected": null
+  },
+  {
+    "input": "/invite|",
+    "expected": null
+  },
+  {
+    "input": "/invite}",
+    "expected": null
+  },
+  {
+    "input": "/invite[",
+    "expected": null
+  },
+  {
+    "input": "/invite]",
+    "expected": null
+  }
+]

@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,8 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.Activity;
@@ -71,6 +74,52 @@ class AiAssistantToolExecutorTest {
     private AiAssistantDateResolver dateResolver;
     private AiAssistantToolExecutor executor;
 
+    @ParameterizedTest
+    @ValueSource(strings = {"get_record", "list_activities", "list_tasks"})
+    void incompleteStoredProseDegradesOnlyItsOwnItem(String tool) throws Exception {
+        String incomplete = "`[Unknown Former Alias](user:42)`";
+        String safe = "Keep this other item's prose";
+        Company company = new Company();
+        company.setId(5);
+        company.setName("Routine Account");
+        when(companyService.getCompanyById(5)).thenReturn(company);
+        Note badNote = new Note();
+        badNote.setContent(incomplete);
+        badNote.setVisibility("workspace");
+        Note goodNote = new Note();
+        goodNote.setContent(safe);
+        goodNote.setVisibility("workspace");
+        when(historyService.notesForCompany(eq(5), eq(10), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenReturn(List.of(badNote, goodNote));
+        Activity badActivity = new Activity();
+        badActivity.setNotes(incomplete);
+        Activity goodActivity = new Activity();
+        goodActivity.setNotes(safe);
+        when(historyService.activitiesForCompany(eq(5), any(), any(), eq(10)))
+                .thenReturn(List.of(badActivity, goodActivity));
+        Task badTask = new Task();
+        badTask.setId(1);
+        badTask.setDescription(incomplete);
+        Task goodTask = new Task();
+        goodTask.setId(2);
+        goodTask.setDescription(safe);
+        when(historyService.tasksForCompany(5, 10)).thenReturn(List.of(badTask, goodTask));
+        var context = new MaskingContext();
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("company", 5);
+
+        var result = executor.execute(tool, objectMapper.readTree("{\"handle\":\"r1\"}"), resources, true);
+
+        var tree = objectMapper.valueToTree(result.data());
+        String rows = tool.equals("get_record") ? "notes" : tool.equals("list_activities") ? "activities" : "tasks";
+        String field = tool.equals("get_record") ? "content" : tool.equals("list_activities") ? "notes" : "description";
+        assertEquals(2, tree.path(rows).size());
+        assertEquals("(unavailable reference)", tree.path(rows).path(0).path(field).asString());
+        assertEquals(safe, tree.path(rows).path(1).path(field).asString());
+        assertFalse(objectMapper.writeValueAsString(result.data()).contains("Unknown Former Alias"));
+        assertFalse(context.identifierDictionary().contains("Unknown Former Alias"));
+    }
+
     @BeforeEach
     void setUp() {
         searchService = mock(SearchService.class);
@@ -91,13 +140,61 @@ class AiAssistantToolExecutorTest {
     }
 
     private AiAssistantToolExecutor executor(List<AiAssistantWriteTool> writeTools) {
+        return executor(writeTools, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
+                ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
+    }
+
+    private AiAssistantToolExecutor executor(List<AiAssistantWriteTool> writeTools,
+            ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes,
+            ooo.klae.connex.backend.tenant.TenantWorkScope tenantScopes) {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         return new AiAssistantToolExecutor(
                 catalog, new AiAssistantWriteToolRegistry(catalog, writeTools),
                 searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), recordScopes, tenantScopes);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void directRecordReadPreparesAndRestoresWorkspaceScopes(boolean routed) {
+        var context = new ooo.klae.connex.backend.tenant.TenantContext();
+        var control = mock(ooo.klae.connex.backend.mappers.WorkspaceMapper.class);
+        var resolver = mock(ooo.klae.connex.backend.tenant.TenantCatalogResolver.class);
+        var transactions = new ooo.klae.connex.backend.support.TestTransactionManager();
+        var tenantScopes = new ooo.klae.connex.backend.tenant.TenantWorkScope(context, resolver, control,
+                mock(ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper.class),
+                new ooo.klae.connex.backend.services.TenantWorkspaceScopeControlOperations(control, resolver));
+        var visibility = new ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess(
+                new ooo.klae.connex.backend.services.ShareWorkspaceControlAccess(control, tenantScopes, context, transactions), context);
+        var anchor = new ooo.klae.connex.backend.beans.Workspace();
+        anchor.setId(7);
+        anchor.setOrgId(19);
+        anchor.setName("Anchor");
+        when(resolver.isCatalogPerPlacement()).thenReturn(routed);
+        when(control.findOrganizationWorkspacesForShare(7)).thenReturn(List.of(anchor));
+        when(control.findByOrgId(19)).thenReturn(List.of(anchor));
+        when(companyService.getCompanyById(41)).thenAnswer(invocation -> {
+            org.junit.jupiter.api.Assertions.assertNotNull(context.getWorkspaceScopes());
+            var scope = visibility.getForWorkspace(7);
+            assertEquals("[7]", visibility.withWorkspaceScopeRead(7, scope, scope::workspaceIdsJson));
+            throw new ooo.klae.connex.backend.exceptions.ResourceNotFoundException("Company not found");
+        });
+        context.set(7, 19, 11, "member", routed ? "cnx_foreign" : null);
+        try {
+            var resources = new AiChatResourceRegistry();
+            String handle = resources.register("company", 41);
+            var failure = assertThrows(AiAssistantLoopException.class,
+                    () -> executor(AiAssistantDeclaredWriteTools.tools(), visibility, tenantScopes).execute(
+                        "get_record", objectMapper.createObjectNode().put("handle", handle), resources, false));
+            assertEquals("inaccessible_resource", failure.detailReason());
+            verify(companyService).getCompanyById(41);
+            org.junit.jupiter.api.Assertions.assertNull(context.getWorkspaceScopes());
+            assertEquals(routed ? "cnx_foreign" : null, context.getCatalog());
+        } finally {
+            context.clear();
+        }
     }
 
     /**
@@ -264,7 +361,7 @@ class AiAssistantToolExecutorTest {
                 List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         when(personService.getPersonById(17)).thenReturn(restricted);
-        when(personMapper.getPersonById(7, 17)).thenReturn(restricted);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(restricted);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
 
@@ -302,7 +399,7 @@ class AiAssistantToolExecutorTest {
         deal.setId(8);
         Company company = new Company();
         company.setId(5);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         when(dealService.getDealById(8)).thenReturn(deal);
         when(companyService.getCompanyById(5)).thenReturn(company);
         when(historyService.activitiesForPerson(17, null, null, 3)).thenReturn(List.of());
@@ -374,6 +471,7 @@ class AiAssistantToolExecutorTest {
         person.setId(17);
         person.setName("Ada Lovelace");
         person.setNotes(new Note[] {workspaceNote, privateNote});
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(workspaceNote, privateNote));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -405,6 +503,7 @@ class AiAssistantToolExecutorTest {
         person.setId(17);
         person.setName("Ada Lovelace");
         person.setNotes(new Note[] {workspaceNote, privateNote});
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(workspaceNote, privateNote));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -465,19 +564,114 @@ class AiAssistantToolExecutorTest {
     }
 
     @Test
+    void missionPrimaryContextDoesNotRetrieveLinkedRecords() {
+        Person primary = new Person();
+        primary.setId(17);
+        primary.setName("Primary");
+        when(personService.getAssistantPrimaryPersonById(17)).thenReturn(primary);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        var scope = new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("person", 17);
+
+        AiAssistantToolResult result = scope.evaluate(() -> executor.pageContext(
+                List.of(new AiChatPageContextDto("person", 17)), resources));
+
+        assertEquals(1, assertInstanceOf(List.class, result.data().get("records")).size());
+        verify(personService).getAssistantPrimaryPersonById(17);
+        verify(personService, never()).getPersonById(17);
+        verifyNoInteractions(personMapper, companyMapper, dealMapper, companyService, dealService, historyService);
+    }
+
+    @Test
+    void missionRejectsOutsideContextBeforeRetrieval() {
+        var scope = new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("person", 17);
+
+        assertThrows(AiAssistantLoopException.class, () -> scope.evaluate(() -> executor.pageContext(
+                List.of(new AiChatPageContextDto("person", 18)), new AiChatResourceRegistry())));
+
+        verifyNoInteractions(personMapper, companyMapper, dealMapper, personService, companyService, dealService);
+    }
+
+    @Test
+    void missionDealReadDoesNotHydrateLinkedCompany() throws Exception {
+        Deal primary = new Deal();
+        primary.setId(17);
+        primary.setName("Primary");
+        primary.setCompanyId(99);
+        primary.setValue(java.math.BigDecimal.ONE);
+        when(dealService.getAssistantPrimaryDealById(17)).thenReturn(primary);
+        when(historyService.notesForDeal(17, 10, false)).thenReturn(List.of());
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("deal", 17);
+        var args = objectMapper.readTree("{\"handle\":\"r1\"}");
+        var scope = new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("deal", 17);
+
+        AiAssistantToolResult result = scope.evaluate(() -> executor.execute("get_record", args, resources, false));
+
+        assertFalse(result.data().containsKey("company"));
+        verify(dealService).getAssistantPrimaryDealById(17);
+        verify(dealService, never()).getDealById(17);
+        verifyNoInteractions(companyMapper, companyService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void dealOnlyPageContextSkipsVisibilityScopeUntilACompanyExists(boolean dealExists) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    executor, "recordVisibilityScopeControlAccess", fixture.scopes);
+            org.mockito.Mockito.doThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"))
+                    .when(fixture.control).findOrganizationWorkspacesForShare(7);
+            Deal deal = new Deal();
+            deal.setId(41);
+            deal.setName("Unlinked deal");
+            when(dealMapper.getByIds(7, List.of(41))).thenReturn(dealExists ? List.of(deal) : List.of());
+
+            var result = executor.pageContext(
+                    List.of(new AiChatPageContextDto("deal", 41)), new AiChatResourceRegistry());
+
+            assertEquals(dealExists ? 1 : 0, ((List<?>) result.data().get("records")).size());
+            verify(dealMapper).getByIds(7, List.of(41));
+            verifyNoInteractions(fixture.control, personMapper, companyMapper);
+        }
+    }
+
+    @Test
+    void dealOnlyPageContextResolvesOneScopeAfterDiscoveringCompanyLinks() {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    executor, "recordVisibilityScopeControlAccess", fixture.scopes);
+            Deal deal = new Deal();
+            deal.setId(41);
+            deal.setName("Linked deal");
+            deal.setCompanyId(55);
+            when(dealMapper.getByIds(7, List.of(41))).thenReturn(List.of(deal));
+
+            var result = executor.pageContext(
+                    List.of(new AiChatPageContextDto("deal", 41)), new AiChatResourceRegistry());
+
+            assertEquals(1, ((List<?>) result.data().get("records")).size());
+            var order = org.mockito.Mockito.inOrder(dealMapper, fixture.control, companyMapper);
+            order.verify(dealMapper).getByIds(7, List.of(41));
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            order.verify(companyMapper).getByIds(7, "[7,17]", List.of(55));
+            verify(fixture.control).findOrganizationWorkspacesForShare(7);
+        }
+    }
+
+    @Test
     void replayContextUsesOneBoundedBatchInsteadOfHydratingEachPerson() {
         List<Integer> ids = IntStream.rangeClosed(1, 50).boxed().toList();
         List<AiChatPageContextDto> context = ids.stream()
                 .map(id -> new AiChatPageContextDto("person", id))
                 .toList();
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(personMapper.getByIds(7, ids)).thenReturn(List.of());
+        when(personMapper.getByIds(7, "[7,8,9]", ids)).thenReturn(List.of());
 
         AiAssistantToolResult result = executor.pageContext(
                 context, new AiChatResourceRegistry());
 
         assertEquals(List.of(), result.data().get("records"));
-        verify(personMapper).getByIds(7, ids);
+        verify(personMapper).getByIds(7, "[7,8,9]", ids);
         verifyNoInteractions(personService, companyService, dealService);
     }
 
@@ -487,7 +681,7 @@ class AiAssistantToolExecutorTest {
         Person restricted = new Person();
         restricted.setId(17);
         restricted.setSuspendedAt(LocalDateTime.parse("2026-08-01T00:00:00"));
-        when(personMapper.getByIds(7, List.of(17))).thenReturn(List.of(restricted));
+        when(personMapper.getByIds(7, "[7,8,9]", List.of(17))).thenReturn(List.of(restricted));
         Activity activity = new Activity();
         activity.setPerson(restricted);
         EntityReference restrictedReference = new EntityReference();
@@ -511,11 +705,11 @@ class AiAssistantToolExecutorTest {
         when(historyService.activitiesForCompany(5, null, null, 5)).thenReturn(
                 List.of(activity, referencedActivity));
         when(historyService.tasksForCompany(5, 5)).thenReturn(List.of(task));
-        when(historyService.notesForCompany(5, 10)).thenReturn(List.of(note));
+        when(historyService.notesForCompany(eq(5), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(dealService.getDealById(8)).thenReturn(deal);
         when(historyService.activitiesForDeal(8, null, null, 5)).thenReturn(
                 List.of(activity, referencedActivity));
-        when(dealService.getNotesByDealId(8)).thenReturn(List.of(note));
+        when(historyService.notesForDeal(eq(8), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("company", 5);
         resources.register("deal", 8);
@@ -561,6 +755,7 @@ class AiAssistantToolExecutorTest {
                 })
                 .toArray(Note[]::new);
         person.setNotes(notes);
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(Arrays.asList(notes));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -594,6 +789,7 @@ class AiAssistantToolExecutorTest {
         note.setContent(
                 "x".repeat(3_989) + " victim@example.com " + "tail".repeat(20));
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -622,6 +818,7 @@ class AiAssistantToolExecutorTest {
         note.setVisibility("workspace");
         note.setContent("x".repeat(3_988) + " Ada Lovelace " + "tail".repeat(20));
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
@@ -650,6 +847,7 @@ class AiAssistantToolExecutorTest {
         note.setVisibility("workspace");
         note.setContent("x".repeat(3_985) + " The contact discussed a diagnosis.");
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
@@ -674,6 +872,7 @@ class AiAssistantToolExecutorTest {
         note.setCreatedAt("2026-08-21 12:34:56");
         note.setContent("Follow up next week");
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
@@ -701,9 +900,10 @@ class AiAssistantToolExecutorTest {
         note.setPerson(linkedPerson);
         note.setContent("x".repeat(3_988) + " Grace Hopper " + "tail".repeat(20));
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(personMapper.getByIds(7, List.of(18))).thenReturn(List.of(linkedPerson));
+        when(personMapper.getByIds(7, "[7,8,9]", List.of(18))).thenReturn(List.of(linkedPerson));
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
 
@@ -727,7 +927,7 @@ class AiAssistantToolExecutorTest {
         Person person = new Person();
         person.setId(17);
         person.setName("Ada Lovelace");
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         Activity activity = new Activity();
         activity.setSubject("x".repeat(500) + " Ada Lovelace " + "tail".repeat(20));
         when(activityService.getActivitiesByPersonIdInWindow(
@@ -763,7 +963,7 @@ class AiAssistantToolExecutorTest {
     void scheduleConflictResultsBoundCountAndTextBeforePromptSerialization() {
         Person person = new Person();
         person.setId(17);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         List<Activity> activities = IntStream.range(0, 25)
                 .mapToObj(index -> {
                     Activity activity = new Activity();
@@ -851,7 +1051,7 @@ class AiAssistantToolExecutorTest {
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("America/Los_Angeles");
         Person person = new Person();
         person.setId(17);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         when(historyService.activitiesForPerson(
                 eq(17), any(LocalDateTime.class), any(LocalDateTime.class), eq(5)))
                 .thenReturn(List.of());
@@ -926,6 +1126,22 @@ class AiAssistantToolExecutorTest {
         assertFalse(data.has("id"));
         assertFalse(data.has("assignedToId"));
         assertEquals(73, registry.resolve("t1").id());
+    }
+
+    @Test
+    void emptyContextAndTenantFreeTodosNeverTouchTheScopeBoundary() throws Exception {
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "recordVisibilityScopeControlAccess", scopes);
+        assertEquals(List.of(), executor.pageContext(List.of(), new AiChatResourceRegistry()).data().get("records"));
+        assertEquals(List.of(), executor.pageContext(
+            java.util.Arrays.asList(null,
+                new ooo.klae.connex.backend.dto.AiChatPageContextDto(null, 41),
+                new ooo.klae.connex.backend.dto.AiChatPageContextDto("unknown", 41),
+                new ooo.klae.connex.backend.dto.AiChatPageContextDto("company", 0)),
+            new AiChatResourceRegistry()).data().get("records"));
+        executor.execute("set_todos", objectMapper.readTree("{\"items\":[\"Review the summary\"]}"),
+            new AiChatResourceRegistry(), false);
+        org.mockito.Mockito.verifyNoInteractions(scopes);
     }
 
 }

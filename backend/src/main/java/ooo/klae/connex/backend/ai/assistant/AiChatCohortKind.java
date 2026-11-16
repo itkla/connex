@@ -107,6 +107,14 @@ final class AiChatCohortKind {
         return narrowed;
     }
 
+    /**
+     * Resolves one record kind for a cohort read.
+     *
+     * <p>An unresolved declaration of several kinds is refused: arbitrarily picking one could let
+     * the preview count contacts while the executed turn narrows the same declaration to companies,
+     * leaving the confirmed count inconsistent with the read. Counting every declared kind would
+     * require a different retrieval contract, so the declaration must first resolve to one kind.
+     */
     private static String kind(
             AiChatQueryScope scope,
             String requestedKind,
@@ -133,11 +141,6 @@ final class AiChatCohortKind {
             return contextKind;
         }
         if (declared.size() > 1) {
-            // One cohort read covers one kind. Picking a listed kind here would let the preview
-            // count contacts while the executed turn, narrowing the same declaration by a tool
-            // argument, read companies — and the confirmed number would describe neither. Counting
-            // every declared kind is a different retrieval contract than this one implements, so the
-            // honest bound is to require the declaration to resolve to a single kind first.
             throw AiAssistantLoopException.refusedArguments(RECORD_KIND_AMBIGUOUS);
         }
         return "company";

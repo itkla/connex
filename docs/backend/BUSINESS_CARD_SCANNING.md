@@ -17,6 +17,19 @@ Preserve `ImageDecodeAdmissionService` behavior:
 
 Scan entitlement, workspace permission, and principal/global admission run in the security filter before multipart parsing. Do not move expensive parsing ahead of those gates.
 
+Session-epoch validation precedes business-card admission, so a revoked session receives the same
+authentication refusal whether its explicit workspace pin names a nonmembership or a membership
+without the required permission.
+
+Malformed or repeated explicit workspace pins receive the filter's controlled 403 permission refusal
+before parsing, workspace permission checks, or throttling; they never fall back to the cookie or continue the chain.
+
+Pinned scan, reservation, and import writes without active membership receive the interceptor's
+`403 FORBIDDEN "Not a member of workspace {id}"` refusal before permission checks, throttling, or
+multipart parsing. Active members missing a required permission retain
+`BUSINESS_CARD_PERMISSION_DENIED`. The client names the unavailable workspace and preserves the
+card and entered contact details without treating that refusal as an ambiguous import outcome.
+
 Never log uploaded bytes, recognized text, names, email addresses, phone numbers, headers, tokens, or provider payloads.
 
 ## Local OCR first

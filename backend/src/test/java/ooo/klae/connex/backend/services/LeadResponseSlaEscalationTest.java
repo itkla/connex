@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,7 +55,7 @@ class LeadResponseSlaEscalationTest extends AbstractServiceTest {
     void aBreachEscalatesThroughAnAuthoredRuleExactlyOnce() {
         Person lead = newPerson(newCompany());
         User escalationOwner = newUser();
-        assertNull(personMapper.getPersonById(workspace.getId(), lead.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), lead.getId()).getOwnerId());
         RuleDto rule = escalationRule(escalationOwner);
         slaService.startFirstResponseClock(lead.getId(), 4);
         expireDeadline(lead);
@@ -71,7 +72,7 @@ class LeadResponseSlaEscalationTest extends AbstractServiceTest {
 
         assertEquals(1, matchedExecutions(rule.getId()));
         assertEquals(escalationOwner.getId(),
-            personMapper.getPersonById(workspace.getId(), lead.getId()).getOwnerId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), lead.getId()).getOwnerId());
 
         recorder.events.clear();
         slaScheduler.sweepBatches(workspace.getId());

@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.StaleRecordException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -207,6 +208,119 @@ class DealUpdateConcurrencyIntegrationTest {
         verify(auditService).singleChange("riskExcluded", true, true);
         assertTrue(returned.get().isRiskExcluded());
         verify(dealMapper, never()).getDealByIdForUpdate(anyInt(), anyInt());
+    }
+
+    @Test
+    void staleFullEditRefusesBeforeValueOutcomeAuditOrEvents() {
+        Deal stale = dealMapper.getDealById(workspace.getId(), deal.getId());
+        stale.setExpectedVersion(stale.getVersion());
+        stale.setName("Stale draft name");
+        stale.setCompanyId(-1);
+        dealMapper.updateValueAndSource(workspace.getId(), deal.getId(), new BigDecimal("99999"), "manual");
+        long currentVersion = dealMapper.getDealById(workspace.getId(), deal.getId()).getVersion();
+        asCurrentUser(() -> {
+            StaleRecordException error = assertThrows(StaleRecordException.class,
+                () -> dealService.update(deal.getId(), stale));
+            assertEquals(currentVersion, error.getCurrentVersion());
+        });
+        Deal stored = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(deal.getName(), stored.getName());
+        assertEquals(0, new BigDecimal("99999").compareTo(stored.getValue()));
+        assertEquals(currentVersion, stored.getVersion());
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+        verify(notificationChanges, never()).publish(anyInt(), anyString(), anyInt());
+    }
+
+    @Test
+    void staleCurrencyWithNewLineItemsReturnsStaleRecordBeforeDomainValidation() {
+        Deal stale = dealMapper.getDealById(workspace.getId(), deal.getId());
+        stale.setExpectedVersion(stale.getVersion());
+        jdbcTemplate.update("UPDATE deal SET currency = 'USD' WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), deal.getId());
+        jdbcTemplate.update("INSERT INTO deal_line_item (workspace_id, deal_id, name, currency) VALUES (?, ?, ?, ?)",
+            workspace.getId(), deal.getId(), "New line", "USD");
+        asCurrentUser(() -> assertThrows(StaleRecordException.class,
+            () -> dealService.update(deal.getId(), stale)));
+        assertEquals("USD", dealMapper.getDealById(workspace.getId(), deal.getId()).getCurrency());
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+    }
+
+    @Test
+    void successfulFullEditReturnsTheFinalVersionAfterDependentValueWrites() {
+        when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
+        Deal edit = dealMapper.getDealById(workspace.getId(), deal.getId());
+        edit.setExpectedVersion(edit.getVersion());
+        edit.setName("Current edit");
+        edit.setValue(new BigDecimal("2000"));
+        AtomicReference<Deal> returned = new AtomicReference<>();
+        asCurrentUser(() -> returned.set(dealService.update(deal.getId(), edit)));
+        Deal stored = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(stored.getVersion(), returned.get().getVersion());
+        assertTrue(stored.getVersion() > edit.getExpectedVersion());
+        assertEquals(0, new BigDecimal("2000").compareTo(stored.getValue()));
+        assertEquals("Current edit", stored.getName());
+    }
+
+    @Test
+    void closeAndReopenResponsesCanSeedTheNextConditionalEdit() {
+        when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
+        asCurrentUser(() -> {
+            Deal closed = dealService.close(deal.getId(), true, null, new BigDecimal("333"));
+            assertEquals(dealMapper.getDealById(workspace.getId(), deal.getId()).getVersion(), closed.getVersion());
+            closed.setExpectedVersion(closed.getVersion());
+            closed.setName("Edited after close");
+            dealService.update(deal.getId(), closed);
+            Deal reopened = dealService.reopen(deal.getId());
+            assertEquals(dealMapper.getDealById(workspace.getId(), deal.getId()).getVersion(), reopened.getVersion());
+            reopened.setExpectedVersion(reopened.getVersion());
+            reopened.setName("Edited after reopen");
+            Deal saved = dealService.update(deal.getId(), reopened);
+            assertEquals("Edited after reopen", saved.getName());
+        });
+    }
+
+    @Test
+    void omittedExpectedVersionRetainsLegacyFullEditBehavior() {
+        when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
+        Deal legacy = dealMapper.getDealById(workspace.getId(), deal.getId());
+        dealMapper.updateValueAndSource(workspace.getId(), deal.getId(), new BigDecimal("99999"), "manual");
+        asCurrentUser(() -> dealService.update(deal.getId(), legacy));
+        Deal stored = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals(0, legacy.getValue().compareTo(stored.getValue()));
+    }
+
+    @Test
+    void twoWritersWithTheSameSnapshotHaveExactlyOneAtomicWinner() throws Exception {
+        Deal first = dealMapper.getDealById(workspace.getId(), deal.getId());
+        Deal second = dealMapper.getDealById(workspace.getId(), deal.getId());
+        first.setExpectedVersion(first.getVersion());
+        second.setExpectedVersion(second.getVersion());
+        first.setName("First edit");
+        second.setName("Second edit");
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Integer> firstWrite = executor.submit(() -> conditionalWrite(first, ready, start));
+            Future<Integer> secondWrite = executor.submit(() -> conditionalWrite(second, ready, start));
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            int firstCount = firstWrite.get(20, TimeUnit.SECONDS);
+            int secondCount = secondWrite.get(20, TimeUnit.SECONDS);
+            assertEquals(1, firstCount + secondCount);
+            Deal stored = dealMapper.getDealById(workspace.getId(), deal.getId());
+            assertEquals(firstCount == 1 ? first.getName() : second.getName(), stored.getName());
+            assertEquals(first.getVersion() + 1, stored.getVersion());
+        } finally {
+            start.countDown();
+        }
+    }
+
+    private int conditionalWrite(Deal edit, CountDownLatch ready, CountDownLatch start) throws Exception {
+        ready.countDown();
+        assertTrue(start.await(10, TimeUnit.SECONDS));
+        java.util.concurrent.atomic.AtomicInteger changed = new java.util.concurrent.atomic.AtomicInteger();
+        asCurrentUser(() -> changed.set(dealMapper.update(edit)));
+        return changed.get();
     }
 
     /**

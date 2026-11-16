@@ -69,13 +69,14 @@ public class SeederService {
             long workspaceSeed = DeterministicSeederRandom.workspaceSeed(seed, workspaceIndex);
             int ordinal = workspaceIndex + 1;
             log.info("Seeding workspace {} of {}", ordinal, workspaceCount);
+            List<Integer> existingOrganizationWorkspaceIds = List.of();
             TransactionTemplate transaction = new TransactionTemplate(transactionManager);
             transaction.setName("connex-seeder-workspace-" + ordinal);
             transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
             transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
             int logicalIndex = workspaceIndex;
             SeedRunSummary.WorkspaceSummary summary = transaction.execute(status ->
-                writer.write(profile, workspaceSeed, logicalIndex, anchorDate));
+                writer.write(profile, workspaceSeed, logicalIndex, anchorDate, existingOrganizationWorkspaceIds));
             summaries.add(Objects.requireNonNull(
                 summary,
                 "Seeder workspace transaction returned no summary"

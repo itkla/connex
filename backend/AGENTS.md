@@ -29,6 +29,8 @@ Primary layers:
 
 Before touching tenancy, routing, lifecycle, catalog/control planes, or organization-wide data access, read `../docs/MULTITENANCY_PLAN.md` and the relevant architecture tests.
 
+Control-plane reads that a request can reach go through `TenantWorkScope.unroutedRead` (or a `*ControlAccess` read helper built on it); work that changes state uses `unrouted`. CodeQL merges every lambda handed to the shared `Supplier` in `unrouted`, so a read routed through it inherits a `java/csrf-unprotected-request-type` path into unrelated writes (#1815). Some pure reads still use `unrouted`, mostly in scheduled work and in request flows that write anyway; prefer `unroutedRead` when you touch one. Never pass `unroutedRead` a lambda that runs DML, appends an audit, mutates shared or static state, performs outbound I/O, publishes an event, or nests another `TenantWorkScope` call: that would hide a real effect from the scan.
+
 ### Unauthenticated ingest endpoints
 
 An endpoint that a browser or third party posts to without a session (`/api/csp-reports` is the
@@ -82,10 +84,13 @@ Read the relevant contract before editing that subsystem:
 | API mappings, anonymous access, deprecation or retirement | `../docs/backend/API_SURFACE.md` |
 | Security/auth/provider/upload boundary | `../docs/backend/SECURITY_BOUNDARIES.md` |
 | AI, masking, assistant, model-provider egress | `../docs/backend/AI_SECURITY.md` |
+| Durable missions, enrolled chat privacy, DSR cleanup | `../docs/backend/AI_MISSIONS.md` |
 | Business-card upload/OCR/fallback/import | `../docs/backend/BUSINESS_CARD_SCANNING.md`, `../ocr/AGENTS.md` |
 | Automation, segments, rules, workflows | `../docs/backend/AUTOMATION.md` |
 | Duplicate review, CSV, interaction-history import | `../docs/backend/IMPORTS_AND_DUPLICATE_REVIEW.md` |
+| Contact/company search normalization | `../docs/backend/RECORD_SEARCH.md` |
 | Tenancy, routing, lifecycle, data planes | `../docs/MULTITENANCY_PLAN.md` |
+| Whole-record edits, optimistic concurrency | `../docs/backend/RECORD_EDIT_CONCURRENCY.md` |
 | Transactions, concurrency, lock order | `../docs/backend/LOCKING.md` |
 | Flyway/schema/table placement | `../docs/backend/MIGRATIONS.md` |
 | Object storage/uploads/deletion queue | `../docs/backend/OBJECT_STORAGE.md` |
@@ -134,6 +139,7 @@ Minimum rules:
 - Place tenant/org-data and control-plane migrations in the correct lineage; no foreign key crosses the plane wall.
 - New tenant-owned tables are workspace-scoped from creation and enrolled in lifecycle/processing registries as required.
 - Composite foreign-key string columns must use compatible explicit charset/collation as documented.
+- A migration after which earlier binaries cannot **safely serve** raises `../deploy/staging/rollback-floor` to that migration in the same PR, and documents its rollback floor in `../docs/UPGRADING.md`. That covers more than schema breakage, such as a dropped or renamed column or a tightened constraint they still write. It also covers cutovers whose invariants older code would violate even though it still starts, as with V225, where pre-cutover writers could manufacture trust.
 - Mapper interfaces live under `mappers/`; XML lives under `src/main/resources/mappers/`. Keep SQL out of services/controllers.
 
 Architecture tests are enforcement, not obstacles. If a migration or mapper change requires weakening a tenancy/RBAC/plane test, stop and reconsider the design.
@@ -148,7 +154,7 @@ Architecture tests are enforcement, not obstacles. If a migration or mapper chan
 
 ## Verification
 
-Use targeted local verification. The required `Backend — build & test` CI job aggregates `backend-unit` (`verifyTestPartition unitTest`, two DB-free forks) and `backend-db` (two shards, each with its own MySQL service). `dbTestShard1` runs DB-backed service tests; `dbTestShard2` runs the remaining DB-backed tests plus the separate `scriptedTrajectoryTest` task. `verifyTestPartition` compiles tests and independently checks compiled test carriers against the tasks' actual selections for complete, disjoint, non-empty coverage. Local `test`, `scriptedTrajectoryTest`, and `check` keep their existing behavior.
+Use targeted local verification. The required `Backend — build & test` CI job aggregates `backend-unit` (`verifyTestPartition unitTest`, two DB-free forks) and `backend-db` (two shards, each with its own MySQL service). `dbTestShard1` runs DB-backed service tests; `dbTestShard2` runs the remaining DB-backed tests plus the separate `scriptedTrajectoryTest` task. `verifyTestPartition` compiles tests and independently checks runtime-visible class/method annotations for direct, composed-annotation, inherited, and nested test carriers against the tasks' actual selections for complete, disjoint, non-empty coverage. Static nested carriers can be selected independently; inner carriers require their enclosing owner. Compiled verifier fixtures are excluded from normal test suites. Local `test`, `scriptedTrajectoryTest`, and `check` keep their existing behavior.
 
 For a material backend change:
 
@@ -177,6 +183,7 @@ set +a
 - Local DB: `docker compose up -d db`
 - Optional OCR sidecar: `docker compose --profile ocr up -d ocr`
 - Full backend suite: CI-owned through `Backend — build & test`
+- Gradle daemon heap: `gradle.properties` sets `org.gradle.jvmargs` to 2 GiB, because `compileTestJava` runs inside the daemon and keeps about 1.1 GiB live. Raise it there if the daemon reports GC thrashing; don't remove it.
 
 Three tooling traps that cost real time:
 

@@ -74,6 +74,7 @@ import AskConnexProposalReview, {
 import AskConnexToolCard, {
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
+import { useProposalReviewNow } from '@/app/hooks/useProposalReviewNow';
 import type {
     AskConnexAttachment,
     AskConnexFileAttachment,
@@ -91,6 +92,7 @@ import {
     askConnexCitationHref,
     askConnexCitations,
     askConnexGroupedToolCallIds,
+    askConnexMessageAuthor,
     askConnexMessageNarration,
     askConnexMessageTodos,
     askConnexPromptFocusPending,
@@ -121,6 +123,7 @@ import {
     type AskConnexFailureMessage,
     type AskConnexRecovery,
     type AskConnexSessionGroupKey,
+    type AskConnexTurnWriteState,
     type AskConnexWidth,
 } from '@/app/lib/askConnexSurface';
 import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
@@ -189,6 +192,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import AskConnexCommandCenter from '@/app/components/ask-connex/AskConnexCommandCenter';
 
@@ -202,6 +206,8 @@ const ASK_CONNEX_MENTION_TYPES = {
 type UnavailableState = {
     title: string;
     body: string;
+    /** Retains an existing editor during revalidation while submission stays disabled. */
+    preserveComposer?: boolean;
 } | null;
 
 const noopRecovery = () => {};
@@ -234,6 +240,8 @@ export type AskConnexTurnLabels = {
     turnAccepted: string;
     turnCancelled: string;
     turnResolved: string;
+    turnWritesSaved: string;
+    turnWritesUncertain: string;
     turnStreaming: string;
     turnWorking: string;
     /** Accessible name for the disclosure that expands the reasoning panel. */
@@ -404,6 +412,8 @@ type AskConnexDrawerProps = {
     loadState: DrawerLoadState;
     loadError: Error | null;
     composer: string;
+    missionProgress?: ReactNode;
+    missionComposerAction?: ReactNode;
     implicitContext: AskConnexAttachment | null;
     selectionContext: AskConnexSelectionContext | null;
     unsupportedPageContext: { type: AskConnexSelectionContext['type']; label: string } | null;
@@ -421,6 +431,7 @@ type AskConnexDrawerProps = {
     contentTooLong: boolean;
     working: boolean;
     turn: AskConnexTurnState;
+    turnWriteState: AskConnexTurnWriteState;
     /** The active turn's ephemeral reasoning steps, in step order; empty for everyone but the requester. */
     thinking: readonly AskConnexTurnSegment[];
     /** The active turn's narration so far, in step order; empty for everyone but the requester. */
@@ -841,10 +852,7 @@ function TranscriptMessage({
     const format = useFormatter();
     const reduceMotion = useReducedMotion() ?? false;
     const user = message.authorKind === 'user';
-    const author = user
-        ? message.authorDisplayName
-            ?? (message.authorUserId === null ? labels.formerMember : labels.memberAuthor(message.authorUserId))
-        : labels.assistantAuthor;
+    const author = askConnexMessageAuthor(message, labels);
     const allowedRecords = useMemo<ReadonlySet<string>>(
         () => new Set(
             (message.citations ?? []).map((citation) => `${citation.kind}:${citation.id}`),
@@ -854,7 +862,7 @@ function TranscriptMessage({
     const narration = useMemo(() => askConnexMessageNarration(message), [message]);
     const todos = useMemo(() => askConnexMessageTodos(message), [message]);
     const animateEntrance = fresh && !user;
-    const createdAt = new Date(message.createdAt);
+    const createdAt = new Date(parseMysqlDateTime(message.createdAt));
     const timestamp = Number.isNaN(createdAt.getTime())
         ? null
         : format.dateTime(createdAt, { hour: 'numeric', minute: '2-digit' });
@@ -954,8 +962,12 @@ function ToolCallCards({
     review: AskConnexToolReview;
     onAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
+    const now = useProposalReviewNow(cards.reduce<(string | null)[]>((deadlines, card) => {
+        if (card.status === 'proposed') deadlines.push(card.reviewExpiresAt);
+        return deadlines;
+    }, []));
     const groups = askConnexProposalGroups(
-        cards, actionableToolCallIds, review.excludedToolCallIds,
+        cards, actionableToolCallIds, review.excludedToolCallIds, now,
     );
     const grouped = askConnexGroupedToolCallIds(groups);
     const ungrouped = cards.filter((card) => !grouped.has(card.id));
@@ -1125,6 +1137,7 @@ function SettledTurnActivity({
  */
 export function TurnActivity({
     turn,
+    writeState = 'uncertain',
     streaming,
     cancelling,
     canRetry,
@@ -1137,6 +1150,8 @@ export function TurnActivity({
     onNarrowScope = noopRecovery,
 }: {
     turn: AskConnexTurnState;
+    /** Write evidence for this turn, withheld until its settled transcript is reconciled. */
+    writeState?: AskConnexTurnWriteState;
     streaming: boolean;
     cancelling: boolean;
     canRetry: boolean;
@@ -1153,7 +1168,10 @@ export function TurnActivity({
     const [openForTurn, setOpenForTurn] = useState<number | null>(null);
     const thinkingPanelId = useId();
     const thinkingOpen = turn.turnId !== null && openForTurn === turn.turnId;
-    const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial);
+    const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial, writeState);
+    const explainFailure = (message: string) => writeState === 'none'
+        ? message
+        : `${message} ${writeState === 'committed' ? labels.turnWritesSaved : labels.turnWritesUncertain}`;
     const toggleThinking = () => setOpenForTurn(thinkingOpen ? null : turn.turnId);
     const thinkingPanel = thinkingOpen && thinking.length > 0 ? (
         <div
@@ -1203,7 +1221,7 @@ export function TurnActivity({
             <SettledTurnActivity
                 icon={<ExclamationCircleIcon className="size-3.5" />}
                 destructive
-                message={labels.terminalMessage[askConnexTerminalKind(turn.reason).message]}
+                message={explainFailure(labels.terminalMessage[askConnexTerminalKind(turn.reason).message])}
                 labels={labels}
                 recovery={recovery}
                 thinkingToggle={settledThinkingToggle}
@@ -1218,7 +1236,7 @@ export function TurnActivity({
         return (
             <SettledTurnActivity
                 icon={<ClockIcon className="size-3.5" />}
-                message={labels.terminalMessage[askConnexTimedOutMessage(turn.reason)]}
+                message={explainFailure(labels.terminalMessage[askConnexTimedOutMessage(turn.reason)])}
                 labels={labels}
                 recovery={recovery}
                 thinkingToggle={settledThinkingToggle}
@@ -1670,6 +1688,8 @@ function ConversationSurface({
     loadState,
     loadError,
     composer,
+    missionProgress,
+    missionComposerAction,
     implicitContext,
     selectionContext,
     unsupportedPageContext,
@@ -1686,6 +1706,7 @@ function ConversationSurface({
     contentTooLong,
     working,
     turn,
+    turnWriteState,
     thinking,
     narration,
     todos: liveTodos,
@@ -1773,13 +1794,13 @@ function ConversationSurface({
         excludedToolCallIds: excludedProposals,
         labels: labels.proposalReview,
         formatDeadline: (instant: string) => {
-            const deadline = new Date(instant);
+            const deadline = new Date(parseMysqlDateTime(instant));
             return Number.isNaN(deadline.getTime())
                 ? instant
                 : surfaceFormat.dateTime(deadline, { hour: 'numeric', minute: '2-digit' });
         },
         formatRemaining: (instant: string) => {
-            const deadline = new Date(instant);
+            const deadline = new Date(parseMysqlDateTime(instant));
             return Number.isNaN(deadline.getTime())
                 ? instant
                 : surfaceFormat.relativeTime(deadline, now);
@@ -2057,6 +2078,11 @@ function ConversationSurface({
                                     />
                                 </MessageScrollerItem>
                             ) : null}
+                            {loadState === 'ready' && missionProgress ? (
+                                <MessageScrollerItem messageId="mission-progress" className="px-4 pt-4">
+                                    {missionProgress}
+                                </MessageScrollerItem>
+                            ) : null}
                             {loadState === 'ready' && historySummarized ? (
                                 <MessageScrollerItem messageId="history-summary" className="px-4 pt-5">
                                     <HistorySummaryMarker label={labels.historySummarized} />
@@ -2066,8 +2092,8 @@ function ConversationSurface({
                                 <MessageScrollerItem messageId="empty">
                                     <EmptyState
                                         icon={SparklesIcon}
-                                        title={labels.emptyTitle}
-                                        body={labels.emptyBody}
+                                        title={unavailable?.title ?? labels.emptyTitle}
+                                        body={unavailable?.body ?? labels.emptyBody}
                                         tone="brand"
                                         className="border-0 bg-transparent px-4 py-12"
                                         action={(
@@ -2077,7 +2103,7 @@ function ConversationSurface({
                                                     workspace ? 'max-w-xl' : 'max-w-sm',
                                                 )}
                                             >
-                                                {jobs.map((job) => (
+                                                {(unavailable ? [] : jobs).map((job) => (
                                                     <Button
                                                         key={job.id}
                                                         type="button"
@@ -2088,9 +2114,9 @@ function ConversationSurface({
                                                         {job.label}
                                                     </Button>
                                                 ))}
-                                                <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
+                                                {!unavailable ? <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
                                                     {labels.disclosureCreation}
-                                                </p>
+                                                </p> : null}
                                                 {workspace ? (
                                                     <>
                                                         <Separator className="my-4" />
@@ -2210,6 +2236,7 @@ function ConversationSurface({
                                 <MessageScrollerItem messageId={`turn:${turn.turnId ?? turn.phase}`}>
                                     <TurnActivity
                                         turn={turn}
+                                        writeState={turnWriteState}
                                         streaming={streaming}
                                         cancelling={cancelling}
                                         canRetry={canRetryTurn}
@@ -2231,7 +2258,7 @@ function ConversationSurface({
                 </MessageScroller>
             </MessageScrollerProvider>
 
-            {unavailable ? (
+            {unavailable && !unavailable.preserveComposer ? (
                 loadState !== 'forbidden' ? (
                     <div role="status" className="shrink-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                         <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
@@ -2246,6 +2273,12 @@ function ConversationSurface({
                         requestSend();
                     }}
                 >
+                    {unavailable?.preserveComposer ? (
+                        <p role="status" className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                            <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
+                            {unavailable.body}
+                        </p>
+                    ) : null}
                     {offeringJobs ? (
                         <JobSuggestions
                             jobs={jobs}
@@ -2368,6 +2401,7 @@ function ConversationSurface({
                                     ? labels.scopeFiltersSet(scope.filterCount)
                                     : labels.scopeFilters}
                             </Button>
+                            {missionComposerAction}
                             <div className="min-w-0 text-xs text-muted-foreground">
                                 {contentTooLong ? (
                                     <p role="alert" className="text-destructive">{labels.tooLong}</p>
@@ -2707,6 +2741,8 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         loadState: props.loadState,
         loadError: props.loadError,
         composer: props.composer,
+        missionProgress: props.missionProgress,
+        missionComposerAction: props.missionComposerAction,
         implicitContext: props.implicitContext,
         selectionContext: props.selectionContext,
         unsupportedPageContext: props.unsupportedPageContext,
@@ -2723,6 +2759,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         contentTooLong: props.contentTooLong,
         working: props.working,
         turn: props.turn,
+        turnWriteState: props.turnWriteState,
         thinking: props.thinking,
         narration: props.narration,
         todos: props.todos,

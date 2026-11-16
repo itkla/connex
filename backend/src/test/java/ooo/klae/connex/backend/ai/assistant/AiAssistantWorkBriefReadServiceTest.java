@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.ObjectMapper;
@@ -37,6 +38,24 @@ class AiAssistantWorkBriefReadServiceTest {
     private TaskMapper taskMapper;
     private ActivityMapper activityMapper;
     private AiAssistantWorkBriefReadService service;
+
+    @Test
+    void incompleteCommitmentProseDoesNotDiscardOtherCommitments() throws Exception {
+        when(taskMapper.getAiAssistantWorkCommitments(anyInt(), anyInt(), any(), any(), anyList(), anyInt()))
+                .thenReturn(List.of(
+                        new AiAssistantWorkCommitment(1, "`[Unknown Former Alias](user:42)`", null, true, null, null),
+                        new AiAssistantWorkCommitment(2, "Keep this commitment", null, false, null, null)));
+        var context = new MaskingContext();
+        var result = service.workCommitments(11, 7, 10, new AiChatResourceRegistry(context));
+        var data = JsonMapper.builder().build().valueToTree(result.data());
+        org.junit.jupiter.api.Assertions.assertEquals(2, result.data().get("returnedCommitments"));
+        org.junit.jupiter.api.Assertions.assertEquals("(unavailable reference)",
+                data.path("commitments").path(0).path("description").asString());
+        org.junit.jupiter.api.Assertions.assertEquals("Keep this commitment",
+                data.path("commitments").path(1).path("description").asString());
+        assertFalse(data.toString().contains("Unknown Former Alias"));
+        assertFalse(context.identifierDictionary().contains("Unknown Former Alias"));
+    }
 
     @BeforeEach
     void setUp() {
@@ -54,12 +73,14 @@ class AiAssistantWorkBriefReadServiceTest {
         Deal deal = new Deal();
         deal.setId(3);
         deal.setName("Renewal Agreement");
-        when(personMapper.getByIds(eq(7), anyList())).thenReturn(List.of(person));
+        when(personMapper.getByIds(eq(7), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(person));
         when(dealMapper.getByIds(eq(7), anyList())).thenReturn(List.of(deal));
+        ReferenceService references = mock(ReferenceService.class);
+        when(references.hydrateTasksForMasking(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         service = new AiAssistantWorkBriefReadService(
                 taskMapper, activityMapper, personMapper, mock(CompanyMapper.class), dealMapper,
                 mock(ScoringService.class), workspaceService, workspaceScope,
-                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC), references, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test
@@ -107,4 +128,29 @@ class AiAssistantWorkBriefReadServiceTest {
         assertTrue(providerInput.contains("{{P"));
         assertTrue(providerInput.contains("{{D"));
     }
+    @Test
+    void commitmentMemberReferencesAreCandidatesBeforeDescriptionTruncation() throws Exception {
+        when(taskMapper.getAiAssistantWorkCommitments(anyInt(), anyInt(), any(), any(), anyList(), anyInt()))
+                .thenReturn(List.of(new AiAssistantWorkCommitment(1,
+                        "x".repeat(490) + " [Former Member](user:42) and [Pending Alias](user:43)", null, true, null, null)));
+        MaskingContext context = new MaskingContext();
+        var resources = new AiChatResourceRegistry(context);
+        var result = service.workCommitments(11, 7, 10, resources);
+        assertTrue(context.identifierDictionary().containsAll(List.of("Former Member", "Pending Alias")));
+        String projected = new ObjectMapper().writeValueAsString(result.data());
+        assertFalse(projected.contains("Former"));
+        assertFalse(projected.contains("Pending"));
+        org.junit.jupiter.api.Assertions.assertEquals(0, context.tokenBindings().size());
+    }
+
+    @Test
+    void emptyCommitmentsAndMeetingsDoNotReadRecordVisibilityScopes() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", operation.scopes);
+            service.workCommitments(11, 7, 10, new AiChatResourceRegistry());
+            service.upcomingMeetings(11, 7, 10, new AiChatResourceRegistry());
+            org.mockito.Mockito.verifyNoInteractions(operation.control);
+        }
+    }
+
 }

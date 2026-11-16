@@ -19,6 +19,17 @@
     <result property="ownerId"                 column="owner_id"/>
   </resultMap>
 
+  <select id="listOpenPassIds" resultType="long" flushCache="true">
+    SELECT id FROM person_lifecycle_pass
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL
+  </select>
+
+  <select id="getOpenPassByIdForUpdate" resultMap="PersonLifecyclePassResult" flushCache="true">
+    SELECT * FROM person_lifecycle_pass
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND id = #{id} AND ended_at IS NULL
+    FOR UPDATE
+  </select>
+
   <select id="getOpenPass" resultMap="PersonLifecyclePassResult">
     SELECT * FROM person_lifecycle_pass
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL

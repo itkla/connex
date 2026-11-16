@@ -64,7 +64,8 @@ public class CampaignSendWorker {
         for (int workspaceId : tenantWorkScope.withCatalog(
                 catalog, () -> campaignSendMapper.workspaceIdsWithQueuedSends(
                     triggeredSendGate.enabled(),
-                    deliveryProperties.providerCallReservationGrace().toNanos() / 1_000L))) {
+                    deliveryProperties.providerCallReservationGrace().toNanos() / 1_000L,
+                    deliveryProperties.legacyUnleasedAudienceIdle().toSeconds()))) {
             JobRunDetail detail = JobRunDetail.startedUtc();
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {

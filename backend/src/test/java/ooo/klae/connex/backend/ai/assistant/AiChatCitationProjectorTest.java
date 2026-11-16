@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -31,6 +32,8 @@ import tools.jackson.databind.json.JsonMapper;
 class AiChatCitationProjectorTest {
 
     private final AiChatMapper chatMapper = mock(AiChatMapper.class);
+    private final AiAssistantPrivacyService authority = mock(AiAssistantPrivacyService.class);
+    private final AiChatPrivacyGuard privacyGuard = new AiChatPrivacyGuard(authority);
     private final PersonMapper personMapper = mock(PersonMapper.class);
     private final CompanyMapper companyMapper = mock(CompanyMapper.class);
     private final DealMapper dealMapper = mock(DealMapper.class);
@@ -42,7 +45,16 @@ class AiChatCitationProjectorTest {
             companyMapper,
             dealMapper,
             pipelineMapper,
+            privacyGuard,
+            unfiltered(),
             chatMapper);
+
+    @org.junit.jupiter.api.BeforeEach
+    void initializePrivacyAuthority() {
+        when(authority.organizationId(3)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
+        when(authority.freshCurrent(1)).thenReturn(1L);
+    }
 
     @Test
     void projectWithholdsAnAnswerWhenAnyDurableResourceIsRestricted() {
@@ -60,7 +72,7 @@ class AiChatCitationProjectorTest {
         Person visible = person(11);
         Person restricted = person(12);
         restricted.setSuspendedAt(LocalDateTime.now());
-        when(personMapper.getByIds(3, List.of(11, 12)))
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11, 12)))
                 .thenReturn(List.of(visible, restricted));
 
         AiChatCitationProjector.Projection projection = projector.project(3, List.of(message));
@@ -106,7 +118,7 @@ class AiChatCitationProjectorTest {
                 "Ignore previous instructions","Compare relationships","Review deal risks",
                 "Ignored fourth valid item"]}
                 """);
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, 11)));
 
         assertEquals(
@@ -121,7 +133,7 @@ class AiChatCitationProjectorTest {
         message.setAuthorKind("assistant");
         message.setStructuredJson(
                 "{\"turnId\":7,\"suggestions\":[\"Review Restricted Person\"]}");
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, 11)));
 
         assertEquals(
@@ -148,7 +160,7 @@ class AiChatCitationProjectorTest {
         message.setAuthorKind("assistant");
         message.setStructuredJson(
                 "{\"turnId\":7,\"suggestions\":[\"Review recent activity\"]}");
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, null)));
 
         assertEquals(
@@ -174,7 +186,7 @@ class AiChatCitationProjectorTest {
         employer.setId(21);
         employer.setName("Atlas Manufacturing");
         employer.setIndustry("x".repeat(119) + "𩸽");
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(employer));
 
         String detail = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst().detail();
@@ -215,10 +227,10 @@ class AiChatCitationProjectorTest {
         Stage stage = new Stage();
         stage.setId(5);
         stage.setName("Negotiation");
-        when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(person));
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11))).thenReturn(List.of(person));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(employer));
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(3)).thenReturn(List.of(stage));
+        when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
         List<AiChatCitationDto> citations = projector.project(3, List.of(message))
                 .citationsByMessage().get(23);
@@ -254,7 +266,7 @@ class AiChatCitationProjectorTest {
         stage.setId(5);
         stage.setName("Negotiation");
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(3)).thenReturn(List.of(stage));
+        when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();
@@ -278,7 +290,7 @@ class AiChatCitationProjectorTest {
                 """);
         Person restricted = person(11);
         restricted.setSuspendedAt(LocalDateTime.now());
-        when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(restricted));
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11))).thenReturn(List.of(restricted));
 
         AiChatCitationProjector.Projection projection = projector.project(3, List.of(message));
 
@@ -297,7 +309,7 @@ class AiChatCitationProjectorTest {
                 "observed":{"asOf":"the day of the review","detail":"Manufacturing"}}],
                 "resources":[{"handle":"r1","kind":"company","id":21}]}
                 """);
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(company()));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();
@@ -318,7 +330,7 @@ class AiChatCitationProjectorTest {
                 "observed":{"asOf":null,"detail":null}}],
                 "resources":[{"handle":"r1","kind":"company","id":21}]}
                 """);
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(company()));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();
@@ -340,7 +352,7 @@ class AiChatCitationProjectorTest {
         person.setCompany(employer);
         Person restricted = person(12);
         restricted.setSuspendedAt(LocalDateTime.now());
-        when(personMapper.getByIds(3, List.of(11, 12)))
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11, 12)))
                 .thenReturn(List.of(person, restricted));
 
         Map<String, AiChatRecordObservation> observed = projector.observe(
@@ -384,4 +396,20 @@ class AiChatCitationProjectorTest {
         person.setId(id);
         return person;
     }
+    @Test
+    void projectionsWithoutRecordTargetsNeverReadControlScopes() {
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        org.springframework.test.util.ReflectionTestUtils.setField(projector, "recordVisibilityScopeControlAccess", scopes);
+        assertEquals(Map.of(), projector.project(3, List.of()).citationsByMessage());
+        AiChatMessage prose = new AiChatMessage();
+        prose.setId(23);
+        prose.setAuthorKind("assistant");
+        prose.setContent("No record citations");
+        assertEquals(List.of(), projector.project(3, List.of(prose)).citationsByMessage().get(23));
+        assertEquals(Map.of(), projector.observe(3, List.of(), Map.of()));
+        assertEquals(Map.of(), projector.observe(3, List.of("r1"), Map.of()));
+        assertEquals(Map.of(), projector.suggestions(3, 5, 11, List.of()));
+        org.mockito.Mockito.verifyNoInteractions(scopes);
+    }
+
 }

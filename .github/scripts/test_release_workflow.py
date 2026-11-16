@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shlex
@@ -12,6 +13,7 @@ import yaml
 
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "release.yml"
 PRECONDITIONS_PATH = Path(__file__).parent / "verify-release-preconditions.sh"
+SCAN_EXCEPTIONS_PATH = Path(__file__).parents[1] / "grype-release.yaml"
 DEPLOYMENT_PATH = Path(__file__).parents[2] / "docs" / "DEPLOYMENT.md"
 SEMVER_TAG_PATTERN = (
     r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -563,6 +565,26 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotEqual(publish_group, dry_run_group)
         self.assertIs(False, self.workflow["concurrency"]["cancel-in-progress"])
 
+    def test_sla_writers_share_a_job_lock_across_reconcile_and_release(self) -> None:
+        reconcile = yaml.safe_load(WORKFLOW_PATH.with_name("vulnerability-sla.yml").read_text())
+        self.assertNotIn("concurrency", reconcile)
+        lock = {"group": "vulnerability-sla", "cancel-in-progress": False}
+        self.assertEqual(reconcile["jobs"]["reconcile"]["concurrency"], lock)
+        self.assertNotEqual(self.workflow["concurrency"]["group"], lock["group"])
+        for job in ("metadata", "promote", "release"):
+            with self.subTest(job=job):
+                self.assertEqual(self.workflow["jobs"][job]["concurrency"], lock)
+
+    def test_cancelled_pending_sla_writer_cannot_enable_publication(self) -> None:
+        jobs = self.workflow["jobs"]
+        for dependency in ("metadata", "promote"):
+            self.assertIn(f"needs.{dependency}.result == 'success'", jobs["release"]["if"])
+            self.assertIn(dependency, jobs["release"]["needs"])
+        # promote has always(), so its explicit metadata-success predicate is load-bearing.
+        self.assertIn("always()", jobs["promote"]["if"])
+        self.assertIn("needs.metadata.result == 'success'", jobs["promote"]["if"])
+        self.assertNotIn("always()", jobs["candidate-images"]["if"] if "if" in jobs["candidate-images"] else "")
+
 
     def test_dispatch_requires_version_and_job_output_derives_mode_from_event(self) -> None:
         events = self.workflow_events()
@@ -944,10 +966,114 @@ class ReleaseWorkflowTest(unittest.TestCase):
             "Scan dry-run candidate for high-severity vulnerabilities",
         )
         self.assertEqual("high", scan["with"]["severity-cutoff"])
+        self.assertIs(True, scan["with"]["only-fixed"])
+        published = self.named_step("candidate-images", "Scan exact candidate for high-severity vulnerabilities")
+        self.assertEqual("high", published["with"]["severity-cutoff"])
+        self.assertTrue(published["with"]["fail-build"])
+        self.assertIs(True, published["with"]["only-fixed"])
+        for step in (scan, published):
+            self.assertEqual(".github/grype-release.yaml", step["with"]["config"])
         self.assertTrue(scan["with"]["fail-build"])
         sbom = self.named_step("candidate-images-dry-run", "Generate dry-run SBOM")
         self.assertNotIn("if", sbom)
         self.assertEqual("spdx-json", sbom["with"]["format"])
+
+    def run_prepare_release_set(self, digests: dict[str, str]) -> tuple[subprocess.CompletedProcess[str], Path]:
+        script = self.named_step("release-set-smoke", "Prepare exact-digest Compose release set")["run"]
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(root)], check=False)
+        deploy = root / "deploy"
+        deploy.mkdir()
+        (deploy / "eval.env.example").write_text(
+            (Path(__file__).parents[2] / "deploy" / "eval.env.example").read_text(encoding="utf-8"), encoding="utf-8")
+        for component, digest in digests.items():
+            sbom = root / f"sbom-{component}.spdx.json"
+            sbom.write_text("{}", encoding="utf-8")
+            (root / f"release-{component}.json").write_text(json.dumps({
+                "component": component, "version": "9.9.9-tc.1", "sourceSha": "a" * 40, "runId": "77",
+                "runAttempt": 1, "image": f"ghcr.io/itkla/connex-{component}", "digest": digest,
+                "sbom": {"file": sbom.name, "sha256": subprocess.run(
+                    ["sha256sum", str(sbom)], capture_output=True, text=True, check=True).stdout.split()[0]},
+            }), encoding="utf-8")
+        script = script.replace("/tmp/benchmark-password", str(root / "benchmark-password"))
+        env = dict(os.environ, VERSION="9.9.9-tc.1", GITHUB_SHA="a" * 40, GITHUB_RUN_ID="77",
+                   GITHUB_RUN_ATTEMPT="1", GITHUB_REPOSITORY_OWNER="itkla")
+        result = subprocess.run(["bash", "-e", "-c", script], cwd=deploy, env=env, capture_output=True, text=True)
+        return result, deploy / ".env"
+
+    def inspection_program(self, container: str) -> str:
+        script = self.named_step("release-set-smoke", "Boot and verify exact release set")["run"]
+        start = script.index(f'docker inspect "${container}" | jq -e \'')
+        body = script[start:].split("'", 2)[1]
+        return body
+
+    def inspected(self, user: str, port: str, memory: int, tmpfs: str, network: str) -> dict[str, object]:
+        """docker inspect output as Docker Engine 29 reports these services: no devices is null."""
+        return {
+            "Config": {"User": user, "ExposedPorts": {f"{port}/tcp": {}}},
+            "HostConfig": {
+                "Memory": memory, "MemorySwap": memory, "NanoCpus": 2000000000, "PidsLimit": 128,
+                "ReadonlyRootfs": True, "Privileged": False, "CapDrop": ["ALL"],
+                "SecurityOpt": ["no-new-privileges:true"], "Devices": None, "DeviceRequests": None,
+                "Binds": None, "Mounts": None, "Tmpfs": {"/tmp": tmpfs}, "NetworkMode": f"connex_{network}",
+            },
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {f"connex_{network}": {}}, "Ports": {f"{port}/tcp": None}},
+        }
+
+    def test_release_set_container_inspections_accept_the_deployed_shape(self) -> None:
+        cases = {
+            "OCR_CONTAINER": self.inspected("10001", "8090", 2147483648,
+                                            "size=64m,mode=1777,noexec,nosuid,nodev", "ocr_internal"),
+            "CLAMAV_CONTAINER": self.inspected("10002", "8091", 3221225472,
+                                               "size=512m,mode=1777,noexec,nosuid,nodev", "clamav_internal"),
+        }
+        for container, inspected in cases.items():
+            program = self.inspection_program(container)
+            with self.subTest(container=container):
+                ok = subprocess.run(["jq", "-e", program], input=json.dumps([inspected]),
+                                    capture_output=True, text=True)
+                self.assertEqual(0, ok.returncode, ok.stdout + ok.stderr)
+                for name, mutate in {
+                    "privileged": lambda d: d["HostConfig"].update(Privileged=True),
+                    "device passed through": lambda d: d["HostConfig"].update(Devices=[{"PathOnHost": "/dev/kvm"}]),
+                    "read-only tmpfs": lambda d: d["HostConfig"].update(Tmpfs={"/tmp": d["HostConfig"]["Tmpfs"]["/tmp"] + ",ro"}),
+                    "published port": lambda d: d["NetworkSettings"].update(Ports={"9999/tcp": [{"HostPort": "9999"}]}),
+                }.items():
+                    bad = json.loads(json.dumps(inspected))
+                    mutate(bad)
+                    refused = subprocess.run(["jq", "-e", program], input=json.dumps([bad]),
+                                             capture_output=True, text=True)
+                    self.assertNotEqual(0, refused.returncode, name)
+
+    def test_release_set_environment_carries_every_candidate_digest(self) -> None:
+        digests = {c: "sha256:" + format(i, "x") * 64 for i, c in enumerate(("backend", "frontend", "ocr", "clamav"), 1)}
+        result, env_file = self.run_prepare_release_set(digests)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        values = dict(line.split("=", 1) for line in env_file.read_text(encoding="utf-8").splitlines()
+                      if line.startswith("CONNEX_") and "=" in line)
+        for component, digest in digests.items():
+            self.assertEqual(digest.removeprefix("sha256:"), values[f"CONNEX_{component.upper()}_DIGEST"])
+        self.assertEqual("false", values["CONNEX_PRIVILEGED_MFA_ENFORCED"])
+        self.assertNotIn(values["CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR"], ("", "configuration-default"))
+        shipped = (Path(__file__).parents[2] / "deploy").glob("*.env.example")
+        self.assertFalse([p.name for p in shipped if "CONNEX_PRIVILEGED_MFA_ENFORCED=false" in p.read_text(encoding="utf-8")])
+
+    def test_release_set_environment_refuses_an_unusable_digest(self) -> None:
+        digests = {c: "sha256:" + "b" * 64 for c in ("backend", "frontend", "ocr", "clamav")}
+        digests["frontend"] = "sha256:not-a-digest"
+        result, _ = self.run_prepare_release_set(digests)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("invalid frontend digest", result.stdout + result.stderr)
+
+    def test_release_scan_exceptions_stay_narrow(self) -> None:
+        config = yaml.safe_load(SCAN_EXCEPTIONS_PATH.read_text())
+        self.assertEqual(["ignore"], list(config))
+        self.assertEqual(
+            [{"package": {"name": "ffmpeg", "version": "5.1.4", "type": "binary",
+                          "location": "/usr/local/lib/python3.12/site-packages/opencv_contrib_python.libs/**"}}],
+            config["ignore"],
+        )
 
     def test_publish_job_body_is_unchanged_from_the_prepublication_pipeline(self) -> None:
         publish = self.workflow["jobs"]["candidate-images"]
@@ -1044,7 +1170,15 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ]
 
         self.assertEqual(3, len(checks))
-        self.assertTrue(all("BuildKit version: v0.31.1" in check for check in checks))
+        pattern = "grep -E '^BuildKit version:[[:space:]]+v0\\.31\\.1$'"
+        self.assertTrue(all(pattern in check for check in checks))
+        # buildx aligns node fields with a tabwriter, so a docker-container builder with daemon flags
+        # pads the value: "BuildKit version:      v0.31.1". A single-space literal never matches it.
+        padded = "Name:                  builder0\nBuildKit daemon flags: --allow-insecure-entitlement network.host\nBuildKit version:      v0.31.1\n"
+        regex = re.compile(r"^BuildKit version:[\s]+v0\.31\.1$", re.M)
+        self.assertIsNotNone(regex.search(padded))
+        self.assertIsNone(regex.search(padded.replace("v0.31.1", "v0.31.10")))
+        self.assertNotIn("BuildKit version: v0.31.1", padded)
 
     def test_transaction_and_candidates_are_attempt_scoped(self) -> None:
         upload = self.named_step("release-set-smoke", "Upload committed release transaction")

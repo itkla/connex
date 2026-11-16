@@ -486,9 +486,12 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         Company customer = company("Wexley Cartage");
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertTrue(journal().dispatched().getFirst().messages().stream()
+                .anyMatch(message -> message.content().contains("hand this company to {{M1}}")),
+                "the scripted owner token must have been exposed before the model chooses it");
         AiChatToolCall proposal = proposal(trajectory, "assign_owner");
         JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
         assertEquals(
@@ -574,7 +577,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         });
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals(
                 objectMapper.createArrayNode().add(reviewed.getId()),
@@ -600,7 +603,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         });
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals(
                 objectMapper.createArrayNode().add(reviewed.getId()),
@@ -626,7 +629,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         });
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals("failed", trajectory.status());
         assertEquals("internal_error", trajectory.terminalReason(),
@@ -1119,8 +1122,16 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
                 List.of(new AiChatPageContextDto("company", target.getId()),
                         new AiChatPageContextDto("company", source.getId())));
 
-        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
-        assertFieldRefused(trajectory, "identifier_from_another_record");
+        if (selector.endsWith("fullwidth_token")) {
+            assertEquals("failed", trajectory.status());
+            assertEquals("malformed_output", trajectory.terminalReason());
+            assertEquals(2, journal().dispatched().size());
+            assertFalse(trajectory.toolCalls().stream()
+                    .anyMatch(call -> "update_record_fields".equals(call.getToolName())));
+        } else {
+            assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+            assertFieldRefused(trajectory, "identifier_from_another_record");
+        }
         assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
         assertEquals(0, fieldAuditRows("company", "company.update", target.getId()));
     }

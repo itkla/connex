@@ -297,6 +297,7 @@ class EncryptionGuardrailArchTest {
         "USER_PROVIDER_MICROSOFT_PKCE_VERIFIER");
 
     private static final Set<String> APPROVED_SECRET_INPUT_FIELDS = Set.of(
+        "ooo/klae/connex/backend/dto/AiAgentHoldingsPurgeRequest.java#snapshotToken",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#secretAccessKey",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#sessionToken",
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#apiKey",
@@ -306,6 +307,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/BusinessCardPersonAction.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/ConnectorConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/DealDuplicatePreflightRequest.java#reviewToken",
+        "ooo/klae/connex/backend/dto/PersonDuplicatePreflightRequest.java#reviewToken",
         "ooo/klae/connex/backend/dto/DeliveryProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/EmailChangeRequestDto.java#currentPassword",
         "ooo/klae/connex/backend/dto/LoginDto.java#password",
@@ -324,8 +326,10 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/WorkflowManualConfirmRequest.java#scopeToken");
 
     private static final Set<String> APPROVED_SECRET_RESPONSE_FIELDS = Set.of(
+        "ooo/klae/connex/backend/dto/AiAgentRunCreateRequest.java#maxTokens",
         "ooo/klae/connex/backend/dto/CsrfBootstrapDto.java#token",
         "ooo/klae/connex/backend/dto/CompanyDto.java#duplicateReviewToken",
+        "ooo/klae/connex/backend/dto/DataSubjectRequestDto.java#snapshotToken",
         "ooo/klae/connex/backend/dto/DealDto.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/DeliveryWebhookTokenDto.java#token",
         "ooo/klae/connex/backend/dto/DuplicatePreflightResponse.java#reviewToken",

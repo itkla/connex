@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -12,23 +13,22 @@ import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.InviteDto;
 import ooo.klae.connex.backend.dto.InvitePreviewDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
-import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.InviteDomainNotAllowedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.mail.MailDispatchOutcome;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
- * The two workspace onboarding flows: email-token invites (create / list /
- * revoke / preview / accept) and admin-adds-an-existing-user. Mutations that
- * touch a workspace's roster require the actor to be an admin of it.
+ * Workspace email-token invitations, including the compatibility member-add entry point.
+ * Invitation management requires the workspace's member-management permission.
  */
 @Service
 @RequiredArgsConstructor
@@ -45,25 +45,35 @@ public class InviteService {
     private final SessionSecurityService sessionSecurityService;
     private final NotificationStateVersionService notificationStateVersionService;
     private final FreshMembershipTransaction freshMembershipTransaction;
-    private final RegistrationVerificationService registrationVerificationService;
 
     /**
-     * Invites someone to a workspace by email. An address that already belongs to a Connex user
-     * whose mailbox ownership is settled is added as a pending member and notified in-app (they
-     * accept from Settings); any other address — including one held by an account that still owes
-     * verification while the instance runs it — gets an emailed token invite instead. Redemption
-     * requires that invitation's token and a matching current address; it does not verify global
-     * mailbox ownership. Either way, an earlier pending invite for the same email is superseded.
+     * Creates the same email-bound token invitation for every address. Recipient account
+     * existence and mailbox-verification state are never resolved or returned to the inviter.
+     * A previous token invitation for the address is superseded. This command must start without
+     * an enclosing transaction so it can report mail submission after all invitation locks and
+     * connections have been released.
+     * @throws IllegalStateException when called inside an enclosing transaction
      */
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actor.getId());
-        return freshMembershipTransaction.execute(
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Invitation creation must start outside a transaction");
+        }
+        PreparedInvitation prepared = freshMembershipTransaction.execute(
             workspaceId,
             () -> createInviteInWorkspace(workspaceId, actor, emailRaw, roleRaw));
+        try {
+            MailDispatchOutcome outcome = inviteEmailService.sendInvite(workspaceId, prepared.workspaceName(),
+                    prepared.email(), prepared.inviterName(), prepared.role(), prepared.token());
+            prepared.result().setEmailDelivery(outcome == null ? MailDispatchOutcome.FAILED : outcome);
+        } catch (RuntimeException exception) {
+            prepared.result().setEmailDelivery(MailDispatchOutcome.FAILED);
+        }
+        return prepared.result();
     }
 
-    private InviteResultDto createInviteInWorkspace(
+    private PreparedInvitation createInviteInWorkspace(
             int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actor.getId());
@@ -71,24 +81,8 @@ public class InviteService {
         String role = normalizeRole(roleRaw);
         requireOrgDomainAllowed(workspaceId, email);
 
-        User existing = userMapper.getUserByEmail(email);
-        workspaceService.lockInviteGrantAuthorization(
-            workspaceId,
-            actor.getId(),
-            existing == null ? null : existing.getId(),
-            role);
-        if (existing != null) {
-            User lockedExisting = userMapper.getUserByIdForShare(existing.getId());
-            if (lockedExisting == null || !email.equalsIgnoreCase(lockedExisting.getEmail())) {
-                throw new ConflictException("Invite recipient changed; refresh and retry");
-            }
-            if (!registrationVerificationService.requiresMailboxProof(lockedExisting)) {
-                inviteMapper.revokePendingForEmail(workspaceId, email);
-                MemberDto member = workspaceService.addPendingMember(
-                    workspaceId, actor, lockedExisting, role);
-                return new InviteResultDto(null, member);
-            }
-        }
+        workspaceService.revokePendingInvitationForEmail(workspaceId, actor.getId(), email);
+        workspaceService.lockInviteGrantAuthorization(workspaceId, actor.getId(), null, role);
 
         inviteMapper.revokePendingForEmail(workspaceId, email);
 
@@ -104,12 +98,9 @@ public class InviteService {
         auditService.record("workspace.invite", "workspace", workspaceId, email,
                 "Invited " + email + " as " + role, null);
 
-        inviteEmailService.sendInvite(workspaceId, workspaceNameFor(actor, workspaceId), email,
-                actor.getDisplayName(), role, invite.getToken());
-
         WorkspaceInvite saved = inviteMapper.findByTokenHash(invite.getTokenHash());
         InviteDto dto = new InviteDto();
-        dto.setId(saved.getId());
+        dto.setId(OneTimeTokenDigest.sha256("workspace-invite:" + saved.getId()));
         dto.setEmail(saved.getEmail());
         dto.setRole(saved.getRole());
         dto.setStatus(saved.getStatus());
@@ -117,7 +108,13 @@ public class InviteService {
         dto.setExpiresAt(saved.getExpiresAt());
         dto.setCreatedAt(saved.getCreatedAt());
         dto.setInvitedByLabel(actor.getDisplayName());
-        return new InviteResultDto(dto, null);
+        InviteResultDto result = new InviteResultDto(dto, MailDispatchOutcome.FAILED);
+        return new PreparedInvitation(result, workspaceNameFor(actor, workspaceId), email,
+                actor.getDisplayName(), role, invite.getToken());
+    }
+
+    private record PreparedInvitation(InviteResultDto result, String workspaceName, String email,
+            String inviterName, String role, String token) {
     }
 
     /** Lists the workspace's still-pending invites. */
@@ -127,11 +124,12 @@ public class InviteService {
     }
 
     /** Revokes a pending invite. */
-    public void revokeInvite(int workspaceId, int inviteId, int actorId) {
+    public void revokeInvite(int workspaceId, String inviteId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        if (inviteMapper.markRevoked(inviteId, workspaceId) == 0) {
-            throw new ResourceNotFoundException("Invite not found");
+        if (inviteMapper.markRevokedByReference(inviteId, workspaceId) == 0) {
+            workspaceService.revokePendingInvitation(workspaceId, actorId, inviteId);
+            return;
         }
         auditService.record("workspace.invite.revoke", "workspace", workspaceId, null,
                 "Revoked invite " + inviteId, null);
@@ -288,42 +286,14 @@ public class InviteService {
         return membership(lockedUser.getId(), workspaceId);
     }
 
-    /**
-     * Invites an existing Connex user to the workspace by email; they join after accepting.
-     * Refuses an account that still owes mailbox proof under the instance's verification policy,
-     * which can instead join through an invitation-specific token without gaining global proof.
-     */
-    public MemberDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
+    /** Compatibility entry point using the same non-disclosing invitation contract. */
+    public InviteResultDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
-        sessionSecurityService.requireRecentAuthentication(actorId);
-        return freshMembershipTransaction.execute(
-            workspaceId,
-            () -> addExistingMemberInWorkspace(workspaceId, actorId, emailRaw, roleRaw));
-    }
-
-    private MemberDto addExistingMemberInWorkspace(
-            int workspaceId, int actorId, String emailRaw, String roleRaw) {
-        workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
-        sessionSecurityService.requireRecentAuthentication(actorId);
-        String email = normalizeEmail(emailRaw);
-        String role = normalizeRole(roleRaw);
-        requireOrgDomainAllowed(workspaceId, email);
-
-        User user = userMapper.getUserByEmail(email);
-        if (user == null) {
-            throw new BadRequestException("No Connex account uses that email; send an invite instead");
-        }
-        workspaceService.lockInviteGrantAuthorization(
-            workspaceId, actorId, user.getId(), role);
-        User lockedUser = userMapper.getUserByIdForShare(user.getId());
-        if (lockedUser == null || !email.equalsIgnoreCase(lockedUser.getEmail())) {
-            throw new ConflictException("Invite recipient changed; refresh and retry");
-        }
-        if (registrationVerificationService.requiresMailboxProof(lockedUser)) {
-            throw new BadRequestException("This account's email is unverified; send an invite instead");
-        }
         User actor = userMapper.getUserById(actorId);
-        return workspaceService.addPendingMember(workspaceId, actor, lockedUser, role);
+        if (actor == null) {
+            throw new ResourceNotFoundException("User not found");
+        }
+        return createInvite(workspaceId, actor, emailRaw, roleRaw);
     }
 
     /**
@@ -334,7 +304,7 @@ public class InviteService {
     private int requireOrgDomainAllowed(int workspaceId, String email) {
         int orgId = workspaceService.getOrgId(workspaceId);
         if (!orgAllowedDomainService.isJoinAllowed(orgId, email)) {
-            throw new ForbiddenException("This organization only allows members from approved email domains");
+            throw new InviteDomainNotAllowedException("This organization only allows members from approved email domains");
         }
         return orgId;
     }

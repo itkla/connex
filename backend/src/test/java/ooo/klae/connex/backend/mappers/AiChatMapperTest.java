@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -17,6 +18,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiry;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -29,6 +31,36 @@ class AiChatMapperTest extends AbstractMapperTest {
 
     @Autowired private AiChatMapper chatMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
+
+    @Test
+    void accountErasureLocksTheOrderedUnionOfEveryProvenanceSource() {
+        User erased = newUser();
+        User retained = newUser();
+        Workspace laterWorkspace = newWorkspace();
+        AiChatSession later = session(laterWorkspace, erased, "Later workspace", "private");
+        AiChatSession owned = session(workspace, erased, "Owned", "private");
+        AiChatSession authored = session(workspace, retained, "Shared message", "shared");
+        message(authored, erased, 1, "Contribution");
+        AiChatSession executed = session(workspace, retained, "Shared tool", "shared");
+        AiChatMessage retainedMessage = message(executed, retained, 1, "Retained message");
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_tool_call (workspace_id, message_id, tool_name, status, executed_by_user_id) "
+                + "VALUES (?, ?, 'erasure_fixture', 'executed', ?)",
+            workspace.getId(), retainedMessage.getId(), erased.getId());
+        AiChatSession requested = session(workspace, retained, "Shared turn", "shared");
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_turn (workspace_id, session_id, requested_by_user_id, status) "
+                + "VALUES (?, ?, ?, 'resolved')",
+            workspace.getId(), requested.getId(), erased.getId());
+        message(owned, erased, 1, "Overlapping provenance");
+        AiChatSession unrelated = session(workspace, retained, "Unrelated", "shared");
+        message(unrelated, retained, 1, "Retained contribution");
+
+        assertEquals(List.of(owned.getId(), authored.getId(), executed.getId(), requested.getId(), later.getId()),
+            chatMapper.lockSessionsForUserErasureAnywhere(erased.getId()));
+        assertTrue(chatMapper.lockSessionsForUserErasureAnywhere(newUser().getId()).isEmpty());
+    }
 
     @Test
     void sessionAndMessageColumnsRoundTrip() {
@@ -37,9 +69,9 @@ class AiChatMapperTest extends AbstractMapperTest {
         AiChatMessage message = message(session, owner, 1, "A durable message");
 
         AiChatSession foundSession = chatMapper.getSessionById(
-            workspace.getId(), owner.getId(), session.getId());
+            workspace.getId(), owner.getId(), session.getId(), 1L);
         AiChatMessage foundMessage = chatMapper.getMessageById(
-            workspace.getId(), session.getId(), message.getId());
+            workspace.getId(), session.getId(), message.getId(), 1L);
 
         assertNotEquals(0, session.getId());
         assertNotNull(foundSession);
@@ -60,6 +92,32 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void latestAnswerExcludesFailedUserTurnsAndOtherSessionsAndWorkspaces() {
+        User owner = newUser();
+        AiChatSession first = session(workspace, owner, "First", "private");
+        AiChatSession second = session(workspace, owner, "Second", "private");
+        Workspace foreign = newWorkspace();
+        AiChatSession third = session(foreign, owner, "Foreign", "private");
+        assertNull(chatMapper.getLatestAnswer(workspace.getId(), first.getId(), 1L));
+        jdbcTemplate.update("INSERT INTO ai_chat_message (workspace_id, session_id, seq, author_kind, content, structured_json, organization_privacy_generation) VALUES "
+                        + "(?, ?, 1, 'assistant', 'Old answer', '{}', 1), (?, ?, 2, 'assistant', 'Latest answer', ?, 1), "
+                        + "(?, ?, 3, 'user', 'Failed request', NULL, 1), (?, ?, 9, 'assistant', 'Other session', '{}', 1), "
+                        + "(?, ?, 99, 'assistant', 'Foreign workspace', '{}', 1)",
+                workspace.getId(), first.getId(), workspace.getId(), first.getId(),
+                "{\"suggestions\":[\"Ask Former Member\"],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}",
+                workspace.getId(), first.getId(), workspace.getId(), second.getId(), foreign.getId(), third.getId());
+        sqlSession.clearCache();
+        AiChatMessage latest = chatMapper.getLatestAnswer(workspace.getId(), first.getId(), 1L);
+        assertEquals(2, latest.getSeq());
+        assertEquals("assistant", latest.getAuthorKind());
+        assertEquals("Latest answer", latest.getContent());
+        assertTrue(latest.getStructuredJson().contains("Former Member"));
+        assertEquals("Other session", chatMapper.getLatestAnswer(workspace.getId(), second.getId(), 1L).getContent());
+        assertNull(chatMapper.getLatestAnswer(workspace.getId(), third.getId(), 1L));
+        assertNull(chatMapper.getLatestAnswer(foreign.getId(), first.getId(), 1L));
+    }
+
+    @Test
     void identicalLogicalDataRemainsWorkspaceIsolated() {
         User owner = newUser();
         Workspace other = newWorkspace();
@@ -69,11 +127,11 @@ class AiChatMapperTest extends AbstractMapperTest {
         message(second, owner, 1, "Same content");
 
         assertNotNull(chatMapper.getAccessibleSessionById(
-            workspace.getId(), owner.getId(), first.getId()));
+            workspace.getId(), owner.getId(), first.getId(), 1L));
         assertNull(chatMapper.getAccessibleSessionById(
-            workspace.getId(), owner.getId(), second.getId()));
-        assertEquals(1, chatMapper.countMessages(workspace.getId(), first.getId()));
-        assertEquals(0, chatMapper.countMessages(workspace.getId(), second.getId()));
+            workspace.getId(), owner.getId(), second.getId(), 1L));
+        assertEquals(1, chatMapper.countMessages(workspace.getId(), first.getId(), 1L));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), second.getId(), 1L));
     }
 
     @Test
@@ -95,12 +153,12 @@ class AiChatMapperTest extends AbstractMapperTest {
             "2026-08-02 00:00:00.000000", workspace.getId(), tiedLowerId.getId(), tiedHigherId.getId());
 
         List<AiChatSession> ownerRows = chatMapper.listAccessibleSessions(
-            workspace.getId(), owner.getId(), 100, 0);
+            workspace.getId(), owner.getId(), 100, 0, 1L);
         List<AiChatSession> participantRows = chatMapper.listAccessibleSessions(
-            workspace.getId(), participant.getId(), 100, 0);
+            workspace.getId(), participant.getId(), 100, 0, 1L);
 
         assertEquals(3, ownerRows.size());
-        assertEquals(3, chatMapper.countAccessibleSessions(workspace.getId(), owner.getId()));
+        assertEquals(3, chatMapper.countAccessibleSessions(workspace.getId(), owner.getId(), 1L));
         assertEquals(
             List.of(tiedHigherId.getId(), tiedLowerId.getId(), oldest.getId()),
             participantRows.stream().map(AiChatSession::getId).toList());
@@ -116,16 +174,16 @@ class AiChatMapperTest extends AbstractMapperTest {
                 workspace.getId(), session.getId(), participant.getId(), owner.getId());
 
         assertEquals(0, chatMapper.countAccessibleSessions(
-                workspace.getId(), participant.getId()));
+                workspace.getId(), participant.getId(), 1L));
         assertEquals(1, chatMapper.countInvitedSessions(
-                workspace.getId(), participant.getId()));
+                workspace.getId(), participant.getId(), 1L));
         assertEquals(List.of(owner.getId()), chatMapper.listRealtimeRecipientUserIds(
                 workspace.getId(), session.getId()));
 
         assertEquals(1, chatMapper.joinParticipant(
                 workspace.getId(), session.getId(), participant.getId()));
         assertEquals(1, chatMapper.countAccessibleSessions(
-                workspace.getId(), participant.getId()));
+                workspace.getId(), participant.getId(), 1L));
         assertEquals(List.of(owner.getId(), participant.getId()).stream().sorted().toList(),
                 chatMapper.listRealtimeRecipientUserIds(workspace.getId(), session.getId()));
 
@@ -145,6 +203,7 @@ class AiChatMapperTest extends AbstractMapperTest {
                 workspace.getId(), session.getId());
         AiChatMessage answer = new AiChatMessage();
         answer.setWorkspaceId(workspace.getId());
+        answer.setOrganizationPrivacyGeneration(1L);
         answer.setSessionId(session.getId());
         answer.setSeq(1);
         answer.setAuthorKind("assistant");
@@ -159,7 +218,7 @@ class AiChatMapperTest extends AbstractMapperTest {
                 workspace.getId(), session.getId(), "Overwritten title"));
 
         AiChatSession stored = chatMapper.getSessionById(
-                workspace.getId(), owner.getId(), session.getId());
+                workspace.getId(), owner.getId(), session.getId(), 1L);
         assertNotNull(stored);
         assertEquals("My renewal notes", stored.getTitle());
         assertTrue(stored.isTitleUserSet());
@@ -182,26 +241,26 @@ class AiChatMapperTest extends AbstractMapperTest {
 
         List<Integer> activeMemberIds = List.of(admin.getId(), activeAuthor.getId());
         List<AiChatSession> retained = chatMapper.listRetainedSessions(
-            workspace.getId(), admin.getId(), activeMemberIds, 100, 0);
+            workspace.getId(), admin.getId(), activeMemberIds, 100, 0, 1L);
 
         assertEquals(
             List.of(departed.getId(), erased.getId()),
             retained.stream().map(AiChatSession::getId).sorted().toList());
-        assertEquals(2, chatMapper.countRetainedSessions(workspace.getId(), activeMemberIds));
+        assertEquals(2, chatMapper.countRetainedSessions(workspace.getId(), activeMemberIds, 1L));
         assertNull(chatMapper.getRetainedSessionById(
-            workspace.getId(), admin.getId(), active.getId(), activeMemberIds));
+            workspace.getId(), admin.getId(), active.getId(), activeMemberIds, 1L));
         assertNotNull(chatMapper.getRetainedSessionById(
-            workspace.getId(), admin.getId(), departed.getId(), activeMemberIds));
+            workspace.getId(), admin.getId(), departed.getId(), activeMemberIds, 1L));
         assertNull(chatMapper.getRetainedSessionById(
-            workspace.getId(), admin.getId(), otherWorkspace.getId(), activeMemberIds));
+            workspace.getId(), admin.getId(), otherWorkspace.getId(), activeMemberIds, 1L));
 
         workspaceMapper.addMember(workspace.getId(), departedAuthor.getId(), "member");
         List<Integer> rejoinedMemberIds = List.of(
             admin.getId(), activeAuthor.getId(), departedAuthor.getId());
 
         assertNull(chatMapper.getRetainedSessionById(
-            workspace.getId(), admin.getId(), departed.getId(), rejoinedMemberIds));
-        assertEquals(1, chatMapper.countRetainedSessions(workspace.getId(), rejoinedMemberIds));
+            workspace.getId(), admin.getId(), departed.getId(), rejoinedMemberIds, 1L));
+        assertEquals(1, chatMapper.countRetainedSessions(workspace.getId(), rejoinedMemberIds, 1L));
     }
 
     @Test
@@ -213,11 +272,11 @@ class AiChatMapperTest extends AbstractMapperTest {
         message(session, owner, 3, "third");
 
         List<AiChatMessage> replay = chatMapper.listMessages(
-            workspace.getId(), session.getId(), 100, 0);
+            workspace.getId(), session.getId(), 100, 0, 1L);
 
         assertEquals(List.of(1, 2, 3), replay.stream().map(AiChatMessage::getSeq).toList());
-        assertEquals(3, chatMapper.countMessages(workspace.getId(), session.getId()));
-        assertTrue(chatMapper.listMessages(workspace.getId() + 1, session.getId(), 100, 0).isEmpty());
+        assertEquals(3, chatMapper.countMessages(workspace.getId(), session.getId(), 1L));
+        assertTrue(chatMapper.listMessages(workspace.getId() + 1, session.getId(), 100, 0, 1L).isEmpty());
     }
 
     @Test
@@ -227,6 +286,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         message(session, owner, 1, "before");
         AiChatMessage summary = new AiChatMessage();
         summary.setWorkspaceId(workspace.getId());
+        summary.setOrganizationPrivacyGeneration(1L);
         summary.setSessionId(session.getId());
         summary.setSeq(2);
         summary.setAuthorKind("system");
@@ -239,21 +299,120 @@ class AiChatMapperTest extends AbstractMapperTest {
         message(session, owner, 4, "later participant message");
 
         List<AiChatMessage> replay = chatMapper.listRecentMessages(
-                workspace.getId(), session.getId(), 3, 50);
+                workspace.getId(), session.getId(), 3, 50, 1L);
         List<AiChatMessage> latestAtBoundary = chatMapper.listRecentMessages(
-                workspace.getId(), session.getId(), 3, 1);
+                workspace.getId(), session.getId(), 3, 1, 1L);
 
         assertEquals(List.of(1, 3), replay.stream().map(AiChatMessage::getSeq).toList());
         assertEquals(List.of(3), latestAtBoundary.stream().map(AiChatMessage::getSeq).toList());
     }
 
     @Test
+    void pendingToolCallsFilterExpiredProposalsBeforeLimitWithRealCutoff() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Proposal expiry", "private");
+        AiChatMessage userMessage = message(session, owner, 1, "Review proposals");
+        LocalDateTime reviewCreatedAfter = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());
+        AiChatToolCall freshProposal = null;
+        for (int microseconds : List.of(-1, 0, 1)) {
+            AiChatToolCall proposal = new AiChatToolCall();
+            proposal.setWorkspaceId(workspace.getId());
+            proposal.setOrganizationPrivacyGeneration(1L);
+            proposal.setMessageId(userMessage.getId());
+            proposal.setToolName("assign_owner");
+            proposal.setStatus("proposed");
+            proposal.setArgumentsJson("{}");
+            proposal.setServerProposal(true);
+            chatMapper.insertToolCall(proposal);
+            jdbcTemplate.update(
+                    "UPDATE ai_chat_tool_call SET created_at = ? WHERE workspace_id = ? AND id = ?",
+                    reviewCreatedAfter.plusNanos(microseconds * 1_000L), workspace.getId(), proposal.getId());
+            freshProposal = proposal;
+        }
+        sqlSession.clearCache();
+
+        assertNotNull(freshProposal);
+        assertEquals(List.of(freshProposal.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 1, reviewCreatedAfter, 1L).stream()
+                .map(AiChatToolCall::getId)
+                .toList());
+        assertEquals(3, chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), false, 10, null, 1L).size());
+    }
+
+    @Test
+    void cappedHistorySupplementRetainsUndecidedProposalsWithoutStarvingLivePending() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Capped proposal history", "private");
+        AiChatMessage firstMessage = message(session, owner, 1, "Earlier calls");
+        AiChatMessage laterMessage = message(session, owner, 2, "Later proposals");
+        LocalDateTime cutoff = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());
+        for (int index = 0; index < 101; index++) {
+            proposalAt(firstMessage, cutoff.minusSeconds(1), true, "proposed");
+        }
+        AiChatToolCall expiresNext = proposalAt(laterMessage, cutoff.plusNanos(1_000), true, "proposed");
+        AiChatToolCall live = proposalAt(laterMessage, cutoff.plusHours(1), true, "proposed");
+        proposalAt(laterMessage, cutoff.plusHours(2), false, "proposed");
+        proposalAt(laterMessage, cutoff.plusHours(2), true, "rejected");
+        sqlSession.clearCache();
+
+        List<AiChatToolCall> history = chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), false, 100, null, 1L);
+        assertEquals(100, history.size());
+        AiChatToolCall boundary = history.getLast();
+        assertEquals(List.of(expiresNext.getId(), live.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 100, cutoff, 1L).stream()
+                .map(AiChatToolCall::getId).toList());
+        assertEquals(List.of(live.getId(), expiresNext.getId()), chatMapper.listUndecidedToolCallsAfterHistory(
+                        workspace.getId(), session.getId(), boundary.getMessageId(), boundary.getId(), 2, 1L).stream()
+                .map(AiChatToolCall::getId).toList());
+
+        LocalDateTime expiredCutoff = cutoff.plusNanos(1_000);
+        assertEquals(List.of(live.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 100, expiredCutoff, 1L).stream()
+                .map(AiChatToolCall::getId).toList());
+        List<AiChatToolCall> supplement = chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), session.getId(), boundary.getMessageId(), boundary.getId(), 2, 1L);
+        assertEquals(List.of(live.getId(), expiresNext.getId()), supplement.stream()
+                .map(AiChatToolCall::getId).toList());
+        assertTrue(AiAssistantProposalExpiry.isExpired(
+                AiAssistantProposalExpiry.reviewExpiresAt(supplement.getLast().getCreatedAt()),
+                expiredCutoff.plusHours(72).toInstant(java.time.ZoneOffset.UTC)));
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId() + 1, session.getId(), boundary.getMessageId(), boundary.getId(), 100, 1L).isEmpty());
+        AiChatSession another = session(workspace, owner, "Other session", "private");
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), another.getId(), boundary.getMessageId(), boundary.getId(), 100, 1L).isEmpty());
+        AiChatMessage otherMessage = message(another, owner, 1, "Other boundary");
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), session.getId(), otherMessage.getId(), boundary.getId(), 100, 1L).isEmpty());
+    }
+
+    private AiChatToolCall proposalAt(
+            AiChatMessage message, LocalDateTime createdAt, boolean trusted, String status) {
+        AiChatToolCall call = new AiChatToolCall();
+        call.setWorkspaceId(workspace.getId());
+        call.setOrganizationPrivacyGeneration(1L);
+        call.setMessageId(message.getId());
+        call.setToolName("assign_owner");
+        call.setStatus(status);
+        call.setArgumentsJson("{}");
+        call.setServerProposal(trusted);
+        chatMapper.insertToolCall(call);
+        jdbcTemplate.update("UPDATE ai_chat_tool_call SET created_at = ? WHERE workspace_id = ? AND id = ?",
+                createdAt, workspace.getId(), call.getId());
+        return call;
+    }
+
+    @Test
     void durableTurnToolAndStructuredMessageStateRoundTripsWithinWorkspace() throws Exception {
         User owner = newUser();
+        LocalDateTime reviewCreatedAfter = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());
         AiChatSession session = session(workspace, owner, "Agent loop", "private");
         AiChatMessage userMessage = message(session, owner, 1, "Investigate");
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(owner.getId());
         turn.setStatus("queued");
@@ -264,6 +423,7 @@ class AiChatMapperTest extends AbstractMapperTest {
 
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setOrganizationPrivacyGeneration(1L);
         toolCall.setMessageId(userMessage.getId());
         toolCall.setToolName("get_record");
         toolCall.setStatus("proposed");
@@ -275,22 +435,18 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(
                 toolCall.getId(),
                 chatMapper.getToolCallBySession(
-                        workspace.getId(), session.getId(), toolCall.getId()).getId());
-        assertEquals(
-                List.of(toolCall.getId()),
-                chatMapper.listToolCallsBySession(
-                                workspace.getId(), session.getId(), true, 1).stream()
-                        .map(AiChatToolCall::getId)
-                        .toList());
+                        workspace.getId(), session.getId(), toolCall.getId(), 1L).getId());
+        assertTrue(chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), true, 1, reviewCreatedAfter, 1L).isEmpty());
         assertNull(chatMapper.getToolCallBySession(
-                workspace.getId() + 1, session.getId(), toolCall.getId()));
+                workspace.getId() + 1, session.getId(), toolCall.getId(), 1L));
         assertEquals(1, chatMapper.updateToolCall(
                 workspace.getId(), userMessage.getId(), toolCall.getId(),
                 "executed", "{\"kind\":\"person\"}", owner.getId()));
         AiChatToolCall storedTool = chatMapper.getToolCallById(
-                workspace.getId(), userMessage.getId(), toolCall.getId());
+                workspace.getId(), userMessage.getId(), toolCall.getId(), 1L);
         AiChatToolCall replayedTool = chatMapper.getToolCallByIdempotencyKey(
-                workspace.getId(), toolCall.getIdempotencyKey());
+                workspace.getId(), toolCall.getIdempotencyKey(), 1L);
         AiChatToolCall lockedTool = chatMapper.getToolCallBySessionForUpdate(
                 workspace.getId(), session.getId(), toolCall.getId());
         assertEquals("executed", storedTool.getStatus());
@@ -302,44 +458,72 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(thoughtSignature, replayedTool.getThoughtSignature());
         assertEquals(toolCall.getId(), lockedTool.getId());
         assertEquals(thoughtSignature, lockedTool.getThoughtSignature());
+        assertFalse(storedTool.isServerProposal());
+        assertFalse(replayedTool.isServerProposal());
+        assertFalse(lockedTool.isServerProposal());
         AiChatToolCall secondToolCall = new AiChatToolCall();
         secondToolCall.setWorkspaceId(workspace.getId());
+        secondToolCall.setOrganizationPrivacyGeneration(1L);
         secondToolCall.setMessageId(userMessage.getId());
         secondToolCall.setToolName("get_record");
         secondToolCall.setStatus("executed");
         secondToolCall.setArgumentsJson("{\"handle\":\"r2\"}");
         secondToolCall.setIdempotencyKey("turn-" + turn.getId() + "-step-2");
+        secondToolCall.setServerProposal(true);
         chatMapper.insertToolCall(secondToolCall);
         assertNull(chatMapper.getToolCallById(
-                workspace.getId(), userMessage.getId(), secondToolCall.getId())
+                workspace.getId(), userMessage.getId(), secondToolCall.getId(), 1L)
                 .getThoughtSignature());
+        assertTrue(chatMapper.getToolCallById(
+                workspace.getId(), userMessage.getId(), secondToolCall.getId(), 1L)
+                .isServerProposal());
+        assertTrue(chatMapper.getToolCallBySession(
+                workspace.getId(), session.getId(), secondToolCall.getId(), 1L)
+                .isServerProposal());
+        assertTrue(chatMapper.getToolCallByIdempotencyKey(
+                workspace.getId(), secondToolCall.getIdempotencyKey(), 1L).isServerProposal());
+        assertTrue(chatMapper.getToolCallBySessionForUpdate(
+                workspace.getId(), session.getId(), secondToolCall.getId()).isServerProposal());
+        assertTrue(chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), false, 10, null, 1L).stream()
+                .filter(listed -> listed.getId() == secondToolCall.getId())
+                .findFirst()
+                .orElseThrow()
+                .isServerProposal());
+        assertTrue(chatMapper.listToolCallsByTurn(
+                        workspace.getId(), session.getId(), "turn-" + turn.getId() + "-step-", 10, 1L).stream()
+                .filter(listed -> listed.getId() == secondToolCall.getId())
+                .findFirst()
+                .orElseThrow()
+                .isServerProposal());
         assertEquals(
                 List.of(toolCall.getId()),
                 chatMapper.listToolCallsBySession(
-                                workspace.getId(), session.getId(), false, 1).stream()
+                                workspace.getId(), session.getId(), false, 1, null, 1L).stream()
                         .map(AiChatToolCall::getId)
                         .toList());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId(), session.getId(), true, 1).isEmpty());
+                workspace.getId(), session.getId(), true, 1, reviewCreatedAfter, 1L).isEmpty());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId() + 1, session.getId(), false, 1).isEmpty());
+                workspace.getId() + 1, session.getId(), false, 1, null, 1L).isEmpty());
         assertEquals(
                 turn.getId(),
                 chatMapper.getLatestActiveTurnBySession(
-                        workspace.getId(), session.getId()).getId());
+                        workspace.getId(), session.getId(), 1L).getId());
         assertEquals(
                 List.of(toolCall.getId(), secondToolCall.getId()),
                 chatMapper.listToolCallsByTurn(
                                 workspace.getId(), session.getId(),
-                                "turn-" + turn.getId() + "-step-", 64).stream()
+                                "turn-" + turn.getId() + "-step-", 64, 1L).stream()
                         .map(AiChatToolCall::getId)
                         .toList());
         assertTrue(chatMapper.listToolCallsByTurn(
                 workspace.getId() + 1, session.getId(),
-                "turn-" + turn.getId() + "-step-", 64).isEmpty());
+                "turn-" + turn.getId() + "-step-", 64, 1L).isEmpty());
 
         AiChatMessage answer = new AiChatMessage();
         answer.setWorkspaceId(workspace.getId());
+        answer.setOrganizationPrivacyGeneration(1L);
         answer.setSessionId(session.getId());
         answer.setSeq(2);
         answer.setAuthorKind("assistant");
@@ -350,6 +534,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         chatMapper.insertMessage(answer);
         AiChatMessage unrelatedAnswer = new AiChatMessage();
         unrelatedAnswer.setWorkspaceId(workspace.getId());
+        unrelatedAnswer.setOrganizationPrivacyGeneration(1L);
         unrelatedAnswer.setSessionId(session.getId());
         unrelatedAnswer.setSeq(3);
         unrelatedAnswer.setAuthorKind("assistant");
@@ -358,7 +543,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         chatMapper.insertMessage(unrelatedAnswer);
         List<AiChatMessage> assistantMessages =
                 chatMapper.listAssistantMessagesBySessionAndTurnIds(
-                        workspace.getId(), session.getId(), List.of(turn.getId()), 100);
+                        workspace.getId(), session.getId(), List.of(turn.getId()), 100, 1L);
         assertEquals(List.of(answer.getId()), assistantMessages.stream()
                 .map(AiChatMessage::getId)
                 .toList());
@@ -368,15 +553,15 @@ class AiChatMapperTest extends AbstractMapperTest {
                 JsonMapper.builder().build().readTree(
                         assistantMessages.getFirst().getStructuredJson()));
         assertTrue(chatMapper.listAssistantMessagesBySessionAndTurnIds(
-                workspace.getId() + 1, session.getId(), List.of(turn.getId()), 100).isEmpty());
+                workspace.getId() + 1, session.getId(), List.of(turn.getId()), 100, 1L).isEmpty());
         assertEquals(1, chatMapper.updateTurnTerminal(
                 workspace.getId(), session.getId(), turn.getId(),
                 "failed", "quota_exhausted", "running", null));
 
         AiChatMessage storedAnswer = chatMapper.getMessageById(
-                workspace.getId(), session.getId(), answer.getId());
+                workspace.getId(), session.getId(), answer.getId(), 1L);
         AiChatTurn storedTurn = chatMapper.getTurnById(
-                workspace.getId(), session.getId(), turn.getId());
+                workspace.getId(), session.getId(), turn.getId(), 1L);
         assertEquals(
                 JsonMapper.builder().build().readTree(
                         "{\"turnId\":" + turn.getId() + ",\"citations\":[]}"),
@@ -387,9 +572,9 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals("quota_exhausted", storedTurn.getTerminalReason());
         assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
         assertNull(chatMapper.getLatestActiveTurnBySession(
-                workspace.getId(), session.getId()));
+                workspace.getId(), session.getId(), 1L));
         assertNull(chatMapper.getTurnById(
-                workspace.getId() + 1, session.getId(), turn.getId()));
+                workspace.getId() + 1, session.getId(), turn.getId(), 1L));
     }
 
     @Test
@@ -398,6 +583,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         AiChatSession session = session(workspace, owner, "Turn deadline", "private");
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(owner.getId());
         turn.setStatus("queued");
@@ -429,6 +615,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         AiChatSession session = session(workspace, owner, "Stream reset", "private");
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(owner.getId());
         turn.setStatus("queued");
@@ -446,13 +633,13 @@ class AiChatMapperTest extends AbstractMapperTest {
                 workspace.getId(), session.getId(), turn.getId(), 3));
 
         AiChatTurn reset = chatMapper.getTurnById(
-                workspace.getId(), session.getId(), turn.getId());
+                workspace.getId(), session.getId(), turn.getId(), 1L);
         assertNull(reset.getPartialContent());
         assertEquals(0, reset.getPartialContentUtf16Offset());
         assertEquals(1, chatMapper.appendTurnPartialContent(
                 workspace.getId(), session.getId(), turn.getId(), 0, "Repaired", 8));
         AiChatTurn repaired = chatMapper.getTurnById(
-                workspace.getId(), session.getId(), turn.getId());
+                workspace.getId(), session.getId(), turn.getId(), 1L);
         assertEquals("Repaired", repaired.getPartialContent());
         assertEquals(8, repaired.getPartialContentUtf16Offset());
     }
@@ -469,6 +656,7 @@ class AiChatMapperTest extends AbstractMapperTest {
 
         AiChatMessage mismatched = new AiChatMessage();
         mismatched.setWorkspaceId(workspace.getId());
+        mismatched.setOrganizationPrivacyGeneration(1L);
         mismatched.setSessionId(elsewhere.getId());
         mismatched.setSeq(1);
         mismatched.setAuthorKind("user");
@@ -490,6 +678,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         message(session, owner, 1, "List recent activity for cool accounts");
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(owner.getId());
         turn.setStatus("queued");
@@ -509,7 +698,7 @@ class AiChatMapperTest extends AbstractMapperTest {
             "activity_digest_v1", "1.0.0"));
 
         AiChatTurn stored = chatMapper.getTurnById(
-            workspace.getId(), session.getId(), turn.getId());
+            workspace.getId(), session.getId(), turn.getId(), 1L);
         assertEquals("activity_digest_v1", stored.getSkillKey());
         assertEquals("1.0.0", stored.getSkillVersion());
         assertNotNull(stored.getScopeJson());
@@ -522,6 +711,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         AiChatSession session = session(workspace, owner, "Skill pairing", "private");
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(owner.getId());
         turn.setStatus("queued");
@@ -540,6 +730,7 @@ class AiChatMapperTest extends AbstractMapperTest {
             Workspace targetWorkspace, User owner, String title, String visibility) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(targetWorkspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(owner.getId());
         session.setTitle(title);
         session.setVisibility(visibility);
@@ -552,6 +743,7 @@ class AiChatMapperTest extends AbstractMapperTest {
             AiChatSession session, User author, int sequence, String content) {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(session.getWorkspaceId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(session.getId());
         message.setSeq(sequence);
         message.setAuthorKind("user");

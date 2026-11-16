@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,8 @@ public class RoleService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
+    private final PrivilegedAccountService privilegedAccountService;
+    private final OwnershipOfferWriter ownershipOfferWriter;
 
     public List<WorkspaceRole> listRoles(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
@@ -40,7 +43,26 @@ public class RoleService {
             throw new ForbiddenException(
                 "Requires member or role management permission in this workspace");
         }
-        return workspaceService.builtInRoles();
+        List<WorkspaceRole> roles = workspaceService.builtInRoles(workspaceId);
+        boolean editable = workspaceService.canEditBuiltInExportPolicy(workspaceId, actorId);
+        roles.forEach(role -> role.setExportPermissionEditable(editable));
+        return roles;
+    }
+
+    /** Changes only a built-in role's export access under current role-management authority. */
+    @Transactional
+    public List<WorkspaceRole> updateBuiltInExportPermission(
+            int workspaceId, int actorId, String role, boolean enabled) {
+        if (!Set.of("owner", "admin", "member").contains(role)) {
+            throw new BadRequestException("Unknown built-in role");
+        }
+        workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
+        workspaceService.lockBuiltInExportPolicyAuthorization(workspaceId, actorId, role, enabled);
+        workspaceService.updateBuiltInExportPermission(workspaceId, role, enabled);
+        auditService.record("workspace.role.update", "workspace", workspaceId, null,
+            "Updated built-in role export permission", java.util.Map.of("role", role, "enabled", enabled));
+        return builtInRoles(workspaceId, actorId);
     }
 
     @Transactional
@@ -60,17 +82,40 @@ public class RoleService {
         return roleMapper.findRole(workspaceId, role.getId());
     }
 
-    @Transactional
+    /**
+     * Updates a role without acknowledging confinement; see
+     * {@link #updateRole(int, int, int, String, List, boolean)}.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public WorkspaceRole updateRole(int workspaceId, int actorId, int roleId, String name, List<String> permissions) {
+        return updateRole(workspaceId, actorId, roleId, name, permissions, false);
+    }
+
+    /**
+     * Renames a role and replaces its permissions. Once attestation is enforced, an edit that makes
+     * any assignee newly privileged in the organization without a passkey approved there is refused
+     * unless acknowledged (#1534). The assignees are those the role-mutation locks hold, read in a
+     * few set-based statements however many there are. Runs at {@code READ COMMITTED} so that check
+     * reads current state.
+     *
+     * @param acknowledgeConfinement whether the actor accepts that assignees may be confined
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public WorkspaceRole updateRole(int workspaceId, int actorId, int roleId, String name, List<String> permissions,
+            boolean acknowledgeConfinement) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         List<String> valid = validatePermissions(permissions);
-        workspaceService.lockRoleMutationAuthorization(
+        List<Integer> assignees = workspaceService.lockRoleMutationAuthorization(
             workspaceId, actorId, roleId, toEnumSet(valid));
+        ConfinementBaseline baseline =
+            privilegedAccountService.confinementBaseline(() -> workspaceService.getOrgId(workspaceId), assignees);
         if (roleMapper.updateRoleName(workspaceId, roleId, name.trim()) == 0) {
             throw new ResourceNotFoundException("Role not found");
         }
         applyPermissions(workspaceId, roleId, valid);
+        privilegedAccountService.requireConfinementAcknowledged(baseline, acknowledgeConfinement);
+        ownershipOfferWriter.invalidateScopeLocked(workspaceService.getOrgId(workspaceId), workspaceId);
         auditService.record("workspace.role.update", "workspace", workspaceId, name,
                 "Updated role " + name, null);
         return roleMapper.findRole(workspaceId, roleId);

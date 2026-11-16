@@ -11,6 +11,9 @@ import { buildTimeline, entryAuthorId, entryId } from "./timelineEntries";
 import TimelineDeepLinkFallback from "./TimelineDeepLinkFallback";
 import TimelineRow from "./TimelineRow";
 import type { Contact, ContactLifecycleHistoryEntry, Deal, NotePageCursor, PersonCampaignTouch, RecordComment, UserReference } from "@/app/lib/types";
+import { useDetailSections } from "@/app/hooks/useDetailSections";
+import { useDetailTimelineUsers } from "@/app/hooks/useDetailTimelineUsers";
+import DetailSectionState from "@/app/components/records/DetailSectionState";
 import type { TimelineProps } from "./Timeline";
 
 const EMPTY_USERS: UserReference[] = [];
@@ -24,13 +27,35 @@ const EMPTY_CAMPAIGN_TOUCHES: PersonCampaignTouch[] = [];
 export default function TimelineContent(props: TimelineProps & { originWorkspaceId: number | null }) {
     const { activeWorkspaceId, switching } = useWorkspace();
     if (switching || activeWorkspaceId !== props.originWorkspaceId) return null;
-    return <ScopedTimelineContent {...props} />;
+    return props.detailKind ? <DetailTimelineContent {...props} /> : <ScopedTimelineContent {...props} />;
+}
+
+function DetailTimelineContent(props: TimelineProps & { originWorkspaceId: number | null }) {
+    const sections = useDetailSections();
+    const t = useTranslations(props.detailKind === "deal" ? "DealsPage" : props.detailKind === "company" ? "CompaniesDetail" : "ContactsPage");
+    const result = sections?.results;
+    const users = useDetailTimelineUsers(props.detailKind, props.users ?? EMPTY_USERS, props.originWorkspaceId);
+    const activities = props.detailKind === "deal" && result?.dealActivities?.kind === "loaded" ? result.dealActivities.data : props.activities;
+    const tasks = props.detailKind === "deal" && result?.dealTasks?.kind === "loaded" ? result.dealTasks.data : props.tasks;
+    const notes = props.detailKind === "deal" && result?.dealNotes?.kind === "loaded" ? result.dealNotes.data : props.notes;
+    const lifecycleHistory = props.detailKind === "contact" && result?.contactHistory?.kind === "loaded" ? result.contactHistory.data : props.lifecycleHistory;
+    const persons = props.detailKind === "company" ? (result?.companyPeople?.kind === "loaded" ? result.companyPeople.data : []) : props.persons;
+    const deals = props.detailKind === "company" ? (result?.companyDeals?.kind === "loaded" ? result.companyDeals.data : []) : props.deals;
+    const content = <ScopedTimelineContent {...props} users={users} activities={activities} tasks={tasks} notes={notes} lifecycleHistory={lifecycleHistory} persons={persons} deals={deals}
+        personsUnavailable={props.detailKind === "company" && result?.companyPeople?.kind === "failed"}
+        dealsUnavailable={props.detailKind === "company" && result?.companyDeals?.kind === "failed"}
+    />;
+    if (props.detailKind === "company") return content;
+    return <DetailSectionState title={t("timeline")} sectionKeys={props.detailKind === "deal" ? ["dealActivities", "dealNotes", "dealTasks"] : ["contactHistory"]}>
+        {content}
+    </DetailSectionState>;
 }
 
 function ScopedTimelineContent({
     tasks, activities, notes, users = EMPTY_USERS, persons = EMPTY_PERSONS, deals = EMPTY_DEALS, lifecycleHistory = EMPTY_LIFECYCLE_HISTORY,
+    personsUnavailable, dealsUnavailable,
     comments = EMPTY_COMMENTS, campaignTouches = EMPTY_CAMPAIGN_TOUCHES, currentUserId, companyId, limit, noteTarget, originWorkspaceId,
-}: TimelineProps & { originWorkspaceId: number | null }) {
+}: TimelineProps & { originWorkspaceId: number | null; personsUnavailable?: boolean; dealsUnavailable?: boolean }) {
     const t = useTranslations("MeTimeline");
     const loadPage = useCallback((page: number, init: RequestInit, cursor?: NotePageCursor) => {
         if (!noteTarget) return Promise.resolve([]);
@@ -72,6 +97,8 @@ function ScopedTimelineContent({
                                 key={`${entry.kind}-${entryId(entry)}`}
                                 entry={entry}
                                 author={author}
+                                personsUnavailable={personsUnavailable}
+                                dealsUnavailable={dealsUnavailable}
                                 persons={persons}
                                 deals={deals}
                                 currentUserId={currentUserId}

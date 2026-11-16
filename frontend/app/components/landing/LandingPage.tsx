@@ -67,21 +67,21 @@ export function LandingPage({ t, preLaunch, ctaHref, ctaLabel }: LandingPageProp
                 <section id="features" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="features-title">
                     <h2 id="features-title" className={`${styles.heading} max-w-4xl`}>{t("featuresHeading")}</h2>
                     <div className="mt-12 grid items-start gap-10 lg:mt-16 lg:grid-cols-[0.8fr_1.2fr] lg:gap-16">
-                        <div><h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("askName")}</h3><p className={featureHeading}>{t("askHeading")}</p><p className={description}>{t("askBody")}</p><p className="mt-5 text-sm leading-relaxed text-muted-foreground">{t("askAvailability")}</p></div>
+                        <div><h3 className="text-xl font-bold text-brand-text dark:text-brand-text">{t("askName")}</h3><p className={featureHeading}>{t("askHeading")}</p><p className={description}>{t("askBody")}</p><p className="mt-5 text-sm leading-relaxed text-muted-foreground">{t("askAvailability")}</p></div>
                         <AskConnexPreview t={t} />
                     </div>
                     <div className="mt-16 sm:mt-20">
-                        <h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("mapName")}</h3>
+                        <h3 className="text-xl font-bold text-brand-text dark:text-brand-text">{t("mapName")}</h3>
                         <p className={featureHeading}>{t("mapHeading")}</p><p className={description}>{t("mapBody")}</p>
                         <MapPreview t={t} />
                     </div>
                     <div className="mt-16 sm:mt-20">
-                        <h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("workflowName")}</h3><p className={featureHeading}>{t("workflowHeading")}</p><p className={description}>{t("workflowBody")}</p>
+                        <h3 className="text-xl font-bold text-brand-text dark:text-brand-text">{t("workflowName")}</h3><p className={featureHeading}>{t("workflowHeading")}</p><p className={description}>{t("workflowBody")}</p>
                         <WorkflowPreview t={t} />
                     </div>
                     <div id="warmth" className="mt-16 grid items-center gap-10 scroll-mt-20 sm:mt-20 lg:grid-cols-[0.8fr_1.2fr] lg:gap-16" aria-labelledby="warmth-title">
                         <div>
-                            <h3 id="warmth-title" className="text-xl font-bold text-brand-dark dark:text-brand">{t("warmth.name")}</h3>
+                            <h3 id="warmth-title" className="text-xl font-bold text-brand-text dark:text-brand-text">{t("warmth.name")}</h3>
                             <p className={featureHeading}>{t("warmth.heading")}</p>
                             <p className={description}>{t("warmth.body")}</p>
                             <p className="mt-5 text-base leading-relaxed text-muted-foreground">{t("warmth.evidence")}</p>
@@ -92,7 +92,7 @@ export function LandingPage({ t, preLaunch, ctaHref, ctaLabel }: LandingPageProp
                 </section>
 
                 <section id="deploy" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="attention-title">
-                    <h2 id="attention-title" className={`${styles.heading} max-w-4xl`}>{t.rich("attentionHeading", { em: (chunks) => <em className="font-semibold not-italic text-brand-dark dark:text-brand">{chunks}</em> })}</h2>
+                    <h2 id="attention-title" className={`${styles.heading} max-w-4xl`}>{t.rich("attentionHeading", { em: (chunks) => <em className="font-semibold not-italic text-brand-text dark:text-brand-text">{chunks}</em> })}</h2>
                     <p className={description}>{t("attentionBody")}</p>
                     <GuidedExample />
                 </section>
@@ -107,7 +107,7 @@ export function LandingPage({ t, preLaunch, ctaHref, ctaLabel }: LandingPageProp
                 <section id="workflow" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="start-title">
                     <h2 id="start-title" className={`${styles.heading} max-w-3xl`}>{t("startHeading")}</h2>
                     <ol className="mt-10 grid gap-8 sm:grid-cols-3 sm:gap-10">
-                        {(["Capture", "Understand", "Act"] as const).map((step, index) => <li key={step}><span className="text-3xl font-semibold text-brand-dark tabular-nums dark:text-brand">{index + 1}</span><h3 className="mt-5 text-xl font-semibold">{t(`step${step}Title`)}</h3><p className="mt-3 text-base leading-relaxed text-muted-foreground">{t(`step${step}Body`)}</p></li>)}
+                        {(["Capture", "Understand", "Act"] as const).map((step, index) => <li key={step}><span className="text-3xl font-semibold text-brand-text tabular-nums dark:text-brand-text">{index + 1}</span><h3 className="mt-5 text-xl font-semibold">{t(`step${step}Title`)}</h3><p className="mt-3 text-base leading-relaxed text-muted-foreground">{t(`step${step}Body`)}</p></li>)}
                     </ol>
                     <p className="mt-8 max-w-[70ch] text-base leading-relaxed text-muted-foreground">{t("startNote")}</p>
                 </section>

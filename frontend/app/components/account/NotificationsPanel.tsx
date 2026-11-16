@@ -17,6 +17,7 @@ const IN_APP = "in_app";
 const EMAIL = "email";
 
 const TYPES = [
+    { type: "task.assigned", icon: CheckCircleIcon, titleKey: "taskAssignedTitle", descriptionKey: "taskAssignedDescription" },
     { type: "task.due", icon: CheckCircleIcon, titleKey: "taskTitle", descriptionKey: "taskDescription" },
     { type: "deal.close", icon: BriefcaseIcon, titleKey: "dealTitle", descriptionKey: "dealDescription" },
     {

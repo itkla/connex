@@ -56,7 +56,7 @@ function MergeTokenView({ node }: NodeViewProps) {
                 contentEditable={false}
                 data-merge-token=""
                 data-token={token}
-                className="mx-px inline-flex items-center rounded-md bg-brand-light/60 px-1.5 py-0.5 align-baseline text-[0.85em] font-medium text-brand-dark ring-1 ring-brand/20"
+                className="mx-px inline-flex items-center rounded-md bg-brand-light/60 px-1.5 py-0.5 align-baseline text-[0.85em] font-medium text-brand-text ring-1 ring-brand/20"
             >
                 {label}
             </span>

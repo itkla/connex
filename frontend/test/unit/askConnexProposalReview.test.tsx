@@ -22,6 +22,8 @@ import {
     toggleAskConnexProposalExclusion,
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
+import { askConnexMissionProposalGroup } from '@/app/lib/askConnexMissions';
+import { missionPartialDecision, missionProposalOutput } from '@/test/unit/helpers/askConnexMissions';
 import type { AiAssistantToolCallChangeState } from "@/app/lib/types";
 import enCommon from "@/messages/en/common.json";
 import jaCommon from "@/messages/ja/common.json";
@@ -77,6 +79,42 @@ function renderCard(
 }
 
 describe("assistant proposal review", () => {
+    it('adapts exact mission membership without requiring three cards or one originating answer', () => {
+        const output = missionProposalOutput();
+        output.proposalSet.items[1].card.turnId = 900;
+        const group = askConnexMissionProposalGroup(output, new Set([31]), new Map(), null, Date.parse('2026-10-19T12:00:00Z'));
+        expect(group.cards).toHaveLength(2);
+        expect(group.selected).toBe(1);
+        expect(group.cards.map((item) => item.status)).toEqual(['proposed', 'proposed']);
+        expect(group.cards.every((item) => item.reviewExpiresAt === output.proposalSet.reviewExpiresAt)).toBe(true);
+    });
+
+    it.each(['refused', 'indeterminate'] as const)('keeps a committed outcome while disarming a %s sibling until canonical reload', (outcome) => {
+        const output = missionProposalOutput();
+        output.proposalSet.items[0].card.status = 'executed';
+        output.proposalSet.items[0].card.reviewState = 'applied';
+        const now = Date.parse('2026-10-19T12:00:00Z');
+        const group = askConnexMissionProposalGroup(output, new Set(), new Map(), missionPartialDecision(outcome), now);
+        expect(group.applied).toBe(1);
+        expect(group.failed).toBe(1);
+        expect(group.selected).toBe(0);
+        expect(askConnexToolCardAffordances(group.cards[1], now)).not.toContain('approve');
+        if (outcome === 'indeterminate') expect(askConnexToolCardAffordances(group.cards[1], now)).toEqual([]);
+        const reloaded = askConnexMissionProposalGroup(output, new Set(), new Map(), null, now);
+        expect(reloaded.selected).toBe(1);
+    });
+
+    it('uses the shared deadline for apply and discard and preserves withdrawn history', () => {
+        const output = missionProposalOutput();
+        output.proposalSet.items[0].card.status = 'withdrawn';
+        output.proposalSet.items[0].card.reviewState = 'unavailable';
+        const now = Date.parse('2026-10-22T09:00:00Z');
+        const group = askConnexMissionProposalGroup(output, new Set(), new Map(), null, now);
+        expect(group.selected).toBe(0);
+        expect(askConnexToolCardAffordances(group.cards[1], now)).toEqual([]);
+        expect(group.cards[0].status).toBe('withdrawn');
+    });
+
     it.each([
         { locale: "en", messages: enCommon, reports: enReports },
         { locale: "ja", messages: jaCommon, reports: jaReports },
@@ -109,7 +147,7 @@ describe("assistant proposal review", () => {
             changes: [report, template],
         });
         const [group] = askConnexProposalGroups(
-            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(), NOW,
         );
         if (group === undefined) throw new Error("Missing proposal group");
         const review = render(
@@ -196,7 +234,7 @@ describe("assistant proposal review", () => {
             changes,
         });
         const [group] = askConnexProposalGroups(
-            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(), NOW,
         );
         const review = render(
             <AskConnexProposalReview
@@ -222,7 +260,7 @@ describe("assistant proposal review", () => {
         expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
         expect(askConnexProposalAppliable(card({
             ...proposal, changes: [name, template, { ...defaults, state: "withheld", proposedValue: null }],
-        }))).toBe(false);
+        }), NOW)).toBe(false);
     });
 
     it.each([
@@ -237,7 +275,7 @@ describe("assistant proposal review", () => {
             changes: [industry, address, website],
         });
         const [group] = askConnexProposalGroups(
-            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(), NOW,
         );
         const review = render(
             <AskConnexProposalReview
@@ -259,7 +297,7 @@ describe("assistant proposal review", () => {
             }
         }
         expect(askConnexToolCardAffordances(proposal, NOW)).toEqual(["reject"]);
-        expect(askConnexProposalAppliable(proposal)).toBe(false);
+        expect(askConnexProposalAppliable(proposal, NOW)).toBe(false);
         expect(group.selected).toBe(0);
         expect(group.applicable).toBe(0);
         expect(review).toMatch(/<button[^>]*disabled=""[^>]*>Apply 0 changes<\/button>/);
@@ -271,7 +309,7 @@ describe("assistant proposal review", () => {
         expect(legacy).not.toHaveProperty("changes");
         expect(askConnexToolCardAffordances(legacy, NOW)).toContain("approve");
         const [group] = askConnexProposalGroups(
-            [legacy, card({ id: 32 }), card({ id: 33 })], new Set([legacy.id, 32, 33]), new Set(),
+            [legacy, card({ id: 32 }), card({ id: 33 })], new Set([legacy.id, 32, 33]), new Set(), NOW,
         );
         const review = render(
             <AskConnexProposalReview
@@ -297,7 +335,7 @@ describe("assistant proposal review", () => {
         delete legacy.changes;
         expect(renderCard(legacy)).not.toContain("space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border");
         expect(askConnexToolCardAffordances(legacy, NOW)).not.toContain("approve");
-        expect(askConnexProposalAppliable(legacy)).toBe(false);
+        expect(askConnexProposalAppliable(legacy, NOW)).toBe(false);
     });
 
     it("uses modern rows when the legacy projection disarms older clients", () => {
@@ -311,7 +349,7 @@ describe("assistant proposal review", () => {
         expect(askConnexChangeApplicable(proposal.change)).toBe(false);
         expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
         const [group] = askConnexProposalGroups(
-            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(), NOW,
         );
         expect(group.selected).toBe(1);
         const review = render(
@@ -330,14 +368,14 @@ describe("assistant proposal review", () => {
             expect(markup).toContain("Osaka");
             expect(markup).not.toContain(escaped(cardLabels.changeState.unresolved));
         }
-        expect(askConnexProposalAppliable(card({ ...proposal, changes: [] }))).toBe(false);
+        expect(askConnexProposalAppliable(card({ ...proposal, changes: [] }), NOW)).toBe(false);
         expect(askConnexProposalAppliable(card({
             ...proposal, changes: [{ ...industry, state: "unchanged" }, address],
-        }))).toBe(true);
+        }), NOW)).toBe(true);
         expect(askConnexProposalAppliable(card({
             ...proposal,
             changes: [{ ...industry, state: "unchanged" }, { ...address, state: "unchanged" }],
-        }))).toBe(false);
+        }), NOW)).toBe(false);
     });
 
     it("refreshes later rows even when the legacy projection and timestamp stay the same", () => {
@@ -350,7 +388,7 @@ describe("assistant proposal review", () => {
             toolCalls: mergeAskConnexToolCalls([proposal], [incoming]),
         });
         expect(merged.changes).toEqual(incoming.changes);
-        expect(askConnexProposalAppliable(merged)).toBe(false);
+        expect(askConnexProposalAppliable(merged, NOW)).toBe(false);
     });
 
     it("renders every field in the existing row markup and withholds the whole proposal", () => {
@@ -371,7 +409,7 @@ describe("assistant proposal review", () => {
         expect(blockedMarkup).toContain("Withheld");
         expect(blockedMarkup).toContain(escaped(cardLabels.changeState.withheld));
         expect(askConnexToolCardAffordances(blocked, NOW)).not.toContain("approve");
-        expect(askConnexProposalAppliable(blocked)).toBe(false);
+        expect(askConnexProposalAppliable(blocked, NOW)).toBe(false);
     });
 
     it("renders all fields in the full review while excluding withheld proposals from Apply", () => {
@@ -386,7 +424,7 @@ describe("assistant proposal review", () => {
             changes: [industry, withheld],
         });
         const [group] = askConnexProposalGroups(
-            [proposal, blocked, card({ id: 53, change: change() })], new Set([51, 52, 53]), new Set(),
+            [proposal, blocked, card({ id: 53, change: change() })], new Set([51, 52, 53]), new Set(), NOW,
         );
         const markup = render(
             <AskConnexProposalReview
@@ -505,7 +543,7 @@ describe("assistant proposal review", () => {
         expect(askConnexToolCardAffordances(existing, NOW)).toContain("approve");
         const drafts = [existing, { ...draft, id: 32 }, { ...draft, id: 33 }];
         const [group] = askConnexProposalGroups(
-            drafts, new Set(drafts.map((entry) => entry.id)), new Set(),
+            drafts, new Set(drafts.map((entry) => entry.id)), new Set(), NOW,
         );
         const grouped = render(<AskConnexProposalReview
             group={group}
@@ -613,6 +651,7 @@ describe("assistant proposal review", () => {
         expect(running).toContain(new Intl.DateTimeFormat("en", {
             dateStyle: "medium",
             timeStyle: "short",
+            timeZone: "UTC",
         }).format(Date.UTC(2026, 7, 13, 9, 30)));
         expect(running).not.toContain("2026-08-13T09:30");
         expect(running).toContain("48 hours after it&#x27;s applied");
@@ -678,7 +717,7 @@ describe("assistant proposal review", () => {
         const moved = card({ change: change({ state: "recordChanged" }) });
         const markup = renderCard(moved);
 
-        expect(askConnexProposalAppliable(moved)).toBe(false);
+        expect(askConnexProposalAppliable(moved, NOW)).toBe(false);
         expect(askConnexToolCardAffordances(moved, NOW)).toEqual(["reject"]);
         expect(markup).not.toContain("Apply the proposed change to Acme renewal");
         expect(markup).toContain("Discard the proposed change to Acme renewal");
@@ -689,9 +728,9 @@ describe("assistant proposal review", () => {
         const refused = card({ change: change(), failure: "proposalChanged" });
         const retryable = card({ change: change(), failure: "actionFailed" });
 
-        expect(askConnexProposalAppliable(refused)).toBe(false);
+        expect(askConnexProposalAppliable(refused, NOW)).toBe(false);
         expect(askConnexToolCardAffordances(refused, NOW)).toEqual(["reject"]);
-        expect(askConnexProposalAppliable(retryable)).toBe(true);
+        expect(askConnexProposalAppliable(retryable, NOW)).toBe(true);
         expect(askConnexToolCardAffordances(retryable, NOW)).toEqual(["reject", "approve"]);
     });
 
@@ -882,7 +921,7 @@ describe("grouped proposal review", () => {
 
     it("groups an answer's proposals and counts what can actually be applied", () => {
         const [group] = askConnexProposalGroups(
-            [first, second, blocked], actionable, new Set(),
+            [first, second, blocked], actionable, new Set(), NOW,
         );
 
         expect(group.cards.map((entry) => entry.id)).toEqual([51, 52, 53]);
@@ -893,16 +932,16 @@ describe("grouped proposal review", () => {
     });
 
     it("leaves a lone proposal, a pair, a decided one, and another member's on their own cards", () => {
-        expect(askConnexProposalGroups([first], actionable, new Set())).toEqual([]);
-        expect(askConnexProposalGroups([first, second], actionable, new Set())).toEqual([]);
+        expect(askConnexProposalGroups([first], actionable, new Set(), NOW)).toEqual([]);
+        expect(askConnexProposalGroups([first, second], actionable, new Set(), NOW)).toEqual([]);
         expect(askConnexProposalGroups(
-            [first, second, { ...blocked, status: "executed" }], actionable, new Set(),
+            [first, second, { ...blocked, status: "executed" }], actionable, new Set(), NOW,
         )).toEqual([]);
         expect(askConnexProposalGroups(
-            [first, second, blocked], new Set([51, 52]), new Set(),
+            [first, second, blocked], new Set([51, 52]), new Set(), NOW,
         )).toEqual([]);
         expect(askConnexProposalGroups(
-            [first, second, { ...blocked, turnId: 10 }], actionable, new Set(),
+            [first, second, { ...blocked, turnId: 10 }], actionable, new Set(), NOW,
         )).toEqual([]);
     });
 
@@ -917,7 +956,7 @@ describe("grouped proposal review", () => {
                 { ...card({ id: 56 }), status: "rejected" },
             ],
             new Set([51, 52, 53, 54, 55, 56]),
-            new Set(),
+            new Set(), NOW,
         );
 
         expect(group.cards.map((entry) => entry.id)).toEqual([51, 52, 53]);
@@ -938,7 +977,7 @@ describe("grouped proposal review", () => {
                 { ...card({ id: 55 }), status: "executed" },
             ],
             new Set([51, 52, 53, 54, 55]),
-            new Set(),
+            new Set(), NOW,
         );
         const markup = render(
             <AskConnexProposalReview
@@ -962,7 +1001,7 @@ describe("grouped proposal review", () => {
 
     it("counts only what is both kept and applicable", () => {
         const excluded = toggleAskConnexProposalExclusion(new Set<number>(), 52);
-        const [group] = askConnexProposalGroups([first, second, blocked], actionable, excluded);
+        const [group] = askConnexProposalGroups([first, second, blocked], actionable, excluded, NOW);
 
         expect([...group.included]).toEqual([51, 53]);
         expect(group.applicable).toBe(2);
@@ -973,7 +1012,7 @@ describe("grouped proposal review", () => {
     it("leaves a proposal whose record moved out of the batch the button commits to", () => {
         const movedChange = change({ field: "stage", state: "recordChanged" });
         const moved = { ...second, change: movedChange, changes: [movedChange] };
-        const [group] = askConnexProposalGroups([first, moved, blocked], actionable, new Set());
+        const [group] = askConnexProposalGroups([first, moved, blocked], actionable, new Set(), NOW);
         const markup = render(
             <AskConnexProposalReview
                 group={group}
@@ -1007,7 +1046,7 @@ describe("grouped proposal review", () => {
             }),
         });
         const [group] = askConnexProposalGroups(
-            [first, second, removal], new Set([51, 52, 54]), new Set(),
+            [first, second, removal], new Set([51, 52, 54]), new Set(), NOW,
         );
         const markup = render(
             <AskConnexProposalReview
@@ -1030,7 +1069,7 @@ describe("grouped proposal review", () => {
 
     it("shows every record, value, and reason in the full review", () => {
         const [group] = askConnexProposalGroups(
-            [first, second, blocked], actionable, new Set([52]),
+            [first, second, blocked], actionable, new Set([52]), NOW,
         );
         const markup = render(
             <AskConnexProposalReview
@@ -1067,7 +1106,7 @@ describe("grouped proposal review", () => {
                 { ...second, change: unchanged, changes: [unchanged] },
             ],
             actionable,
-            new Set(),
+            new Set(), NOW,
         );
         const markup = render(
             <AskConnexProposalReview
@@ -1089,7 +1128,7 @@ describe("grouped proposal review", () => {
 
     it("announces the batch in the drawer and hands the review to the full workspace", () => {
         const [group] = askConnexProposalGroups(
-            [first, second, blocked], actionable, new Set(),
+            [first, second, blocked], actionable, new Set(), NOW,
         );
         const markup = render(
             <AskConnexProposalReviewSummary
@@ -1104,5 +1143,70 @@ describe("grouped proposal review", () => {
         expect(markup).toContain("Open review in full view");
         expect(markup).not.toContain("Include the change to Acme renewal");
         expect(markup).not.toContain("Apply 2 changes");
+    });
+});
+
+describe("legacy proposal expiry", () => {
+    it("uses a strict deadline and refuses missing or invalid expiry fields", () => {
+        const deadline = new Date(NOW).toISOString();
+        const proposal = card({ change: change(), reviewExpiresAt: deadline });
+        expect(askConnexToolCardAffordances(proposal, NOW - 1)).toEqual(['reject', 'approve']);
+        expect(askConnexToolCardAffordances(proposal, NOW)).toEqual([]);
+        expect(askConnexToolCardAffordances(proposal, NOW + 1)).toEqual([]);
+        for (const reviewExpiresAt of [null, '', 'invalid']) {
+            expect(askConnexToolCardAffordances({ ...proposal, reviewExpiresAt }, NOW - 1)).toEqual([]);
+        }
+        expect(askConnexToolCardAffordances({ ...proposal, reviewState: 'unavailable' }, NOW - 1))
+            .toEqual([]);
+        expect(askConnexToolCardAffordances({ ...proposal, tier: 'auto' }, NOW - 1)).toEqual([]);
+    });
+
+    it("retains discard after domain permission loss only while the review window is open", () => {
+        const proposal = card({ change: change({ state: 'permissionLost' }) });
+        expect(askConnexToolCardAffordances(proposal, NOW)).toEqual(['reject']);
+        expect(askConnexToolCardAffordances({ ...proposal, reviewState: 'expired' }, NOW)).toEqual([]);
+    });
+
+    it("preserves terminal outcomes and independent undo after the review deadline", () => {
+        for (const status of ['executed', 'rejected', 'failed', 'undone'] as const) {
+            const markup = renderCard(card({ status, reviewExpiresAt: new Date(NOW - 1).toISOString() }));
+            expect(markup).not.toContain('Proposal expired');
+        }
+        const executed = card({
+            tier: 'auto', status: 'executed', reviewState: 'applied',
+            reviewExpiresAt: new Date(NOW - 1).toISOString(),
+            undoAvailable: true, undoExpiresAt: new Date(NOW + 600_000).toISOString(),
+        });
+        expect(askConnexToolCardAffordances(executed, NOW)).toEqual(['undo']);
+    });
+
+    it("settles an expired refusal while leaving the durable proposal state unchanged", () => {
+        const proposal = card({ change: change(), pendingAction: 'approve' });
+        const failed = reduceAskConnexToolCards([proposal], {
+            type: 'actionFailed', toolCallId: proposal.id, action: 'approve', failure: 'proposalExpired',
+        });
+        const refused = failed[0];
+        if (!refused) throw new Error('Missing refused card');
+        expect(refused.pendingAction).toBeNull();
+        expect(askConnexToolCardAffordances(refused, NOW)).toEqual([]);
+        const settled = reduceAskConnexToolCards(failed, {
+            type: 'actionSettled', toolCall: { ...proposal, reviewState: 'expired' },
+        });
+        expect(settled[0]).toMatchObject({ status: 'proposed', reviewState: 'expired', pendingAction: null });
+    });
+
+    it("reloadFindsFreshLegacyProposalWithoutFrame", () => {
+        const expired = Array.from({ length: 101 }, (_, index) => card({
+            id: index + 1, reviewState: 'expired', reviewExpiresAt: new Date(NOW - 1).toISOString(),
+        }));
+        const fresh = card({ id: expired.length + 1, change: change() });
+        const reloaded = reduceAskConnexToolCards([], {
+            type: 'replace', toolCalls: mergeAskConnexToolCalls(expired.slice(0, 100), [fresh]),
+        });
+        const freshCard = reloaded.find((candidate) => candidate.id === fresh.id);
+        if (!freshCard) throw new Error('Pending read did not recover the fresh proposal');
+        expect(askConnexToolCardAffordances(freshCard, NOW)).toEqual(['reject', 'approve']);
+        expect(reloaded.filter((candidate) => candidate.reviewState === 'expired')
+            .every((candidate) => askConnexToolCardAffordances(candidate, NOW).length === 0)).toBe(true);
     });
 });

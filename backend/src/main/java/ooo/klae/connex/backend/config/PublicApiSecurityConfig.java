@@ -37,11 +37,13 @@ import ooo.klae.connex.backend.publicapi.ApiRateLimiter;
 import ooo.klae.connex.backend.publicapi.PublicApiErrorAdvice;
 import ooo.klae.connex.backend.publicapi.PublicApiCorsProcessor;
 import ooo.klae.connex.backend.publicapi.PublicApiPaths;
+import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import tools.jackson.databind.ObjectMapper;
 
 /** Isolated stateless Spring Security chain for the versioned public API. */
@@ -93,10 +95,12 @@ public class PublicApiSecurityConfig {
             ObjectMapper objectMapper,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
+            AuditService auditService,
+            DenialAuditRateLimiter denialAuditRateLimiter,
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
+            TenantWorkScope tenantWorkScope,
             CorsConfigurationSource corsConfigurationSource,
             PlatformTransactionManager transactionManager) throws Exception {
         ApiCredentialAuthenticationFilter authenticationFilter =
@@ -106,10 +110,12 @@ public class PublicApiSecurityConfig {
                 objectMapper,
                 privilegedMfaProperties,
                 privilegedAccountService,
-                webAuthnService,
+                auditService,
+                denialAuditRateLimiter,
                 clientIpResolver,
                 tenantCatalogResolver,
                 tenantContext,
+                tenantWorkScope,
                 PublicApiSecurityConfig::transactionMode,
                 transactionManager);
         CorsFilter corsFilter = new CorsFilter(corsConfigurationSource);

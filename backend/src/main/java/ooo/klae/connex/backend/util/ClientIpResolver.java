@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.security.web.util.matcher.IpAddressMatcher;
 import org.springframework.stereotype.Component;
 
@@ -85,6 +86,25 @@ public class ClientIpResolver {
      */
     public String resolve(HttpServletRequest request) {
         return resolveWithProvenance(request).address();
+    }
+
+    /**
+     * Resolves the address for a denial-audit limiter key, falling back to the direct peer when
+     * the request firewall rejects the forwarding-header read. Other exceptions propagate.
+     *
+     * <p>Use only after a refusal has already been decided and is being audited, never for
+     * request admission, authentication throttling or other authorization decisions. The caller
+     * must pass this same address to the audit writer without resolving the header again.
+     *
+     * @param request the already-denied request
+     * @return the resolved client IP or direct peer, or {@code null} when unavailable
+     */
+    public String resolveForDenialAudit(HttpServletRequest request) {
+        try {
+            return resolve(request);
+        } catch (RequestRejectedException ignored) {
+            return request.getRemoteAddr();
+        }
     }
 
     /**

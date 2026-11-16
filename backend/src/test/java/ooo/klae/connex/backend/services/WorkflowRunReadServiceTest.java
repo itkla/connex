@@ -146,6 +146,46 @@ class WorkflowRunReadServiceTest {
     }
 
     @Test
+    void actionFailureReadbackUsesOnlyAllowlistedEvidenceAndPinnedVersion() {
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        RuleExecution execution = legacyExecution(9, "failed", asOf.minusMinutes(1));
+        execution.setDetail("""
+            {"workflowVersionId":19,"failure":{"actionNumber":2,"actionType":"add_tag",
+             "code":"action_tag_unavailable","message":"token=private"}}
+            """);
+        when(ruleMapper.getExecutionById(7, 13, 9)).thenReturn(execution);
+        var detail = service.getRun(11, "legacy-9");
+        assertEquals("action_tag_unavailable", detail.failure().code());
+        assertEquals(2, detail.failure().actionNumber());
+        assertEquals("add_tag", detail.failure().actionType());
+        assertFalse(detail.failure().message().contains("private"));
+
+        when(workflowMapper.getByLegacyRuleId(7, 13)).thenReturn(workflow);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(19L);
+        version.setVersionNumber(2);
+        version.setDefinitionHash(new byte[32]);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        assertEquals(2, service.legacySummary(execution).version().number());
+    }
+
+    @Test
+    void unknownFailureEvidenceNeverReturnsStoredPayloads() {
+        RuleExecution execution = legacyExecution(9, "failed", asOf.minusMinutes(1));
+        execution.setDetail("""
+            {"failure":{"actionNumber":1,"actionType":"add_tag","code":"secret=private"},
+             "message":"raw stack trace and customer content"}
+            """);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(ruleMapper.getExecutionById(7, 13, 9)).thenReturn(execution);
+        var summary = service.getRun(11, "legacy-9");
+        assertEquals("legacy_failed", summary.failure().code());
+        assertNull(summary.failure().actionNumber());
+        assertFalse(summary.failure().message().contains("private"));
+        assertNull(summary.version());
+    }
+
+    @Test
     void canonicalDetailLoadsAndVerifiesTheRunPinnedVersion() {
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
         WorkflowRunView run = canonicalRun(31L, asOf.minusMinutes(1));
@@ -185,6 +225,24 @@ class WorkflowRunReadServiceTest {
             () -> service.getRun(11, "canonical-31"));
 
         verify(workflowRunMapper, never()).getViewById(eq(7), eq(11), eq(31L));
+    }
+
+    @Test
+    void runningRuleExecutionHasNoCompletionTimestampOrDuration() {
+        RuleExecution execution = new RuleExecution();
+        execution.setId(1);
+        execution.setStatus("running");
+        execution.setExecutedAt(asOf.minusMinutes(1).toString());
+
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(workflowRunMapper.currentTimestamp(7, 11)).thenReturn(asOf);
+        when(ruleMapper.getExecutionPage(7, 13, asOf, null, null, 21))
+            .thenReturn(List.of(execution));
+        var summary = service.listRuns(11, null, null).items().getFirst();
+
+        assertEquals("running", summary.status());
+        assertNull(summary.finishedAt());
+        assertNull(summary.durationMs());
     }
 
     private static WorkflowRunView canonicalRun(long id, LocalDateTime startedAt) {

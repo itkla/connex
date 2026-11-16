@@ -1,7 +1,9 @@
-import { act, type PropsWithChildren, type ReactNode } from "react";
+import { act, type PropsWithChildren, type ReactNode, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type CampaignRevisionSheet from "@/app/components/marketing/campaigns/CampaignRevisionSheet";
+import type EditCampaignSheet from "@/app/components/marketing/campaigns/EditCampaignSheet";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
 import CampaignDetail from "@/app/components/marketing/campaigns/CampaignDetail";
@@ -12,20 +14,32 @@ import type {
     CampaignAudienceEstimate,
     CampaignAudienceExport,
     CampaignAudienceSnapshotSummary,
+    CampaignEngagement,
     CampaignMessage,
+    CampaignSend,
 } from "@/app/lib/types";
 import enCampaigns from "@/messages/en/campaigns.json";
 import jaCampaigns from "@/messages/ja/campaigns.json";
+import enRecords from "@/messages/en/records.json";
+import jaRecords from "@/messages/ja/records.json";
 import {
     installInteractiveDocument,
     type InteractiveElement,
 } from "@/test/unit/helpers/interactiveDocument";
 
-const { localeState, reconcileCampaignExportMock, setCampaignAudienceMock } = vi.hoisted(() => ({
-    localeState: { locale: "en" as "en" | "ja" },
+const localeState = vi.hoisted<{ locale: "en" | "ja"; zone: string }>(() => ({ locale: "en", zone: "UTC" }));
+const inspector = vi.hoisted<{ current: ComponentProps<typeof CampaignRevisionSheet> | null }>(() => ({ current: null }));
+const saveRevisionMock = vi.hoisted(() => vi.fn());
+
+const editor = vi.hoisted<{ current: ComponentProps<typeof EditCampaignSheet> | null }>(() => ({ current: null }));
+
+const { reconcileCampaignExportMock, setCampaignAudienceMock, updateCampaignMock } = vi.hoisted(() => ({
+    updateCampaignMock: vi.fn(),
     reconcileCampaignExportMock: vi.fn(async (): Promise<unknown> => undefined),
     setCampaignAudienceMock: vi.fn(async () => {}),
 }));
+
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: () => "granted" }));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({
@@ -40,9 +54,12 @@ vi.mock("next-intl", async () => {
         import("@/messages/en/campaigns.json"),
         import("@/messages/ja/campaigns.json"),
     ]);
-    const catalogs = { en, ja };
+    const [{ default: enRecords }, { default: jaRecords }] = await Promise.all([
+        import("@/messages/en/records.json"), import("@/messages/ja/records.json"),
+    ]);
+    const catalogs = { en: { ...en, ...enRecords }, ja: { ...ja, ...jaRecords } };
     return {
-        useLocale: () => localeState.locale,
+        useTimeZone: () => localeState.zone, useLocale: () => localeState.locale,
         useTranslations: (namespace: string) => (
             key: string,
             values?: Record<string, string | number>,
@@ -73,9 +90,11 @@ vi.mock("@/app/lib/api", async (importOriginal) => {
     const actual = await importOriginal<typeof import("@/app/lib/api")>();
     return {
         ...actual,
+        addCampaignMessageRevision: saveRevisionMock,
         getSegmentFields: vi.fn(async () => ({ industries: [], tags: [] })),
         reconcileCampaignExport: reconcileCampaignExportMock,
         setCampaignAudience: setCampaignAudienceMock,
+        updateCampaign: updateCampaignMock,
     };
 });
 
@@ -172,13 +191,18 @@ vi.mock("@/components/ui/responsive-dialog", async () => {
 });
 
 vi.mock("@/app/components/records/SegmentBuilder", () => ({
-    EMPTY_DEFINITION: { match: "all", conditions: [] },
     default: () => <div>segment-builder</div>,
 }));
 
 vi.mock("@/app/components/marketing/campaigns/NewMessageDialog", () => ({ default: () => null }));
+vi.mock("@/app/components/marketing/campaigns/CampaignRevisionSheet", () => ({
+    default: (props: ComponentProps<typeof CampaignRevisionSheet>) => {
+        inspector.current = props;
+        return null;
+    },
+}));
 vi.mock("@/app/components/marketing/campaigns/CampaignEngagement", () => ({ default: () => null }));
-vi.mock("@/app/components/marketing/campaigns/EditCampaignSheet", () => ({ default: () => null }));
+vi.mock("@/app/components/marketing/campaigns/EditCampaignSheet", () => ({ default: (props: ComponentProps<typeof EditCampaignSheet>) => { editor.current = props; return null; } }));
 vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
 vi.mock("@/app/components/marketing/campaigns/CampaignStatusBadge", () => ({ default: () => null }));
 vi.mock("@/app/components/dashboard/CountUp", () => ({
@@ -281,9 +305,12 @@ const COMPLETED_EXPORT = {
 function detailHtml(
     audienceUnavailable: boolean,
     snapshots: CampaignAudienceSnapshotSummary[] = [SNAPSHOT],
+    engagement: CampaignEngagement | null = null,
+    failures: Pick<ComponentProps<typeof CampaignDetail>, "messagesFailure" | "sendsFailure" | "exportsFailure"> = {},
 ): string {
     return renderToStaticMarkup(
         <CampaignDetail
+            {...failures}
             campaign={CAMPAIGN}
             initialAudience={null}
             audienceUnavailable={audienceUnavailable}
@@ -291,7 +318,7 @@ function detailHtml(
             initialMessages={[]}
             initialSends={[]}
             initialExports={[]}
-            initialEngagement={null}
+            initialEngagement={engagement}
             access={{ manage: true, send: true, consent: true }}
             snapshotsRestricted={false}
             deliveryAvailability="enabled"
@@ -311,11 +338,196 @@ function requiredElement(
 
 afterEach(() => {
     localeState.locale = "en";
+    inspector.current = null;
     vi.clearAllMocks();
     vi.unstubAllGlobals();
 });
 
+describe("campaign date inputs", () => {
+    it.each([
+        { zone: "Asia/Tokyo", original: "2026-11-05T14:30:27", civil: "2026-11-05T23:30", edited: "2026-11-05T22:30", utc: "2026-11-05T13:30:00" },
+        { zone: "America/New_York", original: "2026-11-01T06:30:27", civil: "2026-11-01T01:30", edited: "2026-11-01T02:30", utc: "2026-11-01T07:30:00" },
+    ])("round-trips campaign windows in $zone without double conversion", async ({ zone, original, civil, edited, utc }) => {
+        localeState.zone = zone;
+        const campaign = { ...CAMPAIGN, startAt: original, endAt: original };
+        updateCampaignMock.mockResolvedValue(campaign);
+        const interactive = installInteractiveDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        try {
+            await act(async () => root.render(<CampaignDetail campaign={campaign} initialAudience={null}
+                audienceUnavailable={false} initialSnapshots={[]} initialMessages={[]} initialSends={[]}
+                initialExports={[]} initialEngagement={null} access={{ manage: true, send: true, consent: true }}
+                snapshotsRestricted={false} deliveryAvailability="enabled" />));
+            const edit = requiredElement(interactive.elements, (element) => element.tagName === "BUTTON"
+                && element.textContent === enCampaigns.CampaignDetail.edit, "Edit campaign");
+            await act(async () => interactive.dispatch("click", edit));
+            const initial = editor.current;
+            if (!initial) throw new Error("Campaign editor was not rendered");
+            expect(initial.payload.startAt).toBe(civil);
+            expect(initial.payload.endAt).toBe(civil);
+            await act(async () => initial.onSubmit());
+            expect(updateCampaignMock).toHaveBeenLastCalledWith(campaign.id, expect.objectContaining({ startAt: original, endAt: original }));
+            await act(async () => initial.setPayload((value) => ({ ...value, startAt: edited, endAt: edited })));
+            const changed = editor.current;
+            if (!changed) throw new Error("Campaign editor was not rendered");
+            await act(async () => changed.onSubmit());
+            expect(updateCampaignMock).toHaveBeenLastCalledWith(campaign.id, expect.objectContaining({ startAt: utc, endAt: utc }));
+        } finally {
+            await act(async () => root.unmount());
+            localeState.zone = "UTC";
+            updateCampaignMock.mockClear();
+        }
+    });
+});
+
 describe("campaign audience labels and unavailable state", () => {
+    it("hides failed delivery and export collections instead of showing empty states in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+            const records = locale === "en" ? enRecords : jaRecords;
+            const html = detailHtml(false, [], null, {
+                messagesFailure: { kind: "failed", status: 503 },
+                exportsFailure: { kind: "failed", status: 403 },
+            });
+            const failedTitle = records.RecordListState.sectionTitle.replace("{section}", catalog.CampaignMessages.title);
+            const deniedTitle = records.RecordListState.sectionDeniedTitle.replace("{section}", catalog.CampaignDetail.tabExports);
+            expect(html).toContain(failedTitle.replaceAll("'", "&#x27;"));
+            expect(html).toContain(deniedTitle.replaceAll("'", "&#x27;"));
+            expect(html).not.toContain(catalog.CampaignMessages.empty);
+            expect(html).not.toContain(catalog.CampaignExports.empty);
+            const recovered = detailHtml(false, []);
+            expect(recovered).toContain(catalog.CampaignMessages.empty);
+            expect(recovered).toContain(catalog.CampaignExports.empty);
+        }
+    });
+
+    it("keeps message authoring visible when only sends fail in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+            const html = detailHtml(false, [], null, { sendsFailure: { kind: "failed", status: 503 } });
+            expect(html).toContain(catalog.CampaignMessages.empty);
+            expect(html).toContain(catalog.CampaignMessages.new);
+            expect(html).not.toContain(catalog.CampaignSends.empty);
+        }
+    });
+
+    it("keeps send history visible while refusing queueing and hiding message labels after a message denial", () => {
+        const send: ComponentProps<typeof CampaignDelivery>["initialSends"][number] = {
+            id: 9, campaignId: CAMPAIGN.id, snapshotId: 11, origin: "audience",
+            messageId: EMAIL_MESSAGE.id, messageVersion: 1, channel: "email", purpose: "marketing",
+            providerId: null, status: "draft", scheduledAt: null, startedAt: null, completedAt: null,
+            totalRecipients: 1, dispatchedCount: 0, skippedCount: 0, failedCount: 0,
+            createdById: 1, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            contentRefused: true,
+        };
+        const html = (denied: boolean) => renderToStaticMarkup(<CampaignDelivery campaignId={CAMPAIGN.id}
+            initialMessages={[EMAIL_MESSAGE]} initialSends={[send]} snapshots={[SNAPSHOT]}
+            messagesFailure={denied ? { kind: "failed", status: 403 } : null}
+            access={{ manage: true, send: true, consent: true }} deliveryAvailability="enabled" />);
+        const queue = (markup: string) => [...markup.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
+            .map((match) => match[0]).find((button) => button.endsWith(`>${enCampaigns.CampaignSends.queue}</button>`));
+        expect(queue(html(false))).not.toContain('disabled=""');
+        const denied = html(true);
+        expect(queue(denied)).toContain('disabled=""');
+        expect(denied).toContain(enCampaigns.CampaignSends.title);
+        expect(denied).toContain(enCampaigns.CampaignSends.contentRefusedStatus);
+        expect(denied).toContain(enCampaigns.CampaignSends.contentRefused);
+        expect(denied).not.toContain(EMAIL_MESSAGE.name);
+    });
+
+    it.each(["en", "ja"] as const)("shows persisted send refusal to readers without roster permission in %s", (locale) => {
+        localeState.locale = locale;
+        const send = {
+            id: 93, campaignId: CAMPAIGN.id, snapshotId: 91, origin: "audience",
+            messageId: EMAIL_MESSAGE.id, messageVersion: 1, channel: "email", purpose: "marketing",
+            providerId: null, status: "queued", scheduledAt: null, startedAt: null, completedAt: null,
+            totalRecipients: 3, dispatchedCount: 1, skippedCount: 0, failedCount: 0,
+            createdById: 9, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            contentRefused: true,
+        } satisfies CampaignSend;
+        const html = renderToStaticMarkup(<CampaignDelivery campaignId={CAMPAIGN.id}
+            initialMessages={[EMAIL_MESSAGE]} initialSends={[send]} snapshots={[]}
+            access={{ manage: false, send: false, consent: false }} deliveryAvailability="enabled" />);
+        const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+        expect(html).toContain(catalog.CampaignSends.contentRefusedStatus);
+        expect(html).toContain(catalog.CampaignSends.contentRefused);
+        expect(html).toContain(catalog.CampaignSends.status.queued);
+        expect(html).not.toContain("CAMPAIGN_UNSUPPORTED_TOKEN");
+    });
+
+    it("keeps saved-revision inspection and reuse independent of failed sends, then hides inspection when messages fail", async () => {
+        const interactive = installInteractiveDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        saveRevisionMock.mockResolvedValue({
+            ...EMAIL_MESSAGE,
+            revisions: [{ ...EMAIL_MESSAGE.revisions[0], version: 2 }, ...EMAIL_MESSAGE.revisions],
+        });
+        await act(async () => {
+            root.render(<CampaignDelivery campaignId={CAMPAIGN.id} initialMessages={[EMAIL_MESSAGE]}
+                initialSends={[]} snapshots={[]} access={{ manage: true, send: true, consent: true }}
+                sendsFailure={{ kind: "failed", status: 503 }} deliveryAvailability="enabled" />);
+        });
+        const view = requiredElement(interactive.elements,
+            (element) => element.getAttribute("aria-label") === "View revision v1", "Saved revision action");
+        await act(async () => { interactive.dispatch("click", view); });
+        const props = inspector.current;
+        if (!props?.revision || !props.onUse) throw new Error("Saved revision did not open");
+        expect(props.revision).toEqual(EMAIL_MESSAGE.revisions[0]);
+        await act(async () => { props.onUse?.(EMAIL_MESSAGE.revisions[0]); });
+        const save = requiredElement(interactive.elements,
+            (element) => element.tagName === "BUTTON" && element.textContent === enCampaigns.CampaignMessages.saveRevision,
+            "Save revision action");
+        await act(async () => { interactive.dispatch("click", save); });
+        expect(saveRevisionMock).toHaveBeenCalledWith(CAMPAIGN.id, EMAIL_MESSAGE.id, {
+            locale: "en", subject: "Product update", bodyHtml: "<p>Update</p>", bodyText: "Update",
+        });
+        expect(requiredElement(interactive.elements, (element) => element.id === "revision-subject", "Subject").value)
+            .toBe("Product update");
+        expect(requiredElement(interactive.elements, (element) => element.id === "revision-body-html", "HTML body").value)
+            .toBe("<p>Update</p>");
+        expect(requiredElement(interactive.elements, (element) => element.id === "revision-body-text", "Text body").value)
+            .toBe("Update");
+        expect(EMAIL_MESSAGE.revisions).toHaveLength(1);
+        await act(async () => { interactive.dispatch("click", view); });
+        expect(inspector.current?.revision).toBeDefined();
+        for (const status of [503, 403]) {
+            inspector.current = null;
+            await act(async () => {
+                root.render(<CampaignDelivery campaignId={CAMPAIGN.id} initialMessages={[EMAIL_MESSAGE]}
+                    initialSends={[]} snapshots={[]} access={{ manage: true, send: true, consent: true }}
+                    messagesFailure={{ kind: "failed", status }} deliveryAvailability="enabled" />);
+            });
+            expect(inspector.current).toBeNull();
+        }
+        await act(async () => root.unmount());
+    });
+
+    it("labels draft send membership as prepared recipients in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const counts = {
+                preparedRecipients: 6, dispatched: 0, delivered: 0, bounced: 0, complained: 0,
+                unsubscribed: 0, failed: 0, skipped: 0, skipReasons: {}, eventCounts: {},
+                deliveryReceiptsAvailable: false, deliveryRate: null, bounceRate: null, complaintRate: null,
+            };
+            const html = detailHtml(false, [SNAPSHOT], {
+                ...counts,
+                campaignId: CAMPAIGN.id,
+                channels: [],
+                sends: [{ ...counts, sendId: 11, status: "draft", channel: "email" }],
+            });
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+
+            expect(html).toMatch(new RegExp(`${catalog.CampaignDetail.preparedRecipients}</span><span[^>]*>6</span>`));
+            expect(html).toContain(catalog.CampaignDetail.preparedRecipientsHint);
+            expect(html).not.toContain(locale === "en" ? "Recipients reached" : ">到達数<");
+        }
+    });
+
     it("labels a custom-purpose estimate with its channel and exact purpose", () => {
         const estimate = {
             channel: "email",

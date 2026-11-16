@@ -9,6 +9,7 @@ import {
     connectedAccountsSectionHref,
 } from "@/app/lib/connectedAccountsSections";
 import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
+import { settingsConfigRedirects } from "@/app/lib/settingsRedirects";
 import {
     SETTINGS_ENTRIES,
     SETTINGS_GROUPS,
@@ -207,8 +208,9 @@ describe("every address these groups retired forwards to them", () => {
 
     /**
      * The seven addresses this PR retired, as opposed to the ones earlier PRs had already pointed at
-     * a page that has since moved. Each renders nothing now: a panel left behind would be a second
-     * copy of a section, served from an address the navigation no longer offers.
+     * a page that has since moved. Each is forwarded by `next.config.ts` and keeps no page at all: a
+     * panel left behind would be a second copy of a section, served from an address the navigation
+     * no longer offers.
      */
     it.each([
         "/account/connections",
@@ -218,26 +220,25 @@ describe("every address these groups retired forwards to them", () => {
         "/account/security",
         "/settings/data",
         "/settings/general",
-    ])("%s became a stub that renders nothing and spells no destination", (route) => {
+    ])("%s forwards from the manifest before routing and keeps no page", (route) => {
         const entry = entryByRoute(route);
-        const page = source(path.join(routeDir(route), "page.tsx"));
 
-        expect(page).toContain("permanentRedirect(");
-        expect(page).toContain(`settingsRedirectTarget("${entry.id}"`);
-        expect(page, "a panel left here would be a second copy of the destination").not.toContain(
-            "Panel",
-        );
+        expect(settingsConfigRedirects()).toContainEqual({
+            source: route,
+            destination: entry.redirectsTo,
+            permanent: true,
+        });
         expect(
-            page,
-            "a stub that spells its target is a second redirect matrix; the manifest is the only one",
-        ).not.toContain(entry.redirectsTo ?? "");
+            existsSync(path.join(routeDir(route), "page.tsx")),
+            "a panel left here would be a second copy of the destination",
+        ).toBe(false);
         expect(
             existsSync(path.join(routeDir(route), "loading.tsx")),
             "an address that renders nothing has nothing to draw a skeleton for",
         ).toBe(false);
     });
 
-    it("holds a ledger entry explaining every skeleton it deleted", () => {
+    it("drops each forwarded address from the skeleton ledger along with its page", () => {
         const ledger: unknown = JSON.parse(source(path.join(process.cwd(), "lint", "loading-skeleton-exceptions.json")));
         if (typeof ledger !== "object" || ledger === null || !("exceptions" in ledger)) {
             throw new Error("the skeleton ledger changed shape");
@@ -259,7 +260,10 @@ describe("every address these groups retired forwards to them", () => {
             "/settings/data",
             "/settings/general",
         ]) {
-            expect(routes.has(route), `${route} lost its skeleton without a ledger entry`).toBe(true);
+            expect(
+                routes.has(route),
+                `${route} has no page left to excuse from a skeleton; a ledger entry for it would be stale`,
+            ).toBe(false);
         }
     });
 });

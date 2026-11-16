@@ -128,13 +128,13 @@ export default function BulkChangeStageDialog({ open, onOpenChange, count, stage
                                         </InputGroupAddon>
                                     </ComboboxInput>
                                     <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxEmpty>{t('noStagesFound')}</ComboboxEmpty>
                                         <ComboboxList onWheel={handleListWheel}>
-                                            <ComboboxEmpty>{t('noStagesFound')}</ComboboxEmpty>
-                                            {stages.map((stage) => (
+                                            {(stage: (typeof stages)[number]) => (
                                                 <ComboboxItem key={stage.id} value={stage}>
                                                     {stage.name}
                                                 </ComboboxItem>
-                                            ))}
+                                            )}
                                         </ComboboxList>
                                     </ComboboxContent>
                                 </Combobox>

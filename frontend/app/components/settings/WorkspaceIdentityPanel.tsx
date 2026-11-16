@@ -1,5 +1,7 @@
 "use client";
 
+import { useTimeZoneSearch } from "@/app/hooks/useTimeZoneSearch";
+
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -7,6 +9,7 @@ import { Loader2Icon } from "lucide-react";
 
 import AccessDenied from "@/app/components/AccessDenied";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import WorkspaceCurrencyPanel from "@/app/components/settings/WorkspaceCurrencyPanel";
 import Rise from "@/app/components/motion/Rise";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
@@ -66,6 +69,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
             name: workspace.name,
             slug: workspace.slug,
             timezone: workspace.timezone,
+            defaultCurrency: workspace.defaultCurrency,
             identityVersion: workspace.identityVersion,
         };
         const optimistic = { ...previous, name: normalizedName, timezone };
@@ -99,6 +103,8 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
             setSaving(false);
         }
     }
+
+    const timeZoneSearch = useTimeZoneSearch(timezones);
 
     return (
         <Rise>
@@ -158,7 +164,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
                                     setTimezone(value);
                                     setFieldErrors((current) => ({ ...current, timezone: "" }));
                                 }}
-                                itemToStringLabel={(value: string) => value}
+                                {...timeZoneSearch}
                             >
                                 <ComboboxInput
                                     id="workspace-timezone"
@@ -166,11 +172,11 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
                                     aria-invalid={Boolean(fieldErrors.timezone)}
                                 />
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
                                     <ComboboxList>
-                                        <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
-                                        {timezones.map((value) => (
-                                            <ComboboxItem key={value} value={value}>{value}</ComboboxItem>
-                                        ))}
+                                        {(value: (typeof timezones)[number]) => (
+                                            <ComboboxItem key={value} value={value}>{timeZoneSearch.itemToStringLabel(value)}</ComboboxItem>
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -215,5 +221,8 @@ export default function WorkspaceIdentityPanel() {
         return <AccessDenied variant="inline" title={t("noAccessTitle")} body={t("noAccessBody")} />;
     }
     if (!activeWorkspace) return null;
-    return <WorkspaceIdentityForm key={activeWorkspace.id} workspace={activeWorkspace} />;
+    return <>
+        <WorkspaceIdentityForm key={activeWorkspace.id} workspace={activeWorkspace} />
+        <WorkspaceCurrencyPanel key={`currency:${activeWorkspace.id}`} workspace={activeWorkspace} />
+    </>;
 }

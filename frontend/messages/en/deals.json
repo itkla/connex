@@ -6,6 +6,7 @@
         "panelTitle": "Risk signals",
         "unavailable": "Risk evidence is temporarily unavailable.",
         "clear": "No risk signals on this deal right now.",
+        "noHistoryStakeholders": "Some contacts have no history yet. Log a first interaction to get started.",
         "assessedAt": "Assessed {date}",
         "factorCloseOverdue": "Expected close date passed {days, plural, one {# day} other {# days}} ago",
         "factorClosingSoonQuiet": "Closing in {days, plural, one {# day} other {# days}} with no recent activity",
@@ -112,7 +113,8 @@
         "cannotChangeStatus": "Cannot change status: deal is missing pipeline or stage",
         "dealClosed": "Deal closed",
         "dealReopened": "Deal reopened",
-        "failedToUpdateStatus": "Couldn't update the deal status"
+        "failedToUpdateStatus": "Couldn't update the deal status",
+        "failedToLoadDeal": "Couldn't load the deal"
     },
     "DealsActivityBreakdown": {
         "activityMix": "Activity mix",
@@ -120,13 +122,16 @@
         "total": "total"
     },
     "DealsCard": {
+        "closedOn": "Closed {date}",
         "dealActions": "Deal actions",
         "view": "View",
         "quickEdit": "Quick edit",
         "delete": "Delete",
         "openDealPage": "Open deal page",
         "statusOpen": "open",
-        "statusClosed": "closed"
+        "statusClosed": "closed",
+        "statusWon": "Won",
+        "statusLost": "Lost"
     },
     "DealsLifecycleProgress": {
         "todayDay": "Today · day {daysOpen} of {totalDays}",
@@ -147,6 +152,7 @@
         "achievedOn": "Reached on {date}"
     },
     "DealsTaskList": {
+        "entityLabel": "task",
         "taskDeleted": "Task deleted",
         "failedToDeleteTask": "Couldn't delete the task",
         "taskMarkedAsComplete": "Task marked as complete",
@@ -182,9 +188,32 @@
         "a11yLifted": "Picked up deal {name}.",
         "a11yOver": "Deal {name} is over the {column} column.",
         "a11yDropped": "Deal {name} was dropped into the {column} column.",
-        "a11yCancelled": "Moving deal {name} was cancelled."
+        "a11yCancelled": "Moving deal {name} was cancelled.",
+        "moveCard": "Move deal {name}",
+        "outcome": {
+            "open": "Open",
+            "won": "Won",
+            "lost": "Lost"
+        },
+        "confirmTitle": "Move to {column}?",
+        "confirmDescription": "Moving {name} to {column} marks it {outcome} and closes it. Moving it back later keeps this outcome until you choose Reopen.",
+        "cancelMove": "Cancel",
+        "confirmMove": "Move and close",
+        "moved": "{name} is in {column}, position {position}. Outcome: {outcome}.",
+        "movedRetained": "{name} moved to {column}, position {position}, and is still {outcome}. Moving stages does not reopen a deal.",
+        "moveCancelled": "Move cancelled. {name} is still in {column}, position {position}. Outcome: {outcome}.",
+        "reopen": "Reopen",
+        "reopenHint": "To open this deal again, choose Reopen.",
+        "reopenFailed": "Couldn't reopen the deal",
+        "a11yConfirmMove": "Move requested for {name} to {column}. Outcome would be {outcome}. Confirm or cancel in the dialog.",
+        "a11yMoveRequested": "Move requested for {name} to {column}. Outcome remains {outcome}.",
+        "a11yRestored": "Move not confirmed. Showing deal {name} in {column}, position {position}.",
+        "confirmValueLost": "Realized revenue will be reset to {amount}; the amount shown now is {current}. Any earlier win amount is cleared. Winning again will calculate a new amount from the values saved at that time.",
+        "confirmValueFrozen": "The realized revenue shown now is {amount}. While the deal remains won, its win amount stays frozen rather than being recalculated. If its outcome or amount changes before saving, the server uses the updated state; the final amount cannot be confirmed here.",
+        "confirmValueFreshWin": "The deal value shown now is {current}. Winning records the current line-item total, or the current deal value if there are no line items, in {currency}. The exact amount cannot be confirmed here before saving. The server calculates it when the move is saved and freezes it as realized revenue; later value changes do not recalculate it."
     },
     "DealsBrowser": {
+        "columnClosedAt": "Closed at",
         "title": "Deals",
         "addDeal": "Add deal",
         "newButton": "New",
@@ -194,12 +223,12 @@
         "openPipelineTooltip": "Total forecast value of all deals that are still open. Not bounded by close date.",
         "openDeals": "Open deals",
         "openDealsTooltip": "Number of deals that are still open.",
-        "closedForecast": "Closed forecast",
-        "closedForecastTooltip": "Total forecast value of deals that have closed. This is the baseline that actual results are measured against.",
-        "closedRevenue": "Closed revenue",
-        "closedRevenueTooltip": "Total actual value recorded across closed deals.",
+        "closedForecast": "Won deal value",
+        "closedForecastTooltip": "Total projected value of won deals only. This is the baseline for forecast accuracy.",
+        "closedRevenue": "Won revenue",
+        "closedRevenueTooltip": "Total actual value recorded on won deals only.",
         "forecastAccuracy": "Forecast accuracy",
-        "forecastAccuracyTooltip": "Closed revenue ÷ Closed forecast — how close actual results came to what was forecast across all closed deals. 100% means actuals matched the forecast exactly; above 100% means deals beat their forecast.",
+        "forecastAccuracyTooltip": "Won revenue ÷ Won deal value. Only won deals are included; lost deals do not affect this figure. 100% means actual values matched projected values; above 100% means wins exceeded their projected values.",
         "displayMode": "Display mode",
         "gridView": "Grid view",
         "tableView": "Table view",
@@ -283,9 +312,9 @@
     },
     "DealsRevenueChart": {
         "actualRevenue": "Actual revenue",
-        "projectedRevenue": "Projected revenue",
+        "projectedRevenue": "All deal value by expected close",
         "today": "Today",
-        "projectedAmount": "Projected · {amount}",
+        "projectedAmount": "All deal value · {amount}",
         "actualAmount": "Actual · {amount}"
     },
     "DealsEditSheet": {
@@ -297,6 +326,8 @@
         "failedToSave": "Couldn't save the deal"
     },
     "DealsNewDialog": {
+        "workspaceCurrencySaved": "Workspace default: {currency}. You can change it for this deal.",
+        "workspaceCurrencyFallback": "Default: {currency}. No workspace currency has been saved; the original USD default applies until a workspace administrator sets one.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "title": "New deal",
         "description": "Add a deal to your pipeline. Deals are shared with everyone in this workspace.",
@@ -317,9 +348,21 @@
         "noCompaniesFound": "No companies found.",
         "expectedCloseDate": "Expected close date",
         "cancel": "Cancel",
-        "create": "Create"
+        "create": "Create",
+        "setupPipeline": "Create a pipeline",
+        "pipelineSetupHint": "A pipeline gives your deals a set of stages. Create one here, then continue with this deal. Your entries will be kept.",
+        "pipelineSetupAskManager": "Ask a member who manages pipelines to create one for this workspace.",
+        "starterPipeline": "Sales pipeline",
+        "starterOpen": "New",
+        "starterWon": "Won",
+        "starterLost": "Lost",
+        "pipelineNeedsOpenStage": "Name every stage and include at least one in-progress stage so you can add your deal.",
+        "pipelineTerminalLimit": "Use at most one Won stage and one Lost stage.",
+        "pipelineSetupFailed": "Couldn't finish pipeline setup",
+        "pipelineSetupRetry": "Your deal entries are kept. Try again."
     },
     "DealsQuickEditSheet": {
+        "closedAtInvalid": "That time doesn't exist in the reporting timezone shown below. Choose another time.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "titleSingle": "Quick edit deal",
         "titleMulti": "Quick edit {count} deals",
@@ -387,7 +430,22 @@
         "grandTotal": "Total",
         "totalsUnavailable": "Totals are unavailable while line currencies are being repaired.",
         "currencyMismatch": "This line uses {lineCurrency}; the deal uses {dealCurrency}. Check the amounts before editing this line in {dealCurrency}, or remove it. No currency conversion is applied.",
-        "saveFailed": "Couldn't save the line item"
+        "saveFailed": "Couldn't save the line item",
+        "draftTitle": "New line item",
+        "draftHelp": "This line is unsaved. Enter a price, then save to review the deal value.",
+        "saveLine": "Save line",
+        "discardDraft": "Discard line",
+        "taxRate": "Tax rate (%)",
+        "discountType": "Discount type",
+        "discountValue": "Discount value",
+        "discountNone": "No discount",
+        "discountPercent": "Percentage (%)",
+        "discountAmount": "Fixed amount",
+        "confirmTitle": "Replace the deal value?",
+        "confirmDescription": "The deal value will change from {previous} to {next}, including tax. Removing the last line will restore the previous manual amount.",
+        "confirmReplacement": "Replace value and save",
+        "cancel": "Cancel",
+        "restoreHelp": "Removing the last line will restore the manual deal value of {amount}."
     },
     "DealsDocuments": {
         "title": "Documents",
@@ -459,7 +517,9 @@
         "approvalCandidatesPlaceholder": "Search possible approvers",
         "approvalCandidatesLoading": "Loading possible approvers…",
         "approvalCandidatesUnavailable": "Possible approvers are unavailable. Try again before choosing approvers.",
-        "approvalCandidatesNoMatches": "No possible approvers found in the member directory.",
+        "approvalCandidatesNoMatches": "No approvers match your search. Try another name.",
+        "approvalCandidatesEmpty": "No eligible approvers are available for this step.",
+        "approvalQuorumContext": "{required} approvals required · {approved} recorded · {remaining} remaining",
         "approvalQuorumShortfall": "Select {count, plural, one {# more verified approver} other {# more verified approvers}}. The server checks the approval requirement when you confirm.",
         "approvalRemoveMember": "Remove {name}",
         "approvalNoCurrentApprovers": "No current approvers",
@@ -494,6 +554,11 @@
             "oneTimeTotal": "One-time total",
             "recurringTotal": "Recurring total",
             "grandTotal": "Total",
+            "roundingAdjustment": "Rounding adjustment",
+            "subtotalTaxBreakdown": "Subtotal and tax breakdown",
+            "billingBreakdown": "One-time and recurring breakdown",
+            "itemAmountsBreakdown": "Item amount reconciliation",
+            "displayedItemsTotal": "Displayed item amounts",
             "terms": "Terms",
             "printButton": "Print / Save as PDF",
             "notFound": "Document not found.",
@@ -549,5 +614,56 @@
         "approverChangeRefusedDescription": "One or more selected members may not be allowed to approve documents. No approvers were changed. Review the selection and try again.",
         "refreshFailed": "Couldn't refresh the document",
         "statusFailed": "Couldn't update the document status"
+    },
+    "DealsEditConflict": {
+        "title": "This deal has changed",
+        "description": "Changes to “{name}” were saved after you loaded it. Your draft is still here. Changed fields:",
+        "loadFailed": "“{name}” has changed. Your draft is still here, but the latest version could not be loaded. Keep editing and try saving again to check the changes.",
+        "otherChanges": "Another update was saved, including changes outside the fields shown here.",
+        "keepEditing": "Keep editing",
+        "reload": "Reload latest",
+        "confirmTitle": "Discard your draft and reload?",
+        "confirmDescription": "Your unsaved changes to “{name}” will be lost. The latest saved version will replace this draft.",
+        "discardAndReload": "Discard draft and reload",
+        "fields": {
+            "name": "Name",
+            "value": "Value",
+            "actualValue": "Actual value",
+            "valueSource": "Value source",
+            "currency": "Currency",
+            "pipeline": "Pipeline",
+            "stage": "Stage",
+            "position": "Board position",
+            "company": "Company",
+            "ownerId": "Owner",
+            "expectedCloseDate": "Expected close date",
+            "closedAt": "Closed date",
+            "closedReason": "Closed reason",
+            "won": "Outcome",
+            "riskExcluded": "Deal risk evaluation"
+        }
+    },
+    "DealStakeholders": {
+        "title": "Stakeholders",
+        "add": "Add contact",
+        "empty": "No stakeholders yet. Add the contacts involved in this deal.",
+        "editRole": "Edit role",
+        "editRoleFor": "Edit role for {name}",
+        "remove": "Remove",
+        "removeFor": "Remove {name} from this deal",
+        "description": "Choose a contact and describe their role in this deal.",
+        "contact": "Contact",
+        "chooseContact": "Search contacts",
+        "role": "Role (optional)",
+        "rolePlaceholder": "For example, Champion or Buyer",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saved": "Stakeholder saved",
+        "removed": "Stakeholder removed",
+        "saveFailed": "Couldn't save the stakeholder",
+        "removeFailed": "Couldn't remove the stakeholder",
+        "searchFailed": "Couldn’t load contacts. Search again to retry.",
+        "warmthUnavailable": "Warmth unavailable",
+        "contactRequired": "Choose a contact to add."
     }
 }

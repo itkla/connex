@@ -60,7 +60,10 @@ export default function RestrictionsDialog({ open, onOpenChange, contact }: Prop
         if (locked || !dirty) return;
         setIsSaving(true);
         try {
-            await updateContactRestrictions(contact.id, { suspended, provisionCeased });
+            await updateContactRestrictions(contact.id, {
+                ...(suspended !== Boolean(contact.suspendedAt) ? { suspended } : {}),
+                ...(provisionCeased !== Boolean(contact.provisionCeasedAt) ? { provisionCeased } : {}),
+            });
             setIsSaving(false);
             setSucceeded(true);
             toastSuccess(t("toastSaved"));

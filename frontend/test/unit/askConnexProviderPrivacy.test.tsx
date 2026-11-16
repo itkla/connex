@@ -1,0 +1,623 @@
+import { act, isValidElement, useEffect, type ComponentProps } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import AskConnexProvider from '@/app/components/ask-connex/AskConnexProvider';
+import type AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
+import type AskConnexMissionProgress from '@/app/components/ask-connex/AskConnexMissionProgress';
+import { ASK_CONNEX_REALTIME_REFRESH_DELAY_MS } from '@/app/components/ask-connex/realtimeRefreshCoalescer';
+import { ApiError, getAiCommandCenter } from '@/app/lib/api';
+import type { AskConnexScopeDraft } from '@/app/lib/askConnexScope';
+import { askConnexTurnStorageKey, serializeStoredAskConnexTurn, type StoredAskConnexTurn } from '@/app/lib/askConnex';
+import type { AiChatSocketHandlers } from '@/app/lib/realtime';
+import type { AiAgentRun, AiAgentRunPage, AiChatSession, AiChatSessionDetail, AiChatTurn } from '@/app/lib/types';
+import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
+import { navigateAfterWorkspaceSelection } from '@/app/lib/renderedWorkspace';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
+import type { AppAction } from '@/app/lib/actions/types';
+
+const registeredActions = vi.hoisted(() => vi.fn<(actions: AppAction[]) => void>());
+let editorGuard: ReturnType<typeof useUnsavedChangesGuard> | undefined;
+
+function DirtyEditorGuard() {
+    const guard = useUnsavedChangesGuard({ isDirty: true, onClose: () => {}, navigation: { push: harness.router.push, renderedHref: '/workflows/new', onDiscard: () => {} } });
+    useEffect(() => { editorGuard = guard; });
+    return null;
+}
+
+function currentEditorGuard() {
+    if (!editorGuard) throw new Error('Editor guard did not mount');
+    return editorGuard;
+}
+
+const harness = vi.hoisted(() => ({
+    drawer: vi.fn<(props: ComponentProps<typeof AskConnexDrawer>) => null>(() => null),
+    socket: vi.fn<(handlers: AiChatSocketHandlers) => { activate: () => void; deactivate: () => void }>(
+        () => ({ activate: () => {}, deactivate: () => {} })),
+    getSession: vi.fn<() => Promise<AiChatSessionDetail>>(),
+    getSessions: vi.fn<() => Promise<{ items: AiChatSession[] }>>(),
+    getTurn: vi.fn<() => Promise<AiChatTurn>>(),
+    getMissions: vi.fn<() => Promise<AiAgentRunPage>>(),
+    preview: vi.fn<typeof import('@/app/lib/api').previewAiChatScope>(),
+    translate: (key: string) => key,
+    persist: () => true,
+    toast: vi.fn(),
+    router: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
+    context: { user: { id: 1, displayName: 'Member' }, record: null, selection: null },
+    workspace: { activeWorkspaceId: 1, switching: false },
+    sessionId: '7',
+    pathname: '',
+}));
+
+vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({ default: harness.drawer }));
+vi.mock('@/app/components/ask-connex/AskConnexMissionCreate', () => ({ default: () => null }));
+vi.mock('@/app/components/ask-connex/AskConnexMissionProgress', () => ({ default: () => null }));
+vi.mock('next-intl', () => ({ useTimeZone: () => "UTC", useLocale: () => 'en', useTranslations: () => harness.translate }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: harness.sessionId }), usePathname: () => harness.pathname || `/ask-connex/${harness.sessionId}`, useRouter: () => harness.router }));
+vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: registeredActions }));
+vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => harness.workspace }));
+vi.mock('@/app/hooks/usePermissions', () => ({ usePermissionCheck: () => 'granted' }));
+vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({ usePrivilegedMfaReadiness: () => "ready", usePrivilegedMfaConfinement: () => false }));
+vi.mock('@/app/hooks/useAskConnexSkills', () => ({ useAskConnexSkills: () => [] }));
+vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => harness.toast }));
+vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
+vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => 0, useNow: () => 0 }));
+vi.mock('@/app/hooks/useAccountStorageGeneration', () => ({ useAccountStorageGeneration: () => harness.persist }));
+vi.mock('@/app/lib/realtime', () => ({ createAiChatSocket: harness.socket }));
+vi.mock('@/app/lib/api', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@/app/lib/api')>(),
+    currentPrivilegedMfaReadiness: () => 'ready',
+    privilegedMfaConfinementReason: () => null,
+    getAiCommandCenter: vi.fn().mockResolvedValue({ chatAvailable: true, watchesAvailable: true }),
+    getAiChatSessions: harness.getSessions,
+    getAiChatInvitations: async () => ({ items: [] }),
+    getActiveWorkspaceMembers: async () => [],
+    getAiChatSession: harness.getSession,
+    getAiChatTurn: harness.getTurn,
+    getAiGenerationStatus: vi.fn().mockRejectedValue(new Error('Generation handle is no longer retained')),
+    getAiChatAttachments: async () => [],
+    getAiAssistantToolCalls: async () => [],
+    getAiAgentRuns: harness.getMissions,
+    previewAiChatScope: harness.preview,
+}));
+
+const session: AiChatSession = {
+    id: 7, workspaceId: 1, createdByUserId: 1, title: 'Ask Connex', visibility: 'private',
+    organizationPrivacyGeneration: '1',
+    status: 'active', archived: false, ownedByCurrentUser: true, historySummarized: false,
+    participationStatus: null, lastMessageAt: null, archivedAt: null,
+    createdAt: '2026-10-15T10:00:00Z', updatedAt: '2026-10-15T10:00:00Z',
+};
+
+function detail(activeTurn: AiChatTurn | null): AiChatSessionDetail {
+    return { session, activeTurn, messages: { items: [], total: 0 } };
+}
+
+function mission(overrides: Partial<AiAgentRun> = {}): AiAgentRun {
+    return {
+        schemaVersion: 1, id: 12, sessionId: 7, missionType: 'record_review_v1', definitionVersion: 1,
+        state: 'done', reasonCode: null, stateVersion: '3', goal: 'Private goal',
+        scope: { kind: 'record', recordKind: 'person', recordId: 4 },
+        createdAt: '2026-10-15T10:00:00Z', executionDeadlineAt: '2026-10-15T10:15:00Z',
+        hardDeadlineAt: '2026-10-15T10:15:00Z', startedAt: null, finishedAt: null,
+        outputAvailable: true, outputRevision: '1', proposalMembershipRevision: null, proposalFrozenAt: null,
+        proposalFirstPreparedAt: null, reviewExpiresAt: null, proposalCounts: null, contentWithheld: false, availableActions: ['view_output'], progress: null,
+        ...overrides,
+    };
+}
+
+function props() {
+    const value = harness.drawer.mock.calls.at(-1)?.[0];
+    if (!value) throw new Error('Provider has not rendered');
+    return value;
+}
+
+function socket() {
+    const value = harness.socket.mock.calls.at(-1)?.[0];
+    if (!value) throw new Error('Socket has not connected');
+    return value;
+}
+
+function missionProps() {
+    const progress = props().missionProgress;
+    if (!isValidElement<ComponentProps<typeof AskConnexMissionProgress>>(progress)) {
+        throw new Error('Provider has not rendered mission progress');
+    }
+    return progress.props;
+}
+
+async function flushRealtimeRefresh() {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ASK_CONNEX_REALTIME_REFRESH_DELAY_MS); });
+}
+
+async function mount(active = true, generation = '1', storedTurn?: StoredAskConnexTurn, guarded = false) {
+    const interactive = installInteractiveDocument();
+    const storage = new Map(storedTurn ? [[askConnexTurnStorageKey(1, 1), serializeStoredAskConnexTurn(storedTurn)]] : []);
+    Object.assign(window, {
+        setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
+        setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval,
+        requestAnimationFrame: (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0),
+        cancelAnimationFrame: (handle: number) => window.clearTimeout(handle),
+        localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: () => {}, removeItem: (key: string) => storage.delete(key) },
+    });
+    const running: AiChatTurn = { turnId: 9, sessionId: 7, status: 'running', terminalReason: null, progress: [] };
+    harness.getSession.mockResolvedValue({ ...detail(active ? running : null),
+        session: { ...session, organizationPrivacyGeneration: generation } });
+    harness.getTurn.mockResolvedValue(running);
+    const { createRoot } = await import('react-dom/client');
+    const root = createRoot(interactive.container);
+    const render = () => act(async () => root.render(<AskConnexProvider>{guarded ? <DirtyEditorGuard /> : null}</AskConnexProvider>));
+    await render();
+    return { render, unmount: () => act(async () => root.unmount()) };
+}
+
+async function stream(text: string, seq = 0) {
+    await act(async () => {
+        socket().onDelta?.({ workspaceId: 1, sessionId: 7, turnId: 9, kind: 'delta', seq, text });
+        await vi.advanceTimersByTimeAsync(0);
+    });
+}
+
+describe('Ask Connex provider privacy withdrawal', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.clearAllMocks();
+        harness.workspace = { activeWorkspaceId: 1, switching: false };
+        harness.sessionId = '7';
+        harness.pathname = '';
+        editorGuard = undefined;
+        harness.getSessions.mockResolvedValue({ items: [] });
+        harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
+    });
+    afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it.each(['palette', 'full-view'])('guards the %s workspace exit before changing the assistant surface', async (source) => {
+        harness.pathname = '/workflows/new';
+        const mounted = await mount(false, '1', undefined, true);
+        const open = async () => {
+            if (source === 'full-view') {
+                props().onOpenWorkspace();
+                return;
+            }
+            const action = registeredActions.mock.calls.flatMap(([actions]) => actions)
+                .find((candidate) => candidate.id === 'workspace.ask-connex-workspace');
+            if (!action) throw new Error('Workspace action was not registered');
+            await action.execute({ workspace: null, user: null, route: { pathname: harness.pathname }, locale: 'en', record: null, selection: null, can: () => true }, {
+                router: { ...harness.router, forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn(), bfcacheId: 'editor-route' },
+                openOverlay: vi.fn(), closeOverlay: vi.fn(), source: 'palette', translate: (key) => key,
+            });
+        };
+        try {
+            await act(async () => props().onOpenChange(true));
+            await act(open);
+            expect(currentEditorGuard().confirm.open).toBe(true);
+            expect(harness.router.push).not.toHaveBeenCalled();
+            expect(props().open).toBe(true);
+            await act(async () => currentEditorGuard().confirm.onKeepEditing());
+            expect(harness.router.push).not.toHaveBeenCalled();
+            await act(open);
+            await act(async () => currentEditorGuard().confirm.onDiscard());
+            expect(harness.router.push).toHaveBeenCalledOnce();
+            expect(props().open).toBe(false);
+        } finally {
+            await mounted.unmount();
+        }
+    });
+
+    it('keeps a newer deep-link selection when initial readiness finishes late', async () => {
+        const ready = await getAiCommandCenter();
+        const readiness = Promise.withResolvers<typeof ready>();
+        vi.mocked(getAiCommandCenter).mockReturnValueOnce(readiness.promise);
+        const mounted = await mount(false);
+        try {
+            expect(props().activeSession?.id).toBe(7);
+            expect(props().unavailable?.title).toBe('unavailable.checkingTitle');
+            const second = { ...session, id: 8, title: 'Second chat' };
+            harness.getSession.mockResolvedValueOnce({ ...detail(null), session: second });
+            await act(async () => props().onSelectSession(second));
+            expect(props().activeSession?.id).toBe(8);
+            expect(harness.router.replace).toHaveBeenCalledWith('/ask-connex/8');
+            harness.sessionId = '8';
+            await mounted.render();
+            await act(async () => readiness.resolve(ready));
+            expect(props().activeSession?.id).toBe(8);
+            expect(harness.toast).not.toHaveBeenCalled();
+        } finally {
+            readiness.resolve(ready);
+            await mounted.unmount();
+        }
+    });
+
+    it('recovers a stored terminal turn on the same deep link after pending readiness', async () => {
+        const ready = await getAiCommandCenter();
+        const readiness = Promise.withResolvers<typeof ready>();
+        vi.mocked(getAiCommandCenter).mockReturnValueOnce(readiness.promise);
+        const mounted = await mount(false, '1', { sessionId: 7, turnId: 9, generationHandle: 'generation-9' });
+        try {
+            expect(props().activeSession?.id).toBe(7);
+            expect(harness.getTurn).not.toHaveBeenCalled();
+            harness.getTurn.mockResolvedValue({
+                turnId: 9, sessionId: 7, status: 'timed_out', terminalReason: 'turn_deadline_exceeded', progress: [],
+            });
+            await act(async () => readiness.resolve(ready));
+            expect(harness.getTurn).toHaveBeenCalled();
+            expect(props().turn.phase).toBe('timed_out');
+            expect(props().activeSession?.id).toBe(7);
+        } finally {
+            readiness.resolve(ready);
+            await mounted.unmount();
+        }
+    });
+
+    it('does not resolve the previous workspace session while its dashboard navigation is pending', async () => {
+        const mounted = await mount(false);
+        harness.getSession.mockClear();
+        harness.getSession.mockRejectedValue(new ApiError('Unavailable', 404));
+        await act(async () => {
+            navigateAfterWorkspaceSelection(() => harness.router.replace('/dashboard'));
+            harness.workspace = { activeWorkspaceId: 2, switching: false };
+        });
+        await mounted.render();
+        expect(harness.getSession).not.toHaveBeenCalled();
+        expect(harness.router.replace).toHaveBeenCalledExactlyOnceWith('/dashboard');
+        await mounted.unmount();
+    });
+
+    it('does not follow a route-loaded turn after workspace navigation supersedes the route', async () => {
+        const mounted = await mount(false);
+        let resolveDetail: (value: AiChatSessionDetail) => void = () => { throw new Error('Request not initialized'); };
+        harness.getSession.mockReturnValue(new Promise<AiChatSessionDetail>((resolve) => { resolveDetail = resolve; }));
+        harness.getSession.mockClear();
+        harness.sessionId = '8';
+        await mounted.render();
+        expect(harness.getSession).toHaveBeenCalledOnce();
+        await act(async () => {
+            navigateAfterWorkspaceSelection(() => harness.router.replace('/dashboard'));
+            resolveDetail({ ...detail({ turnId: 10, sessionId: 8, status: 'running', terminalReason: null, progress: [] }),
+                session: { ...session, id: 8 } });
+        });
+        expect(props().turn.turnId).toBeNull();
+        expect(props().working).toBe(false);
+        expect(harness.router.replace).toHaveBeenCalledExactlyOnceWith('/dashboard');
+        await mounted.unmount();
+    });
+
+    it.each(['mission_created', 'mission_state', 'mission_output'] as const)(
+        'keeps an idle session quiet through provider rerenders and resumes discovery on %s', async (kind) => {
+        const mounted = await mount(false);
+        const initialRequests = harness.getMissions.mock.calls.length;
+        expect(initialRequests).toBeGreaterThan(0);
+        for (let index = 0; index < 3; index++) await mounted.render();
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(harness.getMissions).toHaveBeenCalledTimes(initialRequests);
+
+        await act(async () => socket().onMissionFrame?.({ workspaceId: 1, sessionId: 7,
+            runId: 12, stateVersion: '1', kind, coarseState: 'queued' }));
+        expect(harness.getMissions.mock.calls.length).toBeGreaterThan(initialRequests);
+        await flushRealtimeRefresh();
+        const refreshedRequests = harness.getMissions.mock.calls.length;
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(harness.getMissions).toHaveBeenCalledTimes(refreshedRequests);
+        await mounted.unmount();
+    });
+
+    it('withdraws Resume for an expired paused mission within a mixed metadata burst', async () => {
+        harness.getMissions.mockResolvedValue({ items: [mission({
+            state: 'paused', stateVersion: '1', availableActions: ['resume', 'cancel'],
+        })], nextCursor: null });
+        const mounted = await mount(false);
+        try {
+            expect(missionProps().runs[0]?.availableActions).toContain('resume');
+            harness.getMissions.mockClear();
+            harness.getSession.mockClear();
+            harness.getMissions.mockResolvedValue({ items: [mission({
+                state: 'failed', stateVersion: '2', reasonCode: 'expired', availableActions: [],
+            })], nextCursor: null });
+            await act(async () => {
+                for (let seq = 0; seq < 48; seq++) {
+                    socket().onFrame({ workspaceId: 1, sessionId: seq % 2 === 0 ? 7 : 8, turnId: 9,
+                        kind: 'step', seq, tool: null, status: 'running', reason: null });
+                }
+                socket().onMissionFrame?.({ workspaceId: 1, sessionId: 7, runId: 12,
+                    stateVersion: '2', kind: 'mission_state', coarseState: 'failed' });
+            });
+            expect(harness.getMissions).toHaveBeenCalledOnce();
+            expect(missionProps().runs[0]).toMatchObject({ state: 'failed', reasonCode: 'expired', availableActions: [] });
+            expect(harness.getSession).not.toHaveBeenCalled();
+            await flushRealtimeRefresh();
+            expect(harness.getSession).toHaveBeenCalledOnce();
+            await flushRealtimeRefresh();
+            expect(harness.getSession).toHaveBeenCalledOnce();
+        } finally {
+            await mounted.unmount();
+        }
+    });
+
+    it('withdraws mission content during an in-flight coalesced refresh and ignores its stale response', async () => {
+        harness.getMissions.mockResolvedValue({ items: [mission()], nextCursor: null });
+        const mounted = await mount();
+        const suspended = Promise.withResolvers<AiChatSessionDetail>();
+        try {
+            await stream('Withdrawn mission content');
+            harness.getSession.mockClear().mockResolvedValue(detail(null)).mockReturnValueOnce(suspended.promise);
+            await act(async () => {
+                for (const sessionId of [7, 8]) {
+                    socket().onFrame({ workspaceId: 1, sessionId, turnId: 9,
+                        kind: 'step', seq: 0, tool: null, status: 'running', reason: null });
+                }
+            });
+            await flushRealtimeRefresh();
+            expect(harness.getSession).toHaveBeenCalledOnce();
+            expect(props().streamStore.getSnapshot()?.text).toBe('Withdrawn mission content');
+            harness.getMissions.mockResolvedValue({ items: [mission({
+                stateVersion: '4', contentWithheld: true, goal: null, outputAvailable: false, availableActions: [],
+            })], nextCursor: null });
+            await act(async () => socket().onMissionFrame?.({ workspaceId: 1, sessionId: 7, runId: 12,
+                stateVersion: '4', kind: 'mission_state', coarseState: 'done' }));
+            expect(props().streamStore.getSnapshot()).toBeNull();
+            expect(props().messages).toEqual([]);
+            expect(props().continuePrompt).toBeNull();
+            await act(async () => suspended.resolve(detail({
+                turnId: 9, sessionId: 7, status: 'running', terminalReason: null, progress: [],
+            })));
+            await stream('Late withdrawn mission content');
+            expect(props().streamStore.getSnapshot()).toBeNull();
+        } finally {
+            suspended.resolve(detail(null));
+            await mounted.unmount();
+        }
+    });
+
+    it('discards buffered and rendered text on a privacy frame before a suspended transcript refresh', async () => {
+        const mounted = await mount();
+        await act(async () => props().scope.onEditorOpenChange(true));
+        expect(props().scope.editorOpen).toBe(true);
+        await stream('Withdrawn text');
+        expect(props().streamStore.getSnapshot()?.text).toBe('Withdrawn text');
+        await stream('Buffered withdrawn text', 50);
+        await act(async () => socket().onFrame({ workspaceId: 1, sessionId: 8, turnId: 10,
+            kind: 'state', seq: 0, tool: null, status: 'cancelled', reason: 'privacy_invalidated' }));
+        expect(props().streamStore.getSnapshot()?.text).toBe('Withdrawn text');
+        harness.getSession.mockReturnValue(new Promise(() => {}));
+
+        await act(async () => socket().onFrame({ workspaceId: 1, sessionId: 7, turnId: 9,
+            kind: 'state', seq: 0, tool: null, status: 'cancelled', reason: 'privacy_invalidated' }));
+
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        expect(props().streaming).toBe(false);
+        expect(props().fileAttachments).toEqual([]);
+        expect(props().scope.editorOpen).toBe(false);
+        expect(props().scope.filterCount).toBe(0);
+        expect(props().unavailable?.body).toBe('privacyUnavailable');
+        expect(props().messages).toEqual([]);
+        expect(props().continuePrompt).toBeNull();
+        await stream('Late withdrawn text');
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        await mounted.unmount();
+    });
+
+    it.each(['1', '9007199254740993'])(
+        'withdraws idle content using original decimal authority %s after session deletion', async (generation) => {
+        const mounted = await mount(false, generation);
+        await act(async () => socket().onPrivacyFrame?.({
+            workspaceId: 1, kind: 'privacy_invalidated', cutoffGeneration: generation,
+        }));
+        expect(props().activeSession).toBeNull();
+        expect(props().unavailable?.body).toBe('privacyUnavailable');
+        await mounted.unmount();
+    });
+
+    it.each(['frame', 'privacy_invalidated', 403, 404] as const)(
+        'allows a transcript reload after v1 withdrawal observed through %s', async (evidence) => {
+        const mounted = await mount();
+        try {
+            await stream('Withdrawn v1 content');
+            const requests = harness.getSession.mock.calls.length;
+            if (evidence === 'frame') {
+                await act(async () => socket().onFrame({ workspaceId: 1, sessionId: 7, turnId: 9,
+                    kind: 'state', seq: 0, tool: null, status: 'cancelled', reason: 'privacy_invalidated' }));
+            } else {
+                if (evidence === 'privacy_invalidated') {
+                    harness.getTurn.mockResolvedValue({ turnId: 9, sessionId: 7, status: 'cancelled',
+                        terminalReason: evidence, partialContent: '', progress: [] });
+                } else {
+                    harness.getTurn.mockRejectedValue(new ApiError('Turn removed', evidence));
+                }
+                await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+            }
+
+            expect(props().activeSession).toBeNull();
+            expect(props().unavailable?.body).toBe('privacyUnavailable');
+            expect(props().messages).toEqual([]);
+            expect(props().streamStore.getSnapshot()).toBeNull();
+            await stream('Late v1 content');
+            await flushRealtimeRefresh();
+            expect(harness.getSession).toHaveBeenCalledTimes(requests);
+            expect(props().streamStore.getSnapshot()).toBeNull();
+
+            harness.getSessions.mockResolvedValue({ items: [session] });
+            harness.getSession.mockResolvedValue({ ...detail(null), messages: { items: [{
+                id: 11, sessionId: 7, seq: 1, authorKind: 'user', authorUserId: 1,
+                authorDisplayName: 'Member', content: 'Preserved ordinary v1 input',
+                createdAt: '2026-10-15T10:00:00Z',
+            }], total: 1 } });
+            if (typeof evidence === 'number') {
+                await act(async () => socket().onFrame({ workspaceId: 1, sessionId: 8, turnId: 10,
+                    kind: 'step', seq: 0, tool: null, status: 'running', reason: null }));
+                await flushRealtimeRefresh();
+            }
+            await act(async () => {
+                if (typeof evidence === 'number') props().onSelectSession(session);
+                else props().onRetry();
+            });
+
+            expect(harness.getSession).toHaveBeenCalledTimes(requests + 1);
+            expect(props().activeSession?.id).toBe(7);
+            expect(props().sessions.map((item) => item.id)).toContain(7);
+            expect(props().messages.map((item) => item.content)).toEqual(['Preserved ordinary v1 input']);
+            expect(props().unavailable).toBeNull();
+        } finally {
+            await mounted.unmount();
+        }
+    });
+
+    it('keeps a v2 retired session unavailable when a reload returns stale session lists', async () => {
+        const mounted = await mount(false);
+        try {
+            await act(async () => socket().onPrivacyFrame?.({
+                workspaceId: 1, kind: 'privacy_invalidated', cutoffGeneration: '1',
+            }));
+            const requests = harness.getSession.mock.calls.length;
+            harness.getSessions.mockResolvedValue({ items: [session] });
+            harness.getSession.mockResolvedValue(detail(null));
+            await act(async () => props().onRetry());
+
+            expect(harness.getSession).toHaveBeenCalledTimes(requests);
+            expect(props().activeSession).toBeNull();
+            expect(props().sessions).toEqual([]);
+            expect(props().unavailable?.body).toBe('privacyUnavailable');
+        } finally {
+            await mounted.unmount();
+        }
+    });
+
+    it('keeps a newly admitted current chat usable after an older workspace withdrawal', async () => {
+        const mounted = await mount(false, '9007199254740993');
+        await act(async () => socket().onPrivacyFrame?.({
+            workspaceId: 1, kind: 'privacy_invalidated', cutoffGeneration: '9007199254740992',
+        }));
+        expect(props().activeSession?.id).toBe(7);
+        expect(props().unavailable).toBeNull();
+        await mounted.unmount();
+    });
+
+    it('cannot restore a cached scope preview when its callback races privacy withdrawal', async () => {
+        const mounted = await mount(false);
+        const pending = Promise.withResolvers<Awaited<ReturnType<typeof import('@/app/lib/api').previewAiChatScope>>>();
+        harness.preview.mockReturnValueOnce(pending.promise);
+        const draft: AskConnexScopeDraft = { ...props().scope.draft, periodMode: 'days', periodDays: 30 };
+        await act(async () => {
+            props().scope.onDraftChange(draft);
+        });
+        await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+        expect(harness.preview).toHaveBeenCalledOnce();
+        const signal = harness.preview.mock.calls[0]?.[1]?.signal;
+        await act(async () => {
+            socket().onPrivacyFrame?.({ workspaceId: 1, kind: 'privacy_invalidated', cutoffGeneration: '1' });
+            pending.reject(new ApiError('Old preview response', 429));
+            await pending.promise.catch(() => {});
+            await Promise.resolve();
+            expect(signal?.aborted).toBe(false);
+        });
+        expect(props().scope.filterCount).toBe(0);
+        await act(async () => props().scope.onDraftChange(draft));
+        expect(props().scope.preview.status).toBe('loading');
+        await mounted.unmount();
+    });
+
+    it('withdraws a purged partial from canonical polling without a realtime signal', async () => {
+        const mounted = await mount();
+        await stream('Withdrawn text');
+        expect(props().streamStore.getSnapshot()?.text).toBe('Withdrawn text');
+        harness.getTurn.mockResolvedValue({ turnId: 9, sessionId: 7, status: 'cancelled',
+            terminalReason: 'privacy_invalidated', partialContent: '', progress: [] });
+        harness.getSession.mockResolvedValue(detail(null));
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        expect(props().streaming).toBe(false);
+        expect(props().continuePrompt).toBeNull();
+        await stream('Late withdrawn text');
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        await mounted.unmount();
+    });
+
+    it('replaces an empty settled partial when a reset frame was missed', async () => {
+        const mounted = await mount();
+        await stream('Withdrawn text');
+        harness.getTurn.mockResolvedValue({ turnId: 9, sessionId: 7, status: 'failed',
+            terminalReason: 'malformed_output', partialContent: '', progress: [] });
+        harness.getSession.mockResolvedValue(detail(null));
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(1_000);
+            await vi.advanceTimersToNextTimerAsync();
+        });
+
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        expect(props().streaming).toBe(false);
+        await stream('Late withdrawn text');
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        await mounted.unmount();
+    });
+
+    it.each([403, 404])('revalidates an idle transcript and session list on the first connection after a missed cutoff (%s)', async (status) => {
+        harness.getSessions.mockResolvedValue({ items: [session] });
+        const mounted = await mount(false);
+        try {
+            expect(props().sessions).toEqual([session]);
+            const sessionReads = harness.getSession.mock.calls.length;
+            const listReads = harness.getSessions.mock.calls.length;
+            harness.getSession.mockRejectedValue(new ApiError('Session unavailable', status));
+            harness.getSessions.mockResolvedValue({ items: [] });
+
+            await act(async () => socket().onStatusChange?.('connected'));
+            await flushRealtimeRefresh();
+
+            expect(harness.getSession).toHaveBeenCalledTimes(sessionReads + 1);
+            expect(harness.getSessions).toHaveBeenCalledTimes(listReads + 1);
+            expect(props().activeSession).toBeNull();
+            expect(props().sessions).toEqual([]);
+            expect(props().messages).toEqual([]);
+            expect(props().streamStore.getSnapshot()).toBeNull();
+        } finally {
+            await mounted.unmount();
+        }
+    });
+
+    it('clears a retained stream on reconnect when cleanup removed its settled turn', async () => {
+        const mounted = await mount();
+        await stream('Retained partial');
+        harness.getTurn.mockResolvedValue({ turnId: 9, sessionId: 7, status: 'cancelled',
+            terminalReason: null, partialContent: 'Retained partial', progress: [] });
+        harness.getSession.mockResolvedValue(detail(null));
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+        expect(props().streamStore.getSnapshot()?.text).toBe('Retained partial');
+
+        harness.getTurn.mockRejectedValue(new ApiError('Turn removed', 404));
+        await act(async () => {
+            socket().onStatusChange?.('connected');
+            socket().onStatusChange?.('disconnected');
+            socket().onStatusChange?.('connected');
+        });
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        expect(props().continuePrompt).toBeNull();
+        await stream('Late withdrawn text');
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        await mounted.unmount();
+    });
+
+    it('withdraws an ordinary retained tail when reconnect refresh observes physical purge', async () => {
+        harness.getMissions.mockResolvedValue({ items: [mission()], nextCursor: null });
+        const mounted = await mount();
+        await stream('Ordinary retained partial');
+        harness.getTurn.mockResolvedValue({ turnId: 9, sessionId: 7, status: 'cancelled',
+            terminalReason: null, partialContent: 'Ordinary retained partial', progress: [] });
+        harness.getSession.mockResolvedValue(detail(null));
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+        expect(props().streamStore.getSnapshot()?.text).toBe('Ordinary retained partial');
+
+        harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
+        const requests = harness.getMissions.mock.calls.length;
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(harness.getMissions).toHaveBeenCalledTimes(requests);
+        await act(async () => {
+            socket().onStatusChange?.('connected');
+            socket().onStatusChange?.('disconnected');
+            socket().onStatusChange?.('connected');
+        });
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        expect(props().continuePrompt).toBeNull();
+        await stream('Late withdrawn text');
+        expect(props().streamStore.getSnapshot()).toBeNull();
+        await mounted.unmount();
+    });
+});

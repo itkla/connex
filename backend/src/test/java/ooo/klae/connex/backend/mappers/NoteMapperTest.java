@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -138,6 +140,53 @@ class NoteMapperTest extends AbstractMapperTest {
         assertEquals(List.of(visibleNote.getId()), notes.stream().map(Note::getId).toList());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "person,archived", "person,suspended", "person,ceased", "person,inaccessible",
+            "deal,archived", "deal,suspended", "deal,ceased", "deal,inaccessible"})
+    void assistantPersonAndDealNotesFilterRestrictedLinksBeforeTheirLimit(String kind, String restriction) {
+        User user = newUser();
+        Company company = newCompany();
+        Person visible = newPerson(company);
+        Person restricted = newPerson(company);
+        switch (restriction) {
+            case "archived" -> jdbcTemplate.update("UPDATE person SET archived_at = NOW() WHERE id = ?", restricted.getId());
+            case "suspended" -> personMapper.updateProcessingRestrictions(workspace.getId(), restricted.getId(), true, false);
+            case "ceased" -> personMapper.updateProcessingRestrictions(workspace.getId(), restricted.getId(), false, true);
+            case "inaccessible" -> jdbcTemplate.update("UPDATE person SET workspace_id = ? WHERE id = ?",
+                    newWorkspace().getId(), restricted.getId());
+            default -> throw new IllegalArgumentException("Unknown fixture restriction");
+        }
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), company);
+        Note eligible = build("eligible", user, visible, deal);
+        eligible.setVisibility("workspace");
+        noteMapper.insert(eligible);
+        jdbcTemplate.update("UPDATE note SET updated_at = '2000-01-01' WHERE id = ?", eligible.getId());
+        jdbcTemplate.update("""
+                INSERT INTO note (workspace_id, content, author_id, person_id, deal_id, visibility)
+                SELECT ?, 'restricted linked note', ?, ?, ?, 'workspace' FROM
+                  (SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+                   UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) fixture
+                """, workspace.getId(), user.getId(), visible.getId(), deal.getId());
+        jdbcTemplate.update("""
+                INSERT INTO entity_reference (workspace_id, source_type, source_id, ref_type, ref_id, label)
+                SELECT workspace_id, 'note', id, 'person', ?, ? FROM note
+                WHERE workspace_id = ? AND person_id = ? AND deal_id = ? AND id <> ?
+                """, restricted.getId(), restricted.getName(), workspace.getId(), visible.getId(), deal.getId(), eligible.getId());
+        List<Note> unfiltered = "person".equals(kind)
+                ? noteMapper.getVisibleNotesByPersonId(workspace.getId(), visible.getId(), user.getId(), 10, 0)
+                : noteMapper.getVisibleNotesByDealId(workspace.getId(), deal.getId(), user.getId(), 10, 0);
+        assertEquals(10, unfiltered.size());
+        assertFalse(unfiltered.stream().anyMatch(note -> note.getId() == eligible.getId()));
+        List<Note> notes = "person".equals(kind)
+                ? noteMapper.getAiAssistantVisibleNotesByPersonId(workspace.getId(), visible.getId(), user.getId(),
+                        List.of(workspace.getId()), 10, false)
+                : noteMapper.getAiAssistantVisibleNotesByDealId(workspace.getId(), deal.getId(), user.getId(),
+                        List.of(workspace.getId()), 10, false);
+        assertEquals(List.of(eligible.getId()), notes.stream().map(Note::getId).toList());
+    }
+
     @Test
     void getNotesByPersonIdsBatchesOnlyRequestedWorkspaceContacts() {
         User user = newUser();
@@ -172,11 +221,11 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(otherPrivate);
 
         List<Note> page = noteMapper.getVisibleNotesPage(
-            pageWorkspace.getId(), current.getId(), null, List.of(), "updated", "desc", 10, 0);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), current.getId(), null, List.of(), "updated", "desc", 10, 0);
 
         assertEquals(2, page.size());
         assertEquals(2, noteMapper.countVisibleNotes(
-            pageWorkspace.getId(), current.getId(), null, List.of()));
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), current.getId(), null, List.of()));
         assertTrue(page.stream().anyMatch(note -> note.getId() == workspaceNote.getId()));
         assertTrue(page.stream().anyMatch(note -> note.getId() == ownPrivate.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == otherPrivate.getId()));
@@ -200,10 +249,10 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(foreign);
 
         List<Note> page = noteMapper.getWorkspaceNotesPage(
-            pageWorkspace.getId(), null, List.of(), "updated", "desc", 1, 0);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, List.of(), "updated", "desc", 1, 0);
 
         assertEquals(1, page.size());
-        assertEquals(2, noteMapper.countWorkspaceNotes(pageWorkspace.getId(), null, List.of()));
+        assertEquals(2, noteMapper.countWorkspaceNotes(pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, List.of()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == privateNote.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == foreign.getId()));
     }
@@ -247,17 +296,17 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(numericEntityFrozenLabel);
 
         List<Note> page = noteMapper.getVisibleNotesPage(
-            pageWorkspace.getId(), user.getId(), "%Needle%", List.of(), "title", "asc", 2, 1);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), user.getId(), "%Needle%", List.of(), "title", "asc", 2, 1);
 
         assertEquals(List.of(zeta.getId(), body.getId()), page.stream().map(Note::getId).toList());
         assertEquals(5, noteMapper.countVisibleNotes(
-            pageWorkspace.getId(), user.getId(), "%Needle%", List.of()));
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), user.getId(), "%Needle%", List.of()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == frozenLabel.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == escapedFrozenLabel.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == namedEntityFrozenLabel.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == numericEntityFrozenLabel.getId()));
         List<Integer> matchingIds = noteMapper.getVisibleNotesPage(
-            pageWorkspace.getId(), user.getId(), "%Needle%", List.of(), "title", "asc", 10, 0)
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), user.getId(), "%Needle%", List.of(), "title", "asc", 10, 0)
             .stream().map(Note::getId).toList();
         assertTrue(matchingIds.contains(richBody.getId()));
         assertTrue(matchingIds.contains(mixedBody.getId()));
@@ -278,6 +327,54 @@ class NoteMapperTest extends AbstractMapperTest {
 
         Note found = noteMapper.getNoteById(workspace.getId(), note.getId());
         assertEquals("after", found.getContent());
+    }
+
+    @Test
+    void update_omittedLinksSurviveAndExplicitNullClearsThem() {
+        Person person = newPerson(newCompany());
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        Note original = build("before", newUser(), person, deal);
+        noteMapper.insert(original);
+        Note update = new Note();
+        update.setId(original.getId());
+        update.setWorkspaceId(workspace.getId());
+        update.setAuthor(original.getAuthor());
+        update.setContent("after");
+
+        assertEquals(1, noteMapper.update(update));
+        Note found = noteMapper.getNoteById(workspace.getId(), original.getId());
+        assertEquals(person.getId(), found.getPerson().getId());
+        assertEquals(deal.getId(), found.getDeal().getId());
+
+        update.setPerson(null);
+        assertEquals(1, noteMapper.update(update));
+        found = noteMapper.getNoteById(workspace.getId(), original.getId());
+        assertNull(found.getPerson());
+        assertEquals(deal.getId(), found.getDeal().getId());
+
+        update.setDeal(null);
+        assertEquals(1, noteMapper.update(update));
+        found = noteMapper.getNoteById(workspace.getId(), original.getId());
+        assertNull(found.getPerson());
+        assertNull(found.getDeal());
+    }
+
+    @Test
+    void update_cannotChangeAnExistingNoteInAnotherWorkspace() {
+        Note original = build("before", newUser(), null, null);
+        noteMapper.insert(original);
+        Workspace other = newWorkspace();
+        Note update = new Note();
+        update.setId(original.getId());
+        update.setWorkspaceId(other.getId());
+        update.setAuthor(original.getAuthor());
+        update.setContent("unwanted");
+        update.setPerson(null);
+        update.setDeal(null);
+
+        assertEquals(0, noteMapper.update(update));
+        assertEquals("before", noteMapper.getNoteById(workspace.getId(), original.getId()).getContent());
     }
 
     /**

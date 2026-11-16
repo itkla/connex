@@ -1,7 +1,11 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,9 +17,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WarmthFilterResolver;
@@ -31,7 +39,9 @@ class ExportControllerTest {
     @Test
     void segmentDealExportPreservesTheValidatedBodyScope() {
         ExportController controller = new ExportController(
-            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService,
+                new CurrencyFilterService(
+                    mock(DealMapper.class), workspaceService));
         SegmentDefinition definition = new SegmentDefinition();
         definition.setMatch("all");
         definition.setConditions(List.of());
@@ -74,7 +84,9 @@ class ExportControllerTest {
     @Test
     void nativeDealExportPreservesTheContactFilter() {
         ExportController controller = new ExportController(
-            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService,
+                new CurrencyFilterService(
+                    mock(DealMapper.class), workspaceService));
         MemberScope memberScope = MemberScope.fromRequest(null, null, 11);
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         when(memberScopeResolver.resolve(null, null, 11)).thenReturn(memberScope);
@@ -93,11 +105,13 @@ class ExportControllerTest {
     @Test
     void productExportNormalizesSearchAndReturnsBomPrefixedCsv() {
         ExportController controller = new ExportController(
-            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
-        when(exportService.exportProducts("%100\\%\\_ready%"))
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService,
+                new CurrencyFilterService(
+                    mock(DealMapper.class), workspaceService));
+        when(exportService.exportProducts("%100\\%\\_ready%", ProductFacetFilter.none()))
             .thenReturn("id,name\r\n7,Product\r\n");
 
-        var response = controller.exportProducts("  100%_ready  ");
+        var response = controller.exportProducts("  100%_ready  ", null, null, null);
 
         assertEquals("attachment; filename=\"products.csv\"",
             response.getHeaders().getFirst("Content-Disposition"));
@@ -109,6 +123,38 @@ class ExportControllerTest {
         expected[2] = (byte) 0xBF;
         System.arraycopy(csv, 0, expected, 3, csv.length);
         assertArrayEquals(expected, response.getBody());
-        verify(exportService).exportProducts("%100\\%\\_ready%");
+        verify(exportService).exportProducts("%100\\%\\_ready%", ProductFacetFilter.none());
+    }
+
+    @Test
+    void productExportForwardsTheBrowserFacetsAsOneCanonicalFilter() {
+        ExportController controller = new ExportController(
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService,
+                new CurrencyFilterService(
+                    mock(DealMapper.class), workspaceService));
+        ProductFacetFilter facets = ProductFacetFilter.fromRequest(
+            List.of("recurring"), List.of("true", "false"), List.of("__empty__"));
+        when(exportService.exportProducts(null, facets)).thenReturn("id\r\n");
+
+        controller.exportProducts(
+            " ", List.of("recurring"), List.of("true", "false"), List.of("__empty__"));
+
+        verify(exportService).exportProducts(null, facets);
+    }
+
+    @Test
+    void productExportRejectsAFacetValueTheBrowserCannotSend() {
+        ExportController controller = new ExportController(
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService,
+                new CurrencyFilterService(
+                    mock(DealMapper.class), workspaceService));
+
+        assertThrows(BadRequestException.class,
+            () -> controller.exportProducts(null, List.of("weekly"), null, null));
+        assertThrows(BadRequestException.class,
+            () -> controller.exportProducts(null, null, List.of("TRUE"), null));
+        assertThrows(BadRequestException.class,
+            () -> controller.exportProducts(null, null, null, List.of("none")));
+        verify(exportService, never()).exportProducts(any(), any());
     }
 }

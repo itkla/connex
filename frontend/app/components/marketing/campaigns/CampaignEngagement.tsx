@@ -1,5 +1,6 @@
 "use client";
 
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import CountUp from "@/app/components/dashboard/CountUp";
@@ -120,7 +121,7 @@ function RateTiles({
     notMeasuredHint: string;
     locale: string;
 }) {
-    const percent = new Intl.NumberFormat(locale, {
+    const percent = getNumberFormatter(locale, {
         style: "percent",
         maximumFractionDigits: 1,
     });
@@ -203,7 +204,7 @@ export default function CampaignEngagement({
 
     const receipts = engagement.deliveryReceiptsAvailable;
     const tiles: CountTile[] = [
-        { key: "recipients", label: t("recipients"), value: engagement.totalRecipients, unavailable: false },
+        { key: "recipients", label: t("recipients"), value: engagement.preparedRecipients, unavailable: false },
         { key: "dispatched", label: t("dispatched"), value: engagement.dispatched, unavailable: false },
         { key: "delivered", label: t("delivered"), value: engagement.delivered, unavailable: !receipts },
         { key: "bounced", label: t("bounced"), value: engagement.bounced, unavailable: !receipts },
@@ -251,6 +252,7 @@ export default function CampaignEngagement({
                     }
                     onDrill={canReadRecipients ? setOpenCounter : null}
                 />
+                <p className="text-xs text-muted-foreground">{t("preparedRecipientsHint")}</p>
 
                 <RateTiles
                     rates={rates}
@@ -268,13 +270,21 @@ export default function CampaignEngagement({
                             {engagement.channels.map((channel) => (
                                 <span
                                     key={channel.channel}
-                                    className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground ring-1 ring-inset ring-border"
+                                    className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-xl bg-muted px-2.5 py-1 text-xs text-foreground ring-1 ring-inset ring-border"
                                 >
                                     <span className="font-medium">{channelLabel(channel.channel)}</span>
                                     <span className="tabular-nums text-muted-foreground">
-                                        {t("deliveries", {
-                                            count: channel.deliveries.toLocaleString(locale),
+                                        {t("channelPrepared", {
+                                            count: channel.preparedRecipients.toLocaleString(locale),
                                         })}
+                                    </span>
+                                    <span className="tabular-nums text-muted-foreground">
+                                        {t("channelSent", { count: channel.dispatched.toLocaleString(locale) })}
+                                    </span>
+                                    <span className="tabular-nums text-muted-foreground">
+                                        {channel.deliveryReceiptsAvailable
+                                            ? t("deliveries", { count: channel.delivered.toLocaleString(locale) })
+                                            : t("channelDeliveryNotMeasured")}
                                     </span>
                                 </span>
                             ))}
@@ -330,7 +340,7 @@ export default function CampaignEngagement({
                                     <div className="grid grid-cols-3 gap-3 sm:grid-cols-6 sm:gap-4">
                                         <CampaignCounter
                                             label={t("recipients")}
-                                            value={send.totalRecipients.toLocaleString(locale)}
+                                            value={send.preparedRecipients.toLocaleString(locale)}
                                         />
                                         <CampaignCounter
                                             label={t("dispatched")}

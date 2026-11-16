@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.mappers;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+
 import ooo.klae.connex.backend.ai.assistant.AiAssistantScopeActivity;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantUpcomingMeeting;
 import ooo.klae.connex.backend.beans.Activity;
@@ -21,6 +23,15 @@ import java.util.List;
  */
 
 public interface ActivityMapper {
+    List<Activity> getListPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("filter") ActivityListFilter filter,
+        @Param("limit") int limit, @Param("offset") int offset);
+    long countList(
+        @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
+        @Param("filter") ActivityListFilter filter);
     List<Activity> getAllActivities(int workspaceId);
     List<Activity> getActivitiesPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
     List<Activity> getActivitiesFilteredPage(

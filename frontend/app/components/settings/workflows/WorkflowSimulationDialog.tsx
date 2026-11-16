@@ -1,5 +1,6 @@
 "use client";
 
+import type { ServerPickerSearch } from '@/lib/server-picker-search';
 import { useState, type ReactNode } from "react";
 import { BeakerIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
@@ -23,6 +24,7 @@ import {
 export default function WorkflowSimulationDialog({
     open,
     records,
+    serverSearch,
     loading,
     supported,
     result,
@@ -34,6 +36,7 @@ export default function WorkflowSimulationDialog({
 }: {
     open: boolean;
     records: RecordSelectOption[];
+    serverSearch: ServerPickerSearch;
     loading: boolean;
     supported: boolean;
     result: WorkflowSimulation | null;
@@ -76,6 +79,7 @@ export default function WorkflowSimulationDialog({
                                 <RecordSelect
                                     id="workflow-simulation-record"
                                     options={records}
+                                    serverSearch={serverSearch}
                                     value={recordId}
                                     onValueChange={(value) => {
                                         setRecordId(value);

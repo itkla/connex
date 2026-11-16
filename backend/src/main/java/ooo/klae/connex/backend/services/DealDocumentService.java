@@ -1,9 +1,15 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.text.NumberFormat;
 import java.time.LocalDateTime;
+import java.util.Currency;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -36,10 +42,12 @@ import ooo.klae.connex.backend.dto.DealLineItemsResponse;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
 import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
+import ooo.klae.connex.backend.dto.GeneratedDocumentTargetDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.InvalidApprovalCurrencyException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -82,6 +90,8 @@ public class DealDocumentService {
     private final ObjectMapper objectMapper;
     private final ApprovalMutationRetryService approvalMutationRetryService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
     private static final int MAX_VERSION_ATTEMPTS = 5;
     private static final int MAX_BODY_DEPTH = 50;
@@ -97,6 +107,32 @@ public class DealDocumentService {
 
     /** Every document type a template can produce. */
     public static final Set<String> INDEX_TYPES = Set.of("quote", "proposal", "order_form", "contract");
+
+    /**
+     * Resolves up to fifty ids under the same parent-deal gate as {@link #getOne}.
+     * Missing documents and unreadable parents are omitted without revealing which check refused them.
+     *
+     * @param ids positive document ids, bounded before deduplication
+     * @return only minimal references whose parent deal is readable in the resolved workspace
+     */
+    public List<GeneratedDocumentTargetDto> getTargets(List<Integer> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > 50
+                || ids.stream().anyMatch(id -> id == null || id < 1)) {
+            throw new BadRequestException("Between one and fifty positive document ids are required");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Map<Integer, Boolean> readableDeals = new HashMap<>();
+        return documentMapper.getTargets(workspaceId, ids.stream().distinct().toList()).stream()
+            .filter(target -> readableDeals.computeIfAbsent(target.dealId(), dealId -> {
+                try {
+                    requireDeal(workspaceId, dealId);
+                    return true;
+                } catch (ResourceNotFoundException exception) {
+                    return false;
+                }
+            }))
+            .toList();
+    }
 
     /**
      * One bounded page of generated documents across every deal in the workspace.
@@ -166,6 +202,25 @@ public class DealDocumentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto generate(int dealId, int templateId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> generateWithinVisibilityScope(dealId, templateId, resolvedVisibilityScope));
+    }
+
+    private DealDocumentDto generateWithinVisibilityScope(int dealId, int templateId, RecordVisibilityScope operationVisibilityScope) {
+        return generateWithinVisibilityScope(dealId, templateId, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public DealDocumentDto generate(int dealId, int templateId, MutationAdmission admission) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> generateWithinVisibilityScope(dealId, templateId, admission, resolvedVisibilityScope));
+    }
+
+    private DealDocumentDto generateWithinVisibilityScope(int dealId, int templateId, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         int actorId = workspaceService.getCurrentUserId();
@@ -180,7 +235,7 @@ public class DealDocumentService {
         }
         String currency = deal.getCurrency() == null || deal.getCurrency().isBlank() ? "USD" : deal.getCurrency();
 
-        Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, deal.getCompanyId());
+        Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, operationVisibilityScope.workspaceIdsJson(), deal.getCompanyId());
         User owner = deal.getOwnerId() == null ? null : userMapper.getUserById(deal.getOwnerId());
         Workspace workspace = workspaceService.getCurrentWorkspace();
         DealLineItemsResponse lines = lineItemService.snapshotForDocument(workspaceId, deal);
@@ -202,7 +257,7 @@ public class DealDocumentService {
         tokens.put("owner.name", owner == null ? "" : nz(owner.getDisplayName()));
         tokens.put("date", LocalDateTime.now().toLocalDate().toString());
         tokens.put("total", totals.grandTotal() == null
-            ? "" : currency + " " + totals.grandTotal().toPlainString());
+            ? "" : formatMoney(totals.grandTotal(), currency, template.getLocale()));
 
         DocumentContent.Sections sections = new DocumentContent.Sections(
             resolve(template.getTitle(), tokens),
@@ -234,6 +289,9 @@ public class DealDocumentService {
         document.setContent(objectMapper.writeValueAsString(content));
         document.setCurrency(currency);
         document.setCreatedBy(workspaceService.getCurrentUserId());
+        Integer maxVersion = documentMapper.maxVersion(workspaceId, dealId);
+        document.setVersion(maxVersion == null ? 1 : maxVersion + 1);
+        admission.beforeMutation();
         insertNextVersion(workspaceId, dealId, document);
 
         auditService.record("deal_document.generate", "deal", dealId, deal.getName(),
@@ -392,8 +450,10 @@ public class DealDocumentService {
      */
     private void insertNextVersion(int workspaceId, int dealId, DealDocument document) {
         for (int attempt = 0; attempt < MAX_VERSION_ATTEMPTS; attempt++) {
-            Integer max = documentMapper.maxVersion(workspaceId, dealId);
-            document.setVersion(max == null ? 1 : max + 1);
+            if (attempt > 0) {
+                Integer max = documentMapper.maxVersion(workspaceId, dealId);
+                document.setVersion(max == null ? 1 : max + 1);
+            }
             try {
                 documentMapper.insert(document);
                 return;
@@ -403,6 +463,26 @@ public class DealDocumentService {
                 }
             }
         }
+    }
+
+    /** Matches the document renderer's currency precision, rounding and letter-symbol spacing. */
+    private String formatMoney(BigDecimal amount, String currency, String localeTag) {
+        Currency unit;
+        try {
+            unit = Currency.getInstance(currency.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unsupportedCurrency) {
+            return currency + " " + amount.toPlainString();
+        }
+        Locale locale = localeTag == null || localeTag.isBlank()
+            ? Locale.ENGLISH : Locale.forLanguageTag(localeTag);
+        NumberFormat format = NumberFormat.getCurrencyInstance(locale);
+        format.setCurrency(unit);
+        int fractionDigits = unit.getDefaultFractionDigits();
+        if (fractionDigits < 0) fractionDigits = 2;
+        format.setMinimumFractionDigits(fractionDigits);
+        format.setMaximumFractionDigits(fractionDigits);
+        format.setRoundingMode(RoundingMode.HALF_UP);
+        return format.format(amount).replaceAll("(?<=\\p{L})(?=\\p{Nd})", "\u00a0");
     }
 
     private String resolve(String template, Map<String, String> tokens) {
@@ -512,12 +592,19 @@ public class DealDocumentService {
     private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies,
             DocumentApprovalDto latestApproval) {
         DocumentContent content = parseContent(d);
-        boolean requiresApproval = !Set.of("final", "sent", "signed", "superseded", "approved")
-            .contains(d.getStatus())
-            && policyService.firstMatch(policies, d, content) != null;
+        boolean requiresApproval = false;
+        String approvalConfigurationError = null;
+        if (!Set.of("final", "sent", "signed", "superseded", "approved").contains(d.getStatus())) {
+            try {
+                requiresApproval = policyService.firstMatch(policies, d, content) != null;
+            } catch (InvalidApprovalCurrencyException exception) {
+                requiresApproval = true;
+                approvalConfigurationError = InvalidApprovalCurrencyException.CODE;
+            }
+        }
         return new DealDocumentDto(d.getId(), d.getDealId(), d.getTemplateId(), d.getType(), d.getLocale(),
             d.getStatus(), d.getVersion(), d.getTitle(), d.getCurrency(), d.getGeneratedAt(), d.getCreatedBy(), content,
-            requiresApproval, latestApproval);
+            requiresApproval, latestApproval, approvalConfigurationError);
     }
 
     private DocumentContent parseContent(DealDocument d) {

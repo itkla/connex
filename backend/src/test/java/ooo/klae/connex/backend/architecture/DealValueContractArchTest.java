@@ -75,13 +75,15 @@ class DealValueContractArchTest {
         try (Stream<Path> files = Files.walk(sourceRoot)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
                 String name = file.getFileName().toString();
-                if ("DealMapper.java".equals(name) || "DealValueService.java".equals(name)) {
+                if ("DealMapper.java".equals(name) || "DealValueMapper.java".equals(name)
+                        || "DealValueService.java".equals(name)) {
                     continue;
                 }
                 String source = Files.readString(file);
                 if (source.contains("updateValueAndSource(")
                         || source.contains("updateValueSource(")
-                        || source.contains("updateActualValue(")) {
+                        || source.contains("updateActualValue(")
+                        || source.contains("setPriorManualValue(")) {
                     violations.add(sourceRoot.relativize(file).toString());
                 }
             }

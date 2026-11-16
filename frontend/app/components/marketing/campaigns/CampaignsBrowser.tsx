@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { ChevronRightIcon, MegaphoneIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import Rise from "@/app/components/motion/Rise";
@@ -26,6 +26,7 @@ export default function CampaignsBrowser({
     campaigns: Campaign[];
     canCreate: boolean;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("CampaignsPage");
     const locale = useLocale();
     const [open, setOpen] = useState(false);
@@ -52,7 +53,7 @@ export default function CampaignsBrowser({
 
                 {campaigns.length === 0 ? (
                     <Rise delay={0.06} className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center sm:py-20">
-                        <span className="flex size-12 items-center justify-center rounded-full bg-brand-light text-brand-dark">
+                        <span className="flex size-12 items-center justify-center rounded-full bg-brand-light text-brand-text">
                             <MegaphoneIcon className="size-6" />
                         </span>
                         <h2 className="text-lg font-semibold">{t("empty")}</h2>
@@ -83,7 +84,7 @@ export default function CampaignsBrowser({
                                         : null;
                                 const window =
                                     campaign.startAt || campaign.endAt
-                                        ? `${formatShortDate(campaign.startAt ?? undefined, locale)} – ${formatShortDate(campaign.endAt ?? undefined, locale)}`
+                                        ? `${formatShortDate(campaign.startAt ?? undefined, locale, timeZone)} – ${formatShortDate(campaign.endAt ?? undefined, locale, timeZone)}`
                                         : null;
                                 return (
                                     <li key={campaign.id}>
@@ -92,7 +93,7 @@ export default function CampaignsBrowser({
                                             className="group flex items-center gap-3 px-4 py-3.5 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 sm:px-5"
                                         >
                                             <div className="min-w-0 flex-1">
-                                                <p className="truncate font-medium text-foreground transition-colors group-hover:text-brand-hover">
+                                                <p className="truncate font-medium text-foreground transition-colors group-hover:text-brand-text">
                                                     {campaign.name}
                                                 </p>
                                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">

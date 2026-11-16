@@ -121,13 +121,13 @@ export default function BulkAssignOwnerDialog({ open, onOpenChange, count, membe
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t('noMembersFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noMembersFound')}</ComboboxEmpty>
-                                        {members.map((member) => (
+                                        {(member: (typeof members)[number]) => (
                                             <ComboboxItem key={member.id} value={member}>
                                                 {member.displayName}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

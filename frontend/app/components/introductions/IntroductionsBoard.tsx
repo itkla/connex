@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArrowPathIcon,
     ArrowsRightLeftIcon,
@@ -47,6 +47,7 @@ function pairKey(personAId: number, personBId: number): string {
 }
 
 function SectionHeading({ title, count, asOf }: { title: string; count: number | null; asOf?: string | null }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Introductions');
     const locale = useLocale();
     const now = useLiveNow();
@@ -67,7 +68,7 @@ function SectionHeading({ title, count, asOf }: { title: string; count: number |
             </div>
             {asOf ? (
                 <span className="text-xs text-muted-foreground">
-                    {t('freshness', { time: formatRelativeTime(asOf, locale, now) })}
+                    {t('freshness', { time: formatRelativeTime(asOf, locale, now, timeZone) })}
                 </span>
             ) : null}
         </div>

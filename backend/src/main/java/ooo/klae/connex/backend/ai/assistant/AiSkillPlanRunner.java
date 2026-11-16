@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,6 +53,8 @@ public class AiSkillPlanRunner {
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * The outcome of one server-owned plan.
      *
@@ -76,6 +82,11 @@ public class AiSkillPlanRunner {
 
     /**
      * Runs one declared plan.
+     *
+     * <p>Every runtime failure in a declared step, including a malformed saved view or an unreadable
+     * segment, closes the durable tool call it already proposed. Leaving it proposed would strand
+     * the turn's progress trail and break the bounded-partial contract, even for faults outside the
+     * plan's anticipated failure reasons.
      *
      * @param turn committed durable turn
      * @param routing the routing decision that selected the skill
@@ -106,6 +117,31 @@ public class AiSkillPlanRunner {
         if (skill.needsSubject() && subjectHandle == null) {
             return Execution.none();
         }
+        String resolvedSubjectHandle = subjectHandle;
+        java.util.function.Supplier<Execution> plan = () -> runSteps(
+            turn, routing, scope, resources, evidenceByteBudget, guard, skill, resolvedSubjectHandle);
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(turn.workspaceId(), () -> {
+            try {
+                recordVisibilityScopeControlAccess.getForWorkspace(turn.workspaceId());
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                return plan.get();
+            }
+            return plan.get();
+        });
+    }
+
+    /** Preload failures are replayed by the operation memo inside each step's existing handler. */
+    private Execution runSteps(
+            AiChatQueuedTurn turn,
+            AiSkillRouter.Routing routing,
+            AiChatQueryScope scope,
+            AiChatResourceRegistry resources,
+            int evidenceByteBudget,
+            Runnable guard,
+            SkillSpec skill,
+            String subjectHandle) {
         List<Map<String, Object>> evidence = new ArrayList<>();
         boolean degraded = false;
         int stepNumber = 0;
@@ -132,12 +168,9 @@ public class AiSkillPlanRunner {
                 evidence.add(entry);
                 result.identifiers().forEach(
                         identifier -> identifier.seed(resources.maskingContext()));
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
-                // Every failure mode of a declared step lands here, not just the three the plan can
-                // anticipate: a malformed saved view, an unreadable segment, or any other runtime
-                // fault must still close the durable tool call it already proposed. Leaving that row
-                // proposed would strand the turn's progress trail and silently break the declared
-                // bounded-partial contract.
                 String reason = failureReason(exception);
                 persistenceService.failTool(
                         turn, toolCallId, serialize(Map.of("reason", reason)));
@@ -162,6 +195,16 @@ public class AiSkillPlanRunner {
         return new Execution(true, payload(skill, evidence), stepNumber, degraded);
     }
 
+    /**
+     * Executes one declared step with its retrieval bounds.
+     *
+     * <p>{@code LIST_ACTIVITIES} receives the declared period so a brief or cooling explanation
+     * requested for a bounded window cannot ground its answer in activity outside that window.
+     *
+     * <p>{@code WORK_COMMITMENTS}, {@code WARMTH_MOVEMENT}, and {@code UPCOMING_MEETINGS} are absent
+     * from the model tool catalog. These server-only personal-brief reads cost nothing in the fixed
+     * prompt envelope, and the model cannot cause them to run outside a declared plan.
+     */
     private AiAssistantToolResult execute(
             PlanStep step,
             AiSkillRouter.Routing routing,
@@ -175,9 +218,6 @@ public class AiSkillPlanRunner {
             case GET_RECORD -> toolExecutor.execute(
                     "get_record", handleArguments(subjectHandle, null),
                     resources, includePrivateNotes, scope);
-            // The declared period reaches this read, not just the turn's echo: a brief or a cooling
-            // explanation asked for a bounded window must not ground its answer in activity from
-            // outside it.
             case LIST_ACTIVITIES -> toolExecutor.execute(
                     "list_activities", handleArguments(subjectHandle, step.rowLimit()),
                     resources, includePrivateNotes, scope);
@@ -197,9 +237,6 @@ public class AiSkillPlanRunner {
                     resources);
             case DEAL_ATTENTION -> scopeReadService.dealAttention(
                     scope, step.rowLimit(), resources);
-            // The three personal-brief reads are server-only by construction: they are absent from
-            // the model tool catalog, so declaring them costs nothing in the fixed prompt envelope
-            // and the model can never cause one to run outside a declared plan.
             case WORK_COMMITMENTS -> workBriefReadService.workCommitments(
                     userId, briefPeriodDays(scope), step.rowLimit(), resources);
             case WARMTH_MOVEMENT -> workBriefReadService.warmthMovement(

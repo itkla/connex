@@ -84,6 +84,8 @@ public class DocumentAcceptanceService {
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Validates the emailed bearer once and returns the routed link a browser grant is issued for.
      * Applies the same per-token and per-source throttle the admission filter applies to grant
@@ -98,6 +100,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(status -> {
                 Aggregate aggregate = lockAggregate(admitted, false);
                 requireActionable(aggregate.delivery(), aggregate.recipient(), now());
@@ -138,6 +141,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(
                 status -> previewInTransaction(admitted, granted.flowId())));
         return Objects.requireNonNull(result, "document preview result");
@@ -153,6 +157,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(
                 status -> markViewedInTransaction(admitted, granted.flowId())));
         return Objects.requireNonNull(result, "document view result");
@@ -201,6 +206,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(status -> acceptInTransaction(
                 admitted, request.typedName().trim(), sourceAddress, userAgent)));
         return Objects.requireNonNull(result, "document acceptance result");
@@ -220,6 +226,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(status -> declineInTransaction(
                 admitted, request.reason().trim(), sourceAddress, userAgent)));
         return Objects.requireNonNull(result, "document decline result");
@@ -253,6 +260,7 @@ public class DocumentAcceptanceService {
 
     private DocumentAcceptanceDecisionDto acceptInTransaction(
             Admitted link, String typedName, String sourceAddress, String userAgent) {
+        recordVisibilityScopeControlAccess.getForWorkspace(link.workspace().getId());
         Aggregate aggregate = lockAggregate(link, true);
         if ("completed".equals(aggregate.recipient().getStatus())) {
             auditRecipientOperation(
@@ -304,6 +312,7 @@ public class DocumentAcceptanceService {
 
     private DocumentAcceptanceDecisionDto declineInTransaction(
             Admitted link, String reason, String sourceAddress, String userAgent) {
+        recordVisibilityScopeControlAccess.getForWorkspace(link.workspace().getId());
         Aggregate aggregate = lockAggregate(link, true);
         if ("declined".equals(aggregate.recipient().getStatus())) {
             auditRecipientOperation(

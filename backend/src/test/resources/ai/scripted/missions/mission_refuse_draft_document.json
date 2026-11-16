@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_draft_document",
+  "selector": "connex_script_mission_refuse_draft_document",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "draft_document",
+        "arguments": "{\"handle\":\"r1\",\"template\":\"proposal\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

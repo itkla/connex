@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -88,6 +89,7 @@ import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /** HTTP proofs that requests waiting on a workspace lock cannot retain revoked authority. */
 @SpringBootTest
@@ -150,8 +152,8 @@ class PrelockAuthorizationConcurrencyTest {
         workspaceMapper.addMember(target.getId(), actor.getId(), "member");
         actorSession = login(actor);
         revokerSession = login(revoker);
-        enrollPasskey(actor, actorSession);
-        enrollPasskey(revoker, revokerSession);
+        enrollApprovedPasskey(actor, actorSession);
+        enrollApprovedPasskey(revoker, revokerSession);
     }
 
     @AfterEach
@@ -212,7 +214,7 @@ class PrelockAuthorizationConcurrencyTest {
     void restrictionClearRejectsPermissionRevokedWhileWaitingOnWorkspace() throws Exception {
         int id = newRecord("person");
         personMapper.updateProcessingRestrictions(workspace.getId(), id, true, true);
-        Person before = personMapper.getPersonById(workspace.getId(), id);
+        Person before = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(before);
         assertNotNull(before.getSuspendedAt());
         assertNotNull(before.getProvisionCeasedAt());
@@ -220,7 +222,7 @@ class PrelockAuthorizationConcurrencyTest {
         revokeWhileWaiting(put("/api/persons/" + id + "/restrictions")
             .content("{\"suspended\":false,\"provisionCeased\":false}"));
 
-        Person after = personMapper.getPersonById(workspace.getId(), id);
+        Person after = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(after);
         assertEquals(before.getSuspendedAt(), after.getSuspendedAt());
         assertEquals(before.getProvisionCeasedAt(), after.getProvisionCeasedAt());
@@ -230,12 +232,12 @@ class PrelockAuthorizationConcurrencyTest {
     @Test
     void personUpdateRejectsPermissionRevokedWhileWaitingOnWorkspace() throws Exception {
         int id = newRecord("person");
-        Person before = personMapper.getPersonById(workspace.getId(), id);
+        Person before = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(before);
 
         revokeWhileWaiting(put("/api/persons/" + id).content("{\"name\":\"Unauthorized replacement\"}"));
 
-        Person after = personMapper.getPersonById(workspace.getId(), id);
+        Person after = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(after);
         assertEquals(before.getName(), after.getName());
         assertEquals(before.getUpdatedAt(), after.getUpdatedAt());
@@ -475,8 +477,8 @@ class PrelockAuthorizationConcurrencyTest {
         return assertInstanceOf(MockHttpSession.class, result.getRequest().getSession(false));
     }
 
-    /** Seeds enrolled credentials and fresh user-bound step-up state without disabling MFA gates. */
-    private void enrollPasskey(User user, MockHttpSession session) {
+    /** Models approved administrators with bound proofs while testing live authorization locks. */
+    private void enrollApprovedPasskey(User user, MockHttpSession session) {
         Bytes handle = Bytes.random();
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
         entity.setId(handle.toBase64UrlString());
@@ -493,8 +495,12 @@ class PrelockAuthorizationConcurrencyTest {
             .created(Instant.now())
             .build());
         assertTrue(credentialMapper.existsByUserId(user.getId()));
-        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, System.currentTimeMillis());
-        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
+        int credential = Objects.requireNonNull(jdbcTemplate.queryForObject(
+            "SELECT c.id FROM webauthn_credential c JOIN webauthn_user_entity e"
+                + " ON e.id = c.user_entity_user_id WHERE e.user_id = ?", Integer.class, user.getId()));
+        jdbcTemplate.update("UPDATE webauthn_credential SET privileged_assurance = 'BREAK_GLASS',"
+            + " privileged_assured_at = UTC_TIMESTAMP(6) WHERE id = ?", credential);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, user, session, credential);
     }
 
     private void clearContext() {

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /**
  * Applies the historical-import notification suppression protocol to provider backfill.
@@ -18,25 +19,24 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 public class ProviderCaptureHistoricalBaselineService {
     private final NotificationReconciliationService notificationReconciliationService;
 
-    /** Captures notification expectations before a historical provider page is projected. */
-    public Snapshot snapshot(int workspaceId, Instant evaluationInstant) {
-        return snapshot(
-            workspaceId, evaluationInstant, Set.of(), Set.of());
-    }
-
-    /** Captures actual and provider-free expectations before a historical mutation. */
+    /**
+     * Captures actual and provider-free expectations using the record-visibility scope resolved
+     * before the historical writer acquired any locks.
+     */
     public Snapshot snapshot(
             int workspaceId,
             Instant evaluationInstant,
             Set<Integer> personIds,
-            Set<Integer> activityIds) {
+            Set<Integer> activityIds,
+            RecordVisibilityScope recordVisibilityScope) {
         NotificationReconciliationService.HistoricalBaselineScope scope =
             scope(personIds, activityIds);
         return new Snapshot(
             notificationReconciliationService.historicalExpectationSnapshot(
-                workspaceId, evaluationInstant),
+                workspaceId, evaluationInstant, recordVisibilityScope),
             notificationReconciliationService.historicalExpectationSnapshot(
-                workspaceId, evaluationInstant, scope));
+                workspaceId, evaluationInstant, scope, recordVisibilityScope),
+            recordVisibilityScope);
     }
 
     /** Persists baselines for expectations changed by historical provider evidence. */
@@ -54,10 +54,10 @@ public class ProviderCaptureHistoricalBaselineService {
             scope(personIds, activityIds);
         NotificationReconciliationService.HistoricalExpectationSnapshot after =
             notificationReconciliationService.historicalExpectationSnapshot(
-                workspaceId, evaluationInstant);
+                workspaceId, evaluationInstant, before.recordVisibilityScope);
         NotificationReconciliationService.HistoricalExpectationSnapshot counterfactual =
             notificationReconciliationService.historicalExpectationSnapshot(
-                workspaceId, evaluationInstant, scope);
+                workspaceId, evaluationInstant, scope, before.recordVisibilityScope);
         if (!scope.sameRelevantExpectations(
                 before.counterfactual, counterfactual)) {
             throw new ConflictException(
@@ -82,13 +82,16 @@ public class ProviderCaptureHistoricalBaselineService {
         private final NotificationReconciliationService.HistoricalExpectationSnapshot actual;
         private final NotificationReconciliationService.HistoricalExpectationSnapshot
             counterfactual;
+        private final RecordVisibilityScope recordVisibilityScope;
 
         Snapshot(
                 NotificationReconciliationService.HistoricalExpectationSnapshot actual,
                 NotificationReconciliationService.HistoricalExpectationSnapshot
-                    counterfactual) {
+                    counterfactual,
+                RecordVisibilityScope recordVisibilityScope) {
             this.actual = actual;
             this.counterfactual = counterfactual;
+            this.recordVisibilityScope = Objects.requireNonNull(recordVisibilityScope);
         }
     }
 }

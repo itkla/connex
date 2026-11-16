@@ -143,8 +143,8 @@ export function useWorkflowDuplication({
             const created = await createWorkflow(
                 {
                     name: fitDuplicatedWorkflowName(source.name, (name) => tw("copyName", { name })),
-                    description: source.description,
-                    recordType: source.recordType,
+                    description: source.description ?? null,
+                    recordType: source.recordType ?? null,
                     executionMode: source.executionMode,
                     definition: source.definition,
                     canvas: source.canvas,

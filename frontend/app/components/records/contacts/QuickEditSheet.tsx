@@ -18,6 +18,7 @@ import {
 import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 
 export type ContactDraft = {
+    expectedVersion?: number;
     name: string;
     email: string;
     phone: string;

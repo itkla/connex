@@ -29,7 +29,7 @@ export default function TimelineDeepLinkFallback({
                 </p>
                 <Link
                     href={target.href}
-                    className="mt-1 inline-flex items-center gap-1 font-medium text-brand underline-offset-4 hover:underline"
+                    className="mt-1 inline-flex items-center gap-1 font-medium text-brand-text underline-offset-4 hover:underline"
                 >
                     {t(`${target.state === 'outside_window' ? 'openLinked' : 'viewLinked'}.${target.kind}`)}
                     <ArrowRightIcon className="size-3.5" />

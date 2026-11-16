@@ -1,5 +1,5 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
-import type { AiChatParticipant, AiChatSession } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession, AiChatTurnToolCall } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 /**
@@ -173,11 +173,103 @@ export function askConnexActiveState({
     return null;
 }
 
+/** Whether repeating the current turn could repeat a write it already made. */
+export type AskConnexTurnWriteState = 'none' | 'committed' | 'uncertain';
+
+/** The exact request this tab observed being accepted as one turn. */
+export type AskConnexRetryTarget = {
+    sessionId: number;
+    turnId: number;
+    prompt: string;
+    authorUserId: number;
+    /** Expected next sequence at submission; the refreshed question must match it exactly. */
+    requestMessageSeq: number;
+};
+
+/**
+ * Resolves an accepted request only while its own question is unambiguous and still latest.
+ *
+ * A transcript refresh can advance past a retained failed turn without reporting an active turn.
+ * Matching the captured question, author and exact message sequence prevents that refresh from
+ * silently replacing the request a Retry would send. A missing, withheld or ambiguous question
+ * cannot supply a one-press repeat. Unseen messages that change the expected sequence also
+ * withhold Retry rather than rebinding it to a different request.
+ */
+export function askConnexBoundRetryPrompt(
+    target: AskConnexRetryTarget | null,
+    turn: { sessionId: number | null; turnId: number | null },
+    messages: readonly AiChatMessage[],
+    toolCalls: readonly AiAssistantToolCall[],
+): string | null {
+    if (target === null || target.sessionId !== turn.sessionId || target.turnId !== turn.turnId) return null;
+    if (toolCalls.some((toolCall) => toolCall.turnId > target.turnId)) return null;
+    const candidates = messages.filter((message) => message.sessionId === target.sessionId
+        && message.seq === target.requestMessageSeq
+        && message.authorKind === 'user'
+        && message.authorUserId === target.authorUserId
+        && message.content.trim() === target.prompt);
+    const question = candidates.length === 1 ? candidates[0] : undefined;
+    if (question === undefined || question.id <= 0 || question.contentWithheld === true
+        || target.prompt.length === 0
+        || messages.some((message) => message.sessionId === target.sessionId && message.seq > question.seq)) {
+        return null;
+    }
+    return target.prompt;
+}
+
+/**
+ * Reads current-turn write evidence from action cards and the durable per-call projection.
+ *
+ * An empty list proves nothing until the transcript has been refreshed after the turn settled.
+ * Undone actions still count as committed writes: replaying the request would repeat work the
+ * member already chose to undo. The server resolves each projected tool's tier from its catalog;
+ * an unknown tool has a null tier. Retry requires a settled projection containing only reads
+ * or terminal, non-executable proposals. A proposed write could still commit after any
+ * evidence read, including when its review card has expired but its durable status has not
+ * changed. Missing projections and non-terminal or unknown write outcomes stay uncertain.
+ * Once execution has been observed, that evidence is retained for the turn even when later
+ * bounded snapshots omit it. Retry also refreshes the terminal evidence before submission.
+ */
+export function askConnexTurnWriteState(
+    turn: {
+        turnId: number | null;
+        progress: readonly AiChatProgressItem[];
+        toolCalls?: readonly AiChatTurnToolCall[] | null;
+        writeCommitted?: boolean;
+        evidenceReconciled?: boolean;
+    },
+    toolCalls: readonly AiAssistantToolCall[],
+    reconciledTurnId: number | null,
+): AskConnexTurnWriteState {
+    const { turnId, progress, toolCalls: projectedCalls } = turn;
+    if (turnId === null) return 'uncertain';
+    if (turn.writeCommitted === true) return 'committed';
+    const current = toolCalls.filter((toolCall) => toolCall.turnId === turnId);
+    if (current.some((toolCall) => toolCall.status === 'executed'
+        || toolCall.status === 'undone'
+        || (projectedCalls == null && toolCall.executedAt !== null))) return 'committed';
+    if (projectedCalls?.some((call) => (call.tier === 'AUTO' || call.tier === 'CONFIRM')
+        && (call.status === 'executed' || call.status === 'undone'))) return 'committed';
+    if (reconciledTurnId !== turnId || turn.evidenceReconciled === false) return 'uncertain';
+    const settledProgress = progress.some((item) => item.source === 'answer'
+        && (item.status === 'failed' || item.status === 'timed_out'
+            || item.status === 'complete' || item.status === 'cancelled'));
+    if (!settledProgress) return 'uncertain';
+    if (projectedCalls == null) return 'uncertain';
+    return projectedCalls.every((call) => call.toolName.length > 0
+        && ((call.tier === 'READ'
+            && ['executed', 'undone', 'proposed', 'rejected', 'failed', 'expired'].includes(call.status))
+            || ((call.tier === 'AUTO' || call.tier === 'CONFIRM')
+                && (call.status === 'rejected' || call.status === 'expired'))))
+        ? 'none' : 'uncertain';
+}
+
 /**
  * The recovery routes a settled answer can honestly offer.
  *
- * Retry re-asks the same question and needs the question to still be readable. Continuing needs a
- * partial answer to continue from — a failure that produced no words has nothing to build on.
+ * Retry re-asks the same question and needs the question to still be readable and its writes to be
+ * ruled out. Continuing needs a partial answer to continue from — a failure that produced no words
+ * has nothing to build on.
  * Narrowing is offered only where a smaller request is genuinely the remedy.
  */
 export type AskConnexRecovery = {
@@ -277,6 +369,7 @@ const TERMINAL_KINDS: Readonly<Record<string, AskConnexTerminalKind>> = {
     context_window_too_small: { category: 'availability', message: 'contextWindowTooSmall' },
     access_revoked: { category: 'authorization', message: 'accessRevoked' },
     restrictions_changed: { category: 'authorization', message: 'restrictionsChanged' },
+    privacy_invalidated: { category: 'authorization', message: 'restrictionsChanged' },
     image_input_unsupported: { category: 'unsupportedInput', message: 'imageUnsupported' },
     tool_outside_skill_authority: { category: 'generic', message: 'toolAuthority' },
     attachment_auto_write_blocked: { category: 'generic', message: 'generic' },
@@ -357,19 +450,21 @@ const RECOVERY_BY_CLASS: Readonly<Record<AskConnexFailureClass, AskConnexRecover
  * @param reason its terminal reason, when the server gave one
  * @param canRetry whether the original question is still readable and the surface can send
  * @param hasPartial whether words were retained from the answer before it stopped
+ * @param writeState whether this turn committed writes or their outcome remains uncertain
  */
 export function askConnexRecovery(
     phase: string,
     reason: string | null,
     canRetry: boolean,
     hasPartial: boolean,
+    writeState: AskConnexTurnWriteState,
 ): AskConnexRecovery {
     if (phase !== 'failed' && phase !== 'timed_out') {
         return { retry: false, continueFromPartial: false, narrowScope: false, narrowScopeFirst: false };
     }
     const offered = RECOVERY_BY_CLASS[askConnexTerminalKind(reason).category];
     return {
-        retry: offered.retry && canRetry,
+        retry: offered.retry && canRetry && writeState === 'none',
         continueFromPartial: offered.continueFromPartial && canRetry && hasPartial,
         narrowScope: offered.narrowScope && canRetry,
         narrowScopeFirst: offered.narrowScopeFirst,

@@ -43,6 +43,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @Service
 @RequiredArgsConstructor
 public class ContactMarketingService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     /** The consent purpose the campaign machinery enforces for marketing sends. */
     private static final String MARKETING_PURPOSE = "marketing";
@@ -65,7 +67,8 @@ public class ContactMarketingService {
      */
     public ContactMarketingStatusDto getStatus(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = personMapper.getPersonById(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
         if (person == null) {
             throw new ResourceNotFoundException("Contact not found with id: " + personId);
         }
@@ -102,7 +105,8 @@ public class ContactMarketingService {
     public PageResponse<PersonCampaignTouchDto> getCampaignTouches(
             int personId, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (personMapper.getPersonById(workspaceId, personId) == null) {
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        if (personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId) == null) {
             throw new ResourceNotFoundException("Contact not found with id: " + personId);
         }
         List<PersonCampaignTouchDto> items =

@@ -1,5 +1,7 @@
 'use client';
 
+import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
+
 import { type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -27,8 +29,11 @@ import NewContactDialog from '@/app/components/records/contacts/NewContactDialog
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
 import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
-import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -41,12 +46,11 @@ function emptyContactPayload(companyId: number): CreateContactPayload {
     };
 }
 
-function emptyDealPayload(companyId: number): CreateDealPayload {
+function emptyDealPayload(companyId: number, currency: string): CreateDealPayload {
     return {
         name: '',
         value: 0,
-        actualValue: 0,
-        currency: 'USD',
+        currency,
         pipeline: 0,
         stage: 0,
         company: companyId,
@@ -56,13 +60,16 @@ function emptyDealPayload(companyId: number): CreateDealPayload {
 
 export default function CompanyActionsMenu({
     company,
+    mapAvailability = 'unknown',
 }: {
     company: Company;
+    mapAvailability?: RelationshipMapAvailability;
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
     const showApiError = useApiErrorToast('CompaniesActionsMenu');
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const defaultCurrency = workspaceDefaultCurrency(activeWorkspace);
     const owned = company.workspaceId == null || company.workspaceId === activeWorkspaceId;
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [archiveOpen, setArchiveOpen] = useState(false);
@@ -77,8 +84,7 @@ export default function CompanyActionsMenu({
     const [editOpen, setEditOpen] = useState(false);
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [newDealDialogOpen, setNewDealDialogOpen] = useState(false);
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-    const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
+    const { pipelines, stagesByPipeline, setPipelines, setStagesByPipeline } = usePipelineChoices();
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(
         () => emptyContactPayload(company.id),
     );
@@ -98,7 +104,7 @@ export default function CompanyActionsMenu({
     }, []);
 
     const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(
-        () => emptyDealPayload(company.id),
+        () => emptyDealPayload(company.id, defaultCurrency),
     );
     const setContextualDealPayload = useCallback((
         nextPayload: SetStateAction<CreateDealPayload>,
@@ -112,14 +118,15 @@ export default function CompanyActionsMenu({
     }, [company.id]);
 
     useEffect(() => {
-        getPipelines().then(async (ps) => {
+        const origin = workspacePinnedRequest(activeWorkspaceId);
+        getPipelines(origin).then(async (ps) => {
             setPipelines(ps);
             const entries = await Promise.all(
-                ps.map(async (p) => [p.id, await getStagesByPipelineId(p.id).catch(() => [] as Stage[])] as const),
+                ps.map(async (p) => [p.id, await getStagesByPipelineId(p.id, origin).catch(() => [] as Stage[])] as const),
             );
             setStagesByPipeline(Object.fromEntries(entries));
         }).catch(() => setPipelines([]));
-    }, []);
+    }, [activeWorkspaceId, setPipelines, setStagesByPipeline]);
 
     useEffect(
         () => () => invalidatePendingContactClose(),
@@ -144,13 +151,13 @@ export default function CompanyActionsMenu({
     const closeNewDealDialog = (open: boolean) => {
         setNewDealDialogOpen(open);
         if (!open) {
-            setNewDealPayload(emptyDealPayload(company.id));
+            setNewDealPayload(emptyDealPayload(company.id, defaultCurrency));
             setDealCreationSucceeded(false);
         }
     };
 
     const showNewDealDialog = () => {
-        setNewDealPayload(emptyDealPayload(company.id));
+        setNewDealPayload(emptyDealPayload(company.id, defaultCurrency));
         setNewDealDialogOpen(true);
     };
 
@@ -180,7 +187,9 @@ export default function CompanyActionsMenu({
     const createNewContact = async (
         businessCard?: BusinessCardImportDraft,
         duplicateReviewToken: string | null = null,
+        init?: RequestInit,
     ) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         invalidatePendingContactClose();
         const operationGeneration = contactCloseGenerationRef.current;
         const isCurrent = () => contactCloseGenerationRef.current === operationGeneration;
@@ -188,19 +197,19 @@ export default function CompanyActionsMenu({
         setIsCreatingContact(true);
         try {
             const imported = businessCard
-                ? await importBusinessCard(businessCard)
+                ? await importBusinessCard(businessCard, origin)
                 : null;
             const newContact = imported?.contact
                 ?? await createContact({
                     ...newContactPayload,
                     duplicateReviewToken: duplicateReviewToken ?? undefined,
-                });
+                }, origin);
             if (!isCurrent()) return;
             const reusedContact = imported?.disposition === 'reused';
             let avatarUploadFailed = false;
             if (imageFile && !reusedContact) {
                 try {
-                    await uploadContactPicture(newContact.id, imageFile);
+                    await uploadContactPicture(newContact.id, imageFile, origin);
                 } catch {
                     avatarUploadFailed = true;
                 }
@@ -237,7 +246,8 @@ export default function CompanyActionsMenu({
         }
     };
 
-    const createNewDeal = async (duplicateReviewToken: string) => {
+    const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setDealCreationSucceeded(false);
         setIsCreatingDeal(true);
         try {
@@ -245,14 +255,14 @@ export default function CompanyActionsMenu({
                 ...newDealPayload,
                 name: newDealPayload.name.trim(),
                 value: Number.isFinite(newDealPayload.value) ? newDealPayload.value : 0,
-                actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : 0,
-                currency: newDealPayload.currency.trim() || 'USD',
+                actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : undefined,
+                currency: newDealPayload.currency.trim() || defaultCurrency,
                 pipeline: newDealPayload.pipeline || null,
                 stage: newDealPayload.stage || null,
                 company: company.id,
                 duplicateReviewToken,
                 expectedCloseDate: newDealPayload.expectedCloseDate || undefined,
-            });
+            }, origin);
             toastSuccess(t('toastDealCreated'));
             setIsCreatingDeal(false);
             setDealCreationSucceeded(true);
@@ -277,14 +287,16 @@ export default function CompanyActionsMenu({
                     <PencilSquareIcon className="size-4" />
                     {t('edit')}
                 </Button>
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    onClick={() => router.push(`/intelligence/map?companyId=${company.id}`)}
-                >
-                    <EyeIcon className="size-4" />
-                    {t('viewInMap')}
-                </Button>
+                {mapAvailability !== 'overCapacity' && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={() => router.push(`/intelligence/map?companyId=${company.id}`)}
+                    >
+                        <EyeIcon className="size-4" />
+                        {t('viewInMap')}
+                    </Button>
+                )}
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 <Button
@@ -430,6 +442,10 @@ export default function CompanyActionsMenu({
                 setPayload={setContextualDealPayload}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onPipelineCreated={(pipeline, stages) => {
+                    setPipelines((current) => [...current.filter((item) => item.id !== pipeline.id), pipeline]);
+                    setStagesByPipeline((current) => ({ ...current, [pipeline.id]: stages }));
+                }}
                 isCreating={isCreatingDeal}
                 isSuccess={dealCreationSucceeded}
                 createNewDeal={createNewDeal}

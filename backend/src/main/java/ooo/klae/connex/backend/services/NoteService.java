@@ -1,10 +1,13 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -18,6 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -54,6 +58,7 @@ public class NoteService {
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
     private final ObjectMapper objectMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final Set<String> AUDIT_FIELDS = Set.of("content", "title", "visibility");
     private static final Set<String> PRIVATE_AUDIT_FIELDS = Set.of("visibility");
@@ -67,59 +72,46 @@ public class NoteService {
     private static final int SNIPPET_LENGTH = 140;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    public List<Note> getAllNotes() {
-        return getNotesPage(25, 0);
-    }
-
-    public List<Note> getNotesPage(int limit, int offset) {
-        return getNotesPage(limit, offset, false);
-    }
-
-    /** Returns a bounded note page, optionally excluding every private note. */
-    public List<Note> getNotesPage(int limit, int offset, boolean workspaceOnly) {
-        return getNotesPage(null, null, null, limit, offset, workspaceOnly);
-    }
-
-    /** Returns a bounded, searchable, and sortable note page. */
-    public List<Note> getNotesPage(
+    /** Returns a bounded note page and total using one visibility scope and author snapshot. */
+    public PageResponse<Note> getNotesPage(
             String query,
             String sort,
             String dir,
             int limit,
             int offset,
             boolean workspaceOnly) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getNotesPageWithinVisibilityScope(query, sort, dir, limit, offset, workspaceOnly, resolvedVisibilityScope));
+    }
+
+    private PageResponse<Note> getNotesPageWithinVisibilityScope(
+            String query,
+            String sort,
+            String dir,
+            int limit,
+            int offset,
+            boolean workspaceOnly, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = operationVisibilityScope
+            .workspaceIdsJson();
         List<Integer> authorIds = matchingAuthorIds(workspaceId, query);
         String sortKey = canonicalPageSort(sort);
         String direction = canonicalPageDirection(sortKey, dir);
+        List<Note> notes;
+        long total;
         if (workspaceOnly) {
-            return referenceService.hydrate(
+            notes = referenceService.hydrate(
                 workspaceId, noteMapper.getWorkspaceNotesPage(
-                    workspaceId, query, authorIds, sortKey, direction, limit, offset));
+                    workspaceId, orgWorkspaceIdsJson, query, authorIds, sortKey, direction, limit, offset));
+            total = noteMapper.countWorkspaceNotes(workspaceId, orgWorkspaceIdsJson, query, authorIds);
+        } else {
+            int currentUserId = workspaceService.getCurrentUserId();
+            notes = referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesPage(
+                workspaceId, orgWorkspaceIdsJson, currentUserId, query, authorIds, sortKey, direction, limit, offset));
+            total = noteMapper.countVisibleNotes(workspaceId, orgWorkspaceIdsJson, currentUserId, query, authorIds);
         }
-        int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesPage(
-            workspaceId, currentUserId, query, authorIds, sortKey, direction, limit, offset));
-    }
-
-    public long countNotes() {
-        return countNotes(false);
-    }
-
-    /** Counts notes in the active workspace, optionally excluding every private note. */
-    public long countNotes(boolean workspaceOnly) {
-        return countNotes(null, workspaceOnly);
-    }
-
-    /** Counts notes matching the same visibility and query contract as the paged list. */
-    public long countNotes(String query, boolean workspaceOnly) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Integer> authorIds = matchingAuthorIds(workspaceId, query);
-        if (workspaceOnly) {
-            return noteMapper.countWorkspaceNotes(workspaceId, query, authorIds);
-        }
-        int currentUserId = workspaceService.getCurrentUserId();
-        return noteMapper.countVisibleNotes(workspaceId, currentUserId, query, authorIds);
+        return new PageResponse<>(notes, total);
     }
 
     /** Returns a bounded filtered page with previews derived only after reader-specific redaction. */
@@ -163,11 +155,21 @@ public class NoteService {
      * private note never surfaces as a backlink to someone who cannot read it.
      */
     public List<Note> getNotesReferencing(String refType, int refId) {
-        return getNotesReferencing(refType, refId, 25, 0);
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getNotesReferencingWithinVisibilityScope(refType, refId));
+    }
+
+    private List<Note> getNotesReferencingWithinVisibilityScope(String refType, int refId) {
+        return getNotesReferencingWithinVisibilityScope(refType, refId, 25, 0);
     }
 
     /** Returns bounded backlink previews after reader-specific reference redaction. */
     public List<Note> getNotesReferencing(String refType, int refId, int limit, int offset) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getNotesReferencingWithinVisibilityScope(refType, refId, limit, offset));
+    }
+
+    private List<Note> getNotesReferencingWithinVisibilityScope(String refType, int refId, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
         String canonicalRefType = referenceService.requireVisibleTarget(
@@ -187,14 +189,29 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_CREATE)
     public Note create(Note note) {
+        return create(note, MutationAdmission.UNRESTRICTED);
+    }
+
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.NOTE_CREATE)
+    public Note create(Note note, MutationAdmission admission) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> createWithinVisibilityScope(note, admission, personVisibilityScope.workspaceIdsJson()));
+    }
+
+    private Note createWithinVisibilityScope(Note note, MutationAdmission admission, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         note.setWorkspaceId(workspaceId);
         note.setAuthor(actor);
         note.setVisibility(normalizeVisibility(note.getVisibility(),
             note.getPerson() == null && note.getDeal() == null ? PRIVATE : "workspace"));
-        requireLinkedRecordsVisible(workspaceId, note);
+        requireLinkedRecordsVisible(workspaceId, note, null, personWorkspaceIdsJson);
         note.setCreatedAt(null);
+        admission.beforeMutation();
         noteMapper.insert(note);
         auditService.record("note.create", "note", note.getId(), auditLabel(note),
             "Created note",
@@ -209,6 +226,12 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_UPDATE)
     public Note update(int id, Note note) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> updateWithinVisibilityScope(id, note, personVisibilityScope.workspaceIdsJson()));
+    }
+
+    private Note updateWithinVisibilityScope(int id, Note note, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         WorkspaceService.LockedPermissionSnapshot authority = workspaceService.lockAndRequirePermissionsSnapshot(
@@ -220,7 +243,9 @@ public class NoteService {
         note.setWorkspaceId(workspaceId);
         note.setAuthor(before.getAuthor());
         note.setVisibility(normalizeVisibility(note.getVisibility(), before.getVisibility()));
-        requireLinkedRecordsVisible(workspaceId, note);
+        if (!note.isPersonSpecified()) note.setPerson(before.getPerson());
+        if (!note.isDealSpecified()) note.setDeal(before.getDeal());
+        requireLinkedRecordsVisible(workspaceId, note, before, personWorkspaceIdsJson);
         if (noteMapper.update(note) != 1) {
             throw new ResourceNotFoundException("Note not found with id: " + id);
         }
@@ -360,19 +385,23 @@ public class NoteService {
         return PRIVATE.equals(note.getVisibility()) ? "" : note.getContent();
     }
 
-    private void requireLinkedRecordsVisible(int workspaceId, Note note) {
+    private void requireLinkedRecordsVisible(int workspaceId, Note note, Note before, String personWorkspaceIdsJson) {
+        Integer previousPersonId = before != null && before.getPerson() != null ? before.getPerson().getId() : null;
+        Integer previousDealId = before != null && before.getDeal() != null ? before.getDeal().getId() : null;
         if (note.getPerson() != null && note.getPerson().getId() > 0
-                && !personMapper.exists(workspaceId, note.getPerson().getId())) {
+                && !Objects.equals(note.getPerson().getId(), previousPersonId)
+                && !personMapper.exists(workspaceId, personWorkspaceIdsJson, note.getPerson().getId())) {
             throw new ResourceNotFoundException("Contact not found");
         }
         if (note.getDeal() != null && note.getDeal().getId() > 0
+                && !Objects.equals(note.getDeal().getId(), previousDealId)
                 && !dealMapper.exists(workspaceId, note.getDeal().getId())) {
             throw new ResourceNotFoundException("Deal not found");
         }
     }
 
     private Note hydrateReferences(int workspaceId, Note note) {
-        note.setReferences(referenceService.referencesFor(workspaceId, ReferenceService.SOURCE_NOTE, note.getId()));
+        note.setReferences(referenceService.referencesForReader(workspaceId, ReferenceService.SOURCE_NOTE, note.getId()));
         return note;
     }
 

@@ -1,10 +1,13 @@
 import { Fragment, type CSSProperties } from 'react';
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { requestNow } from '@/app/lib/requestClock';
 import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
-import { getLocale, getTranslations } from 'next-intl/server';
+import { getTimeZone, getLocale, getTranslations } from 'next-intl/server';
 
 import { type Stage, type NoteReference, type DealStageHistory } from '@/app/lib/types';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
-import { formatDate, formatShortDate, parseMysqlDateTime, startOfLocalDay } from '@/app/lib/utils';
+import { formatDate, formatShortDate, parseMysqlDateTime, parseCalendarDateUtc, toDatetimeLocalValue } from '@/app/lib/utils';
+import { formatDealClosedAt } from './dealDates';
 import { classifyStage, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -14,6 +17,7 @@ type ScheduleTone = 'early' | 'late' | 'neutral';
 
 export default async function DealLifecycleProgress({
     stages,
+    timezone,
     currentStageId,
     outcome,
     createdAt,
@@ -24,6 +28,7 @@ export default async function DealLifecycleProgress({
     stageHistory,
 }: {
     stages: Stage[];
+    timezone: string;
     currentStageId: number | null;
     outcome: DealOutcome;
     createdAt: string;
@@ -33,6 +38,8 @@ export default async function DealLifecycleProgress({
     references?: NoteReference[];
     stageHistory?: DealStageHistory[];
 }) {
+    const timeZone = await getTimeZone();
+    const closeTimeZone = timezone || 'UTC';
     const t = await getTranslations('DealsLifecycleProgress');
     const locale = await getLocale();
 
@@ -54,10 +61,10 @@ export default async function DealLifecycleProgress({
     const currentIdx = filtered.findIndex((s) => s.id === currentStageId);
 
     const startMs = parseMysqlDateTime(createdAt);
-    const expectedMs = expectedCloseDate ? parseMysqlDateTime(expectedCloseDate) : NaN;
-    const closedMs = closedAt ? parseMysqlDateTime(closedAt) : NaN;
-    const nowMs = new Date().getTime();
-    const todayStart = startOfLocalDay(nowMs);
+    const expectedMs = expectedCloseDate ? parseCalendarDateUtc(expectedCloseDate) : NaN;
+    const closedDayMs = closedAt ? parseCalendarDateUtc(toDatetimeLocalValue(closedAt, closeTimeZone).slice(0, 10)) : NaN;
+    const nowMs = requestNow();
+    const todayStart = parseCalendarDateUtc(calendarDayInTimeZone(nowMs, timeZone));
 
     const isClosed = outcome !== 'open';
     const isWon = outcome === 'won';
@@ -84,8 +91,8 @@ export default async function DealLifecycleProgress({
         ? Math.round((expectedMs - todayStart) / DAY_MS)
         : null;
     const closedVsExpected =
-        isClosed && Number.isFinite(closedMs) && Number.isFinite(expectedMs)
-            ? Math.round((closedMs - expectedMs) / DAY_MS)
+        isClosed && Number.isFinite(closedDayMs) && Number.isFinite(expectedMs)
+            ? Math.round((closedDayMs - expectedMs) / DAY_MS)
             : null;
 
     let scheduleDays: number | null = null;
@@ -245,9 +252,9 @@ export default async function DealLifecycleProgress({
                                 <span
                                     className={`absolute top-[3.35rem] max-w-[56px] truncate text-[9px] tabular-nums text-muted-foreground sm:top-[3.9rem] sm:max-w-[88px] sm:text-[10px] ${labelAlign}`}
                                     style={labelStyle}
-                                    title={t('achievedOn', { date: formatDate(achievedAt, locale) })}
+                                    title={t('achievedOn', { date: formatDate(achievedAt, locale, timeZone) })}
                                 >
-                                    {formatShortDate(achievedAt, locale)}
+                                    {formatShortDate(achievedAt, locale, timeZone)}
                                 </span>
                             ) : null}
                         </Fragment>
@@ -258,7 +265,7 @@ export default async function DealLifecycleProgress({
             <div className="mt-4 flex items-start justify-between gap-3 text-[10px] leading-tight text-muted-foreground sm:text-[11px]">
                 <div className="flex shrink-0 flex-col items-start whitespace-nowrap">
                     <span className="font-medium text-foreground">{t('created')}</span>
-                    <span>{formatDate(createdAt, locale)}</span>
+                    <span>{formatDate(createdAt, locale, timeZone)}</span>
                 </div>
                 {expectedCloseDate || (isClosed && closedAt) ? (
                     <>
@@ -278,7 +285,7 @@ export default async function DealLifecycleProgress({
                                 {isClosed ? t('closed') : t('expectedClose')}
                             </span>
                             <span>
-                                {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate, locale)}
+                                {isClosed && closedAt ? formatDealClosedAt(closedAt, locale, closeTimeZone) : formatDate(expectedCloseDate, locale, timeZone)}
                             </span>
 
                         </div>
@@ -303,7 +310,7 @@ export default async function DealLifecycleProgress({
                     <div className="flex min-w-0 flex-col gap-0.5">
                         <span
                             className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
-                                isWon ? 'text-brand-dark' : 'text-red-700 dark:text-red-300'
+                                isWon ? 'text-brand-text' : 'text-red-700 dark:text-red-300'
                             }`}
                         >
                             {isWon ? t('closedReasonWonTitle') : t('closedReasonLostTitle')}

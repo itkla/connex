@@ -14,7 +14,7 @@ function UserNodeImpl({ data }: NodeProps<UserNodeType>) {
             <Handle type="source" position={Position.Bottom} isConnectable={false} className="!opacity-0" />
             <Avatar className="h-14 w-14 ring-2 ring-brand/30 transition-transform hover:scale-110">
                 <AvatarImage src={user.profilePictureUrl} alt={name} />
-                <AvatarFallback className="bg-brand/10 text-sm font-semibold text-brand">
+                <AvatarFallback className="bg-brand/10 text-sm font-semibold text-brand-text">
                     {name.charAt(0).toUpperCase()}
                 </AvatarFallback>
             </Avatar>

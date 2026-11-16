@@ -94,12 +94,13 @@ export interface UseCalendar {
  * day per view, and which record kinds are visible. View and kind filters persist
  * to localStorage (hydrated after mount to stay SSR-safe); the anchor always opens
  * on today so the calendar never resumes on a stale month.
+ * @param today the profile-zone calendar day represented as a local civil-date placeholder
  */
-export function useCalendar(): UseCalendar {
+export function useCalendar(today: Date): UseCalendar {
     const [view, setViewState] = useState<CalendarView>('month');
     const [navDirection, setNavDirection] = useState<NavDirection>(0);
-    const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date()));
-    const [selectedDay, setSelectedDayState] = useState<Date>(() => startOfDay(new Date()));
+    const [anchor, setAnchor] = useState<Date>(() => startOfDay(today));
+    const [selectedDay, setSelectedDayState] = useState<Date>(() => startOfDay(today));
     const [visibleKinds, setVisibleKinds] = useState<Set<CalendarEventKind>>(() => new Set(EVENT_KINDS));
     const [hydrated, setHydrated] = useState(false);
 
@@ -163,11 +164,10 @@ export function useCalendar(): UseCalendar {
     );
 
     const goToday = useCallback(() => {
-        const today = startOfDay(new Date());
         setNavDirection(today.getTime() === anchor.getTime() ? 0 : today > anchor ? 1 : -1);
         setAnchor(today);
         setSelectedDayState(today);
-    }, [anchor]);
+    }, [anchor, today]);
 
     const step = useCallback(
         (direction: 1 | -1) => {

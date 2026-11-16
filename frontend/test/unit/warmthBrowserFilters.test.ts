@@ -16,7 +16,6 @@ import {
     warmthHorizonContactsHref,
     warmthRequestParams,
     withValidWarmthHorizon,
-    withoutWarmth,
     withoutWarmthHorizon,
 } from "@/app/components/records/warmthFilters";
 import { FILTER_EMPTY, countActiveFilters, type FilterState } from "@/app/components/records/types";
@@ -26,14 +25,16 @@ import {
     exportCompaniesCsv,
     exportContactsCsv,
     getCompaniesPage,
+    getCompaniesSegmentPage,
     getCompanyFacets,
     getCompanyIds,
+    getCompanySegmentIds,
     getContactIds,
     getContactsPage,
     getPersonFacets,
     getRadarForSubject,
 } from "@/app/lib/api";
-import type { CompaniesPageParams, ContactsPageParams, FacetCount } from "@/app/lib/types";
+import type { CompaniesPageParams, CompanySegmentPageParams, ContactsPageParams, FacetCount } from "@/app/lib/types";
 
 const SIGNALS_PANEL = "app/components/records/RecordSignalsPanel.tsx";
 const CONTACTS_BROWSER = "app/components/records/contacts/ContactsBrowser.tsx";
@@ -43,9 +44,10 @@ function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
 }
 
-/** Records every request URL api.ts issues, with the browser globals its request builders read. */
-function stubBrowser(): { urls: string[] } {
+/** Records every request URL and JSON body api.ts issues, with the browser globals its request builders read. */
+function stubBrowser(): { urls: string[]; bodies: Array<string | null> } {
     const urls: string[] = [];
+    const bodies: Array<string | null> = [];
     const anchor = { href: "", download: "", click: () => undefined, remove: () => undefined };
     vi.stubGlobal("document", {
         cookie: "connex_workspace=5; NEXT_LOCALE=en",
@@ -60,13 +62,14 @@ function stubBrowser(): { urls: string[] } {
             return undefined;
         }
     });
-    vi.stubGlobal("fetch", (input: string | URL | Request) => {
+    vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
         urls.push(input instanceof Request ? input.url : String(input));
+        bodies.push(typeof init?.body === "string" ? init.body : null);
         return Promise.resolve(
             new Response("[]", { status: 200, headers: { "content-type": "application/json" } }),
         );
     });
-    return { urls };
+    return { urls, bodies };
 }
 
 /** The warmth query params one request carried, so two surfaces can be compared key for key. */
@@ -163,22 +166,6 @@ describe("the decay horizon a shared link can carry", () => {
     });
 });
 
-describe("a surface that cannot apply warmth at all", () => {
-    it("strips every warmth key so nothing counts, chips, or sends it", () => {
-        const state: FilterState = {
-            [WARMTH_FILTER_KEY]: ["hot"],
-            [WARMTH_HORIZON_FILTER_KEY]: ["30"],
-            industry: ["Software"],
-        };
-        const stripped = withoutWarmth(state);
-
-        expect(stripped).toEqual({ industry: ["Software"] });
-        expect(warmthRequestParams(stripped)).toEqual({});
-        expect(hasWarmthFilter(stripped)).toBe(false);
-        expect(countActiveFilters(stripped)).toBe(1);
-    });
-});
-
 describe("the warmth filter keys a records browser round-trips through the URL", () => {
     it("are none of the reserved keys another list-state writer owns", () => {
         const reserved = new Set<string>([
@@ -249,6 +236,20 @@ describe("the warmth facet options a browser offers", () => {
 describe("the warmth params every records surface sends", () => {
     afterEach(() => {
         vi.unstubAllGlobals();
+    });
+
+    it("preserves tag membership alongside warmth on page, matching ids and export", async () => {
+        const { urls } = stubBrowser();
+        const filter: ContactsPageParams = { tagIds: [12, 34], warmthBands: ["warm"] };
+        await getContactsPage(filter);
+        await getContactIds(filter);
+        await exportContactsCsv(filter);
+        expect(urls).toHaveLength(3);
+        for (const url of urls) {
+            const query = new URL(url, "https://example.invalid").searchParams;
+            expect(query.getAll("tagIds")).toEqual(["12", "34"]);
+            expect(query.getAll("warmthBands")).toEqual(["warm"]);
+        }
     });
 
     it("reach the contacts page, its id read, and its export identically", async () => {
@@ -369,7 +370,7 @@ describe("the browsers' warmth wiring", () => {
     });
 
     it.each(browsers)("asks the $name facets endpoint for the warmth counts it shows", ({ file }) => {
-        expect(source(file)).toMatch(/get(Person|Company)Facets\(\{ warmth: (true|!segmentScoped) \}\)/);
+        expect(source(file)).toMatch(/get(Person|Company)Facets\(\{ warmth: true \}\)/);
     });
 
     it.each(browsers)("lets a reader order the $name list by warmth", ({ file }) => {
@@ -383,14 +384,16 @@ describe("the browsers' warmth wiring", () => {
         const browser = source(file);
 
         expect(browser).toContain("const warmthNarrowed = hasWarmthFilter(filterState);");
-        expect(browser).toContain("explicit_selection");
+        expect(browser).toContain(file === CONTACTS_BROWSER ? "contactWorkflowScope({" : "explicit_selection");
         expect(browser).not.toContain("page_selection");
     });
 
     it.each(browsers)("keeps the $name saved-view scope off a warmth-narrowed selection too", ({ file }) => {
-        expect(source(file)).toContain(
-            "allMatchingActive && activeSavedViewId !== null && !warmthNarrowed",
-        );
+        if (file === CONTACTS_BROWSER) {
+            expect(source(file)).toContain('            warmthNarrowed,');
+        } else {
+            expect(source(file)).toContain("allMatchingActive && activeSavedViewId !== null && !warmthNarrowed");
+        }
     });
 
     it.each(browsers)("drops an unhonourable $name horizon before anything can count it", ({ file }) => {
@@ -409,31 +412,28 @@ describe("the browsers' warmth wiring", () => {
     });
 });
 
-describe("the companies segment path, which the backend applies no warmth to", () => {
+describe("the companies segment path, which the backend filters by warmth and owner scope", () => {
     const browser = source(COMPANIES_BROWSER);
 
-    it("strips warmth from the filter state the whole surface reads", () => {
-        expect(browser).toContain("const segmentScoped = !showArchived && hasSegments;");
-        expect(browser).toContain("segmentScoped ? withoutWarmth(validatedFilterState) : validatedFilterState");
+    it("reads one filter state whether or not a segment is active", () => {
+        expect(browser).toContain(
+            "const filterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);",
+        );
+        expect(browser).not.toContain("segmentScoped");
+        expect(browser).not.toContain("withoutWarmth(");
     });
 
-    it("offers no warmth facet to select, because selecting one would filter nothing", () => {
-        expect(browser).toContain("const warmthOptions = segmentScoped ? [] : warmthFacetOptions(");
+    it("keeps a warmth sort when a segment is applied, because the segment page orders by warmth too", () => {
+        expect(browser).not.toContain("hasSegmentConditions(evaluableSegmentDefinition(next))");
+        expect(browser).toContain("onChange={setDefinition}");
     });
 
-    it("offers no warmth sort either, because the segment query orders by name instead", () => {
-        expect(browser).toContain("sortable: !showArchived && !segmentScoped");
-        expect(browser).toContain("hasSegmentConditions(evaluableSegmentDefinition(next))");
-    });
-
-    it("does not pay for warmth facet counts it will not show", () => {
-        expect(browser).toContain("getCompanyFacets({ warmth: !segmentScoped })");
-    });
-
-    it("leaves the segment page, ids, and export reading one warmth-free filter object", () => {
+    it("sends the segment page, ids, and export the same filter object as the plain list", () => {
         expect(browser).toContain("warmthRequestParams(filterState)");
         expect(browser).toContain("getCompaniesSegmentPage({ ...params, definition: evaluable })");
         expect(browser).toContain("getCompanySegmentIds({ ...params, definition: evaluable })");
+        expect(browser).toContain("getCompanySegmentIds({ ...params, definition: evaluable }, init)");
+        expect(browser).toContain("{ ...params, ids: matched.length ? matched : [NO_MATCH_COMPANY_ID] }");
     });
 });
 
@@ -442,16 +442,48 @@ describe("a companies request built while a segment is active", () => {
         vi.unstubAllGlobals();
     });
 
-    it("carries no warmth keys on the export, so the CSV is not secretly narrower than the list", async () => {
-        const { urls } = stubBrowser();
-        const segmentFilter: CompaniesPageParams = { industry: ["Software"] };
+    it("carries the warmth filter and owner scope in the segment page and id bodies", async () => {
+        const { urls, bodies } = stubBrowser();
+        const filter: CompanySegmentPageParams = {
+            ...warmthRequestParams({ [WARMTH_FILTER_KEY]: ["hot", FILTER_EMPTY], [WARMTH_HORIZON_FILTER_KEY]: ["30"] }),
+            scope: "members",
+            memberIds: [3, 5],
+            sort: WARMTH_SORT_KEY,
+            definition: { match: "all", conditions: [] },
+        };
 
-        await getCompanyIds(segmentFilter);
-        await exportCompaniesCsv({ ...segmentFilter, ids: [7, 9] });
+        await getCompaniesSegmentPage(filter);
+        await getCompanySegmentIds(filter);
 
-        for (const url of urls) {
-            expect(warmthParams(url)).toEqual({});
+        expect(urls.map((url) => new URL(url).pathname)).toEqual([
+            "/api/companies/segment/page",
+            "/api/companies/segment/ids",
+        ]);
+        for (const body of bodies) {
+            expect(JSON.parse(body ?? "null")).toMatchObject({
+                warmthBands: ["hot"],
+                noWarmth: true,
+                goesColdWithinDays: 30,
+                scope: "members",
+                memberIds: [3, 5],
+                sort: WARMTH_SORT_KEY,
+            });
         }
+    });
+
+    it("exports the matched segment ids under the same warmth filter and owner scope", async () => {
+        const { urls } = stubBrowser();
+        const params: CompaniesPageParams = {
+            ...warmthRequestParams({ [WARMTH_FILTER_KEY]: ["hot"] }),
+            scope: "me",
+        };
+
+        await exportCompaniesCsv({ ...params, ids: [7, 9] });
+
+        const search = new URL(urls[0], "https://connex.test").searchParams;
+        expect(warmthParams(urls[0])).toEqual({ warmthBands: ["hot"] });
+        expect(search.get("scope")).toBe("me");
+        expect(search.getAll("ids")).toEqual(["7", "9"]);
     });
 });
 

@@ -111,10 +111,6 @@ class FreshMembershipScopeArchTest {
                 "acceptInviteByHash",
                 List.of("String", "User", "Runnable")),
             new CallSite(
-                "ooo.klae.connex.backend.services.InviteService",
-                "addExistingMember",
-                List.of("int", "int", "String", "String")),
-            new CallSite(
                 "ooo.klae.connex.backend.services.InviteLinkService",
                 "redeemLink",
                 List.of("String", "User")),
@@ -133,7 +129,16 @@ class FreshMembershipScopeArchTest {
                     "boolean",
                     "int",
                     "String",
-                    "String"))));
+                    "String"))),
+        new EntryPoint("FreshMembershipTransaction", "executeWithPreparedScopes", 2), Set.of(
+            new CallSite(
+                "ooo.klae.connex.backend.services.WorkspaceService",
+                "ensureActiveMember",
+                List.of("int", "int", "String")),
+            new CallSite(
+                "ooo.klae.connex.backend.services.WorkspaceService",
+                "addPendingMember",
+                List.of("int", "User", "User", "String"))));
 
     @Test
     void newlyScopedCleanupCallsRemainInsideTheirRoutedBoundaries() throws IOException {

@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
@@ -19,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -65,6 +70,8 @@ class MyWorkTenantIsolationIntegrationTest {
     @Autowired private NotificationMapper notificationMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ObjectMapper objectMapper;
+
+    @Autowired private JdbcTemplate jdbc;
 
     private MockMvc mockMvc;
     private Workspace firstWorkspace;
@@ -125,6 +132,210 @@ class MyWorkTenantIsolationIntegrationTest {
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void personalReadsStayBoundedAndCannotSelectAnotherUserOrWorkspace() throws Exception {
+        User actor = user("reader");
+        User other = user("other");
+        workspaceMapper.addMember(firstWorkspace.getId(), actor.getId(), "member");
+        workspaceMapper.addMember(firstWorkspace.getId(), other.getId(), "member");
+        Workspace second = workspace("personal-second", firstWorkspace.getOrgId());
+        workspaceMapper.addMember(second.getId(), actor.getId(), "member");
+        for (int index = 0; index < 30; index++) task(firstWorkspace, actor, "personal task " + index);
+        task(firstWorkspace, other, "other recipient task");
+        task(second, actor, "other workspace task");
+        jdbc.update("INSERT INTO person (workspace_id, owner_id, name) VALUES (?, ?, ?)",
+            firstWorkspace.getId(), actor.getId(), "Personal contact");
+        jdbc.update("INSERT INTO person (workspace_id, owner_id, name) VALUES (?, ?, ?)",
+            firstWorkspace.getId(), other.getId(), "Other contact");
+        jdbc.update("INSERT INTO person (workspace_id, owner_id, name) VALUES (?, ?, ?)",
+            second.getId(), actor.getId(), "Foreign contact");
+        jdbc.update("INSERT INTO person (workspace_id, owner_id, name) VALUES (?, ?, ?)",
+            firstWorkspace.getId(), actor.getId(), "Cooling contact");
+        Integer coolingId = jdbc.queryForObject("SELECT id FROM person WHERE workspace_id = ? AND name = ?",
+            Integer.class, firstWorkspace.getId(), "Cooling contact");
+        assertNotNull(coolingId);
+        for (int index = 0; index < 3; index++) {
+            jdbc.update("INSERT INTO activity (workspace_id, person_id, created_by_id, type, subject, timestamp) "
+                    + "VALUES (?, ?, ?, 'meeting', 'Prior meeting', ?)",
+                firstWorkspace.getId(), coolingId, other.getId(),
+                java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(40));
+        }
+        for (String statement : List.of(
+                "INSERT INTO person (workspace_id, owner_id, name, archived_at) VALUES (?, ?, 'Archived', CURRENT_TIMESTAMP)",
+                "INSERT INTO person (workspace_id, owner_id, name, suspended_at) VALUES (?, ?, 'Suspended', CURRENT_TIMESTAMP)",
+                "INSERT INTO person (workspace_id, owner_id, name, provision_ceased_at) VALUES (?, ?, 'Ceased', CURRENT_TIMESTAMP)")) {
+            jdbc.update(statement, firstWorkspace.getId(), actor.getId());
+        }
+        Deal yen = deal(firstWorkspace);
+        Deal dollars = deal(firstWorkspace);
+        Deal otherDeal = deal(firstWorkspace);
+        Deal otherWorkspaceDeal = deal(second);
+        jdbc.update("UPDATE deal SET owner_id = ?, currency = 'JPY' WHERE workspace_id = ? AND id = ?",
+            actor.getId(), firstWorkspace.getId(), yen.getId());
+        jdbc.update("UPDATE deal SET owner_id = ?, currency = 'USD' WHERE workspace_id = ? AND id = ?",
+            actor.getId(), firstWorkspace.getId(), dollars.getId());
+        jdbc.update("UPDATE deal SET owner_id = ? WHERE workspace_id = ? AND id = ?",
+            other.getId(), firstWorkspace.getId(), otherDeal.getId());
+        jdbc.update("UPDATE deal SET owner_id = ? WHERE workspace_id = ? AND id = ?",
+            actor.getId(), second.getId(), otherWorkspaceDeal.getId());
+        MockHttpSession session = login(actor.getUsername());
+        mockMvc.perform(get("/api/my-work/history").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId()).param("userId", Integer.toString(other.getId())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.tasks.length()").value(25))
+            .andExpect(jsonPath("$.tasks[0].description").value("personal task 29"))
+            .andExpect(jsonPath("$.tasks[24].description").value("personal task 5"));
+        mockMvc.perform(get("/api/my-work/relationships").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .param("userId", Integer.toString(other.getId())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.counts.cold").value(1))
+            .andExpect(jsonPath("$.counts.cooling").value(1))
+            .andExpect(jsonPath("$.contacts.length()").value(2))
+            .andExpect(jsonPath("$.contacts[*].name", containsInAnyOrder("Personal contact", "Cooling contact")));
+        for (String currency : List.of("JPY", "USD")) {
+            mockMvc.perform(get("/api/my-work/deal-kpis").session(session)
+                    .header("X-Workspace-Id", firstWorkspace.getId())
+                    .param("currency", currency).param("scope", "members").param("memberIds", Integer.toString(other.getId())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.currency").value(currency))
+                .andExpect(jsonPath("$.metrics.totalCount").value(2))
+                .andExpect(jsonPath("$.kpis.newPipeline").value(1000));
+        }
+        mockMvc.perform(get("/api/deals/kpis").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId()).param("scope", "me"))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/my-work/pulse").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .param("userId", Integer.toString(other.getId())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        mockMvc.perform(get("/api/my-work/risks").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .param("userId", Integer.toString(other.getId()))
+                .param("scope", "members").param("memberIds", Integer.toString(other.getId())))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.inputLimitExceeded").value(false))
+            .andExpect(jsonPath("$.deals[*].id", containsInAnyOrder(yen.getId(), dollars.getId())))
+            .andExpect(jsonPath("$.risks[*].dealId", containsInAnyOrder(yen.getId(), dollars.getId())));
+        mockMvc.perform(get("/api/my-work/history").session(session)
+                .header("X-Workspace-Id", second.getId()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.tasks.length()").value(1))
+            .andExpect(jsonPath("$.tasks[0].description").value("other workspace task"));
+        Workspace unavailable = workspace("unavailable-personal", newOrganization().getId());
+        for (String endpoint : List.of("history", "relationships", "deal-kpis", "pulse", "risks")) {
+            mockMvc.perform(get("/api/my-work/" + endpoint)).andExpect(status().isUnauthorized());
+            mockMvc.perform(get("/api/my-work/" + endpoint).session(session)
+                    .header("X-Workspace-Id", unavailable.getId()))
+                .andExpect(status().isForbidden());
+        }
+    }
+
+    @Test
+    void reportSizedWorkspaceUsesFixedSizePersonalResponses() throws Exception {
+        User actor = user("large-personal");
+        workspaceMapper.addMember(firstWorkspace.getId(), actor.getId(), "member");
+        jdbc.batchUpdate("INSERT INTO person (workspace_id, owner_id, name) VALUES (?, ?, ?)",
+            java.util.stream.IntStream.range(0, 5000).mapToObj(index -> new Object[] {
+                firstWorkspace.getId(), actor.getId(), "Personal contact " + index }).toList());
+        List<Integer> contactIds = jdbc.queryForList("SELECT id FROM person WHERE workspace_id = ? ORDER BY id",
+            Integer.class, firstWorkspace.getId());
+        var touchedAt = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusMinutes(1);
+        jdbc.batchUpdate("INSERT INTO activity (workspace_id, person_id, created_by_id, type, subject, timestamp) "
+                + "VALUES (?, ?, ?, 'meeting', 'Personal meeting', ?)",
+            java.util.stream.IntStream.range(0, 20_000).mapToObj(index -> new Object[] {
+                firstWorkspace.getId(), contactIds.get(index % contactIds.size()), actor.getId(), touchedAt }).toList());
+        Deal template = deal(firstWorkspace);
+        jdbc.update("UPDATE deal SET owner_id = ? WHERE workspace_id = ? AND id = ?",
+            actor.getId(), firstWorkspace.getId(), template.getId());
+        jdbc.batchUpdate("INSERT INTO deal (workspace_id, owner_id, name, pipeline_id, stage_id, value, currency) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            java.util.stream.IntStream.range(1, 2000).mapToObj(index -> new Object[] {
+                firstWorkspace.getId(), actor.getId(), "Personal deal " + index,
+                template.getPipelineId(), template.getStageId(), 1000, "JPY" }).toList());
+        MockHttpSession session = login(actor.getUsername());
+        MvcResult relationships = mockMvc.perform(get("/api/my-work/relationships").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.counts.hot").value(5000))
+            .andExpect(jsonPath("$.contacts.length()").value(18))
+            .andExpect(jsonPath("$.temperatures.length()").value(18)).andReturn();
+        assertTrue(relationships.getResponse().getContentAsByteArray().length <= 32_768);
+        MvcResult kpis = mockMvc.perform(get("/api/my-work/deal-kpis").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId()).param("currency", "JPY"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.metrics.totalCount").value(2000))
+            .andExpect(jsonPath("$.kpis.newPipeline").value(2_000_000)).andReturn();
+        assertTrue(kpis.getResponse().getContentAsByteArray().length <= 8_192);
+        mockMvc.perform(get("/api/my-work/risks").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.inputLimitExceeded").value(true))
+            .andExpect(jsonPath("$.deals.length()").value(0));
+    }
+
+    @Test
+    void sharedPersonalContactsMatchTheContactListAndDisappearWhenTheirShareIsRevoked() throws Exception {
+        User actor = user("shared-personal");
+        User other = user("shared-other");
+        Workspace source = workspace("personal-source", firstWorkspace.getOrgId());
+        Workspace foreign = workspace("personal-foreign", newOrganization().getId());
+        for (Workspace memberWorkspace : List.of(firstWorkspace, source, foreign)) {
+            workspaceMapper.addMember(memberWorkspace.getId(), actor.getId(), "member");
+        }
+        workspaceMapper.addMember(source.getId(), other.getId(), "member");
+        int localContact = person(firstWorkspace, actor, "Local personal contact");
+        int sharedContact = person(source, actor, "Shared personal contact");
+        person(source, actor, "Unshared personal contact");
+        int otherContact = person(source, other, "Shared other member contact");
+        int foreignContact = person(foreign, actor, "Forged cross-organization share");
+        for (int contactId : List.of(sharedContact, otherContact, foreignContact)) {
+            jdbc.update("INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit) VALUES (?, ?, ?, FALSE)",
+                contactId, firstWorkspace.getId(), actor.getId());
+        }
+        var prior = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(40);
+        for (int index = 0; index < 3; index++) {
+            jdbc.update("INSERT INTO activity (workspace_id, person_id, created_by_id, type, subject, timestamp) "
+                    + "VALUES (?, ?, ?, 'meeting', 'Shared-contact meeting', ?)",
+                firstWorkspace.getId(), sharedContact, actor.getId(), prior);
+        }
+        jdbc.update("INSERT INTO activity (workspace_id, person_id, created_by_id, type, subject, timestamp) "
+                + "VALUES (?, ?, ?, 'meeting', 'Source-only meeting', ?)",
+            source.getId(), sharedContact, actor.getId(), java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(1));
+        MockHttpSession session = login(actor.getUsername());
+
+        mockMvc.perform(get("/api/persons/page").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .param("scope", "me").param("page", "1").param("size", "25"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(2))
+            .andExpect(jsonPath("$.items[*].id", containsInAnyOrder(localContact, sharedContact)));
+        mockMvc.perform(get("/api/my-work/relationships").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.counts.hot").value(1))
+            .andExpect(jsonPath("$.counts.cold").value(1)).andExpect(jsonPath("$.counts.cooling").value(1))
+            .andExpect(jsonPath("$.contacts.length()").value(2))
+            .andExpect(jsonPath("$.contacts[*].id", containsInAnyOrder(localContact, sharedContact)))
+            .andExpect(jsonPath("$.temperatures[*].id", containsInAnyOrder(localContact, sharedContact)))
+            .andExpect(jsonPath("$.temperatures[?(@.id == " + sharedContact + ")].trend", contains("cooling")));
+
+        jdbc.update("DELETE FROM person_share WHERE person_id = ? AND workspace_id = ?",
+            sharedContact, firstWorkspace.getId());
+
+        mockMvc.perform(get("/api/persons/page").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .param("scope", "me").param("page", "1").param("size", "25"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(localContact));
+        mockMvc.perform(get("/api/my-work/relationships").session(session)
+                .header("X-Workspace-Id", firstWorkspace.getId()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.counts.hot").value(0))
+            .andExpect(jsonPath("$.counts.cold").value(1)).andExpect(jsonPath("$.counts.cooling").value(0))
+            .andExpect(jsonPath("$.contacts.length()").value(1)).andExpect(jsonPath("$.contacts[0].id").value(localContact))
+            .andExpect(jsonPath("$.temperatures.length()").value(1))
+            .andExpect(jsonPath("$.temperatures[0].id").value(localContact));
+    }
+
+    private int person(Workspace workspace, User owner, String name) {
+        jdbc.update("INSERT INTO person (workspace_id, owner_id, name) VALUES (?, ?, ?)",
+            workspace.getId(), owner.getId(), name);
+        Integer id = jdbc.queryForObject("SELECT id FROM person WHERE workspace_id = ? AND name = ?",
+            Integer.class, workspace.getId(), name);
+        assertNotNull(id);
+        return id;
     }
 
     private String firstItemVersion(

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -78,127 +79,120 @@ class PublicApiCredentialRollbackSafetyIntegrationTest {
 
     @Test
     void oldBinaryDeletesARevokerAccountAndCredentialKeepsRevocation() throws SQLException {
-        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
-            Fixture fixture = seedFixture(statement, 9562100);
-            insertCredential(statement, fixture, 9562101, fixture.revokerId(), true);
+        try (Connection connection = connection()) {
+            Fixture fixture = seedFixture(connection, 9562100);
+            insertCredential(connection, fixture, 9562101, fixture.revokerId(), true);
 
-            assertEquals(1, statement.executeUpdate(
-                "DELETE FROM app_user WHERE id = " + fixture.revokerId()));
-            assertEquals(1, scalar(statement,
+            assertEquals(1, update(connection, "DELETE FROM app_user WHERE id = ?", fixture.revokerId()));
+            assertEquals(1, scalar(connection,
                 "SELECT COUNT(*) FROM api_credential"
-                    + " WHERE id = 9562101 AND revoked_at IS NOT NULL AND revoked_by_id IS NULL"));
-            assertEquals(1, scalar(statement,
-                "SELECT COUNT(*) FROM api_credential_scope WHERE credential_id = 9562101"));
+                    + " WHERE id = ? AND revoked_at IS NOT NULL AND revoked_by_id IS NULL",
+                9562101));
+            assertEquals(1, scalar(connection,
+                "SELECT COUNT(*) FROM api_credential_scope WHERE credential_id = ?", 9562101));
         }
     }
 
     @Test
     void oldBinaryCanDeleteEveryV202ParentRow() throws SQLException {
-        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
-            Fixture membershipFixture = seedFixture(statement, 9562200);
-            insertCredential(statement, membershipFixture, 9562201, null, false);
-            assertEquals(1, statement.executeUpdate(
-                "DELETE FROM workspace_member WHERE workspace_id = "
-                    + membershipFixture.workspaceId() + " AND user_id = "
-                    + membershipFixture.creatorId()));
-            assertEquals(0, scalar(statement,
-                "SELECT COUNT(*) FROM api_credential WHERE id = 9562201"));
+        try (Connection connection = connection()) {
+            Fixture membershipFixture = seedFixture(connection, 9562200);
+            insertCredential(connection, membershipFixture, 9562201, null, false);
+            assertEquals(1, update(connection,
+                "DELETE FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+                membershipFixture.workspaceId(), membershipFixture.creatorId()));
+            assertEquals(0, scalar(connection, "SELECT COUNT(*) FROM api_credential WHERE id = ?", 9562201));
 
-            Fixture creatorFixture = seedFixture(statement, 9562300);
-            insertCredential(statement, creatorFixture, 9562301, null, false);
-            assertEquals(1, statement.executeUpdate(
-                "DELETE FROM app_user WHERE id = " + creatorFixture.creatorId()));
-            assertEquals(0, scalar(statement,
-                "SELECT COUNT(*) FROM api_credential WHERE id = 9562301"));
+            Fixture creatorFixture = seedFixture(connection, 9562300);
+            insertCredential(connection, creatorFixture, 9562301, null, false);
+            assertEquals(1, update(connection, "DELETE FROM app_user WHERE id = ?", creatorFixture.creatorId()));
+            assertEquals(0, scalar(connection, "SELECT COUNT(*) FROM api_credential WHERE id = ?", 9562301));
 
-            Fixture workspaceFixture = seedFixture(statement, 9562400);
-            insertCredential(statement, workspaceFixture, 9562401, null, false);
-            assertEquals(1, statement.executeUpdate(
-                "DELETE FROM workspace WHERE id = " + workspaceFixture.workspaceId()));
-            assertEquals(0, scalar(statement,
-                "SELECT COUNT(*) FROM api_credential WHERE id = 9562401"));
-            assertEquals(1, statement.executeUpdate(
-                "DELETE FROM organization WHERE id = " + workspaceFixture.organizationId()));
+            Fixture workspaceFixture = seedFixture(connection, 9562400);
+            insertCredential(connection, workspaceFixture, 9562401, null, false);
+            assertEquals(1, update(connection, "DELETE FROM workspace WHERE id = ?", workspaceFixture.workspaceId()));
+            assertEquals(0, scalar(connection, "SELECT COUNT(*) FROM api_credential WHERE id = ?", 9562401));
+            assertEquals(1, update(connection,
+                "DELETE FROM organization WHERE id = ?", workspaceFixture.organizationId()));
 
-            Fixture legacyInsertFixture = seedFixture(statement, 9562500);
-            int legacyUserId = (int) scalar(statement, "SELECT COALESCE(MAX(id), 0) + 1 FROM app_user");
-            insertUser(statement, legacyUserId, "legacy-" + legacyUserId);
-            assertEquals(1, statement.executeUpdate(
-                "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES ("
-                    + legacyInsertFixture.workspaceId() + ", " + legacyUserId + ", 'member')"));
-            assertEquals(1, scalar(statement,
-                "SELECT COUNT(*) FROM workspace_member WHERE workspace_id = "
-                    + legacyInsertFixture.workspaceId() + " AND user_id = " + legacyUserId
-                    + " AND membership_id IS NOT NULL"));
+            Fixture legacyInsertFixture = seedFixture(connection, 9562500);
+            int legacyUserId = (int) scalar(connection, "SELECT COALESCE(MAX(id), 0) + 1 FROM app_user");
+            insertUser(connection, legacyUserId, "legacy-" + legacyUserId);
+            assertEquals(1, update(connection,
+                "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, 'member')",
+                legacyInsertFixture.workspaceId(), legacyUserId));
+            assertEquals(1, scalar(connection,
+                "SELECT COUNT(*) FROM workspace_member"
+                    + " WHERE workspace_id = ? AND user_id = ? AND membership_id IS NOT NULL",
+                legacyInsertFixture.workspaceId(), legacyUserId));
 
-            assertDeleteRule(statement, "fk_api_credential_workspace", "CASCADE");
-            assertDeleteRule(statement, "fk_api_credential_organization", "CASCADE");
-            assertDeleteRule(statement, "fk_api_credential_creator", "CASCADE");
-            assertDeleteRule(statement, "fk_api_credential_membership", "CASCADE");
-            assertDeleteRule(statement, "fk_api_credential_revoker", "SET NULL");
-            assertDeleteRule(statement, "fk_api_credential_scope_credential", "CASCADE");
+            assertDeleteRule(connection, "fk_api_credential_workspace", "CASCADE");
+            assertDeleteRule(connection, "fk_api_credential_organization", "CASCADE");
+            assertDeleteRule(connection, "fk_api_credential_creator", "CASCADE");
+            assertDeleteRule(connection, "fk_api_credential_membership", "CASCADE");
+            assertDeleteRule(connection, "fk_api_credential_revoker", "SET NULL");
+            assertDeleteRule(connection, "fk_api_credential_scope_credential", "CASCADE");
         }
     }
 
-    private static Fixture seedFixture(Statement statement, int base) throws SQLException {
+    private static Fixture seedFixture(Connection connection, int base) throws SQLException {
         int organizationId = base;
         int workspaceId = base + 1;
         int creatorId = base + 2;
         int revokerId = base + 3;
-        statement.executeUpdate("INSERT INTO organization (id, name, slug) VALUES ("
-            + organizationId + ", 'Rollback organization', 'rollback-org-" + base + "')");
-        statement.executeUpdate("INSERT INTO workspace (id, org_id, name, slug) VALUES ("
-            + workspaceId + ", " + organizationId
-            + ", 'Rollback workspace', 'rollback-workspace-" + base + "')");
-        insertUser(statement, creatorId, "creator-" + base);
-        insertUser(statement, revokerId, "revoker-" + base);
-        statement.executeUpdate(
-            "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES ("
-                + workspaceId + ", " + creatorId + ", 'member')");
-        statement.executeUpdate(
-            "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES ("
-                + workspaceId + ", " + revokerId + ", 'member')");
-        long membershipId = scalar(statement,
-            "SELECT membership_id FROM workspace_member WHERE workspace_id = "
-                + workspaceId + " AND user_id = " + creatorId);
+        update(connection,
+            "INSERT INTO organization (id, name, slug) VALUES (?, 'Rollback organization', ?)",
+            organizationId, "rollback-org-" + base);
+        update(connection,
+            "INSERT INTO workspace (id, org_id, name, slug) VALUES (?, ?, 'Rollback workspace', ?)",
+            workspaceId, organizationId, "rollback-workspace-" + base);
+        insertUser(connection, creatorId, "creator-" + base);
+        insertUser(connection, revokerId, "revoker-" + base);
+        update(connection,
+            "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, 'member')",
+            workspaceId, creatorId);
+        update(connection,
+            "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, 'member')",
+            workspaceId, revokerId);
+        long membershipId = scalar(connection,
+            "SELECT membership_id FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+            workspaceId, creatorId);
         return new Fixture(organizationId, workspaceId, creatorId, revokerId, membershipId);
     }
 
-    private static void insertUser(Statement statement, int id, String identity)
+    private static void insertUser(Connection connection, int id, String identity)
             throws SQLException {
-        statement.executeUpdate("INSERT INTO app_user"
-            + " (id, username, display_name, email, password_hash, timezone) VALUES ("
-            + id + ", '" + identity + "', 'Rollback user', '" + identity
-            + "@example.test', 'hash', 'UTC')");
+        update(connection,
+            "INSERT INTO app_user (id, username, display_name, email, password_hash, timezone)"
+                + " VALUES (?, ?, 'Rollback user', ?, 'hash', 'UTC')",
+            id, identity, identity + "@example.test");
     }
 
     private static void insertCredential(
-            Statement statement,
+            Connection connection,
             Fixture fixture,
             long credentialId,
             Integer revokerId,
             boolean revoked) throws SQLException {
-        String tokenHash = String.format("%064d", credentialId);
-        String revokedAt = revoked ? "UTC_TIMESTAMP(6)" : "NULL";
-        String revokedBy = revokerId == null ? "NULL" : revokerId.toString();
-        statement.executeUpdate("INSERT INTO api_credential"
-            + " (id, workspace_id, organization_id, created_by_id, membership_id, name,"
-            + " token_hash, token_last4, expires_at, revoked_at, revoked_by_id) VALUES ("
-            + credentialId + ", " + fixture.workspaceId() + ", "
-            + fixture.organizationId() + ", " + fixture.creatorId() + ", "
-            + fixture.membershipId() + ", 'Rollback credential', '" + tokenHash
-            + "', 'v202', UTC_TIMESTAMP(6) + INTERVAL 1 DAY, " + revokedAt + ", "
-            + revokedBy + ")");
-        statement.executeUpdate("INSERT INTO api_credential_scope (credential_id, scope) VALUES ("
-            + credentialId + ", 'crm.read')");
+        update(connection,
+            "INSERT INTO api_credential"
+                + " (id, workspace_id, organization_id, created_by_id, membership_id, name,"
+                + " token_hash, token_last4, expires_at, revoked_at, revoked_by_id) VALUES"
+                + " (?, ?, ?, ?, ?, 'Rollback credential', ?, 'v202', UTC_TIMESTAMP(6) + INTERVAL 1 DAY,"
+                + " CASE WHEN ? THEN UTC_TIMESTAMP(6) END, ?)",
+            credentialId, fixture.workspaceId(), fixture.organizationId(), fixture.creatorId(),
+            fixture.membershipId(), String.format("%064d", credentialId), revoked, revokerId);
+        update(connection,
+            "INSERT INTO api_credential_scope (credential_id, scope) VALUES (?, 'crm.read')",
+            credentialId);
     }
 
     private static void assertDeleteRule(
-            Statement statement, String constraintName, String expected) throws SQLException {
-        String rule = stringScalar(statement,
+            Connection connection, String constraintName, String expected) throws SQLException {
+        String rule = stringScalar(connection,
             "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS"
-                + " WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = '"
-                + constraintName + "'");
+                + " WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = ?",
+            constraintName);
         assertEquals(expected, rule, constraintName);
     }
 
@@ -206,19 +200,44 @@ class PublicApiCredentialRollbackSafetyIntegrationTest {
         return DriverManager.getConnection(scratchUrl, username, password);
     }
 
-    private static long scalar(Statement statement, String sql) throws SQLException {
-        try (ResultSet resultSet = statement.executeQuery(sql)) {
+    private static int update(Connection connection, String sql, Object... parameters)
+            throws SQLException {
+        try (PreparedStatement statement = prepare(connection, sql, parameters)) {
+            return statement.executeUpdate();
+        }
+    }
+
+    private static long scalar(Connection connection, String sql, Object... parameters)
+            throws SQLException {
+        try (PreparedStatement statement = prepare(connection, sql, parameters);
+                ResultSet resultSet = statement.executeQuery()) {
             assertNotNull(resultSet);
             resultSet.next();
             return resultSet.getLong(1);
         }
     }
 
-    private static String stringScalar(Statement statement, String sql) throws SQLException {
-        try (ResultSet resultSet = statement.executeQuery(sql)) {
+    private static String stringScalar(Connection connection, String sql, Object... parameters)
+            throws SQLException {
+        try (PreparedStatement statement = prepare(connection, sql, parameters);
+                ResultSet resultSet = statement.executeQuery()) {
             assertNotNull(resultSet);
             resultSet.next();
             return resultSet.getString(1);
+        }
+    }
+
+    private static PreparedStatement prepare(Connection connection, String sql, Object... parameters)
+            throws SQLException {
+        PreparedStatement statement = connection.prepareStatement(sql);
+        try {
+            for (int index = 0; index < parameters.length; index++) {
+                statement.setObject(index + 1, parameters[index]);
+            }
+            return statement;
+        } catch (SQLException exception) {
+            statement.close();
+            throw exception;
         }
     }
 

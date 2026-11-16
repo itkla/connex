@@ -9,11 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -27,6 +30,8 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,6 +42,7 @@ import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -60,7 +66,14 @@ import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.introrationale.IntroRationaleContent;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation;
+import ooo.klae.connex.backend.ai.mission.AiAgentCapabilityGate;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService;
+import ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -83,7 +96,11 @@ import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
+import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiScriptLoader;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.AiAgentSegment;
+import ooo.klae.connex.backend.beans.AiAgentRun;
+import ooo.klae.connex.backend.dto.AiAgentRunCreateRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -244,7 +261,7 @@ class AiInvocationServiceTest {
     }
 
     @Test
-    void completeStreamingUnmaskedSkipsDemaskingAndAuditsDisclosurePosture() {
+    void completeStreamingUnmaskedValidatesUnknownPlaceholdersAndAuditsDisclosurePosture() {
         ResolvedAiProvider unmasked = unmaskedResolved();
         when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(unmasked);
         when(aiProvider.supportsStreaming(unmasked.target())).thenReturn(true);
@@ -261,8 +278,8 @@ class AiInvocationServiceTest {
 
         AiCompletionOutcome outcome = service.complete(invocation);
 
-        assertEquals("{{P1}}", outcome.text());
-        assertEquals(0, outcome.demaskWarnings());
+        assertEquals("[unknown reference]", outcome.text());
+        assertEquals(1, outcome.demaskWarnings());
         assertTrue(auditMetadata().stream()
                 .allMatch(metadata -> Boolean.TRUE.equals(metadata.get("streamed"))));
         verify(aiProvider, never()).complete(any());
@@ -599,7 +616,7 @@ class AiInvocationServiceTest {
     }
 
     /**
-     * A response above the requested bound is demasked before it is refused for its size.
+     * A response above the requested bound is checked for invented references before its size.
      *
      * <p>The cardinality refusal is repairable and an invented placeholder is not. While the loop
      * bounds every request to one call, this refusal is the only path an over-delivered batch
@@ -618,7 +635,7 @@ class AiInvocationServiceTest {
                                 searchCall("call_2", "{{P99}}"))));
 
         assertEquals(1, malformed.demaskWarnings());
-        assertEquals("native_multiple_calls", malformed.repairRule());
+        assertEquals("invented_placeholder", malformed.repairRule());
         Map<?, ?> terminal = auditMetadata().get(1);
         assertEquals("native_tool_call", terminal.get("schemaRule"));
         assertEquals("malformed_output", terminal.get("parseOutcome"));
@@ -650,11 +667,10 @@ class AiInvocationServiceTest {
     /**
      * A warning-free response above the bound keeps the cardinality repair, whatever else it holds.
      *
-     * <p>Demasking first must not turn the size refusal into a validation pass: a call the guard
+     * <p>Reference validation must not turn the size refusal into a validation pass: a call the guard
      * would refuse, arguments that do not parse, and arguments that are not an object all leave the
-     * refusal exactly the repairable {@code native_multiple_calls} it has always been. A placeholder
-     * inside non-object arguments is not counted, because the admitted path refuses such arguments
-     * before demasking them.
+     * refusal exactly the repairable {@code native_multiple_calls} it has always been. Invented
+     * references in non-object arguments are refused before cardinality admission.
      */
     @Test
     void aWarningFreeResponseAboveTheBoundKeepsTheCardinalityRepairWhateverElseItCarries() {
@@ -668,7 +684,7 @@ class AiInvocationServiceTest {
                                         "call_2", "not_a_tool", "{\"query\":\"x\"}"),
                                 new AiToolCall("call_3", "search_records", "not json"),
                                 new AiToolCall(
-                                        "call_4", "search_records", "[\"{{P99}}\"]"))));
+                                        "call_4", "search_records", "[\"ordinary query\"]"))));
 
         assertEquals("native_multiple_calls", malformed.repairRule());
         assertEquals(0, malformed.demaskWarnings());
@@ -788,8 +804,8 @@ class AiInvocationServiceTest {
      */
     @Test
     void demaskWarningsAreSummedAcrossEveryCallOfABatch() {
-        AiNativeToolCompletion.Tool<?> secondOnly = assertInstanceOf(
-                AiNativeToolCompletion.Tool.class,
+        AiNativeToolCompletion.Malformed<?> secondOnly = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
                 completeNativeTools(
                         4,
                         List.of(
@@ -802,8 +818,8 @@ class AiInvocationServiceTest {
     /** Warnings from calls on both sides of a batch add up rather than overwrite each other. */
     @Test
     void demaskWarningsFromEveryCallOfABatchAddUp() {
-        AiNativeToolCompletion.Tool<?> both = assertInstanceOf(
-                AiNativeToolCompletion.Tool.class,
+        AiNativeToolCompletion.Malformed<?> both = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
                 completeNativeTools(
                         4,
                         List.of(
@@ -872,7 +888,7 @@ class AiInvocationServiceTest {
                                 searchCall("call_1", "{{P1}}"),
                                 new AiToolCall("call_2", "search_records", "{\"query\":7}"),
                                 searchCall("call_3", "{{P99}}"))));
-        assertEquals("native_invalid_arguments", after.repairRule());
+        assertEquals("invented_placeholder", after.repairRule());
         assertEquals(1, after.demaskWarnings());
         assertEquals(1, auditMetadata().get(1).get("demaskWarnings"));
 
@@ -884,7 +900,7 @@ class AiInvocationServiceTest {
                                 searchCall("call_1", "{{P99}}"),
                                 new AiToolCall(
                                         "call_2", "not_a_tool", "{\"query\":\"x\"}"))));
-        assertEquals("native_unknown_tool", before.repairRule());
+        assertEquals("invented_placeholder", before.repairRule());
         assertEquals(1, before.demaskWarnings());
     }
 
@@ -904,7 +920,7 @@ class AiInvocationServiceTest {
                         List.of(
                                 searchCall("call_1", "{{P99}}"),
                                 searchCall("call_1", "Bellweather"))));
-        assertEquals("native_duplicate_call_id", sharedId.repairRule());
+        assertEquals("invented_placeholder", sharedId.repairRule());
         assertEquals(1, sharedId.demaskWarnings());
 
         AiNativeToolCompletion.Malformed<?> unparsable = assertInstanceOf(
@@ -914,7 +930,7 @@ class AiInvocationServiceTest {
                         List.of(
                                 new AiToolCall("call_1", "search_records", "not json"),
                                 searchCall("call_2", "{{P99}}"))));
-        assertEquals("native_arguments_not_object", unparsable.repairRule());
+        assertEquals("invented_placeholder", unparsable.repairRule());
         assertEquals(1, unparsable.demaskWarnings());
 
         when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4);
@@ -926,19 +942,15 @@ class AiInvocationServiceTest {
                         List.of(
                                 searchCall("call_1", "Bellweather"),
                                 searchCall("call_2", "{{P99}}"))));
-        assertEquals("native_call_content", content.repairRule());
+        assertEquals("invented_placeholder", content.repairRule());
         assertEquals(1, content.demaskWarnings());
     }
 
     /**
-     * A single call keeps the order it always had: its own guard rejection is its refusal.
-     *
-     * <p>The batch rule exists because a sibling's rejection must not hide another call's
-     * invented placeholder. One call has no sibling, so the response every undeclared endpoint can
-     * produce is refused and repaired exactly as before, with no demask count on the refusal.
+     * An invented reference takes precedence over even a single call's repairable guard rejection.
      */
     @Test
-    void aSingleCallTheGuardRejectsStaysRepairableWhateverPlaceholderItNames() {
+    void aSingleGuardRejectedCallCannotEarnRepairWithAnInventedPlaceholder() {
         AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
                 AiNativeToolCompletion.Malformed.class,
                 completeNativeTools(
@@ -947,9 +959,9 @@ class AiInvocationServiceTest {
                                 "call_1", "search_records",
                                 "{\"query\":\"{{P99}}\",\"kinds\":[\"planet\"]}"))));
 
-        assertEquals("native_invalid_arguments", malformed.repairRule());
-        assertEquals(0, malformed.demaskWarnings());
-        assertFalse(auditMetadata().get(1).containsKey("demaskWarnings"));
+        assertEquals("invented_placeholder", malformed.repairRule());
+        assertEquals(1, malformed.demaskWarnings());
+        assertEquals(1, auditMetadata().get(1).get("demaskWarnings"));
     }
 
     private static AiToolCall searchCall(String id, String query) {
@@ -1428,6 +1440,7 @@ class AiInvocationServiceTest {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        context.exposeDispatchedPayload(placeholder);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
                 catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
                 List.of(new AiToolExchange(
@@ -1946,6 +1959,24 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void missionUnsafeOutputFixtureFailsAdmissionWithoutRepair() throws Exception {
+        var directory = java.nio.file.Path.of(java.util.Objects.requireNonNull(
+                getClass().getResource("/ai/scripted/missions")).toURI());
+        var loader = new ScriptedAiScriptLoader(directory.toString(), new ObjectMapper());
+        var script = loader.bySelector("connex_script_mission_confirm_unsafe_output");
+        providerReturns(new AiCompletionResult(script.steps().getLast().emit().text(), 1, 1, "end_turn"));
+        var catalog = new AiAssistantToolCatalog();
+        var attempt = service.completeStructuredRepairable(
+                invocation("Review the selected record"), AiAssistantStep.class,
+                new AiAssistantStepGuard(catalog).forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
+                new AiAssistantStepSchema(new ObjectMapper(), catalog).missionClosingResponseSchema());
+
+        var outcome = assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertEquals(AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER, outcome.reason());
+        assertTrue(attempt.repair().isEmpty());
+    }
+
+    @Test
     void completeStructuredRepairableDropsAmbiguousReasoningAndKeepsTheValidAnswer()
             throws Exception {
         AiInvocation invocation = reasoningInvocation("Summarize relationship state");
@@ -2261,6 +2292,269 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void minimumAcceptedMissionCheckpointsThenCompletesAReportWithinItsRootAllowance() {
+        var request = new AiAgentRunCreateRequest("2ec8b877-06f4-44a1-b315-e8ad20a61a8c", "record_review_v1",
+                "Review this record", new AiAgentRunCreateRequest.Scope("record", "person", 41),
+                new AiAgentRunCreateRequest.Limits(null, AiAgentBudgetService.MIN_RUN_TOKENS, null));
+        AiAgentBudgetService.requireFeasibleCreation(new ObjectMapper().writeValueAsBytes(request.goal()).length,
+                request.limits().maxTokens());
+        var root = new AiAgentRun();
+        root.setMissionType(request.missionType());
+        root.setDefinitionVersion(1);
+        root.setRuntimeContractVersion(2);
+        root.setMaxSteps(request.limits().maxSteps());
+        root.setMaxTokens(request.limits().maxTokens());
+        root.setExecutionDeadlineAt(LocalDateTime.ofInstant(NOW.plusSeconds(900), ZoneOffset.UTC));
+        root.setHardDeadlineAt(root.getExecutionDeadlineAt());
+        var budgets = new AiAgentBudgetService();
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var active = new AtomicReference<AiAgentSegment>();
+        when(persistence.maxOutputTokens(any(), anyInt(), anyInt())).thenAnswer(call ->
+                budgets.maxOutputTokens(active.get(), call.getArgument(1), call.getArgument(2)));
+        when(persistence.reserveDispatch(any(), anyLong())).thenAnswer(call -> {
+            long ceiling = call.getArgument(1);
+            assertTrue(ceiling <= active.get().getReservedTokens());
+            return new AiAgentDispatchReservation(31, 37, 1, 1, ceiling);
+        });
+        doAnswer(call -> {
+            active.get().setKnownSteps(active.get().getKnownSteps() + 1);
+            active.get().setKnownInputTokens((int) call.getArgument(2));
+            active.get().setKnownOutputTokens((int) call.getArgument(3));
+            return null;
+        }).when(persistence).recordUsage(any(), any(), anyInt(), anyInt());
+        when(aiProvider.toolCallingCapability(resolved.target())).thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(131072);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(16384);
+        var json = new ObjectMapper();
+        var catalog = new AiAssistantToolCatalog();
+        var assembler = new AiAssistantPromptAssembler(json, catalog);
+        var schema = new AiAssistantStepSchema(json, catalog);
+        var guard = new AiAssistantStepGuard(catalog);
+        var goal = new AiChatMessage();
+        goal.setAuthorKind("user");
+        goal.setContent(request.goal());
+
+        for (int segmentNo = 1; segmentNo <= 2; segmentNo++) {
+            var reservation = budgets.reserve(root, segmentNo, NOW);
+            assertEquals(segmentNo == 1, reservation.continuationCapable());
+            assertEquals(segmentNo == 1 ? 16384 : 65536, reservation.tokens());
+            var segment = new AiAgentSegment();
+            segment.setReservedSteps(reservation.steps());
+            segment.setReservedTokens(reservation.tokens());
+            active.set(segment);
+            var policy = new AiAgentExecutionPolicy(31, 37, 1, null, goal, new AiAgentScopePolicy("person", 41),
+                    reservation.steps(), reservation.deadline(), null, null, persistence,
+                    mock(AiAgentCapabilityGate.class), 2, segmentNo, 1, null,
+                    reservation.continuationCapable(), reservation.tokens());
+            boolean closing = segmentNo == 2;
+            providerReturns(closing
+                    ? new AiCompletionResult("{\"text\":\"Record reviewed.\",\"citations\":[],\"suggestions\":[],\"title\":null}", 0, 0, "stop")
+                    : new AiCompletionResult("", 0, 0, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA,
+                            "", AiReasoningMode.NONE, List.of(new AiToolCall("checkpoint", "checkpoint_segment",
+                                    "{\"expectedPlanRevision\":\"1\",\"expectedCheckpointRevision\":\"1\",\"nextPlanItemKey\":null,"
+                                            + "\"memory\":{\"summary\":\"\",\"citations\":[]},\"phase\":\"reporting\"}"))));
+            var completion = policy.execute(() -> {
+                var context = new MaskingContext();
+                var nativeTools = new AiNativeToolRequest(
+                        assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), List.of(), null, closing);
+                int envelope = service.serializedPromptBytes(assembler.fixedNativePrompt(AiAssistantToolCatalog.ALL),
+                        schema.finalResponseSchema(), AiReasoningMode.NONE, nativeTools);
+                var prompt = assembler.assembleNative(List.of(goal),
+                        new AiAssistantToolResult(Map.of("missionContext", Map.of("memory", "")), List.of()),
+                        List.of(), context, new AiChatResourceRegistry(), List.of(),
+                        AiAssistantPromptBudget.from(new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA,
+                                AiReasoningMode.NONE, 131072, 16384, AiToolCallingMode.NATIVE_FUNCTIONS), 16384, envelope),
+                        AiAssistantPromptAssembler.SkillContext.NONE, AiAssistantToolCatalog.ALL);
+                var invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context, prompt, List.of(),
+                        16384, 0.2, false, null, AiInvocationProtocol.NATIVE_TOOLS);
+                return service.completeNativeToolsRepairable(invocation, AiAssistantStep.FinalAnswer.class,
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of()), guard.finalAnswerForIssuedPlaceholders(Set.of()),
+                        schema.finalResponseSchema(), nativeTools,
+                        directAdmission, providerAttemptGuard);
+            });
+            if (closing) {
+                var content = assertInstanceOf(AiNativeToolCompletion.Content.class, completion);
+                var parsed = assertInstanceOf(AiStructuredOutcome.Parsed.class, content.attempt().outcome());
+                assertEquals("Record reviewed.", assertInstanceOf(AiAssistantStep.FinalAnswer.class, parsed.value()).text());
+            } else {
+                assertEquals("checkpoint_segment", assertInstanceOf(AiNativeToolCompletion.Tool.class, completion).providerCall().name());
+            }
+            var settlement = budgets.settle(segment);
+            root.setConsumedSteps(root.getConsumedSteps() + settlement.steps());
+            root.setConsumedTokens(root.getConsumedTokens() + settlement.tokens());
+        }
+        assertEquals(2, root.getConsumedSteps());
+        assertTrue(root.getConsumedTokens() <= request.limits().maxTokens());
+        verify(aiProvider, times(2)).complete(any());
+    }
+
+    @Test
+    void smallSegmentPassesClampedOutputToProviderAndConservativeAccounting() {
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var mission = mission(persistence);
+        AiInvocation invocation = missionInvocation("Review the selected record");
+        int promptTokens = service.serializedPromptBytes(invocation.prompt(), null, AiReasoningMode.NONE);
+        var segment = new AiAgentSegment();
+        segment.setReservedSteps(4);
+        segment.setReservedTokens(8192);
+        when(persistence.maxOutputTokens(eq(mission), anyInt(), eq(16384))).thenAnswer(call ->
+                new AiAgentBudgetService().maxOutputTokens(segment, call.getArgument(1), call.getArgument(2)));
+        var dispatch = new AiAgentDispatchReservation(31, 37, 1, 1, 8192);
+        when(persistence.reserveDispatch(mission, 8192)).thenReturn(dispatch);
+        providerReturns(new AiCompletionResult("Review complete.", 0, 0, "stop"));
+
+        mission.execute(() -> service.complete(invocation));
+
+        ArgumentCaptor<AiCompletionRequest> request = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(request.capture());
+        assertEquals(8192 - promptTokens, request.getValue().maxTokens());
+        assertTrue(request.getValue().maxTokens() < invocation.maxTokens());
+        verify(persistence).reserveDispatch(mission, 8192);
+        verify(persistence).recordUsage(mission, dispatch, promptTokens, 8192 - promptTokens);
+        verify(budgetLease).settle(promptTokens, 8192 - promptTokens);
+        ArgumentCaptor<AiInvocation> budgetInvocation = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), budgetInvocation.capture(), anyString());
+        assertEquals(request.getValue().maxTokens(), budgetInvocation.getValue().maxTokens());
+        assertTrue(budgetInvocation.getValue().outputTokensClamped());
+    }
+
+    @Test
+    void missionBelowOutputFloorRefusesBeforeProviderOrBudgetAdmission() {
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var mission = mission(persistence);
+        AiInvocation invocation = missionInvocation("Review the selected record");
+        int promptTokens = service.serializedPromptBytes(invocation.prompt(), null, AiReasoningMode.NONE);
+        var segment = new AiAgentSegment();
+        segment.setReservedSteps(4);
+        segment.setReservedTokens(8192);
+        segment.setKnownInputTokens(8192 - promptTokens - 255);
+        when(persistence.maxOutputTokens(eq(mission), anyInt(), eq(16384))).thenAnswer(call ->
+                new AiAgentBudgetService().maxOutputTokens(segment, call.getArgument(1), call.getArgument(2)));
+
+        var refused = assertThrows(AiAssistantLoopException.class,
+                () -> mission.execute(() -> service.complete(invocation)));
+
+        assertEquals("mission_budget_exhausted", refused.terminalReason());
+        verify(aiProvider, never()).complete(any());
+        verifyNoInteractions(budgetCoordinator, providerTransport);
+        verify(persistence, never()).reserveDispatch(any(), anyLong());
+        verify(persistence, never()).recordUsage(any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void missionRepairRecomputesOutputFromItsLargerPromptAndPriorUsage() {
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var mission = mission(persistence);
+        var segment = new AiAgentSegment();
+        segment.setReservedSteps(4);
+        segment.setReservedTokens(8192);
+        when(persistence.maxOutputTokens(eq(mission), anyInt(), eq(16384))).thenAnswer(call ->
+                new AiAgentBudgetService().maxOutputTokens(segment, call.getArgument(1), call.getArgument(2)));
+        when(persistence.reserveDispatch(eq(mission), anyLong())).thenAnswer(call ->
+                new AiAgentDispatchReservation(31, 37, 1, segment.getKnownSteps() + 1, call.getArgument(1)));
+        doAnswer(call -> {
+            segment.setKnownSteps(segment.getKnownSteps() + 1);
+            segment.setKnownInputTokens(segment.getKnownInputTokens() + (int) call.getArgument(2));
+            segment.setKnownOutputTokens(segment.getKnownOutputTokens() + (int) call.getArgument(3));
+            return null;
+        }).when(persistence).recordUsage(eq(mission), any(), anyInt(), anyInt());
+        AiResponseSchema schema = new AiResponseSchema("intro_rationale",
+                new ObjectMapper().createObjectNode().put("type", "object"));
+        AiInvocation initial = missionInvocation("Review the selected record");
+        providerReturns(new AiCompletionResult("malformed", 100, 50, "stop"));
+        var attempt = mission.execute(() -> service.completeStructuredRepairable(
+                initial, IntroRationaleContent.class, AiRawOutputGuard.PERMIT_ALL, schema));
+        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        AiInvocation repaired = new AiInvocation(initial.feature(), initial.context(),
+                PromptAssembly.builder(initial.context()).system("Return the required JSON object")
+                        .userTurn("Repair the malformed response: " + "malformed".repeat(30)).build(),
+                16384, initial.temperature());
+        providerReturns(new AiCompletionResult("{\"rationale\":\"Review complete.\"}", 100, 50, "stop"));
+
+        mission.execute(() -> service.completeStructuredRepairable(
+                repaired, IntroRationaleContent.class, AiRawOutputGuard.PERMIT_ALL, schema));
+
+        ArgumentCaptor<AiCompletionRequest> requests = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider, times(2)).complete(requests.capture());
+        int initialPrompt = service.serializedPromptBytes(initial.prompt(), schema, AiReasoningMode.NONE);
+        int repairPrompt = service.serializedPromptBytes(repaired.prompt(), schema, AiReasoningMode.NONE);
+        assertEquals(8192 - initialPrompt, requests.getAllValues().getFirst().maxTokens());
+        assertEquals(8192 - 150 - repairPrompt, requests.getAllValues().getLast().maxTokens());
+        assertEquals(300, segment.getKnownInputTokens() + segment.getKnownOutputTokens());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {400, 422, 503})
+    void definiteFallbackRejectionSettlesTheActualMissionDispatchWhileServerFailureStaysUncertain(int status) {
+        var persistence = mock(ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService.class);
+        var capability = mock(ooo.klae.connex.backend.ai.mission.AiAgentCapabilityGate.class);
+        var mission = new AiAgentExecutionPolicy(31, 37, 1, null, null,
+                new AiAgentScopePolicy("person", 41), 4,
+                Instant.parse("2030-01-01T00:00:00Z"), null, null, persistence, capability);
+        AiInvocation invocation = missionInvocation("Summarize");
+        int promptTokens = service.serializedPromptBytes(invocation.prompt(), null, AiReasoningMode.NONE);
+        when(persistence.maxOutputTokens(mission, promptTokens, 16384)).thenReturn(8192 - promptTokens);
+        var reservations = new java.util.ArrayList<AiAgentDispatchReservation>();
+        when(persistence.reserveDispatch(eq(mission), anyLong())).thenAnswer(call -> {
+            var dispatch = new AiAgentDispatchReservation(
+                    31, 37, 1, reservations.size() + 1, call.getArgument(1));
+            reservations.add(dispatch);
+            return dispatch;
+        });
+        if (status != 503) {
+            when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        }
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            assertEquals(8192 - promptTokens, request.maxTokens());
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
+                    throw new AiProviderRequestRejectedException("provider", status);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                if (!exception.permitsStructuredOutputFallback()) {
+                    throw exception;
+                }
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                return "fallback";
+            });
+            return new AiCompletionResult("done", 1, 1, "stop");
+        });
+        if (status == 503) {
+            assertThrows(AiProviderRequestRejectedException.class,
+                    () -> mission.execute(() -> service.complete(invocation)));
+            verify(persistence, never()).recordUsage(any(), any(), anyInt(), anyInt());
+            assertEquals(1, reservations.size());
+        } else {
+            mission.execute(() -> service.complete(invocation));
+            assertEquals(2, reservations.size());
+            var order = inOrder(persistence);
+            order.verify(persistence).reserveDispatch(eq(mission), anyLong());
+            order.verify(persistence).recordUsage(mission, reservations.getFirst(), 0, 0);
+            order.verify(persistence).reserveDispatch(eq(mission), anyLong());
+            order.verify(persistence).recordUsage(mission, reservations.getLast(), 1, 1);
+        }
+        assertTrue(reservations.stream().allMatch(dispatch -> dispatch.tokenCeiling() == 8192));
+        verify(budgetLease).close();
+    }
+
+    private AiInvocation missionInvocation(String text) {
+        AiInvocation base = invocation(text);
+        lenient().when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(131072);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(16384);
+        return new AiInvocation(AiFeature.ASSISTANT_CHAT, base.context(), base.prompt(), 16384, 0.2);
+    }
+
+    private AiAgentExecutionPolicy mission(AiAgentRunPersistenceService persistence) {
+        return new AiAgentExecutionPolicy(31, 37, 1, null, null,
+                new AiAgentScopePolicy("person", 41), 4, NOW.plusSeconds(180), null, null,
+                persistence, mock(AiAgentCapabilityGate.class), 2, 1, 1, null, false, 8192);
+    }
+
+    @Test
     void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressChecks() {
         AiInvocation invocation = invocation("Summarize relationship state");
         AiRequestDeadline originalDeadline = AiRequestDeadline.afterMillis(60_000);
@@ -2344,6 +2638,61 @@ class AiInvocationServiceTest {
         verify(invocationAdmission).commitLeaderInvocation();
         verify(fallbackAdmission, never()).commitInvocation();
         verify(fallbackAdmission).close();
+        verify(providerTransport).run();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void durablePrivacyIsRecheckedAtActualFallbackEgress(boolean expectedEpoch) {
+        var mapper = mock(ooo.klae.connex.backend.mappers.AiChatMapper.class);
+        var session = new ooo.klae.connex.backend.beans.AiChatSession();
+        session.setMissionTaintSeq(1);
+        var barrier = new ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier();
+        barrier.setGeneration(1);
+        when(mapper.getPrivacySession(WORKSPACE_ID, 7)).thenReturn(session);
+        when(mapper.getPrivacyBarrier(WORKSPACE_ID)).thenReturn(barrier);
+        session.setId(7);
+        session.setWorkspaceId(WORKSPACE_ID);
+        session.setOrganizationPrivacyGeneration(1L);
+        var authority = mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
+        when(authority.organizationId(WORKSPACE_ID)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
+        when(authority.freshCurrent(1)).thenReturn(1L);
+        var privacyGuard = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(authority);
+        var token = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken(WORKSPACE_ID, 7, 1, 1, 1, 1L);
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            assertThrows(AiProviderRequestRejectedException.class, () ->
+                    request.providerAttemptExecutor().execute(() -> {
+                        request.providerAttemptExecutor().beforeSend();
+                        providerTransport.run();
+                        throw new AiProviderRequestRejectedException("provider", 400);
+                    }));
+            barrier.setGeneration(2);
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                providerTransport.run();
+                return "forbidden fallback";
+            });
+            throw new AssertionError("Durable privacy did not reject fallback egress");
+        });
+        java.util.function.Supplier<AiStructuredOutcome<IntroRationaleContent>> complete = () ->
+                privacyGuard.execute(mapper, token,
+                        () -> service.completeStructured(invocation, IntroRationaleContent.class, invocationAdmission));
+        var refused = assertThrows(ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException.class,
+                () -> {
+                    if (expectedEpoch) {
+                        restrictionEpoch.runWithExpectedEgressEpoch(WORKSPACE_ID,
+                                restrictionEpoch.current(WORKSPACE_ID), () -> complete.get());
+                    } else {
+                        complete.get();
+                    }
+                });
+        assertEquals("restrictions_changed", refused.detailReason());
+        verify(invocationAdmission).commitLeaderInvocation();
+        verify(fallbackAdmission, never()).commitInvocation();
         verify(providerTransport).run();
     }
 
@@ -2439,12 +2788,93 @@ class AiInvocationServiceTest {
         verify(aiProvider, never()).complete(any());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(EntityKind.class)
+    void plainTextReasoningCannotHideInventedReferencesBeforeDiscard(EntityKind kind) {
+        for (boolean separate : List.of(false, true)) {
+            var context = new MaskingContext();
+            String token = context.tokenFor(kind, "Undispatched label");
+            var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                    .system("Use concise analysis").userTurn("Describe the attachment").build(), 64, 0.1);
+            providerReturns(new AiCompletionResult(separate ? "Ready" : "<think>" + token + "</think>Ready",
+                    1, 1, "stop", AiStructuredOutputEnforcement.PROMPT_ONLY,
+                    separate ? token : "", AiReasoningMode.TAGGED));
+
+            var completion = service.complete(invocation);
+
+            assertEquals("", completion.text());
+            assertEquals(1, completion.demaskWarnings());
+        }
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> failedDispatchKinds() {
+        return java.util.stream.Stream.of("connection", "timeout").flatMap(failure ->
+                java.util.stream.Stream.of(EntityKind.values()).map(kind ->
+                        org.junit.jupiter.params.provider.Arguments.of(failure, kind)));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("failedDispatchKinds")
+    void failedAttemptCannotExposeTokensOmittedFromRebuiltBody(String failure, EntityKind kind) {
+        var context = new MaskingContext();
+        String token = context.tokenFor(kind, "Hidden reference");
+        String other = context.tokenFor(EntityKind.COMPANY, "Existing Company");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            var first = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
+                    request, AiStructuredOutputEnforcement.PROMPT_ONLY, false, new ObjectMapper());
+            assertTrue(first.dispatchedTokens().contains(token));
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    first.run();
+                    assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask(token, context).warnings());
+                    throw new AiProviderException(failure);
+                });
+            } catch (AiProviderException expected) {
+                assertEquals(failure, expected.getMessage());
+            }
+            var rebuilt = new AiCompletionRequest(request.target(), request.credentials(), request.systemPrompt(),
+                    List.of(new AiMessage("user", "Discuss the relationship")), request.images(),
+                    request.outputMode(), request.responseSchema(), request.nativeTools(), request.reasoningMode(),
+                    request.providerAttemptExecutor(), request.maxTokens(), request.temperature());
+            var second = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
+                    rebuilt, AiStructuredOutputEnforcement.PROMPT_ONLY, false, new ObjectMapper());
+            assertFalse(second.dispatchedTokens().contains(token));
+            request.providerAttemptExecutor().execute(() -> {
+                second.run();
+                ooo.klae.connex.backend.ai.provider.AiProviderDispatch.responded(second);
+                return "response";
+            });
+            return new AiCompletionResult(token, 1, 1, "stop");
+        });
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Discuss " + token).build(), 64, 0.1);
+
+        var result = service.complete(invocation);
+
+        assertEquals("[unknown reference]", result.text());
+        assertEquals(1, result.demaskWarnings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask(token, context).warnings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask(other, context).warnings());
+        verify(budgetLease).markDispatched();
+        verify(fallbackBudgetLease).markDispatched();
+    }
+
+    private void respondWithDispatchEvidence(AiCompletionRequest request) {
+        var dispatch = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
+                request, ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY,
+                false, new ObjectMapper());
+        ooo.klae.connex.backend.ai.provider.AiProviderDispatch.responded(dispatch);
+    }
+
     private void providerReturns(AiCompletionResult result) {
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
             AiCompletionRequest request = invocation.getArgument(0);
             request.providerAttemptExecutor().execute(() -> {
                 request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
+                respondWithDispatchEvidence(request);
                 return "provider response";
             });
             return result;
@@ -2588,6 +3018,7 @@ class AiInvocationServiceTest {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        context.exposeDispatchedPayload(placeholder);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
                 catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
                 List.of(new AiToolExchange(
@@ -2755,4 +3186,366 @@ class AiInvocationServiceTest {
         assertFalse(serialized.contains("SECRET_ACCESS_KEY"));
         assertFalse(serialized.contains("/9j/"));
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "{\"owner\":\"\\u007b\\u007bM1\\u007d\\u007d\"",
+            "{\"owner\":\"\\\\u007b\\\\u007bM1\\\\u007d\\\\u007d\"",
+            "{\"owner\":\"\\{\\{M1\\}\\}\""})
+    void malformedNativeArgumentsCannotHideUnexposedMembersBehindEscapes(String arguments) {
+        var completion = completeNativeTools(1, List.of(new AiToolCall("guess", "assign_owner", arguments)));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void plainTextCompletionsCannotRetainEscapedUnexposedMembersForAttachmentReplay(boolean direct) {
+        AiInvocation invocation = invocation("Describe the attachment");
+        invocation.context().tokenFor(EntityKind.MEMBER, "Hidden Member");
+        providerReturns(new AiCompletionResult("Image mentions \\u007b\\u007bM1\\u007d\\u007d", 12, 7, "stop"));
+        AiCompletionOutcome outcome = direct ? service.complete(invocation, directAdmission) : service.complete(invocation);
+        assertEquals(1, outcome.demaskWarnings());
+        assertEquals("", outcome.text());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "{} {\"owner\":\"\\u007b\\u007bM1\\u007d\\u007d\"",
+            "{} garbage \"\\\\u007b\\\\u007bM1\\\\u007d\\\\u007d\"",
+            "{\"query\":\"relationship\"} \"\\u007b\\u007bM1\\u007d\\u007d\""})
+    void nativeArgumentSuffixesCannotEarnRepairOrBeRetainedForReplay(String arguments) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Hidden Member");
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis")
+                .userTurn("Find the relationship").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 64, 0.2, false, null,
+                AiInvocationProtocol.NATIVE_TOOLS);
+        var completion = completeMemberNative(invocation, List.of(), new AiToolCall("guess", "search_records", arguments));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "signature", "text"})
+    void everyReplayedNativeProviderFieldRejectsEscapedUnexposedMembers(String field) {
+        String token = "\\u007b\\u007bM1\\u007d\\u007d";
+        var call = new AiToolCall(field.equals("id") ? token : "guess",
+                "search_records", "{\"query\":\"relationship\"}",
+                field.equals("signature") ? token : null);
+        var completion = invokeNativeTools(1, field.equals("text") ? token : "", List.of(call));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        assertTrue(refused.reasoning().isEmpty());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "unknown,{\"owner\":\"{{M1}}\"}",
+            "assign_owner,{\"owner\":\"{{M1}}\"}",
+            "assign_owner,not-json-{{M1}}",
+            "unknown,{\"owner\":\"\\u007b\\u007bM1\\u007d\\u007d\"}"})
+    void singleInvalidNativeCallWithAnUnexposedMemberNeverEarnsRepair(String name, String arguments) {
+        var completion = completeNativeTools(1, List.of(new AiToolCall("guess", name, arguments)));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "id,false,{{M1}}", "signature,false,{{M1}}",
+            "id,false,{{M99}}", "signature,false,{{m1}}",
+            "id,false,｛｛Ｍ１｝｝", "signature,false,｛｛Ｍ１｝｝",
+            "id,true,{{M1}}", "signature,true,{{M1}}"})
+    void nativeOpaqueFieldsRequirePriorMemberExposure(String field, boolean exposed, String token) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Hidden Member");
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis")
+                .userTurn(exposed ? "Discuss {{M1}}" : "Find the relationship").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 64, 0.2, false, null,
+                AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "call-" + token : "call-1", "search_records",
+                "{\"query\":\"relationship\"}", field.equals("signature") ? "sig-" + token : null);
+        var completion = completeMemberNative(invocation, List.of(), call);
+        if (exposed) {
+            var accepted = assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
+            assertEquals(call, accepted.providerCall());
+            assertEquals(0, accepted.demaskWarnings());
+            assertEquals("Hidden Member", ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).text());
+        } else {
+            var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+            assertEquals("invented_placeholder", refused.repairRule());
+            assertEquals(1, refused.demaskWarnings());
+            assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+        }
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "signature"})
+    void guessedOpaqueMembersCannotHideBehindAnInvalidNativeCall(String field) {
+        var call = new AiToolCall(field.equals("id") ? "{{M1}}" : "call-1", "unknown",
+                "not-json", field.equals("signature") ? "{{M1}}" : null);
+        var completion = completeNativeTools(1, List.of(call));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "name", "arguments", "signature", "escapedValue", "escapedKey"})
+    void nativeReplayDistinguishesValidatedNamesFromProviderAuthoredMaskingSentinels(String field) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(field.equals("name") ? "search_records" : "[redacted]");
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis")
+                .userTurn("Find the relationship").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 64, 0.2, false, null,
+                AiInvocationProtocol.NATIVE_TOOLS);
+        var acceptedCall = new AiToolCall("call-1", "search_records", "{\"query\":\"relationship\"}");
+        var accepted = assertInstanceOf(AiNativeToolCompletion.Tool.class,
+                completeMemberNative(invocation, List.of(), acceptedCall));
+        assertEquals(acceptedCall, accepted.providerCall());
+        String escaped = "\\u005bredacted\\u005d";
+        String arguments = switch (field) {
+            case "arguments" -> "{\"query\":\"[redacted]\"}";
+            case "escapedValue" -> "{\"query\":\"" + escaped + "\"}";
+            case "escapedKey" -> "{\"" + escaped + "\":\"relationship\"}";
+            default -> "{\"query\":\"relationship\"}";
+        };
+        var replay = new AiToolCall(field.equals("id") ? "[redacted]" : "call-1",
+                "search_records", arguments,
+                field.equals("signature") ? "[redacted]" : null);
+        if (field.equals("name") || field.equals("signature")) {
+            providerReturns(new AiCompletionResult(
+                    "{\"text\":\"Ready\",\"citations\":[],\"suggestions\":[],\"title\":null}", 12, 7, "stop"));
+            var completed = assertInstanceOf(AiNativeToolCompletion.Content.class,
+                    requestMemberNative(invocation, List.of(new AiToolExchange(replay, "{}", 1, 1))));
+            assertInstanceOf(AiStructuredOutcome.Parsed.class, completed.attempt().outcome());
+            verify(aiProvider, times(2)).complete(any());
+        } else {
+            assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> requestMemberNative(invocation, List.of(new AiToolExchange(replay, "{}", 1, 1))));
+            verify(aiProvider, times(1)).complete(any());
+        }
+    }
+
+    @Test
+    void nativeAdmissionAndReplayUseTheSameFrozenRawMemberPolicyWhileSignaturesStayOpaque() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall("call-1", "search_records", "{\"query\":\"Former Name\"}", "/Li+");
+        var accepted = assertInstanceOf(AiNativeToolCompletion.Tool.class,
+                completeMemberNative(invocation, List.of(), call));
+        assertEquals(call, accepted.providerCall());
+        context.registerMemberCandidate("Former Name");
+        providerReturns(new AiCompletionResult(
+                "{\"text\":\"Ready\",\"citations\":[],\"suggestions\":[],\"title\":null}", 12, 7, "stop"));
+        var replayed = assertInstanceOf(AiNativeToolCompletion.Content.class,
+                requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+        assertInstanceOf(AiStructuredOutcome.Parsed.class, replayed.attempt().outcome());
+        var newCall = new AiToolCall("call-2", "search_records", call.arguments(), "/Li+");
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class,
+                completeMemberNative(invocation, List.of(), newCall));
+        assertEquals("native_member_leak", refused.repairRule());
+    }
+
+    /** One JSON-field decoding pass is identical for admission and the classified replay segment. */
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> nativeMemberFieldRepresentations() {
+        var mapper = new ObjectMapper();
+        return java.util.stream.Stream.of(
+                Map.entry("{\"query\":\"Alice\"}", true),
+                Map.entry("{\"query\":\"\\u0041lice\"}", true),
+                Map.entry("{\"query\":\"\\u0041\\u006c\\u0069\\u0063\\u0065\"}", true),
+                Map.entry("{\"query\":\"\\\\u0041lice\"}", false),
+                Map.entry(mapper.writeValueAsString(Map.of("query", "{\"x\":\"Alice\"}")), true),
+                Map.entry(mapper.writeValueAsString(Map.of("query", "{\"x\":\"\\u0041lice\"}")), false),
+                Map.entry(mapper.writeValueAsString(Map.of("query", mapper.writeValueAsString("Alice"))), true),
+                Map.entry(mapper.writeValueAsString(Map.of("query", mapper.writeValueAsString("\\u0041lice"))), false),
+                Map.entry("{\"query\":\"Bob\"}", false),
+                Map.entry("{\"query\":\"call-1\"}", false))
+                .flatMap(example -> java.util.stream.Stream.of("id", "arguments").map(field ->
+                        org.junit.jupiter.params.provider.Arguments.of(field, example.getKey(), example.getValue())));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("nativeMemberFieldRepresentations")
+    void nativeFieldRepresentationsHaveIdenticalAdmissionAndReplayDecisions(
+            String field, String representation, boolean refused) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Alice");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? representation : "call-1", "search_records",
+                field.equals("arguments") ? representation : "{\"query\":\"relationship\"}");
+        var admitted = completeMemberNative(invocation, List.of(), call);
+        if (refused) {
+            var malformed = assertInstanceOf(AiNativeToolCompletion.Malformed.class, admitted);
+            assertEquals("native_member_leak", malformed.repairRule());
+            assertEquals(0, malformed.demaskWarnings());
+            assertThrows(MaskingLeakException.class,
+                    () -> requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+            verify(aiProvider, times(1)).complete(any());
+        } else {
+            assertInstanceOf(AiNativeToolCompletion.Tool.class, admitted);
+            context.registerMemberCandidate("Bob");
+            providerReturns(new AiCompletionResult(
+                    "{\"text\":\"Ready\",\"citations\":[],\"suggestions\":[],\"title\":null}", 12, 7, "stop"));
+            var replayed = assertInstanceOf(AiNativeToolCompletion.Content.class,
+                    requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+            assertInstanceOf(AiStructuredOutcome.Parsed.class, replayed.attempt().outcome());
+            verify(aiProvider, times(2)).complete(any());
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"id,false", "signature,false", "arguments,false", "id,true", "signature,true", "arguments,true"})
+    void sharedValueTokensInNativeProviderFieldsRequireExposure(String field, boolean exposed) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.PERSON, "Hidden Member");
+        context.registerMemberCandidate("Hidden Member");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn(exposed ? "Discuss {{P1}}" : "Find the relationship").build(),
+                List.of(), 64, 0.2, false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "call-{{P1}}" : "call-1", "search_records",
+                field.equals("arguments") ? "{\"query\":\"{{P1}}\"}" : "{\"query\":\"relationship\"}",
+                field.equals("signature") ? "{{P1}}" : "/Li+");
+        var completion = completeMemberNative(invocation, List.of(), call);
+        if (exposed) {
+            assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
+        } else {
+            var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+            assertEquals("invented_placeholder", refused.repairRule());
+            assertEquals(1, refused.demaskWarnings());
+            assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "arguments", "signature"})
+    void invalidatedMemberAliasTokensAreRefusedBeforeNativeAdmission(String field) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.PERSON, "Hidden Member");
+        context.registerMemberCandidate("Hidden Member");
+        context.registerMemberCandidate("{{P1}}");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "{{P1}}" : "call-1", "search_records",
+                field.equals("arguments") ? "{\"query\":\"{{P1}}\"}" : "{\"query\":\"relationship\"}",
+                field.equals("signature") ? "{{P1}}" : null);
+        var malformed = assertInstanceOf(AiNativeToolCompletion.Malformed.class,
+                completeMemberNative(invocation, List.of(), call));
+        assertEquals("invented_placeholder", malformed.repairRule());
+        assertEquals(1, malformed.demaskWarnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "arguments"})
+    void rawMemberAdmissionRefusalPreservesUnknownReferenceWarnings(String field) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Return");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "Return" : "call-1", "search_records",
+                field.equals("arguments") ? "{\"query\":\"Return {{P99}}\"}" : "{\"query\":\"{{P99}}\"}");
+        var malformed = assertInstanceOf(AiNativeToolCompletion.Malformed.class,
+                completeMemberNative(invocation, List.of(), call));
+        assertEquals("invented_placeholder", malformed.repairRule());
+        assertEquals(1, malformed.demaskWarnings(), "Admission refusal must retain the no-repair demask warning");
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    /** Runs the actual dispatch callback with caller-owned member bindings and native replay. */
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completeMemberNative(
+            AiInvocation invocation, List<AiToolExchange> exchanges, AiToolCall call) {
+        when(aiProvider.toolCallingCapability(resolved.target())).thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        providerReturns(new AiCompletionResult("", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA,
+                "", AiReasoningMode.NONE, List.of(call)));
+        return requestMemberNative(invocation, exchanges);
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> requestMemberNative(
+            AiInvocation invocation, List<AiToolExchange> exchanges) {
+        var mapper = new ObjectMapper();
+        var catalog = new AiAssistantToolCatalog();
+        var guard = new AiAssistantStepGuard(catalog);
+        var schema = new AiAssistantStepSchema(mapper, catalog);
+        var issued = invocation.context().tokenBindings().stream().map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.toSet());
+        return service.completeNativeToolsRepairable(invocation, AiAssistantStep.FinalAnswer.class,
+                guard.forStep(AiAssistantToolCatalog.ALL, issued), guard.finalAnswerForIssuedPlaceholders(issued),
+                schema.finalResponseSchema(), new AiNativeToolRequest(
+                        catalog.nativeDefinitions(mapper, AiAssistantToolCatalog.ALL), exchanges),
+                directAdmission, providerAttemptGuard);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void unmaskedUnknownPlaceholdersStillProduceFailClosedWarnings(boolean nativeProtocol, boolean tool) throws Exception {
+        when(aiProvider.contextWindowTokens(any())).thenReturn(128_000);
+        var unmasked = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(unmasked);
+        if (nativeProtocol) {
+            when(aiProvider.toolCallingCapability(any())).thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        }
+        var context = new MaskingContext(AiPrivacyMode.UNMASKED);
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis").userTurn("Follow up").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 256, 0.1, false, null,
+                nativeProtocol ? AiInvocationProtocol.NATIVE_TOOLS : AiInvocationProtocol.JSON_REACT);
+        var mapper = new ObjectMapper();
+        var catalog = new AiAssistantToolCatalog();
+        var guard = new AiAssistantStepGuard(catalog);
+        var schema = new AiAssistantStepSchema(mapper, catalog);
+        String arguments = "{\"handle\":\"r1\",\"description\":\"{{P1}}\"}";
+        String answer = "{\"text\":\"{{P1}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
+        String output = nativeProtocol ? (tool ? "" : answer)
+                : tool ? "{\"tool\":{\"name\":\"create_task\",\"args\":" + arguments + "},\"final\":null}"
+                : "{\"tool\":null,\"final\":" + answer + "}";
+        providerReturns(new AiCompletionResult(output, 3, 5, tool ? "tool_calls" : "stop",
+                AiStructuredOutputEnforcement.JSON_SCHEMA, "", AiReasoningMode.NONE,
+                nativeProtocol && tool ? List.of(new AiToolCall("call-1", "create_task", arguments)) : List.of()));
+        if (nativeProtocol) {
+            var result = service.completeNativeToolsRepairable(invocation, AiAssistantStep.FinalAnswer.class,
+                    guard.forStep(AiAssistantToolCatalog.ALL, Set.of()), guard.finalAnswerForIssuedPlaceholders(Set.of()),
+                    schema.finalResponseSchema(), new AiNativeToolRequest(catalog.nativeDefinitions(mapper, AiAssistantToolCatalog.ALL), List.of()),
+                    directAdmission, providerAttemptGuard);
+            if (tool) {
+                var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, result);
+                assertEquals("invented_placeholder", refused.repairRule());
+                assertEquals(1, refused.demaskWarnings());
+            } else {
+                var content = assertInstanceOf(AiNativeToolCompletion.Content.class, result);
+                var refused = assertInstanceOf(AiStructuredOutcome.Malformed.class, content.attempt().outcome());
+                assertEquals("invented_placeholder", refused.reason());
+                assertTrue(content.attempt().repair().isEmpty());
+            }
+        } else {
+            var result = service.completeStructuredRepairable(invocation, AiAssistantStep.class,
+                    guard.forStep(AiAssistantToolCatalog.ALL, Set.of()), schema.responseSchema(AiAssistantToolCatalog.ALL),
+                    directAdmission, providerAttemptGuard);
+            var refused = assertInstanceOf(AiStructuredOutcome.Malformed.class, result.outcome());
+            assertEquals("invented_placeholder", refused.reason());
+            assertTrue(result.repair().isEmpty());
+        }
+        verify(aiProvider, times(1)).complete(any());
+    }
+
 }

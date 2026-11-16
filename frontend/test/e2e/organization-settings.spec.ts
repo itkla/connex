@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import { activeWorkspaceId, csrfBootstrap, registerUser } from "./support/api";
@@ -156,7 +157,7 @@ test.describe("workspace and organization identity", () => {
         test.setTimeout(90_000);
         const baseURL = testInfo.project.use.baseURL;
         if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");
-        const runId = `mfa${Date.now().toString(36)}${testInfo.retry}`;
+        const runId = `mfa${randomUUID().replaceAll("-", "").slice(0, 16)}`;
         const password = `MfaEnroll!${runId}A1`;
         const context = await browser.newContext({
             baseURL,
@@ -176,7 +177,20 @@ test.describe("workspace and organization identity", () => {
             await csrfBootstrap(context.request);
             const page = await context.newPage();
             removeVirtualAuthenticator = await installVirtualAuthenticator(page);
+            await page.route("**/api/capabilities", async (route) => {
+                const response = await route.fetch();
+                const body: unknown = await response.json();
+                if (!isRecord(body)) throw new Error("Expected capability posture");
+                await route.fulfill({ response, json: { ...body, privilegedMfaEnforced: true } });
+            });
             let notificationCountRequests = 0;
+            await page.route("**/api/auth/webauthn/register/requirements", async (route) => {
+                const response = await route.fetch();
+                const body: unknown = await response.json();
+                if (!isRecord(body)) throw new Error("Expected passkey requirements");
+                await route.fulfill({ response, json: notificationCountRequests === 0
+                    ? { ...body, standing: "SATISFIED" } : body });
+            });
             await page.route("**/api/notifications/counts", async (route) => {
                 notificationCountRequests += 1;
                 if (notificationCountRequests === 1) {
@@ -210,6 +224,7 @@ test.describe("workspace and organization identity", () => {
             await expect.poll(() => notificationCountRequests).toBeGreaterThan(1);
         } finally {
             if (removeVirtualAuthenticator) await removeVirtualAuthenticator();
+            await Promise.all(context.pages().map((page) => page.unrouteAll({ behavior: "wait" })));
             await context.close();
         }
     });
@@ -253,7 +268,7 @@ test.describe("workspace and organization identity", () => {
             await expect(page.getByRole("heading", { name: "Workspace identity" })).toBeVisible();
             await page.getByLabel("Workspace name").fill(workspaceName);
             await page.getByLabel("Reporting timezone").fill("Asia/Tokyo");
-            await page.getByRole("option", { name: "Asia/Tokyo", exact: true }).click();
+            await page.getByRole("option", { name: /Japan.*UTC\+09:00.*Asia\/Tokyo/ }).click();
             await page.getByRole("button", { name: "Save changes" }).click();
             await expect(page.getByText("Workspace settings updated.")).toBeVisible();
             await expect(page.getByRole("button", { name: "Switch workspace" })).toContainText(workspaceName);

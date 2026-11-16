@@ -77,7 +77,53 @@ class AuditLogMapperTest extends AbstractMapperTest {
         int second = insertAuditWithChain(ws.getId(), 2, "second");
         int first = insertAuditWithChain(ws.getId(), 1, "first");
 
-        assertEquals(List.of(first, second), idsOf(auditLogMapper.findWorkspaceExport(ws.getId(), 50, 0)));
+        assertEquals(List.of(first, second), idsOf(auditLogMapper.findWorkspaceExport(ws.getId(), 50, 0, null, null, null)));
+    }
+
+    @Test
+    void selectedWorkspaceAuditIdsCannotReadSiblingOrForeignWorkspaceRows() {
+        Organization organization = newOrganization();
+        Workspace mine = newWorkspace(organization.getId());
+        Workspace sibling = newWorkspace(organization.getId());
+        Workspace foreign = newWorkspace(newOrganization().getId());
+        int wanted = insertAudit(mine.getId(), "company", 12, "wanted");
+        int wrongEntity = insertAudit(mine.getId(), "company", 13, "other entity");
+        int siblingRow = insertAudit(sibling.getId(), "company", 12, "sibling");
+        int foreignRow = insertAudit(foreign.getId(), "company", 12, "foreign");
+        List<Integer> selection = List.of(wanted, wrongEntity, siblingRow, foreignRow);
+
+        assertEquals(List.of(wanted, wrongEntity), idsOf(auditLogMapper.findWorkspaceExport(
+            mine.getId(), 200, 0, selection, null, null)));
+        assertEquals(List.of(wanted), idsOf(auditLogMapper.findWorkspaceExport(
+            mine.getId(), 200, 0, selection, "company", 12)));
+        assertTrue(auditLogMapper.findWorkspaceExport(mine.getId(), 200, 0, List.of(), null, null).isEmpty());
+    }
+
+    @Test
+    void selectedOrgAuditIdsExcludeForeignOrganizationsAndAllWorkspaceEvents() {
+        Organization mine = newOrganization();
+        Organization foreign = newOrganization();
+        Workspace workspace = newWorkspace(mine.getId());
+        int wanted = insertOrgAudit(mine.getId(), "wanted", null);
+        int foreignRow = insertOrgAudit(foreign.getId(), "foreign", null);
+        int workspaceRow = insertAudit(workspace.getId(), "company", 12, "workspace");
+        AuditLog detachedWorkspace = new AuditLog();
+        detachedWorkspace.setOrgId(mine.getId());
+        detachedWorkspace.setIntegrityWorkspaceId(workspace.getId());
+        detachedWorkspace.setAction("company.update");
+        detachedWorkspace.setEntityType("company");
+        detachedWorkspace.setOutcome("success");
+        detachedWorkspace.setChainScopeType("workspace");
+        detachedWorkspace.setChainScopeId(workspace.getId());
+        detachedWorkspace.setChainIndex(nextChainIndex);
+        detachedWorkspace.setPrevHash(hash(nextChainIndex - 1));
+        detachedWorkspace.setRowHash(hash(nextChainIndex));
+        nextChainIndex++;
+        auditLogMapper.insert(detachedWorkspace);
+        List<Integer> selection = List.of(wanted, foreignRow, workspaceRow, detachedWorkspace.getId());
+
+        assertEquals(List.of(wanted), idsOf(auditLogMapper.findOrgExport(mine.getId(), 200, 0, selection)));
+        assertTrue(auditLogMapper.findOrgExport(mine.getId(), 200, 0, List.of()).isEmpty());
     }
 
     @Test

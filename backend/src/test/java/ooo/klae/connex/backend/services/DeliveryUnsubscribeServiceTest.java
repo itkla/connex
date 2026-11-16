@@ -90,8 +90,9 @@ class DeliveryUnsubscribeServiceTest {
         User system = new User();
         system.setId(1);
         when(systemActor.user()).thenReturn(system);
-        when(automationExecutor.runAs(eq(WORKSPACE), any(), eq("system"), any()))
-                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(3)).get());
+        when(automationExecutor.runAs(eq(WORKSPACE), any(), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_UNSUBSCRIBE, "system")), any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
     }
 
     private void transactionInline() {
@@ -114,7 +115,8 @@ class DeliveryUnsubscribeServiceTest {
         assertEquals("r***@dest.test", result.address());
         assertFalse(result.unsubscribed());
         InOrder ordered = inOrder(automationExecutor, campaignSendMapper, campaignDeliveryMapper);
-        ordered.verify(automationExecutor).runAs(eq(WORKSPACE), any(), eq("system"), any());
+        ordered.verify(automationExecutor).runAs(eq(WORKSPACE), any(), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_UNSUBSCRIBE, "system")), any());
         ordered.verify(campaignSendMapper).getSend(WORKSPACE, SEND_ID);
         ordered.verify(campaignDeliveryMapper).hasEvent(WORKSPACE, DELIVERY_ID, "unsubscribed");
     }
@@ -130,7 +132,8 @@ class DeliveryUnsubscribeServiceTest {
 
         InOrder ordered = inOrder(
                 automationExecutor, transactionTemplate, campaignSendMapper, campaignDeliveryMapper);
-        ordered.verify(automationExecutor).runAs(eq(WORKSPACE), any(), eq("system"), any());
+        ordered.verify(automationExecutor).runAs(eq(WORKSPACE), any(), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_UNSUBSCRIBE, "system")), any());
         ordered.verify(transactionTemplate).execute(any());
         ordered.verify(campaignSendMapper).getSend(WORKSPACE, SEND_ID);
         ordered.verify(campaignDeliveryMapper).insertEvent(any(CampaignDeliveryEvent.class));

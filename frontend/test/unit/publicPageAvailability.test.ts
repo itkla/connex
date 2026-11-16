@@ -20,7 +20,7 @@ vi.mock('next/font/google', () => ({
 
 vi.mock('next-intl/server', () => ({
     getTranslations: () => Promise.resolve(Object.assign((key: string) => key, { rich: (key: string) => key })),
-    getLocale: () => Promise.resolve('en'),
+    getTimeZone: async () => "UTC", getLocale: () => Promise.resolve('en'),
 }));
 
 const VISITOR_COOKIE = 'NEXT_LOCALE=en';

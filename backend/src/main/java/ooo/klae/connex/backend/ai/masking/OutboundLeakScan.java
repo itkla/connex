@@ -6,6 +6,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
@@ -21,7 +23,8 @@ import tools.jackson.databind.ObjectMapper;
  * <p>An identifier whose raw value the request's registered server-authored text provably contains
  * is skipped: the server emits that word in every prompt regardless of tenant data, so its presence
  * carries no tenant signal, and refusing it would make a record named a common envelope word poison
- * every request that seeds it. Tenant occurrences of the value are still tokenized by the replacer.
+ * every request that seeds it. MEMBER labels never receive this label-wide exemption: only complete
+ * static fields and server-authored system/tool/schema positions are excluded for members.
  *
  * <p>The same reasoning applies positionally, and more sharply. A server-authored envelope holds
  * tenant text only in its values; its property names and its message-role discriminator are emitted
@@ -41,6 +44,7 @@ public final class OutboundLeakScan {
     static final int MIN_IDENTIFIER_LENGTH = 4;
 
     private static final String ROLE_PROPERTY = "role";
+    private static final Pattern MASKING_SENTINEL = Pattern.compile("\\[redacted]|\\[omitted by policy]");
 
     private OutboundLeakScan() {
     }
@@ -91,50 +95,166 @@ public final class OutboundLeakScan {
         Objects.requireNonNull(serializedOutboundPayload, "serializedOutboundPayload");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
-        boolean honorTrustedText = !providerAuthored;
         List<ScannedField> fields = decodedJsonFields(serializedOutboundPayload, objectMapper);
-        List<String> unprotectedFields = fields.stream()
+        assertNoLeak(fields, ctx, providerAuthored, false);
+    }
+
+    /** Checks one already-masked message while its recorded MEMBER containment scope is active. */
+    static void assertNoLeakInReplay(String text, MaskingContext ctx) {
+        assertNoLeak(List.of(new ScannedField(text, true, false)), ctx, false, false);
+    }
+
+    /**
+     * Screens a provider-authored segment identically at native admission and replay. Its raw text
+     * and decoded JSON fields are checked without an additional JSON encoding at either boundary.
+     * Only recorded masker insertions are exempt, and an admission snapshot owns replay's policy.
+     * Shared member values retain their non-member protections here; unrelated non-member
+     * envelope policy remains owned by the complete server-envelope scan.
+     *
+     * @param segment provider-authored raw field with its insertion and candidate provenance
+     * @param ctx fallback request-local context when the segment has no admission snapshot
+     * @param objectMapper payload JSON decoder
+     * @throws MaskingLeakException when a raw member label is present
+     */
+    public static void assertNoMemberLeakInProviderReplay(
+            OutboundSegment segment, MaskingContext ctx, ObjectMapper objectMapper) {
+        Objects.requireNonNull(segment, "segment");
+        Objects.requireNonNull(ctx, "ctx");
+        Objects.requireNonNull(objectMapper, "objectMapper");
+        if (segment.origin() != OutboundSegment.Origin.PROVIDER_AUTHORED) {
+            throw new IllegalArgumentException("Member replay screening requires provider-authored text");
+        }
+        MaskingContext candidates = segment.memberScanContext() == null ? ctx : segment.memberScanContext();
+        String field = segment.memberScanText();
+        assertNoLeak(List.of(new ScannedField(field, true, false)), candidates, true, true);
+        assertNoLeak(decodedJsonFields(field, objectMapper), candidates, true, true);
+    }
+
+    /**
+     * Checks the complete serialized envelope for existing kinds and its classified text for MEMBER.
+     * Static text carries no member identity. Provider text receives neither static nor sentinel
+     * exemptions. Exact masker-inserted spans retain server origin even within provider text;
+     * tenant text has already passed replacement before server sentinels were inserted.
+     */
+    public static void assertNoLeakInClassifiedEnvelope(
+            String payload, List<OutboundSegment> segments, MaskingContext ctx, ObjectMapper objectMapper) {
+        assertNoLeak(decodedJsonFields(payload, objectMapper), ctx, false, false, true, false);
+        for (OutboundSegment segment : segments) {
+            if (segment.origin() == OutboundSegment.Origin.SERVER_STATIC
+                    || segment.origin() == OutboundSegment.Origin.PROVIDER_OPAQUE) {
+                continue;
+            }
+            if (segment.origin() == OutboundSegment.Origin.PROVIDER_AUTHORED) {
+                assertNoMemberLeakInProviderReplay(segment, ctx, objectMapper);
+            } else if (segment.origin() == OutboundSegment.Origin.TENANT_TOOL_RESULT) {
+                assertNoLeak(decodedJsonFields(segment.text(), objectMapper, true), ctx, false, true, false, true);
+            } else {
+                assertNoLeak(List.of(new ScannedField(segment.text(), true, false)), ctx, false, true, false, true);
+            }
+        }
+    }
+
+    private static void assertNoLeak(
+            List<ScannedField> fields, MaskingContext ctx, boolean providerAuthored, boolean membersOnly) {
+        assertNoLeak(fields, ctx, providerAuthored, membersOnly, false, false);
+    }
+
+    private static void assertNoLeak(
+            List<ScannedField> fields, MaskingContext ctx, boolean providerAuthored, boolean membersOnly,
+            boolean excludeMembers, boolean classified) {
+        boolean honorTrustedText = !providerAuthored;
+        List<PreparedField> preparedFields = fields.stream()
                 .filter(field -> providerAuthored || field.tenantBearing())
-                .flatMap(field -> MaskingEngine.unprotectedTextSegments(field.text(), ctx).stream())
+                .flatMap(field -> MaskingEngine.unprotectedTextSegments(field.text(), ctx).stream()
+                        .map(text -> new PreparedField(MaskingEngine.screenText(text),
+                                classified || providerAuthored
+                                        || !field.staticPosition() && !ctx.isTrustedStaticField(field.text()))))
                 .toList();
-        List<String> canonicalFields = unprotectedFields.stream().map(OutboundLeakScan::normalizeForScan).toList();
-        List<String> labelFields = unprotectedFields.stream()
-                .map(field -> CanonicalText.projectLabels(field).value()).toList();
-        Set<String> leakedTokens = new LinkedHashSet<>();
+        List<MaskingEngine.ScreenText> allFields = preparedFields.stream().map(PreparedField::input).toList();
+        List<MaskingEngine.ScreenText> memberFields = preparedFields.stream().filter(PreparedField::memberBearing)
+                .flatMap(field -> memberSegments(field.input(), providerAuthored).stream()).toList();
+        Set<String> leakedIdentifiers = new LinkedHashSet<>();
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
+            boolean member = !excludeMembers && ctx.isMemberIdentifier(entry.rawValue());
+            boolean nonMember = (!membersOnly || member) && ctx.hasNonMemberIdentifier(entry.rawValue());
+            if (!member && !nonMember) {
+                continue;
+            }
+            List<MaskingEngine.ScreenText> nonMemberFields = membersOnly ? memberFields : allFields;
             String identifier = entry.canonicalValue();
-            boolean canonicalLeak = identifier.length() >= MIN_IDENTIFIER_LENGTH
-                    && canonicalFields.stream().anyMatch(field -> field.contains(identifier));
-            boolean labelLeak = entry.labelEligible() && entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH
-                    && labelFields.stream().anyMatch(field -> field.contains(entry.labelValue()));
-            boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
-                    && unprotectedFields.stream().anyMatch(field -> field.contains(entry.rawValue()));
-            if ((canonicalLeak || labelLeak || exactRawLeak)
-                    && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
-                leakedTokens.add(entry.token());
+            boolean canonicalLeak = nonMember && identifier.length() >= MIN_IDENTIFIER_LENGTH
+                    && !identifier.isEmpty()
+                    && nonMemberFields.stream().anyMatch(field -> field.literal().value().contains(identifier));
+            boolean labelLeak = nonMember && entry.labelEligible()
+                    && entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH
+                    && nonMemberFields.stream().anyMatch(field -> field.labels().value().contains(entry.labelValue()));
+            boolean rawOnly = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH;
+            boolean exactRawLeak = nonMember && rawOnly
+                    && nonMemberFields.stream().anyMatch(field -> field.original().contains(entry.rawValue()));
+            boolean nonMemberLeak = (canonicalLeak || labelLeak || exactRawLeak)
+                    && !(honorTrustedText && ctx.isTrustedNonMemberTextCollision(entry.rawValue()));
+            boolean memberLeak = member && memberFields.stream().anyMatch(field ->
+                    MaskingEngine.containsMemberMatch(field, entry, ctx.requiresMemberContainment(entry.rawValue()))
+                            || rawOnly && field.original().contains(entry.rawValue()));
+            if (nonMemberLeak || memberLeak) {
+                leakedIdentifiers.add(entry.rawValue());
                 leakedKinds.add(entry.kind());
             }
         }
-        if (!leakedTokens.isEmpty()) {
-            throw new MaskingLeakException(leakedKinds, leakedTokens.size());
+        if (!leakedIdentifiers.isEmpty()) {
+            throw new MaskingLeakException(leakedKinds, leakedIdentifiers.size());
         }
+    }
+
+    /** Only final server-authored marker positions are exempt; source text is masked before insertion. */
+    private static List<MaskingEngine.ScreenText> memberSegments(MaskingEngine.ScreenText input, boolean providerAuthored) {
+        if (providerAuthored) {
+            return List.of(input);
+        }
+        Matcher marker = MASKING_SENTINEL.matcher(input.original());
+        if (!marker.find()) {
+            return List.of(input);
+        }
+        List<MaskingEngine.ScreenText> segments = new ArrayList<>();
+        int end = 0;
+        do {
+            segments.add(MaskingEngine.screenText(input.original().substring(end, marker.start())));
+            end = marker.end();
+        } while (marker.find());
+        segments.add(MaskingEngine.screenText(input.original().substring(end)));
+        return List.copyOf(segments);
     }
 
     /** Visits every key and non-null scalar separately, including earlier values of duplicate keys. */
     private static List<ScannedField> decodedJsonFields(String payload, ObjectMapper objectMapper) {
+        return decodedJsonFields(payload, objectMapper, false);
+    }
+
+    private static List<ScannedField> decodedJsonFields(
+            String payload, ObjectMapper objectMapper, boolean includeRoleValues) {
         List<ScannedField> fields = new ArrayList<>();
         try (JsonParser parser = objectMapper.createParser(payload)) {
+            int depth = 0;
+            String rootField = null;
             for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
-                if (token == JsonToken.PROPERTY_NAME) {
-                    fields.add(new ScannedField(parser.getString(), false));
+                if (token == JsonToken.START_OBJECT || token == JsonToken.START_ARRAY) {
+                    depth++;
+                } else if (token == JsonToken.END_OBJECT || token == JsonToken.END_ARRAY) {
+                    depth--;
+                } else if (token == JsonToken.PROPERTY_NAME) {
+                    if (depth == 1) {
+                        rootField = parser.getString();
+                    }
+                    fields.add(new ScannedField(parser.getString(), false, false));
                 } else if (token.isScalarValue() && token != JsonToken.VALUE_NULL) {
                     String value = parser.getString();
-                    fields.add(new ScannedField(value, !isRoleDiscriminator(parser.currentName(), value)));
+                    fields.add(new ScannedField(value, includeRoleValues || !isRoleDiscriminator(parser.currentName(), value),
+                            "system".equals(rootField) || "tools".equals(rootField) || "responseSchema".equals(rootField)));
                 }
             }
         } catch (JacksonException exception) {
-            fields.add(new ScannedField(payload, true));
+            fields.add(new ScannedField(payload, true, false));
         }
         return fields;
     }
@@ -143,7 +263,10 @@ public final class OutboundLeakScan {
         return ROLE_PROPERTY.equals(propertyName) && MaskedMessage.ROLES.contains(value);
     }
 
-    private record ScannedField(String text, boolean tenantBearing) {
+    private record ScannedField(String text, boolean tenantBearing, boolean staticPosition) {
+    }
+
+    private record PreparedField(MaskingEngine.ScreenText input, boolean memberBearing) {
     }
 
     /** Uses the same canonical form as registration, lookup admission and replacement. */

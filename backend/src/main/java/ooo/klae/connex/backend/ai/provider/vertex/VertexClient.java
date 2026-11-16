@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.ai.egress.AiSseEventReader;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
 
 /**
  * Minimal Vertex AI transport. The production path accepts only constructed regional Vertex
@@ -174,6 +175,7 @@ public class VertexClient {
         AiEgressGuard.requireFetchableHost(host, false);
         beforeSend.run();
         return spec.body(body).exchange((request, response) -> {
+            AiProviderDispatch.responded(beforeSend);
             if (response.getStatusCode().isError()) {
                 throw new AiProviderException(
                         "Vertex invocation failed with status "
@@ -216,8 +218,11 @@ public class VertexClient {
         AiEgressGuard.requireFetchableHost(host, false);
         beforeSend.run();
         return spec.body(body)
-                .exchange((request, response) -> new VertexResponse(response.getStatusCode().value(),
-                        readBounded(response.getBody())));
+                .exchange((request, response) -> {
+                    AiProviderDispatch.responded(beforeSend);
+                    return new VertexResponse(response.getStatusCode().value(),
+                        readBounded(response.getBody()));
+                });
     }
 
     private byte[] readBounded(InputStream input) throws IOException {

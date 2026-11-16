@@ -36,7 +36,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next-intl", () => ({
-    useLocale: () => "en",
+    useTimeZone: () => "UTC", useLocale: () => "en",
     useTranslations: () => (key: string) => key,
 }));
 
@@ -66,6 +66,8 @@ vi.mock("@/app/hooks/useWorkspace", () => ({
     useWorkspace: () => ({ activeWorkspaceId: 17 }),
 }));
 
+vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => true }));
+
 vi.mock("@/app/hooks/useFormDraft", () => ({
     useFormDraft: () => ({ persist: vi.fn(), clear: vi.fn() }),
 }));
@@ -84,6 +86,8 @@ vi.mock("@/app/hooks/useCompanySearch", () => ({
 }));
 
 vi.mock("@/app/hooks/useRecordTargetSearch", () => ({
+    useContactTargetSearch: () => ({ contacts: [], query: "", loading: false, error: null, onInputValueChange: vi.fn() }),
+    useMemberTargetSearch: () => ({ users: [], query: "", loading: false, error: null, onInputValueChange: vi.fn() }),
     useDealTargetSearch: () => ({
         deals: [],
         options: [],
@@ -754,7 +758,8 @@ const ownerScenarios: Record<string, OwnerScenario> = {
                 selectedStepId: approvalStep.id,
                 memberDirectoryStatus: "ready",
                 members: [selectedMember],
-                verifiedApproverIds: [selectedMember.id],
+                quorum: { candidates: [selectedMember], requiredCount: 1, approvedCount: 0, remainingRequiredCount: 1,
+                    decidedByUserIds: [], effectiveApproverIds: [] },
                 memberLabelStatus: "ready",
                 memberLabels: [selectedMember],
                 mode: "members",
@@ -822,6 +827,7 @@ const ownerScenarios: Record<string, OwnerScenario> = {
                 schedule: null,
                 members: [],
                 canManage: true,
+                canExport: true,
                 loading: false,
                 loadFailed: false,
                 membersFailed: false,
@@ -1047,6 +1053,7 @@ const delegationScenarios: Record<string, OwnerScenario> = {
                 },
             });
             return createElement(QuickEditDealSheet, {
+                timezone: "UTC",
                 open: true,
                 onOpenChange: onClose,
                 selectedIds: new Set([deal.id]),

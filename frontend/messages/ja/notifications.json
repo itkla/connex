@@ -29,6 +29,9 @@
     "priority": "優先",
     "logTouch": "接点を記録",
     "viewAll": "すべての通知を見る",
+    "openingEmailLink": "通知を開いています…",
+    "emailLinkError": "通知を開けませんでした",
+    "emailLinkHelp": "受信トレイからもう一度お試しいただくか、ほかの通知をご確認ください。",
     "viewAction": "表示",
     "loading": "通知を読み込んでいます…",
     "loadingMembers": "チームメンバーを読み込んでいます…",
@@ -108,6 +111,8 @@
     "documentApprovalPolicyInvalidatedBody": "承認ポリシーが変更されたため、{document}の承認依頼は終了しました。",
     "documentApprovalUnsatisfiableBody": "承認チェーンを完了できなくなったため、{document}の承認依頼は終了しました。",
     "documentApprovalTerminatedBody": "{document}の承認依頼は終了しました。",
+    "taskAssignedTitle": "タスクを依頼されました",
+    "taskAssignedBody": "{actor}さんから「{task}」を依頼されました。",
     "taskDueTitle": "期限が近いタスク",
     "taskDueBody": "{task} の期限は {date} です。",
     "taskOverdueTitle": "期限切れのタスク",
@@ -167,7 +172,10 @@
     "noUsers": "ユーザーが見つかりません",
     "noCollaborators": "追加できるメンバーがいません",
     "cancel": "キャンセル",
-    "inbox": "受信トレイ"
+    "inbox": "受信トレイ",
+    "ownershipOfferTitle": "オーナー提案",
+    "ownershipOfferWorkspaceBody": "{workspace} のオーナー権限が提案されました。設定で確認してください。",
+    "ownershipOfferOrganizationBody": "組織のオーナー権限が提案されました。設定で確認してください。"
   },
   "NotificationsLayout": {
     "title": "通知",

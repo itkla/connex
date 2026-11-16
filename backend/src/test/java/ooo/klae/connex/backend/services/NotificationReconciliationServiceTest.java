@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -26,6 +28,9 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
 import ooo.klae.connex.backend.beans.HistoricalNotificationBaseline;
@@ -44,9 +49,163 @@ import ooo.klae.connex.backend.notifications.NotificationDispatcher;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationPushPublisher;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import tools.jackson.databind.ObjectMapper;
 
 class NotificationReconciliationServiceTest {
+    private static final RecordVisibilityScope RECORD_SCOPE = new RecordVisibilityScope(1, List.of(7));
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void modelCutoverQuietlyBaselinesUntilALiveSourceChangeEvenWithDisabledPreference(boolean disabled) {
+        ReconciliationFixture fixture = ReconciliationFixture.mockedDelivery();
+        var mapper = fixture.notificationMapper;
+        var baselines = new java.util.ArrayList<HistoricalNotificationBaseline>();
+        var version = new java.util.concurrent.atomic.AtomicReference<>("warmth-v1");
+        when(mapper.getWarmthModelVersion(7)).thenAnswer(invocation -> version.get());
+        when(mapper.setWarmthModelVersion(eq(7), anyString())).thenAnswer(invocation -> {
+            version.set(invocation.getArgument(1));
+            return 1;
+        });
+        when(mapper.findHistoricalNotificationBaselines(7)).thenAnswer(invocation -> List.copyOf(baselines));
+        when(mapper.insertHistoricalNotificationBaselines(eq(7), anyList())).thenAnswer(invocation -> {
+            List<HistoricalNotificationBaseline> rows = invocation.getArgument(1);
+            baselines.addAll(rows);
+            return rows.size();
+        });
+        when(mapper.deleteHistoricalNotificationBaselines(eq(7), anyList())).thenAnswer(invocation -> {
+            List<HistoricalNotificationBaseline> rows = invocation.getArgument(1);
+            baselines.removeAll(rows);
+            return rows.size();
+        });
+        when(mapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(nudgeCandidate()));
+        var temperature = new RelationshipTemperatureDto(9, 12, "cold", "cooling",
+            "2026-05-10 09:00:00", 44, 0, null, null, "warmth-v2", fixture.clock.instant());
+        when(fixture.scoringService.scoreContacts(eq(7), any(Instant.class))).thenReturn(List.of(temperature));
+        when(fixture.scoringService.scoreContactsExcludingHistoryImports(eq(7), any(), any(), any(), any()))
+            .thenReturn(List.of(temperature));
+        when(fixture.scoringService.contactSourceStateHashes(eq(7), any(), any(), any()))
+            .thenReturn(Map.of(9, "a".repeat(64)));
+        NotificationPreference preference = new NotificationPreference();
+        preference.setUserId(42);
+        preference.setType(NotificationReconciliationService.RELATIONSHIP_TYPE);
+        preference.setEnabled(false);
+        if (disabled) when(fixture.preferenceMapper.findByWorkspaceAndChannel(7, "in_app"))
+            .thenReturn(List.of(preference));
+
+        var service = fixture.service();
+        service.reconcileWorkspace(7, true);
+        assertEquals("warmth-v2", version.get());
+        assertEquals(1, baselines.size());
+        assertEquals("warmth-v2", baselines.getFirst().getModelVersion());
+        verify(fixture.notificationDelivery, never()).deliver(any());
+        when(fixture.preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of());
+        service.reconcileWorkspace(7, true);
+        verify(fixture.notificationDelivery, never()).deliver(any());
+        when(fixture.scoringService.contactSourceStateHashes(eq(7), any(), any(), any()))
+            .thenReturn(Map.of(9, "b".repeat(64)));
+        service.reconcileWorkspace(7, true);
+        assertTrue(baselines.isEmpty());
+        verify(fixture.notificationDelivery).deliver(any());
+    }
+
+    @Test
+    void failedModelSnapshotRetriesWithoutAdvancingTheMarkerOrSendingRelationshipNotifications() {
+        ReconciliationFixture fixture = ReconciliationFixture.mockedDelivery();
+        when(fixture.notificationMapper.getWarmthModelVersion(7)).thenReturn("warmth-v1");
+        when(fixture.scoringService.scoreContactsExcludingHistoryImports(eq(7), any(), any(), any(), any()))
+            .thenThrow(new IllegalStateException("Scoring unavailable"));
+        fixture.service().reconcileWorkspace(7, true);
+        verify(fixture.notificationMapper, never()).setWarmthModelVersion(anyInt(), anyString());
+        verify(fixture.notificationMapper, never()).deletePreviousWarmthBaselines(anyInt(), anyString());
+        verify(fixture.notificationDelivery, never()).deliver(any());
+    }
+
+    @Test
+    void missingPreparedScopeCannotDegradeIntoASkippedIntroPass() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(true);
+        var missing = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("workspace 7");
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7)).thenThrow(missing);
+
+        assertSame(missing, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        Mockito.verifyNoInteractions(fixture.transactionManager, fixture.notificationMapper, fixture.dispatcher);
+    }
+
+    @Test
+    void dealRiskWithoutIntroductionsReceivesOneScopeBeforeTheTransactionAndMutex() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+
+        fixture.service().reconcileWorkspace(7, true);
+
+        var order = Mockito.inOrder(fixture.recordVisibilityScopeControlAccess, fixture.transactionManager,
+            fixture.duplicateDecisionLockService, fixture.dealRiskService);
+        order.verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(fixture.transactionManager).getTransaction(any());
+        order.verify(fixture.duplicateDecisionLockService).lockBackgroundOrganization(7);
+        order.verify(fixture.dealRiskService).assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE));
+        Mockito.verify(fixture.recordVisibilityScopeControlAccess, Mockito.times(1)).getForWorkspace(7);
+    }
+
+    @Test
+    void ordinaryPreloadFailureLeavesDealRiskUnmanagedAndPreservesOtherReminderPasses() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7))
+            .thenThrow(new IllegalStateException("Control read failed"));
+        when(fixture.notificationMapper.findWorkspaceReminderNotifications(7))
+            .thenReturn(List.of(reminderNotification(202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101")));
+
+        fixture.service().reconcileWorkspace(7, true);
+
+        verify(fixture.notificationMapper).findTaskReminderCandidates(7);
+        verify(fixture.notificationMapper).findDealReminderCandidates(7);
+        Mockito.verifyNoInteractions(fixture.dealRiskService);
+        verify(fixture.notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), anyString());
+    }
+
+    @Test
+    void mismatchedSnapshotCannotDegradeIntoASkippedDealRiskPass() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+        var mismatch = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("Mismatched scope");
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7)).thenThrow(mismatch);
+
+        assertSame(mismatch, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        Mockito.verifyNoInteractions(fixture.transactionManager, fixture.notificationMapper, fixture.dispatcher);
+    }
+
+    @Test
+    void snapshotRefusalWithinARiskPassEscapesItsOrdinaryFailureIsolation() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+        var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("Scope changed");
+        when(fixture.dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
+            .thenThrow(refusal);
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        verify(fixture.transactionManager).rollback(any());
+        Mockito.verifyNoInteractions(fixture.dispatcher);
+    }
+
+    @Test
+    void snapshotRefusalFromWarmthCannotBecomeAnUnmanagedRelationshipPass() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("Scope changed");
+        when(fixture.scoringService.scoreContacts(eq(7), any(Instant.class))).thenThrow(refusal);
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        verify(fixture.transactionManager).rollback(any());
+    }
 
     @Test
     void classifiesWarningCriticalAndInitialBackfillBoundaries() {
@@ -340,18 +499,35 @@ class NotificationReconciliationServiceTest {
         verify(dispatcher, never()).dispatch(any());
     }
 
+    @Test
+    void aFailedManagedPassRemainsNonIdleOnEveryRetry() {
+        ReconciliationFixture fixture = ReconciliationFixture.mockedDelivery();
+        when(fixture.notificationMapper.findTaskReminderCandidates(7))
+            .thenThrow(new IllegalStateException("Task snapshot unavailable"));
+        var service = fixture.service();
+
+        assertTrue(service.reconcileWorkspace(7, false) > 0);
+        assertTrue(service.reconcileWorkspace(7, false) > 0);
+    }
+
     private static final class ReconciliationFixture {
         private final NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
         private final PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
         private final NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
         private final ScoringService scoringService = Mockito.mock(ScoringService.class);
         private final IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        private final DuplicateDecisionLockService duplicateDecisionLockService = Mockito.mock(DuplicateDecisionLockService.class);
+        private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        private final PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
         private final DealRiskService dealRiskService = noRiskService();
         private final NotificationProperties properties = new NotificationProperties();
         private final Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
         private final NotificationDelivery notificationDelivery;
 
         private ReconciliationFixture(boolean mockedDelivery) {
+            when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(RECORD_SCOPE);
+            when(transactionManager.getTransaction(any())).thenAnswer(invocation -> new SimpleTransactionStatus());
             notificationDelivery = mockedDelivery
                 ? Mockito.mock(NotificationDelivery.class)
                 : wrap(dispatcher, notificationMapper, preferenceMapper);
@@ -372,7 +548,7 @@ class NotificationReconciliationServiceTest {
         private NotificationReconciliationService service(Clock evaluationClock) {
             return new NotificationReconciliationService(
                 notificationMapper,
-                Mockito.mock(DuplicateDecisionLockService.class),
+                duplicateDecisionLockService,
                 preferenceMapper,
                 notificationDelivery,
                 stateVersions(notificationMapper),
@@ -381,7 +557,9 @@ class NotificationReconciliationServiceTest {
                 introductionService,
                 dealRiskService,
                 evaluationClock,
-                new ObjectMapper());
+                new ObjectMapper(),
+                recordVisibilityScopeControlAccess,
+                transactionManager);
         }
     }
 
@@ -403,6 +581,12 @@ class NotificationReconciliationServiceTest {
         PreferenceMapper preferenceMapper
     ) {
         Mockito.lenient().when(dispatcher.channel()).thenReturn("in_app");
+        Mockito.lenient().when(notificationMapper.existsDelivery(anyInt(), anyInt(), anyInt(), any()))
+            .thenReturn(true);
+        Mockito.lenient().when(dispatcher.dispatch(any())).thenAnswer(invocation -> {
+            invocation.<Notification>getArgument(0).setId(77);
+            return 1;
+        });
         NotificationQuietHoursControlAccess quietHoursControlAccess =
             Mockito.mock(NotificationQuietHoursControlAccess.class);
         Mockito.lenient().when(quietHoursControlAccess.evaluateForUser(anyInt(), Mockito.any(Instant.class)))
@@ -418,7 +602,7 @@ class NotificationReconciliationServiceTest {
     /** A deal-risk service that flags nothing, so the deal-risk pass is a no-op in unrelated tests. */
     private static DealRiskService noRiskService() {
         DealRiskService mock = Mockito.mock(DealRiskService.class);
-        when(mock.assessWorkspaceNotificationStates(anyInt(), any(), any()))
+        when(mock.assessWorkspaceNotificationStates(anyInt(), any(), any(), any()))
             .thenReturn(List.of());
         return mock;
     }
@@ -439,7 +623,8 @@ class NotificationReconciliationServiceTest {
 
     private static NotificationStateVersionService stateVersions(NotificationMapper notificationMapper) {
         return new NotificationStateVersionService(
-            notificationMapper, Mockito.mock(NotificationPushPublisher.class));
+            notificationMapper, Mockito.mock(NotificationPushPublisher.class),
+            Mockito.mock(OwnershipOfferNotificationStateVersionService.class));
     }
 
     private static OpenDealRecipient recipient(int dealId, String dealLabel, int recipientId) {
@@ -463,7 +648,7 @@ class NotificationReconciliationServiceTest {
         DealRiskDto low = new DealRiskDto(102, BigDecimal.ZERO, null, "low", 10,
             List.of(new DealRiskFactor("no_stakeholders", "low", Map.of())),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(high), riskState(low)));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(
             recipient(101, "Acme renewal", 42),
@@ -495,7 +680,7 @@ class NotificationReconciliationServiceTest {
 
         verify(dealRiskService, never()).assessWorkspace(anyInt());
         verify(dealRiskService, never())
-            .assessWorkspaceNotificationStates(anyInt(), any(), any());
+            .assessWorkspaceNotificationStates(anyInt(), any(), any(), any());
     }
 
     @Test
@@ -508,7 +693,7 @@ class NotificationReconciliationServiceTest {
         DealRiskDto medium = new DealRiskDto(101, BigDecimal.ZERO, null, "medium", 25,
             List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 40))),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(medium)));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(
             recipient(101, "Acme renewal", 42),
@@ -540,7 +725,7 @@ class NotificationReconciliationServiceTest {
         optOut.setEnabled(false);
 
         when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of(optOut));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(new DealRiskDto(
                 101,
                 BigDecimal.ZERO,
@@ -571,7 +756,7 @@ class NotificationReconciliationServiceTest {
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
 
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of());
         when(notificationMapper.resolveReminder(
             7, 42, 202, "2026-06-23 15:30:00")).thenReturn(1);
@@ -606,10 +791,19 @@ class NotificationReconciliationServiceTest {
         IntroductionService introductionService = fixture.introductionService;
 
         when(notificationMapper.findWorkspaceRecipientIds(7)).thenReturn(List.of(42));
-        when(introductionService.computeSuggestions(eq(7), anyInt(), any())).thenReturn(List.of(introSuggestion()));
+        when(introductionService.computeSuggestions(eq(7), anyInt(), any(), eq(RECORD_SCOPE))).thenReturn(List.of(introSuggestion()));
 
         NotificationReconciliationService service = fixture.service();
         service.reconcileWorkspace(7, true);
+
+        var order = Mockito.inOrder(fixture.recordVisibilityScopeControlAccess, fixture.transactionManager,
+            fixture.duplicateDecisionLockService, introductionService);
+        order.verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(fixture.transactionManager).getTransaction(org.mockito.ArgumentMatchers.argThat(
+            definition -> definition.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRES_NEW));
+        order.verify(fixture.duplicateDecisionLockService).lockBackgroundOrganization(7);
+        order.verify(introductionService).computeSuggestions(eq(7), anyInt(), any(), eq(RECORD_SCOPE));
+        verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(dispatcher).dispatch(captor.capture());
@@ -627,6 +821,25 @@ class NotificationReconciliationServiceTest {
     }
 
     @Test
+    void unavailablePrelockScopeLeavesIntroRemindersUnmanagedAndOtherPassesRunning() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        Notification existing = reminderNotification(201,
+            NotificationReconciliationService.INTRO_OPPORTUNITY_TYPE, "relationship.intro_opportunity:3:8");
+        when(fixture.notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7))
+            .thenThrow(new IllegalStateException("scope unavailable"));
+
+        fixture.service().reconcileWorkspace(7, true);
+
+        var order = Mockito.inOrder(fixture.recordVisibilityScopeControlAccess, fixture.duplicateDecisionLockService);
+        order.verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(fixture.duplicateDecisionLockService).lockBackgroundOrganization(7);
+        verify(fixture.notificationMapper).findTaskReminderCandidates(7);
+        Mockito.verifyNoInteractions(fixture.introductionService);
+        verify(fixture.notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), anyString());
+    }
+
+    @Test
     void reconciliationSkipsIntroOpportunitiesWhenDisabled() {
         ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
         NotificationDispatcher dispatcher = fixture.dispatcher;
@@ -638,6 +851,7 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService service = fixture.service();
         service.reconcileWorkspace(7, true);
 
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dispatcher, never()).dispatch(any());
     }
@@ -651,6 +865,7 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService service = fixture.service();
         service.reconcileWorkspace(7, false);
 
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dispatcher, never()).dispatch(any());
     }
@@ -669,6 +884,7 @@ class NotificationReconciliationServiceTest {
         service.reconcileWorkspace(7, false);
 
         verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
     }
 
@@ -704,9 +920,10 @@ class NotificationReconciliationServiceTest {
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(dispatcher).dispatch(captor.capture());
         assertEquals(NotificationReconciliationService.TASK_TYPE, captor.getValue().getType());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dealRiskService, never())
-            .assessWorkspaceNotificationStates(anyInt(), any(), any());
+            .assessWorkspaceNotificationStates(anyInt(), any(), any(), any());
         verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
     }
 
@@ -720,7 +937,7 @@ class NotificationReconciliationServiceTest {
         Notification existing = reminderNotification(
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenThrow(new IllegalStateException("risk engine down"));
 
         NotificationReconciliationService service = fixture.service();
@@ -750,7 +967,7 @@ class NotificationReconciliationServiceTest {
         service.reconcileWorkspace(7, true);
 
         verify(dealRiskService, never())
-            .assessWorkspaceNotificationStates(anyInt(), any(), any());
+            .assessWorkspaceNotificationStates(anyInt(), any(), any(), any());
         verify(notificationMapper).resolveReminder(7, 42, 55, "2026-06-23 15:30:00");
         verify(notificationMapper).resolveReminder(7, 42, 202, "2026-06-23 15:30:00");
     }
@@ -773,7 +990,7 @@ class NotificationReconciliationServiceTest {
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
         when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(task));
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(new DealRiskDto(
                 101,
                 BigDecimal.ZERO,
@@ -859,7 +1076,7 @@ class NotificationReconciliationServiceTest {
             .thenReturn(List.of());
         NotificationReconciliationService service = fixture.service();
         NotificationReconciliationService.HistoricalExpectationSnapshot snapshot =
-            service.historicalExpectationSnapshot(7, clock.instant());
+            service.historicalExpectationSnapshot(7, clock.instant(), RECORD_SCOPE);
         HistoricalNotificationBaseline baseline =
             baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
         baseline.setSourceStateHash(
@@ -895,10 +1112,10 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService dueSoonService = fixture.service(dueSoon);
         NotificationReconciliationService overdueService = fixture.service(overdue);
         NotificationReconciliationService.HistoricalExpectation dueSoonExpectation =
-            dueSoonService.historicalExpectationSnapshot(7, dueSoon.instant())
+            dueSoonService.historicalExpectationSnapshot(7, dueSoon.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         NotificationReconciliationService.HistoricalExpectation overdueExpectation =
-            overdueService.historicalExpectationSnapshot(7, overdue.instant())
+            overdueService.historicalExpectationSnapshot(7, overdue.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         HistoricalNotificationBaseline baseline =
             baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
@@ -949,11 +1166,11 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService.HistoricalExpectation before =
             fixture.service(beforeClosingSoon)
-                .historicalExpectationSnapshot(7, beforeClosingSoon.instant())
+                .historicalExpectationSnapshot(7, beforeClosingSoon.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         NotificationReconciliationService.HistoricalExpectation after =
             fixture.service(closingSoon)
-                .historicalExpectationSnapshot(7, closingSoon.instant())
+                .historicalExpectationSnapshot(7, closingSoon.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
 
         assertEquals(before.sourceStateHash(), after.sourceStateHash());
@@ -988,7 +1205,7 @@ class NotificationReconciliationServiceTest {
                 "medium",
                 Map.of("daysSinceTouch", 30))),
             "2026-06-24 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(
                 List.of(riskState(high, sourceStateHash)),
                 List.of(riskState(medium, sourceStateHash)));
@@ -1005,7 +1222,7 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService service =
             fixture.service(clock);
         NotificationReconciliationService.HistoricalExpectation initial =
-            service.historicalExpectationSnapshot(7, clock.instant())
+            service.historicalExpectationSnapshot(7, clock.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         HistoricalNotificationBaseline baseline = baseline(
             NotificationReconciliationService.DEAL_RISK_TYPE,
@@ -1229,7 +1446,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService.HistoricalExpectationSnapshot snapshot =
             service.historicalExpectationSnapshot(
-                7, Instant.parse("2026-06-23T15:30:00Z"));
+                7, Instant.parse("2026-06-23T15:30:00Z"), RECORD_SCOPE);
         HistoricalNotificationBaseline baseline =
             baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
         baseline.setSourceStateHash(
@@ -1309,7 +1526,7 @@ class NotificationReconciliationServiceTest {
             0,
             List.of(),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(
                 List.of(riskState(none, warmedSourceState)),
                 List.of(riskState(none, "c".repeat(64))));

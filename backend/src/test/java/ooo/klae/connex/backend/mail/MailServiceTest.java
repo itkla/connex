@@ -1,14 +1,20 @@
 package ooo.klae.connex.backend.mail;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.net.InetAddress;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -103,6 +109,54 @@ class MailServiceTest {
         assertTrue(mailService.hasUsableWorkspaceTransport(7));
         assertFalse(mailService.hasUsableWorkspaceTransport(8));
         verify(resolver, never()).resolveForWorkspace(anyInt());
+    }
+
+    @Test
+    void workspaceSubmissionReportsSkippedWithoutTransport() {
+        assertEquals(MailDispatchOutcome.SKIPPED,
+            mailService.submitForWorkspace(7, MailMessage.html("member@example.com", "Subject", "Body")));
+        verify(smtpDestinationGuard, never()).resolveForSend(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void workspaceSubmissionReportsAcceptedOnlyAfterSmtpAcceptance() throws Exception {
+        ResolvedMailConfig config = config(true);
+        InetAddress address = InetAddress.getByName("203.0.113.10");
+        JavaMailSender sender = mock(JavaMailSender.class);
+        MimeMessage message = new MimeMessage((Session) null);
+        when(resolver.resolveForWorkspace(7)).thenReturn(config);
+        when(smtpDestinationGuard.resolveForSend(config)).thenReturn(address);
+        when(senderFactory.forConfig(config, address)).thenReturn(sender);
+        when(sender.createMimeMessage()).thenReturn(message);
+
+        assertEquals(MailDispatchOutcome.ACCEPTED,
+            mailService.submitForWorkspace(7, MailMessage.html("member@example.com", "Subject", "Body")));
+        verify(sender).send(message);
+    }
+
+    @Test
+    void workspaceSubmissionReportsFailedWhenTransportRefuses() throws Exception {
+        ResolvedMailConfig config = config(true);
+        InetAddress address = InetAddress.getByName("203.0.113.10");
+        JavaMailSender sender = mock(JavaMailSender.class);
+        MimeMessage message = new MimeMessage((Session) null);
+        when(resolver.resolveForWorkspace(7)).thenReturn(config);
+        when(smtpDestinationGuard.resolveForSend(config)).thenReturn(address);
+        when(senderFactory.forConfig(config, address)).thenReturn(sender);
+        when(sender.createMimeMessage()).thenReturn(message);
+        doThrow(new org.springframework.mail.MailSendException("SMTP refused")).when(sender).send(message);
+
+        assertEquals(MailDispatchOutcome.FAILED,
+            mailService.submitForWorkspace(7, MailMessage.html("member@example.com", "Subject", "Body")));
+    }
+
+    @Test
+    void workspaceSubmissionReportsFailedWhenSenderResolutionFails() {
+        when(resolver.resolveForWorkspace(7)).thenThrow(new IllegalStateException("Unavailable secret"));
+
+        assertEquals(MailDispatchOutcome.FAILED,
+            mailService.submitForWorkspace(7, MailMessage.html("member@example.com", "Subject", "Body")));
+        verify(smtpDestinationGuard, never()).resolveForSend(org.mockito.ArgumentMatchers.any());
     }
 
     private static ResolvedMailConfig config(boolean workspaceSupplied) {

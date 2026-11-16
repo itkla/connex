@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import org.springframework.security.core.Authentication;
@@ -193,6 +195,21 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
      * @throws DeliveryProviderException when no enabled, webhook-capable config matches the token
      */
     public ResolvedDeliveryProvider resolveByWebhookToken(String rawToken) {
+        return resolveByWebhookToken(rawToken, (workspaceId, read) -> read.get());
+    }
+
+    /**
+     * Resolves the token as {@link #resolveByWebhookToken(String)}, reading its signing secret through
+     * the supplied workspace scope.
+     * Token lookup and validation precede the scoped read, so its workspace comes only from the
+     * matched configuration. Signature verification and event application remain with the caller.
+     * @param rawToken the raw webhook URL token
+     * @param secretReader scope to install around the signing-secret read
+     * @return the resolved provider carrying the webhook secret
+     * @throws DeliveryProviderException when no enabled, webhook-capable config matches the token
+     */
+    public ResolvedDeliveryProvider resolveByWebhookToken(
+            String rawToken, BiFunction<Integer, Supplier<String>, String> secretReader) {
         if (isBlank(rawToken)) {
             throw new DeliveryProviderException("Webhook token is required");
         }
@@ -201,8 +218,9 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         if (config == null || !config.isEnabled() || isBlank(config.getWebhookSecretRef())) {
             throw new DeliveryProviderException("Webhook token is not valid");
         }
-        String secret = deliveryProviderSecretCipher.decryptWebhookSecret(
-                config.getWorkspaceId(), config.getWebhookSecretRef());
+        String secret = secretReader.apply(config.getWorkspaceId(),
+                () -> deliveryProviderSecretCipher.decryptWebhookSecret(
+                        config.getWorkspaceId(), config.getWebhookSecretRef()));
         if (isBlank(secret)) {
             throw new DeliveryProviderException("Webhook token is not valid");
         }

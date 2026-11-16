@@ -16,6 +16,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 
 /**
  * Fail-closed backstop for tenant isolation. Throws when a statement that reads
@@ -29,6 +30,14 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
  * {@code TenantWorkScope} catalog override, so a future async path that
  * forgets to route fails loudly instead of silently reading the default
  * catalog (#485).
+ *
+ * <p>A control-only request capability is stricter than ordinary workspace enforcement: only the
+ * physical-control registry may execute, including when scope enforcement is disabled. Existing
+ * tenant-statement exemptions, manually installed identities and catalog-only overrides cannot
+ * override that restriction.
+ * Descendants receive no resolved tenant scope from a control selection. Ordinary enforcement
+ * requires their own explicit TenantWorkScope or runAs span; catalog-per-placement startup
+ * refuses disabled scope enforcement. Neither the capability nor tenant identity is inherited.
  *
  * <p>The signatures below must cover <em>every</em> statement-executing method
  * on {@link Executor}, including {@code queryCursor} — the streaming reads
@@ -55,12 +64,18 @@ public class TenantScopeInterceptor implements Interceptor {
      * Mapper interfaces whose statements read or write workspace-scoped data. The
      * canonical registry of tenant-scoped namespaces — also consumed by the
      * read-path architecture test that asserts every {@code <select>} here binds
-     * the workspace predicate.
+     * the workspace predicate, including {@code RoleMapper.findAuthorityRolesByWorkspace}.
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
+        MAPPERS + "AssignmentSweepMapper",
         MAPPERS + "AiAssistantIdentifierMapper",
+        MAPPERS + "AiAssistantProposalSetMapper",
         MAPPERS + "AiBriefScheduleMapper",
         MAPPERS + "AiChatMapper",
+        MAPPERS + "AiAgentRunMapper",
+        MAPPERS + "AiAgentActionMapper",
+        MAPPERS + "AiAgentPrivacyMapper",
+        MAPPERS + "AiAgentPrivacyObjectMapper",
         MAPPERS + "AiRunLeaseMapper",
         MAPPERS + "AiWatchMapper",
         MAPPERS + "AiWorkspaceGovernanceMapper",
@@ -69,6 +84,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "IdentityCollisionMapper",
         MAPPERS + "IdentityMapper",
         MAPPERS + "PersonMapper",
+        MAPPERS + "RecordSearchMapper",
         MAPPERS + "PersonEmploymentMapper",
         MAPPERS + "PersonLifecycleHistoryMapper",
         MAPPERS + "PersonLifecyclePassMapper",
@@ -79,6 +95,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "TagMapper",
         MAPPERS + "ProductMapper",
         MAPPERS + "DealLineItemMapper",
+        MAPPERS + "DealValueMapper",
         MAPPERS + "DocumentTemplateMapper",
         MAPPERS + "DealDocumentMapper",
         MAPPERS + "ApprovalPolicyMapper",
@@ -90,6 +107,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "SavedViewMapper",
         MAPPERS + "SavedViewPreferenceMapper",
         MAPPERS + "UserDashboardMapper",
+        MAPPERS + "MyWorkReadMapper",
         MAPPERS + "SegmentMapper",
         MAPPERS + "RuleMapper",
         MAPPERS + "JobRunMapper",
@@ -151,6 +169,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * must appear either here or in {@link #SCOPED_NAMESPACES} — the
      * registry-completeness architecture test enforces the partition so a new
      * mapper cannot silently bypass the fail-closed backstop.
+     * {@code UserMapper.privilegedMemberships} is a self-only control-plane read in this registry.
      */
     public static final Set<String> CONTROL_PLANE_NAMESPACES = Set.of(
         MAPPERS + "AllowedDomainMapper",
@@ -162,6 +181,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ClientErrorMapper",
         MAPPERS + "ControlWorkspaceLifecycleMapper",
         MAPPERS + "DataSubjectRequestMapper",
+        MAPPERS + "AiAgentDsrControlMapper",
+        MAPPERS + "AiAssistantPrivacyControlMapper",
         MAPPERS + "OrgAllowedDomainMapper",
         MAPPERS + "EmailChangeTokenMapper",
         MAPPERS + "FederatedIdentityMapper",
@@ -174,6 +195,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "OneTimeLinkFlowMapper",
         MAPPERS + "OrganizationMapper",
         MAPPERS + "OrgMemberMapper",
+        MAPPERS + "OwnershipOfferMapper",
         MAPPERS + "OrgPlacementMapper",
         MAPPERS + "ObjectStorageBackendIdentityMapper",
         MAPPERS + "PasskeyBootstrapConfirmationTokenMapper",
@@ -181,6 +203,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationQuietHoursMapper",
         MAPPERS + "NativeConnectSessionMapper",
         MAPPERS + "PreferenceMapper",
+        MAPPERS + "PrivilegedCredentialAttestationMapper",
+        MAPPERS + "PrivilegedMfaAttestationGrantMapper",
         MAPPERS + "PrivilegedMfaRecoveryRedemptionMapper",
         MAPPERS + "RegistrationVerificationTokenMapper",
         MAPPERS + "SecretValueMapper",
@@ -241,6 +265,18 @@ public class TenantScopeInterceptor implements Interceptor {
      * workspace set resolved by the service from the current workspace's organization.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
+        MAPPERS + "AssignmentSweepMapper.findWatermark",
+        MAPPERS + "AssignmentSweepMapper.findReferencesAnywhere",
+        MAPPERS + "AssignmentSweepMapper.lockParent",
+        MAPPERS + "AssignmentSweepMapper.clearOwner",
+        MAPPERS + "AssignmentSweepMapper.removeCollaborator",
+        MAPPERS + "AssignmentSweepMapper.unassignTask",
+        MAPPERS + "AssignmentSweepMapper.clearInterventionOwner",
+        MAPPERS + "AssignmentSweepMapper.clearCampaignOwner",
+        MAPPERS + "AssignmentSweepMapper.clearPersonPassOwners",
+        MAPPERS + "AssignmentSweepMapper.deleteOwnedGoal",
+        MAPPERS + "AssignmentSweepMapper.clearGoalCreator",
+
         MAPPERS + "AuditLogMapper.insert",
         MAPPERS + "AuditLogMapper.findRecentByOrg",
         MAPPERS + "AuditLogMapper.findOrgExport",
@@ -277,12 +313,21 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiBriefScheduleMapper.deleteForUserAnywhere",
         MAPPERS + "AiWatchMapper.deleteForUser",
         MAPPERS + "AiWatchMapper.deleteForUserAnywhere",
+        MAPPERS + "AiAgentRunMapper.ownerWorkspaceIdsAnywhere",
         MAPPERS + "AiChatMapper.deleteParticipantsForUser",
         MAPPERS + "AiChatMapper.deleteParticipantsForUserAnywhere",
+        MAPPERS + "AiChatMapper.lockSessionsForUserErasureAnywhere",
         MAPPERS + "AiChatMapper.clearSessionCreatorsAnywhere",
+        MAPPERS + "AiChatMapper.clearParticipantInvitersAnywhere",
         MAPPERS + "AiChatMapper.clearMessageAuthorsAnywhere",
         MAPPERS + "AiChatMapper.clearToolCallExecutorsAnywhere",
         MAPPERS + "AiChatMapper.clearTurnRequestersAnywhere",
+        MAPPERS + "AiChatMapper.clearProposalSetRequestersAnywhere",
+        MAPPERS + "RecordCommentMapper.clearAuthorsAnywhere",
+        MAPPERS + "RecordCommentMapper.clearDeletersAnywhere",
+        MAPPERS + "RecordCommentMapper.clearThreadCreatorsAnywhere",
+        MAPPERS + "RecordCommentMapper.clearThreadResolversAnywhere",
+        MAPPERS + "RecordCommentMapper.deleteReactionsAnywhere",
         MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
         MAPPERS + "PersonMapper.clearOwnershipAnywhere",
         MAPPERS + "PersonLifecyclePassMapper.clearOwnerAnywhere",
@@ -319,7 +364,16 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "SequenceMapper.clearSequenceVersionPublishersAnywhere",
         MAPPERS + "TeamMapper.findReferencesForUserAnywhere",
         MAPPERS + "TeamMapper.deleteMembershipsAnywhere",
-        MAPPERS + "TeamMapper.clearManagerAnywhere"
+        MAPPERS + "TeamMapper.clearManagerAnywhere",
+        MAPPERS + "GoalMapper.findDepartureReferencesAnywhere",
+        MAPPERS + "GoalMapper.deleteDepartingOwnerAnywhere",
+        MAPPERS + "GoalMapper.clearDepartingCreatorAnywhere",
+        MAPPERS + "ApprovalPolicyMapper.deleteDepartingApproverAnywhere",
+        MAPPERS + "DocumentApprovalMapper.deleteDepartingApproverAnywhere",
+        MAPPERS + "ApprovalPolicyMapper.findActiveStepsForDepartureAnywhere",
+        MAPPERS + "ApprovalPolicyMapper.findDepartureReferencesAnywhere",
+        MAPPERS + "DocumentApprovalMapper.findOpenStepsForDepartureAnywhere",
+        MAPPERS + "DocumentApprovalMapper.findDepartureReferencesAnywhere"
     );
 
     private final TenantContext tenantContext;
@@ -328,6 +382,12 @@ public class TenantScopeInterceptor implements Interceptor {
 
     @Override
     public Object intercept(Invocation invocation) throws Throwable {
+        if (ControlOnlyHandlerPolicy.isActive()) {
+            MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
+            if (!ControlCatalogRoutingInterceptor.routesToControlCatalog(statement.getId())) {
+                throw new ServiceUnavailableException("Tenant SQL is unavailable during control-only handling");
+            }
+        }
         if (enforce) {
             MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
             enforce(statement.getId());

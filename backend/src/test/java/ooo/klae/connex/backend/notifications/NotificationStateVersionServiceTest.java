@@ -1,8 +1,12 @@
 package ooo.klae.connex.backend.notifications;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +16,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -19,11 +25,14 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
+import ooo.klae.connex.backend.services.OwnershipOfferNotificationStateVersionService;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationStateVersionServiceTest {
     @Mock private NotificationMapper notificationMapper;
     @Mock private NotificationPushPublisher pushPublisher;
+    @Mock private OwnershipOfferNotificationStateVersionService ownershipNoticeVersions;
 
     private NotificationStateVersionService service;
 
@@ -31,7 +40,72 @@ class NotificationStateVersionServiceTest {
     void setUp() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
         TransactionSynchronizationManager.initSynchronization();
-        service = new NotificationStateVersionService(notificationMapper, pushPublisher);
+        service = new NotificationStateVersionService(notificationMapper, pushPublisher, ownershipNoticeVersions);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void membershipAndOwnershipClosureShareOneExistingRowBumpRegardlessOfQueueOrder(boolean closureFirst) {
+        OwnershipOfferMapper offers = mock(OwnershipOfferMapper.class);
+        var ownership = new OwnershipOfferNotificationStateVersionService(offers, pushPublisher);
+        service = new NotificationStateVersionService(notificationMapper, pushPublisher, ownership);
+        when(offers.bumpExistingNoticeStateVersion(9)).thenReturn(1);
+        if (closureFirst) {
+            ownership.markChanged(9);
+        }
+        service.markChanged(9);
+        service.markChanged(2);
+        if (!closureFirst) {
+            ownership.markChanged(9);
+        }
+
+        List<TransactionSynchronization> callbacks = TransactionSynchronizationManager.getSynchronizations();
+        callbacks.forEach(callback -> callback.beforeCommit(false));
+
+        verify(offers).bumpExistingNoticeStateVersion(9);
+        verify(notificationMapper).bumpStateVersions(List.of(2));
+        verify(notificationMapper, never()).bumpStateVersions(List.of(2, 9));
+        verify(notificationMapper, never()).bumpStateVersions(List.of(9));
+        verify(pushPublisher).invalidated(9);
+        verify(pushPublisher).invalidated(2);
+        callbacks.forEach(callback -> callback.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+    }
+
+    @Test
+    void immediateResponseConsumesBothQueuesUsingTheExistingRowOnlyWriter() {
+        OwnershipOfferMapper offers = mock(OwnershipOfferMapper.class);
+        var ownership = new OwnershipOfferNotificationStateVersionService(offers, pushPublisher);
+        service = new NotificationStateVersionService(notificationMapper, pushPublisher, ownership);
+        when(offers.bumpExistingNoticeStateVersion(9)).thenReturn(1);
+        when(notificationMapper.getStateVersion(9)).thenReturn(17L);
+        service.markChanged(9);
+        ownership.markChanged(9);
+
+        assertEquals(17L, service.bumpNow(9));
+        List<TransactionSynchronization> callbacks = TransactionSynchronizationManager.getSynchronizations();
+        callbacks.forEach(callback -> callback.beforeCommit(false));
+
+        verify(offers).bumpExistingNoticeStateVersion(9);
+        verify(notificationMapper, never()).bumpStateVersions(List.of(9));
+        verify(pushPublisher).invalidated(9);
+        callbacks.forEach(callback -> callback.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+    }
+
+    @Test
+    void overlappingMembershipChangeCannotRecreateAMissingDeliveredStateRow() {
+        OwnershipOfferMapper offers = mock(OwnershipOfferMapper.class);
+        var ownership = new OwnershipOfferNotificationStateVersionService(offers, pushPublisher);
+        service = new NotificationStateVersionService(notificationMapper, pushPublisher, ownership);
+        service.markChanged(9);
+        ownership.markChanged(9);
+        List<TransactionSynchronization> callbacks = TransactionSynchronizationManager.getSynchronizations();
+
+        assertThrows(IllegalStateException.class,
+            () -> callbacks.forEach(callback -> callback.beforeCommit(false)));
+
+        verify(notificationMapper, never()).bumpStateVersions(List.of(9));
+        verify(pushPublisher, never()).invalidated(9);
+        callbacks.forEach(callback -> callback.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
     }
 
     @AfterEach
@@ -40,6 +114,49 @@ class NotificationStateVersionServiceTest {
             TransactionSynchronizationManager.clearSynchronization();
         }
         TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+
+    @Test
+    void committedInnerChangeIsIndependentOfOuterRollback() {
+        service.markChanged(9);
+        TransactionSynchronization outer = onlySynchronization();
+        outer.suspend();
+        TransactionSynchronizationManager.clearSynchronization();
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.markChanged(2);
+        TransactionSynchronization inner = onlySynchronization();
+        assertNotSame(outer, inner);
+        inner.beforeCommit(false);
+        inner.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+
+        outer.resume();
+        outer.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+        verify(notificationMapper).bumpStateVersions(List.of(2));
+        verify(notificationMapper, never()).bumpStateVersions(List.of(9));
+        verify(pushPublisher).invalidated(2);
+        verify(pushPublisher, never()).invalidated(9);
+    }
+
+    @Test
+    void afterCommitInnerChangeGetsANewQueueForTheSameRecipient() {
+        service.markChanged(9);
+        TransactionSynchronization outer = onlySynchronization();
+        outer.beforeCommit(false);
+        outer.suspend();
+        TransactionSynchronizationManager.clearSynchronization();
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.markChanged(9);
+        TransactionSynchronization inner = onlySynchronization();
+        assertNotSame(outer, inner);
+        inner.beforeCommit(false);
+        inner.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+
+        outer.resume();
+        outer.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+        verify(notificationMapper, times(2)).bumpStateVersions(List.of(9));
+        verify(pushPublisher, times(2)).invalidated(9);
     }
 
     @Test

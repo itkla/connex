@@ -26,6 +26,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
 import tools.jackson.databind.ObjectMapper;
@@ -83,18 +85,18 @@ class RadarServiceTest {
         when(userMapper.lockByIdForShare(USER_ID)).thenReturn(USER_ID);
         when(userMapper.isAccountDeletionReserved(USER_ID)).thenReturn(false);
         memberLock();
-        when(personMapper.getProcessablePersonIds(eq(WORKSPACE_ID), anyList()))
+        when(personMapper.getProcessablePersonIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> requested = invocation.getArgument(1);
+                List<Integer> requested = invocation.getArgument(2);
                 return requested.stream()
-                    .filter(id -> personMapper.getPersonById(WORKSPACE_ID, id) != null)
+                    .filter(id -> personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", id) != null)
                     .toList();
             });
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> requested = invocation.getArgument(1);
+                List<Integer> requested = invocation.getArgument(2);
                 return requested.stream()
-                    .map(id -> personMapper.getPersonById(WORKSPACE_ID, id))
+                    .map(id -> personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", id))
                     .filter(Objects::nonNull)
                     .toList();
             });
@@ -111,7 +113,121 @@ class RadarServiceTest {
             taskService,
             warmPathService,
             new ObjectMapper(),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"feed", "subject", "summary"})
+    void publicReadsKeepFamilyFailureIsolationWhenTheScopeReadFails(String entry) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(WORKSPACE_ID))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            var detectors = mock(RelationshipSignalDetectorService.class);
+            var writer = mock(RelationshipSignalWriteService.class);
+            when(detectors.detectDecay(eq(WORKSPACE_ID), any()))
+                .thenAnswer(call -> { fixture.scopes.getForWorkspace(WORKSPACE_ID); throw new AssertionError(); });
+            when(detectors.detectDealRisk(eq(WORKSPACE_ID), any()))
+                .thenAnswer(call -> { fixture.scopes.getForWorkspace(WORKSPACE_ID); throw new AssertionError(); });
+            when(detectors.detectWarmPaths(eq(WORKSPACE_ID), any(), eq(NOW)))
+                .thenReturn(new RelationshipSignalDetectorService.Detection(List.of(), NOW, "warm"));
+            var states = new java.util.ArrayList<RelationshipSignalFamilyState>();
+            when(signalMapper.findFamilyStates(WORKSPACE_ID)).thenAnswer(call -> List.copyOf(states));
+            doAnswer(call -> {
+                RelationshipSignalFamilyState state = new RelationshipSignalFamilyState();
+                state.setFamily(call.getArgument(1));
+                state.setStatus("unavailable");
+                states.add(state);
+                return null;
+            }).when(writer).markUnavailable(eq(WORKSPACE_ID), any(), any(), eq("detector_failed"));
+            doAnswer(call -> {
+                RelationshipSignalFamilyState state = new RelationshipSignalFamilyState();
+                state.setFamily(call.getArgument(1));
+                state.setStatus("available");
+                states.add(state);
+                return null;
+            }).when(writer).replaceFamily(eq(WORKSPACE_ID), eq("warm_path"), eq("warm"), eq(List.of()), any(), any());
+            var reconciler = new RelationshipSignalReconciliationService(
+                detectors, writer, Clock.fixed(NOW, ZoneOffset.UTC), fixture.scopes);
+            RadarService reader = reader(reconciler, fixture.scopes);
+
+            RadarResponseDto result = switch (entry) {
+                case "feed" -> reader.get(List.of(), List.of(), null);
+                case "subject" -> reader.get(List.of(), List.of(), null, "person", 23);
+                case "summary" -> reader.summary();
+                default -> throw new AssertionError(entry);
+            };
+
+            assertTrue(result.items().isEmpty());
+            assertTrue(result.partialFailure());
+            assertEquals(2, result.families().stream().filter(state -> "unavailable".equals(state.status())).count());
+            verify(writer).markUnavailable(eq(WORKSPACE_ID), eq("relationship_decay"), any(), eq("detector_failed"));
+            verify(writer).markUnavailable(eq(WORKSPACE_ID), eq("deal_risk"), any(), eq("detector_failed"));
+            verify(detectors).detectWarmPaths(eq(WORKSPACE_ID), any(), eq(NOW));
+            verify(writer).replaceFamily(eq(WORKSPACE_ID), eq("warm_path"), eq("warm"), eq(List.of()), any(), any());
+            verify(writer).enforceWorkspaceCap(eq(WORKSPACE_ID), any());
+            verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE_ID);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "identity"})
+    void publicReadsStillRefuseSnapshotInvariantFailures(String kind) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            var refusal = kind.equals("missing")
+                ? new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload")
+                : new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("identity mismatch");
+            when(fixture.control.findOrganizationWorkspacesForShare(WORKSPACE_ID)).thenThrow(refusal);
+            var detectors = mock(RelationshipSignalDetectorService.class);
+            var writer = mock(RelationshipSignalWriteService.class);
+            when(detectors.detectDecay(eq(WORKSPACE_ID), any()))
+                .thenAnswer(call -> { fixture.scopes.getForWorkspace(WORKSPACE_ID); throw new AssertionError(); });
+            when(signalMapper.findFamilyStates(WORKSPACE_ID)).thenReturn(List.of());
+            var reconciler = new RelationshipSignalReconciliationService(
+                detectors, writer, Clock.fixed(NOW, ZoneOffset.UTC), fixture.scopes);
+
+            org.junit.jupiter.api.Assertions.assertSame(refusal, assertThrows(
+                ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> reader(reconciler, fixture.scopes).get(List.of(), List.of(), null)));
+
+            org.mockito.Mockito.verifyNoInteractions(writer);
+            verify(detectors, never()).detectDealRisk(anyInt(), any());
+            verify(detectors, never()).detectWarmPaths(anyInt(), any(), any());
+        }
+    }
+
+    private RadarService reader(RelationshipSignalReconciliationService reconciler, RecordVisibilityScopeControlAccess scopes) {
+        return new RadarService(signalMapper, reconciler, workspaceService, workspaceMapper, userMapper,
+            personMapper, personEdgeReadService, mock(CompanyMapper.class), dealMapper, taskService,
+            warmPathService, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC), scopes);
+    }
+
+    @Test
+    void oneHundredCompanySignalsAndTheirEvidenceShareOneScopeRead() {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            var companies = mock(CompanyMapper.class);
+            var signals = java.util.stream.IntStream.rangeClosed(1, 100).mapToObj(id -> {
+                RelationshipSignal signal = signal("relationship_decay", evidenceForSubjectAndCompany(id));
+                signal.setId(id);
+                signal.setSubjectType("company");
+                signal.setSubjectId(id);
+                return signal;
+            }).toList();
+            when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(signals);
+            when(companies.getCompanyById(eq(WORKSPACE_ID), eq("[7,17]"), anyInt())).thenAnswer(call -> {
+                var company = new ooo.klae.connex.backend.beans.Company();
+                company.setId(call.getArgument(2));
+                company.setName("Visible company " + company.getId());
+                return company;
+            });
+            RadarService reader = new RadarService(signalMapper, mock(RelationshipSignalReconciliationService.class),
+                workspaceService, workspaceMapper, userMapper, personMapper, personEdgeReadService, companies,
+                dealMapper, taskService, warmPathService, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC), fixture.scopes);
+
+            assertEquals(100, reader.get(List.of(), List.of(), null).items().size());
+
+            verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE_ID);
+            verify(companies, org.mockito.Mockito.times(200)).getCompanyById(eq(WORKSPACE_ID), eq("[7,17]"), anyInt());
+        }
     }
 
     @Test
@@ -185,9 +301,26 @@ class RadarServiceTest {
     }
 
     @Test
+    void anUnchangedRowUsesFreshFamilyEvidenceWithoutChangingItsVersion() {
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        signal.setEvidenceAsOf(LocalDateTime.ofInstant(NOW.minusSeconds(3600), ZoneOffset.UTC));
+        currentPerson(signal.getSubjectId(), "Visible");
+        when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
+
+        RadarResponseDto.Signal item = service.get(List.of(), List.of(), null).items().getFirst();
+
+        assertFalse(item.stale());
+        assertEquals(NOW, item.evidenceAsOf());
+        assertEquals("1:0", item.version());
+    }
+
+    @Test
     void staleEvidenceRefusesTaskBeforeAnyTaskMutation() {
         RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
         signal.setEvidenceAsOf(LocalDateTime.ofInstant(NOW.minusSeconds(16 * 60), ZoneOffset.UTC));
+        RelationshipSignalFamilyState staleFamily = availableFamily();
+        staleFamily.setEvidenceAsOf(signal.getEvidenceAsOf());
+        when(signalMapper.findFamilyStates(WORKSPACE_ID)).thenReturn(List.of(staleFamily));
         currentPerson(signal.getSubjectId(), "Visible");
         memberLock();
         when(signalMapper.getActiveForActorForUpdate(
@@ -221,6 +354,7 @@ class RadarServiceTest {
     @Test
     void standardTaskDelegatesWithSubjectLinkAndBindsIdempotently() {
         RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        signal.setEvidenceAsOf(LocalDateTime.ofInstant(NOW.minusSeconds(3600), ZoneOffset.UTC));
         currentPerson(signal.getSubjectId(), "Visible");
         memberLock();
         when(signalMapper.getActiveForActorForUpdate(
@@ -256,6 +390,8 @@ class RadarServiceTest {
             new RadarTaskRequestDto("Call", "2026-08-10", USER_ID, signal.getSubjectId(), null, null));
 
         assertEquals(66, updated.taskId());
+        assertFalse(updated.stale());
+        assertEquals(NOW, updated.evidenceAsOf());
         verify(taskService).create(any(Task.class));
     }
 
@@ -390,7 +526,7 @@ class RadarServiceTest {
         RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
         currentPerson(signal.getSubjectId(), "Suspended");
         doAnswer(invocation -> List.<Integer>of()).when(personMapper)
-            .getProcessablePersonIds(WORKSPACE_ID, List.of(signal.getSubjectId()));
+            .getProcessablePersonIds(WORKSPACE_ID, "[7,8,9]", List.of(signal.getSubjectId()));
         when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
         when(signalMapper.getActiveForActorForUpdate(
             WORKSPACE_ID, signal.getId(), USER_ID)).thenReturn(signal);
@@ -588,7 +724,7 @@ class RadarServiceTest {
         Person person = new Person();
         person.setId(id);
         person.setName(name);
-        when(personMapper.getPersonById(WORKSPACE_ID, id)).thenReturn(person);
+        when(personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", id)).thenReturn(person);
     }
 
     private void currentDeal(int id, String name) {

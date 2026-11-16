@@ -1,0 +1,24 @@
+{
+  "id": "mission_fallback_gate",
+  "selector": "connex_script_mission_fallback_gate",
+  "capabilityClass": "scripted-native",
+  "expectsNativeDegradation": true,
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "failure",
+        "failureKind": "rejected"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "emit": {
+        "kind": "final",
+        "text": "{\"tool\":null,\"final\":{\"text\":\"The selected record was reviewed.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}}"
+      }
+    }
+  ]
+}

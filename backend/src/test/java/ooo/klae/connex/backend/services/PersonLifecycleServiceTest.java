@@ -43,6 +43,9 @@ import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The contact lead-lifecycle state machine, its append-only history, and the browser filter it
@@ -80,18 +83,22 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         workspace = fresh;
         workspaceMapper.addMember(workspace.getId(), provisioningOwner.getId(), "owner");
         User lifecycleMember = standaloneUser("lifecycle-member");
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, lifecycleMember);
         workspaceMapper.addMember(workspace.getId(), lifecycleMember.getId(), "member");
         authenticateAs(provisioningOwner, workspace.getId());
+        approveForStepUp(provisioningOwner);
         var lifecycleRole = roleService.createRole(
             workspace.getId(), provisioningOwner.getId(), "Lifecycle manager " + unique(),
-            List.of("PERSON_UPDATE", "PERSON_DELETE", "WORKSPACE_SETTINGS"));
+            List.of("PERSON_UPDATE", "PERSON_DELETE", "WORKSPACE_SETTINGS", "EXPORT_DATA"));
         workspaceService.assignCustomRole(
             workspace.getId(), provisioningOwner.getId(), lifecycleMember.getId(),
             lifecycleRole.getId());
         currentUser = lifecycleMember;
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void enteringTheLifecycleRecordsTheStageAndAppendsOneHistoryRow() {
         Person person = newPerson(newCompany());
@@ -113,6 +120,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void theCurrentStateExposesOnlyThePermittedNextMoves() {
         Person person = newPerson(newCompany());
@@ -127,6 +135,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             lifecycleService.getLifecycle(person.getId()).allowedTransitions());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void anImpossibleTransitionIsRejectedAndChangesNothing() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -138,6 +147,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals(1, lifecycleService.getHistory(person.getId()).size());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void disqualifyingRequiresAReasonAndRecyclingClearsIt() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -162,6 +172,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
                 .findFirst().orElseThrow().reason());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aReasonIsRefusedWhenTheContactIsNotBeingDisqualified() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -171,6 +182,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             request(PersonLifecycleStage.WORKING, PersonDisqualificationReason.NO_FIT, null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void convertingRequiresALinkedDeal() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -183,13 +195,14 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 1), company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "champion");
 
         Person converted = lifecycleService.updateLifecycle(
             person.getId(), request(PersonLifecycleStage.CONVERTED, null, null));
         assertEquals(PersonLifecycleStage.CONVERTED, converted.getLifecycleStage());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void reSelectingTheCurrentStageUpdatesNotesWithoutRecordingATransition() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -201,6 +214,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals(1, lifecycleService.getHistory(person.getId()).size());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void withdrawingClearsTheContactStateButKeepsTheTimeline() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -215,6 +229,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals("not a prospect", history.getFirst().note());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aRestrictedOrArchivedContactCannotBeMoved() {
         Person suspended = newPerson(newCompany());
@@ -230,6 +245,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             archived.getId(), request(PersonLifecycleStage.NEW, null, null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void anotherTenantCanNeitherMoveNorReadTheLifecycle() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -247,6 +263,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             person.getId(), request(PersonLifecycleStage.WORKING, null, null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aSharedInContactKeepsItsLifecycleInsideTheOwningWorkspace() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -263,7 +280,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(grantee.getId(), outsider.getId(), "owner");
         authenticateAs(outsider, grantee.getId());
 
-        Person shared = personMapper.getPersonById(grantee.getId(), person.getId());
+        Person shared = personMapper.getPersonById(grantee.getId(), orgWorkspaceIdsJson(workspaceMapper, grantee.getId()), person.getId());
         assertNotNull(shared, "the share itself must still be visible");
         assertNull(shared.getLifecycleStage());
         assertNull(shared.getDisqualifiedReason());
@@ -279,6 +296,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             MemberScope.allTeam(), List.of(PersonLifecycleStage.DISQUALIFIED), false, null, false, null, false, false, null));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void disqualifyingForAnotherReasonRequiresANote() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -296,6 +314,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
     }
 
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void lifecycleServiceRejectsNoncanonicalReasonCodesWithoutStoringThem() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -309,6 +328,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertNull(reload(person).getDisqualifiedReason());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customReasonIsValidatedStoredListedExportedAndLabeledInCurrentStateAndHistory() {
         DisqualificationReasonDto custom = reason(
@@ -356,6 +376,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertTrue(!csv.contains("Wrong workspace label"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void contactCsvUsesTheLocalizedBuiltInLabelWhenNoWorkspaceLabelExists() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -373,6 +394,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         }
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void contactCsvDoesNotResolveANoncanonicalStoredCodeThroughTheCatalogCollation() {
         DisqualificationReasonDto custom = reason(
@@ -391,6 +413,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertTrue(!csv.contains(custom.label()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void unavailableAndOtherWorkspaceReasonCodesAreRejectedTheSameWay() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -404,6 +427,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             person.getId(), request(PersonLifecycleStage.DISQUALIFIED, "FOREIGN_ONLY", null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void noteRequirementComesFromTheConfiguredReason() {
         DisqualificationReasonDto custom = reason(
@@ -418,6 +442,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
                 .getLifecycleStage());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void archivedCurrentReasonCanBeResubmittedForANoteOnlyEdit() {
         DisqualificationReasonDto custom = reason(
@@ -436,6 +461,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             lifecycleService.getLifecycle(person.getId()).reasonLabel());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aConvertedContactCanStillBeAnnotatedAfterItsDealLinkIsRemoved() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -443,7 +469,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             person.getId(), request(PersonLifecycleStage.QUALIFIED, null, null));
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 1), newCompany());
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "champion");
         lifecycleService.updateLifecycle(
             person.getId(), request(PersonLifecycleStage.CONVERTED, null, null));
         dealMapper.removePerson(workspace.getId(), deal.getId(), person.getId());
@@ -455,6 +481,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals("deal link cleaned up", annotated.getQualificationNotes());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void theBrowserFilterAndFacetsSeparateStagedContactsFromTheRest() {
         Company company = newCompany();
@@ -507,8 +534,10 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         Workspace sibling = siblingWorkspace();
         workspaceMapper.addMember(sibling.getId(), provisioningOwner.getId(), "owner");
         User siblingMember = standaloneUser("sibling-member");
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, siblingMember);
         workspaceMapper.addMember(sibling.getId(), siblingMember.getId(), "member");
         authenticateAs(provisioningOwner, sibling.getId());
+        approveForStepUp(provisioningOwner);
         var role = roleService.createRole(
             sibling.getId(), provisioningOwner.getId(), "Sibling reason manager " + unique(),
             List.of("WORKSPACE_SETTINGS"));
@@ -517,6 +546,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         authenticateAs(siblingMember, sibling.getId());
         reason(code, label, requiresNote, position);
         authenticateAs(originalActor, originalWorkspaceId);
+        approveForStepUp(originalActor);
     }
 
     private User standaloneUser(String qualifier) {
@@ -538,7 +568,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
     }
 
     private Person reload(Person person) {
-        return personMapper.getPersonById(workspace.getId(), person.getId());
+        return personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
     }
 
     private DisqualificationReasonDto reason(

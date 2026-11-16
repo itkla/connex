@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
 import { formatDateTime, riskContainerClasses, riskTextClass } from '@/app/lib/utils';
@@ -18,10 +18,13 @@ import { riskFactorIcon, useRiskText } from './dealRisk';
 export default function DealRiskPanel({
     risk,
     className,
+    hasNoHistoryStakeholders = false,
 }: {
     risk?: DealRisk | null;
     className?: string;
+    hasNoHistoryStakeholders?: boolean;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealRisk');
     const locale = useLocale();
     const { factorNode } = useRiskText();
@@ -67,7 +70,7 @@ export default function DealRiskPanel({
                                         contact.personId == null ? label : (
                                             <Link
                                                 href={`/records/contacts/${contact.personId}`}
-                                                className="font-medium underline-offset-4 transition-colors hover:text-brand-hover hover:underline"
+                                                className="font-medium underline-offset-4 transition-colors hover:text-brand-text hover:underline"
                                             >
                                                 {label}
                                             </Link>
@@ -79,8 +82,11 @@ export default function DealRiskPanel({
                     })}
                 </ul>
             )}
+            {hasNoHistoryStakeholders && (
+                <p className="text-sm text-muted-foreground">{t('noHistoryStakeholders')}</p>
+            )}
             <p className="text-xs text-muted-foreground">
-                {t('assessedAt', { date: formatDateTime(risk.assessedAt, locale) })}
+                {t('assessedAt', { date: formatDateTime(risk.assessedAt, locale, timeZone) })}
             </p>
         </section>
     );

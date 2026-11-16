@@ -1,0 +1,16 @@
+{
+  "id": "mission_minimum_report",
+  "selector": "connex_script_mission_minimum_report",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "closing": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I reviewed [the selected record](record:r1).\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

@@ -14,6 +14,13 @@ Schema changes use Flyway under `backend/src/main/resources/db/migration/`.
 - `TablePlaneRegistry` and architecture tests define/enforce table placement. A table must have one deliberate plane.
 - No foreign key crosses the tenant/control plane wall in either direction. Validate cross-plane references in the service layer instead.
 
+Schema-verified conditional DDL may read `information_schema.COLUMNS`, `STATISTICS` and `TRIGGERS`.
+Use one unaliased metadata source with a leading `TABLE_SCHEMA = DATABASE()` (or
+`TRIGGER_SCHEMA = DATABASE()`) predicate joined to the object checks by `AND`. Metadata reads do
+not exempt any tenant/control data access, cross-catalog source, or metadata write from the plane
+wall. V244 uses invalid statement markers to fail preparation on incompatible definitions without
+accessing another table. Every committed DDL prefix must remain safe to replay.
+
 Read `docs/MULTITENANCY_PLAN.md` before deciding a new table's plane.
 
 ## Versioning
@@ -72,5 +79,41 @@ Before merge:
 - Tenant/workspace lifecycle/export/teardown obligations are registered.
 - Processing restrictions assessed where subject/person data is involved.
 - Composite FK string columns have compatible explicit collation where needed.
+- If earlier binaries cannot safely serve after this migration, `deploy/staging/rollback-floor` names this migration and `docs/UPGRADING.md` documents the rollback floor. That applies when the schema breaks them, and also when they would still start but violate the migration's invariants (V225).
 - MyBatis mappings use parameter binding and tenant scoping.
 - Relevant migration, plane, tenancy, and lifecycle architecture tests pass locally through targeted selectors; exhaustive suite is CI-owned.
+
+## Assistant privacy cutover allocation
+
+Control V236 creates organization coordination authority and stable bootstrap identities; tenant
+V237 appends immutable organization provenance with historical default 0, versions existing work
+scopes and adds object obligations. Separate explicit INSTANT column operations and INPLACE index
+operations must fail if unsupported; no retained-content UPDATE backfill, COPY fallback or disabled
+FK validation is authorized. Scope triggers precede replacement of affected legacy work checks.
+The historical privacy component floor is tenant V237; the current release-wide floor is
+control V250, as documented in [UPGRADING.md](../UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250).
+
+Recent serving compatibility minima, in migration order:
+
+- Tenant V245 prevents stale manual confirmations from overwriting a newer consent revocation; see
+  [the consent-version cutover](../UPGRADING.md#contact-channel-consent-versions-tenant-v245).
+- Control V246 prevents older deal writers from ignoring an explicit workspace currency setting; see
+  [the workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
+- Control V247 prevents older membership writers from accepting expired historical invitations; see
+  [the invitation-expiry cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).
+- Control V248 introduces revocable export access while preserving existing role access. Older
+  binaries ignore revocations and cannot serve safely; see [the export-permission cutover](../UPGRADING.md#export-data-permission-control-v248).
+- Tenant V249 and control V250 retire external notification invalidation triggers. The release
+  requires Java-owned notification teardown invalidation; older generic teardown writers relied on
+  the notification DELETE trigger on long-lived catalogs. The release floor is control V250; see
+  [trigger retirement](../UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250).
+
+## Historical invitation deadline backfill
+
+Control V247 uses guarded additive DDL without a catalog-wide UPDATE. Its successful installation
+TIMESTAMP, converted to UTC, fixes the thirty-day legacy deadline. Runtime pages independently
+commit bounded workspace primary-key windows; reads and acceptance use the same fixed deadline
+for pending NULL rows until persistence completes. The invitation inbox receives the deadline
+through a suspended control read rather than reading tenant Flyway history. Pausing, retrying or
+restarting reconciliation cannot extend validity. The full deployment, replay and rollback contract
+is in [the V247 cutover](../UPGRADING.md#historical-pending-invitation-expiry-control-v247).

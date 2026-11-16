@@ -19,6 +19,20 @@ Single-origin means cookies, WebAuthn (RP = the serving host), and realtime all 
 browser-facing backend URL. Internally, browser rewrites still talk to `backend:8080`, while
 server-rendered preview fetches use the app-network-only `backend-app:8080` alias.
 
+Data-subject disclosure uses the synchronous Tomcat HTTP/1.1 NIO connector behind Caddy. Its
+pass-two absolute delivery deadline is `CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS=120000`
+(`connex.data-subject-disclosure.delivery-timeout-ms`). The backend explicitly sets
+`CONNEX_TOMCAT_CONNECTION_TIMEOUT=30s` (`server.tomcat.connection-timeout`); Tomcat also uses this
+positive setting for blocking writes. Deadline cancellation closes the specific socket, so stalled
+or trickling delivery ends within the deadline plus one connector write timeout (150 seconds with
+defaults), followed by normal rollback/cleanup. Unlimited connector writes are rejected at startup.
+Admission is two disclosures per instance and one per organization. Budget four pooled connections
+for both slots plus ordinary traffic; each disclosure peaks at two, after its separate placement
+lookup has returned its connection. Pools of two or three admit one disclosure to retain audit
+capacity. See the [operator procedure](APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md)
+for incomplete-download rejection and explicit retries. An unsupported live connector/protocol
+fails disclosure closed before output; it needs equivalent cancellation support before use.
+
 The site-level edge header contract applies to every response, including frontend HTML and static
 assets, downloads, backend JSON, and Caddy-generated error responses. Caddy normalizes
 `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY`. It preserves an upstream
@@ -349,6 +363,8 @@ create bodies active. Set it to `true` only in the coupled release whose fronten
 nested person, company, and deal create bodies; the enabled backend rejects legacy flat bodies and
 has no compatibility fallback. Values other than the exact literals `true` and `false` fail backend
 startup.
+Record review and Record preparation missions remain disabled independently of ordinary AI. V232 requires draining all older backends and background message writers, applying the durable sequence backfill, and starting only compatible readers/writers. See [the V232 upgrade cutover](UPGRADING.md#v232-mission-privacy-and-message-sequence-cutover). Activation additionally requires `connex.ai.missions-enabled=true`, `connex.ai.missions-single-jvm-confirmed=true`, successful routed initialization, and an exact `connex.ai.mission-capabilities` declaration containing provider, endpoint, model and `capability: missions_v1`. Absence or loss of any gate refuses execution; stopping and privacy maintenance remain available. Keep disabled until #2101 contains the required MySQL, trajectory, browser and approved synthetic staging evidence. Control V250 is the release-wide rollback floor even while AI and mission flags are off; see [the consent-version cutover](UPGRADING.md#contact-channel-consent-versions-tenant-v245), [the workspace-currency cutover](UPGRADING.md#workspace-default-deal-currency-control-v246), and [the invitation-expiry cutover](UPGRADING.md#historical-pending-invitation-expiry-control-v247), followed by [the export-permission cutover](UPGRADING.md#export-data-permission-control-v248). Apply control V236 → tenant V237 → tenant V238 in order. Drain serving binaries and mission workers for the singleton-proposal cutover, deploy compatible publication/decision/privacy/export paths together, and keep missions disabled until their evidence is complete; see [the V238 cutover](UPGRADING.md#mission-singleton-proposals-tenant-v238).
+
 AI remains instance-disabled unless `CONNEX_AI_ENABLED=true`. When the master switch is enabled,
 operators may independently disable deal briefs, deal-risk rationales, introduction rationales,
 report narratives, or provider-backed business-card extraction with
@@ -994,3 +1010,65 @@ boots every profile with instance-managed mail configured and asserts the result
 matrix fails the build. The profile-boot job runs with dev-relaxed transport to isolate the profile
 dimension; a full image-and-Caddy end-to-end bring-up is exercised locally and on release rather
 than per-PR.
+
+## Account assignment recovery (#1941)
+
+Post-delete assignment cleanup is best effort after the committed account/membership cascade.
+Successful cleanup covers eight reference kinds across all lifecycle states in the default catalog
+and every servable dedicated handle returned by `PlacementRegistry.activeCatalogs()`. An unavailable
+catalog or failed record remains pending; restored catalog access and later periodic transactions
+are required for erasure completeness. Unserved silo/dedicated placements are outside this fleet's
+coverage. Goals/approvers (#1953) and self-only asynchronous writers are separate residuals.
+
+`CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_DELAY_MS` and
+`CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_INITIAL_DELAY_MS` default to 300000 (five minutes).
+`CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_PAGE_SIZE` defaults to 200 candidates per catalog/kind/run.
+Immediate cleanup drains matching pages; periodic cleanup batches control-only existence reads and
+uses one new `READ_COMMITTED` transaction per orphan. Fixed upper watermarks prevent continuing
+inserts from starving retries; collaborators use the full `(workspace_id, deal_id, user_id)` key.
+The empty-page wrap includes deleted watermark rows. Cursors are in memory, and restart safely
+rediscovers residuals without a durable retry queue.
+
+Monitor `connex.account.assignment.sweep.failures`, tagged only by
+`mode=immediate|periodic` and `phase=catalogs|page|existence|record`. Logs contain catalog and exception
+type, without driver SQL or row content. Sweep failures never turn a completed deletion into a
+retryable HTTP failure or prevent session revocation. Investigate repeated failures and restore
+catalog access; recovery time depends on traversal length and successful unit commits.
+
+During rolling deployment, an older binary's unlocked campaign owner validation can still write
+past the cascade. The immediate sweep alone cannot provide fleet-wide completeness until those
+writers have drained. After the upgraded fleet is fully serving traffic, allow a complete periodic
+traversal of every served catalog and kind and resolve failure signals before certifying the eight
+assignment types absent. No schema migration or new dependency is required. Campaign owner writes
+can now return the existing 409 membership-changing conflict when the target row is busy; callers
+resubmit rather than retry inside the transaction.
+
+### Assistant privacy and singleton-proposal cutover V236/V237/V238
+
+Drain incompatible serving JVMs, scheduled workers and in-flight chat writers before control V236
+and tenant V237, followed by tenant V238. Only binaries compatible with organization privacy and
+runtime-3 proposal holdings may start afterward, with one serving JVM until #941. V238 remains the singleton-proposal compatibility minimum; the release-wide rollback floor
+is control V250 even with AI/missions disabled, as described in
+[the notification trigger-retirement cutover](UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250). Proposal-set emission remains
+disabled; runtime-3 mission singleton proposals use their separate source-linked storage. Bootstrap,
+DSR all-chat cleanup and object cleanup include that storage independently of feature flags. Unreachable
+placements or unreceipted object deletions keep erasure pending. Before serving a restore, reconcile
+original organization operations, placement receipts and generation-0 holdings; never promote
+restored content into the current generation. Use forward fixes for normal recovery.
+
+### Export permission cutover (V248)
+
+After V247, drain all older backend replicas and custom-role writers before applying control
+V248. Deploy the permission-aware frontend and backend together; start only binaries enforcing
+export policy. Existing roles retain export access, while custom roles created after the one-time
+backfill default without it. The export-permission component minimum is control V248 because older binaries
+ignore export revocations. See [the V248 upgrade procedure](UPGRADING.md#export-data-permission-control-v248).
+
+### Legacy notification trigger retirement (V249/V250)
+
+Apply tenant V249 and control V250 with older teardown and privacy-cleanup writers drained. They remove external
+notification invalidation triggers without rewriting notification, membership or version rows.
+The release-wide staging rollback floor is control V250: the compatible binary supplies atomic
+notification teardown/privacy deletion and recipient-version bumps. Older cleanup writers relied
+on the legacy DELETE trigger on long-lived catalogs. Recover forward with a compatible binary;
+see [the V249/V250 upgrade note](UPGRADING.md#legacy-notification-invalidation-triggers-tenant-v249-control-v250).

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { CalendarDaysIcon, CheckIcon } from '@heroicons/react/24/outline';
 
 import type { Contact, RelationshipTemperature } from '@/app/lib/types';
@@ -26,6 +26,7 @@ export default function CoolingRelationships({
     items: CoolingItem[];
     currentUserId: number;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('CoolingRelationships');
     const showApiError = useApiErrorToast('CoolingRelationships');
     const [scheduled, setScheduled] = useState<Set<number>>(new Set());
@@ -37,7 +38,7 @@ export default function CoolingRelationships({
         try {
             await createTask({
                 description: t('followUpWith', { name: item.contact.name }),
-                dueDate: followUpDueDate(item.temp.goesColdAt, Date.now()),
+                dueDate: followUpDueDate(item.temp.goesColdAt, Date.now(), timeZone),
                 assignedToId: currentUserId,
                 personId: item.contact.id,
             });

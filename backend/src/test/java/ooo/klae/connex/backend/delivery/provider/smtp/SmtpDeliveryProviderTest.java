@@ -117,6 +117,28 @@ class SmtpDeliveryProviderTest {
     }
 
     @Test
+    void diagnosticScrubbingPrecedesTruncationSoNoBearerPrefixSurvives() throws Exception {
+        JavaMailSenderFactory senderFactory = mock(JavaMailSenderFactory.class);
+        SmtpDestinationGuard destinationGuard = mock(SmtpDestinationGuard.class);
+        ResolvedMailConfig config = config(true);
+        InetAddress address = InetAddress.getLoopbackAddress();
+        String prefix = "x".repeat(450) + "554 rejected ";
+        when(destinationGuard.resolveForSend(config)).thenReturn(address);
+        when(senderFactory.deadlineBoundForConfig(eq(config), eq(address), eq(true), anyLong()))
+                .thenThrow(new IllegalStateException(prefix + "a".repeat(64) + " retained"));
+        SmtpDeliveryProvider provider = new SmtpDeliveryProvider(senderFactory, destinationGuard);
+        try {
+            DispatchReceipt receipt = provider.dispatch(target(config), request(
+                    System.nanoTime() + Duration.ofSeconds(5).toNanos()));
+            assertEquals(DispatchStatus.REJECTED, receipt.status());
+            assertTrue(receipt.provenBeforeEgress());
+            assertEquals(prefix + "[redacted] retained", receipt.detail());
+        } finally {
+            provider.shutdown();
+        }
+    }
+
+    @Test
     void instanceDefaultUsesPreResolvedAddressAndHardDeadlineCancellation() throws Exception {
         JavaMailSenderFactory senderFactory = mock(JavaMailSenderFactory.class);
         SmtpDestinationGuard destinationGuard = mock(SmtpDestinationGuard.class);

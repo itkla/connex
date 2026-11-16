@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -52,12 +51,13 @@ class PersonServiceUnitTest {
             mock(DuplicateDecisionLockService.class),
             mock(RecordCreationAugmentationService.class),
             mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class),
-            mock(AiRestrictionEpoch.class)
+            mock(ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService.class),
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered()
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(
-            7, "Security", null, null, false, MemberScope.allTeam(),
-            null, false, null, false, null, false, false, null)).thenReturn(1001L);
+            7, "[7,8,9]", "Security", null, null, false, MemberScope.allTeam(),
+            null, false, null, false, null, false, false, null, null)).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
             () -> service.getMatchingPersonIds(
@@ -65,7 +65,7 @@ class PersonServiceUnitTest {
                 null, false, false, null));
 
         verify(mapper, never()).getPersonIdsFiltered(
-            7, "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, null, 1000);
+            7, "[7,8,9]", "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
+            null, false, false, null, 1000, null);
     }
 }

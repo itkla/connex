@@ -21,6 +21,7 @@ import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
@@ -41,6 +42,7 @@ class AuthServiceTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PlatformTransactionManager fixtureTransactionManager;
+    @Autowired private ObjectMapper objectMapper;
 
     private RegisterDto registration(String username, String email) {
         RegisterDto dto = new RegisterDto();
@@ -86,6 +88,38 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertTrue(userMapper.getUserById(user.getId()).isEmailVerified(),
             "with verification off, self-serve accounts are verified so enabling it later never gates them");
+    }
+
+    @Test
+    void invitationRegistrationCanSkipInitialWorkspaceWithoutGrantingMembership() {
+        RegisterDto request = registration("invited_" + unique(), unique() + "@example.com");
+        request.setSkipInitialWorkspace(true);
+        RegisterDto decoded = objectMapper.readValue(objectMapper.writeValueAsString(request), RegisterDto.class);
+
+        User user = authService.registerSelfService(decoded, "1.2.3.4");
+
+        assertTrue(workspaceMapper.getWorkspacesForUser(user.getId()).isEmpty());
+    }
+
+    @Test
+    void ordinaryRegistrationKeepsInitialWorkspaceByDefault() {
+        RegisterDto request = registration("ordinary_" + unique(), unique() + "@example.com");
+        RegisterDto decoded = objectMapper.readValue(objectMapper.writeValueAsString(request), RegisterDto.class);
+
+        User user = authService.registerSelfService(decoded, "1.2.3.4");
+
+        assertFalse(decoded.isSkipInitialWorkspace());
+        assertEquals(1, workspaceMapper.getWorkspacesForUser(user.getId()).size());
+    }
+
+    @Test
+    void administratorRegistrationDoesNotHonorSelfServiceWorkspaceSuppression() {
+        RegisterDto request = registration("admin_created_" + unique(), unique() + "@example.com");
+        request.setSkipInitialWorkspace(true);
+
+        User user = authService.register(request, null);
+
+        assertEquals(1, workspaceMapper.getWorkspacesForUser(user.getId()).size());
     }
 
     @Test

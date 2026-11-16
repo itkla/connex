@@ -15,7 +15,7 @@ vi.mock("next/font/google", () => ({
 type CommonNamespace = "AppMetadata" | "CommonHome";
 
 vi.mock("next-intl/server", () => ({
-    getLocale: async () => session.locale,
+    getTimeZone: async () => "UTC", getLocale: async () => session.locale,
     getTranslations: async (namespace: CommonNamespace) =>
         session.locale === "en"
             ? createTranslator({ locale: "en", messages: en, namespace })

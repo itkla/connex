@@ -8,6 +8,7 @@ import java.util.function.IntPredicate;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.RowError;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -50,38 +51,39 @@ public class BulkOperationService {
     private final DealMapper dealMapper;
     private final TagMapper tagMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @RequirePermission(Permission.PERSON_UPDATE)
     public BulkOperationResult addTagToPersons(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.addTag(id, tagId));
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.addTag(id, tagId));
     }
 
     @RequirePermission(Permission.PERSON_UPDATE)
     public BulkOperationResult removeTagFromPersons(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.removeTag(id, tagId));
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.removeTag(id, tagId));
     }
 
     @RequirePermission(Permission.PERSON_DELETE)
     public BulkOperationResult archivePersons(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), personService::archive);
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id), personService::archive);
     }
 
     @RequirePermission(Permission.PERSON_DELETE)
     public BulkOperationResult restorePersons(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> personMapper.existsOwnedArchived(workspaceId, id), personService::restore);
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwnedArchived(workspaceId, id), personService::restore);
     }
 
     @RequirePermission(Permission.PERSON_UPDATE)
     public BulkOperationResult assignOwnerToPersons(List<Integer> ids, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id),
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id),
             id -> personService.updateOwner(id, ownerId));
     }
 
@@ -89,26 +91,26 @@ public class BulkOperationService {
     public BulkOperationResult addTagToCompanies(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), id -> companyService.addTag(id, tagId));
+        return applyWithWorkspaceScope(workspaceId, ids, id -> companyMapper.existsOwned(workspaceId, id), id -> companyService.addTag(id, tagId));
     }
 
     @RequirePermission(Permission.COMPANY_UPDATE)
     public BulkOperationResult removeTagFromCompanies(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), id -> companyService.removeTag(id, tagId));
+        return applyWithWorkspaceScope(workspaceId, ids, id -> companyMapper.existsOwned(workspaceId, id), id -> companyService.removeTag(id, tagId));
     }
 
     @RequirePermission(Permission.COMPANY_DELETE)
     public BulkOperationResult archiveCompanies(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), companyService::archiveCompany);
+        return applyWithWorkspaceScope(workspaceId, ids, id -> companyMapper.existsOwned(workspaceId, id), companyService::archiveCompany);
     }
 
     @RequirePermission(Permission.COMPANY_DELETE)
     public BulkOperationResult restoreCompanies(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> companyMapper.existsOwnedArchived(workspaceId, id),
+        return applyWithWorkspaceScope(workspaceId, ids, id -> companyMapper.existsOwnedArchived(workspaceId, id),
             companyService::restoreCompany);
     }
 
@@ -116,7 +118,7 @@ public class BulkOperationService {
     public BulkOperationResult assignOwnerToCompanies(List<Integer> ids, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
-        return apply(ids, id -> companyMapper.existsOwned(workspaceId, id),
+        return applyWithWorkspaceScope(workspaceId, ids, id -> companyMapper.existsOwned(workspaceId, id),
             id -> companyService.updateOwner(id, ownerId));
     }
 
@@ -144,16 +146,24 @@ public class BulkOperationService {
     public BulkOperationResult assignOwnerToDeals(List<Integer> ids, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
-        return apply(ids, id -> dealMapper.existsOwned(workspaceId, id), id -> dealService.updateOwner(id, ownerId));
+        return applyWithWorkspaceScope(workspaceId, ids, id -> dealMapper.existsOwned(workspaceId, id), id -> dealService.updateOwner(id, ownerId));
     }
 
     @RequirePermission(Permission.DEAL_UPDATE)
     public BulkOperationResult changeStageForDeals(List<Integer> ids, int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (pipelineMapper.getVisibleStageById(workspaceId, stageId) == null) {
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
+        if (pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId) == null) {
             throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         }
-        return apply(ids, id -> dealMapper.existsOwned(workspaceId, id), id -> dealService.changeStage(id, stageId));
+        return apply(ids, id -> dealMapper.existsOwned(workspaceId, id), id -> dealService.changeStage(id, stageId, scope));
+    }
+
+    private BulkOperationResult applyWithWorkspaceScope(
+            int workspaceId, List<Integer> ids, IntPredicate ownedByWorkspace, IntConsumer action) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> apply(ids, ownedByWorkspace, action));
     }
 
     private void requireTag(int workspaceId, int tagId) {

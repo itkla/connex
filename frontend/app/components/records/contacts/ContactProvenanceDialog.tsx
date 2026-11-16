@@ -37,7 +37,7 @@ import { toastSuccess } from '@/app/lib/toast';
 import { LEAD_SOURCES, REFERRER_SOURCES, asLeadSource } from '@/app/lib/contactProvenance';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { filterByNameQuery } from '@/app/lib/filterByNameQuery';
-import type { Contact, ContactLeadSource } from '@/app/lib/types';
+import type { ContactPickerOption, ContactLeadSource } from '@/app/lib/types';
 
 const NO_SOURCE_VALUE = '__none__';
 
@@ -48,7 +48,7 @@ type Props = {
     leadSource: ContactLeadSource | null;
     leadSourceDetail: string | null;
     referrerPersonId: number | null;
-    referrer: Contact | null;
+    referrer: ContactPickerOption | null;
     open: boolean;
     onOpenChange: (open: boolean) => void;
 };
@@ -172,12 +172,12 @@ export default function ContactProvenanceDialog({
                                     <Label htmlFor="contact-provenance-referrer">{t('referrerLabel')}</Label>
                                     <Combobox
                                         items={referrerOptions}
-                                        filter={null}
-                                        itemToStringLabel={(contact: Contact) => contact.name}
+                                        serverSearch={referrerSearch.serverSearch}
+                                        itemToStringLabel={(contact: ContactPickerOption) => contact.name}
                                         value={selectedReferrer}
-                                        onInputValueChange={(value) => {
+                                        onInputValueChange={(value, details) => {
                                             setReferrerQuery(value);
-                                            referrerSearch.onInputValueChange(value);
+                                            referrerSearch.onInputValueChange(value, details);
                                         }}
                                         onValueChange={(contact) => setReferrerId(contact?.id ?? null)}
                                     >
@@ -189,7 +189,7 @@ export default function ContactProvenanceDialog({
                                         <ComboboxContent>
                                             <ComboboxEmpty>{t('referrerEmpty')}</ComboboxEmpty>
                                             <ComboboxList>
-                                                {(contact: Contact) => (
+                                                {(contact: ContactPickerOption) => (
                                                     <ComboboxItem key={contact.id} value={contact}>
                                                         {contact.name}
                                                     </ComboboxItem>

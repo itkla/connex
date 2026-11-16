@@ -172,7 +172,7 @@ class DealMentionTest extends AbstractServiceTest {
         Deal deal = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
         Tag tag = newTag();
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "decision_maker");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "decision_maker");
         dealMapper.addTag(workspace.getId(), deal.getId(), tag.getId());
         dealService.close(deal.getId(), false,
             "Lost after [Secret Review](note:" + privateNote.getId() + ")", null);
@@ -181,8 +181,7 @@ class DealMentionTest extends AbstractServiceTest {
 
         List<Deal> fetched = List.of(
             findDeal(dealService.getAllDeals(), deal.getId()),
-            findDeal(dealService.getDealsPage(
-                "%" + deal.getName() + "%", null, null, null, null, null, null, null, 25, 0), deal.getId()),
+            findDeal(referenceService.hydrateDeals(workspace.getId(), dealService.queryDealsPage("%" + deal.getName() + "%", null, null, null, null, null, null, null, false, null, null, null, 25, 0).items()), deal.getId()),
             findDeal(companyService.getDealsByCompanyId(company.getId(), 100), deal.getId()),
             findDeal(personService.getDealsByPersonId(person.getId()), deal.getId()),
             findDeal(pipelineService.getDealsByPipelineId(pipeline.getId()), deal.getId()),
@@ -208,7 +207,7 @@ class DealMentionTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "decision_maker");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "decision_maker");
 
         Note privateDraft = new Note();
         privateDraft.setContent("private linked note");

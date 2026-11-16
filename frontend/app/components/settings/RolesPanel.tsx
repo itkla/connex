@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AccessDenied from "@/app/components/AccessDenied";
 import { useTranslations } from "next-intl";
@@ -21,9 +21,15 @@ import {
     getPermissionCatalog,
     getWorkspaceRoles,
     updateWorkspaceRole,
+    updateBuiltInRoleExportPermission,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePermission } from "@/app/hooks/usePermissions";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import {
+    ConfinementAcknowledgementDeclined,
+    useConfinementAcknowledgement,
+} from "@/app/hooks/useConfinementAcknowledgement";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
@@ -35,14 +41,14 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
+import ConfinementAcknowledgementDialog from "@/app/components/settings/ConfinementAcknowledgementDialog";
 import RoleDialog from "./RoleDialog";
 import { groupPermissions, type PermissionGroup } from "./permissions";
-
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 function RoleIcon({ locked }: { locked?: boolean }) {
     return (
@@ -58,36 +64,36 @@ function RoleIcon({ locked }: { locked?: boolean }) {
 function PermissionSummary({
     role,
     groups,
-    totalPermissions,
 }: {
     role: CustomRole;
     groups: PermissionGroup[];
-    totalPermissions: number;
 }) {
     const t = useTranslations("WorkspaceRoles");
-    if (role.permissions.length === 0) {
-        return <span className="text-xs text-muted-foreground">{t("noPermissions")}</span>;
-    }
-    if (totalPermissions > 0 && role.permissions.length === totalPermissions) {
-        return <span className="text-xs font-medium text-brand">{t("fullAccess")}</span>;
-    }
-    const set = new Set(role.permissions);
-    const touched = groups.filter((g) => g.items.some((i) => set.has(i.permission)));
+    const permissions = new Set(role.permissions);
     return (
-        <div className="flex flex-wrap items-center gap-1.5">
-            {touched.map(({ group, label, items }) => {
-                const on = items.filter((i) => set.has(i.permission)).length;
-                return (
-                    <span
-                        key={group}
-                        className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border"
-                    >
-                        {label}
-                        <span className="text-muted-foreground/60">{on}</span>
-                    </span>
-                );
-            })}
-        </div>
+        <details className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                {t("accessDetails")}
+            </summary>
+            <p className="mt-2 text-xs text-muted-foreground">{t("accessScopeHint")}</p>
+            <div className="mt-3 space-y-4">
+                {groups.map(({ group, label, items }) => (
+                    <div key={group} className="space-y-1.5">
+                        <p className="font-medium text-foreground">{label}</p>
+                        <ul className="space-y-2">
+                            {items.map(({ permission, action, description }) => (
+                                <li key={permission}>
+                                    <p className="text-foreground">
+                                        {action} · {t(permissions.has(permission) ? "allowed" : "notAllowed")}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">{description}</p>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ))}
+            </div>
+        </details>
     );
 }
 
@@ -112,12 +118,19 @@ export type RolesPresentation = "page" | "section";
 
 export default function RolesPanel({ presentation = "page" }: { presentation?: RolesPresentation } = {}) {
     const t = useTranslations("WorkspaceRoles");
+    const canManageRoles = usePermission("ROLE_MANAGE");
     const showApiError = useApiErrorToast("WorkspaceRoles");
     const headingLevel = presentation === "section" ? 3 : 2;
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
+    const confinement = useConfinementAcknowledgement();
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
+    const workspaceEpoch = useRef(0);
+    useLayoutEffect(() => {
+        workspaceEpoch.current += 1;
+        return () => { workspaceEpoch.current += 1; };
+    }, [workspaceId]);
 
     const [roles, setRoles] = useState<CustomRole[]>([]);
     const [builtIn, setBuiltIn] = useState<CustomRole[]>([]);
@@ -129,25 +142,19 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
     const [editing, setEditing] = useState<CustomRole | null>(null);
     const [removeTarget, setRemoveTarget] = useState<CustomRole | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [savingExportRole, setSavingExportRole] = useState<string | null>(null);
 
-    const groups = useMemo(
-        () => groupPermissions(catalog, {
-            TEAM_MANAGE: {
-                group: t("permissionLabels.teamManage.group"),
-                action: t("permissionLabels.teamManage.action"),
-            },
-        }),
-        [catalog, t],
-    );
+    const groups = useMemo(() => groupPermissions(catalog, t), [catalog, t]);
 
     useEffect(() => {
         if (!workspaceId) return;
         let cancelled = false;
         (async () => {
             setLoading(true);
+            setSavingExportRole(null);
             try {
                 const [loadedRoles, loadedBuiltIn, loadedCatalog] = await Promise.all([
-                    getWorkspaceRoles(workspaceId),
+                    canManageRoles ? getWorkspaceRoles(workspaceId) : Promise.resolve([]),
                     getBuiltInRoles(workspaceId),
                     getPermissionCatalog(),
                 ]);
@@ -170,7 +177,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         return () => {
             cancelled = true;
         };
-    }, [workspaceId, t]);
+    }, [workspaceId, canManageRoles, t]);
 
     const openCreate = () => {
         setEditing(null);
@@ -186,7 +193,11 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         if (!workspaceId) return;
         try {
             if (editing) {
-                const updated = await updateWorkspaceRole(workspaceId, editing.id, name, permissions);
+                const updated = await confinement.run(
+                    t("confinementSubjectRoleEdit", { name }),
+                    (acknowledge) => updateWorkspaceRole(workspaceId, editing.id, name, permissions, acknowledge),
+                );
+                if (updated === null) throw new ConfinementAcknowledgementDeclined();
                 setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
                 toastSuccess(t("updated"));
             } else {
@@ -196,10 +207,27 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
             }
             router.refresh();
         } catch (err) {
-            if (!handlePasskeyStepUpError(err)) {
+            if (!(err instanceof ConfinementAcknowledgementDeclined) && !handlePasskeyStepUpError(err)) {
                 showApiError(err, "saveFailed");
             }
             throw err;
+        }
+    };
+
+    const setBuiltInExport = async (role: CustomRole, enabled: boolean) => {
+        if (!workspaceId || savingExportRole !== null) return;
+        const originEpoch = workspaceEpoch.current;
+        setSavingExportRole(role.name);
+        try {
+            const updated = await updateBuiltInRoleExportPermission(workspaceId, role.name, enabled);
+            if (workspaceEpoch.current !== originEpoch) return;
+            setBuiltIn(updated);
+            router.refresh();
+            toastSuccess(t("updated"));
+        } catch (err) {
+            if (workspaceEpoch.current === originEpoch && !handlePasskeyStepUpError(err)) showApiError(err, "saveFailed");
+        } finally {
+            if (workspaceEpoch.current === originEpoch) setSavingExportRole(null);
         }
     };
 
@@ -227,8 +255,6 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         );
     }
 
-    const totalPermissions = catalog.length;
-
     return (
         <div className="space-y-10">
             <Rise className="space-y-4">
@@ -237,7 +263,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                     title={t("defaultRolesLabel")}
                     description={t("builtInSubtitle")}
                     action={
-                        !loading && (
+                        !loading && canManageRoles && (
                             <Button onClick={openCreate} variant="brand">
                                 <PlusIcon className="size-4" />
                                 {t("newRole")}
@@ -256,18 +282,28 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                                 <div className="min-w-0 flex-1 space-y-1.5">
                                     <div className="flex items-center gap-2">
                                         <span className="truncate text-sm font-medium capitalize text-foreground">
-                                            {role.name}
+                                            {t(`builtInRoles.${role.name}.name`)}
                                         </span>
                                         <Badge variant="secondary" className="text-muted-foreground">
                                             <LockClosedIcon className="size-3" />
                                             {t("builtInBadge")}
                                         </Badge>
                                     </div>
-                                    <PermissionSummary
-                                        role={role}
-                                        groups={groups}
-                                        totalPermissions={totalPermissions}
-                                    />
+                                    <p className="text-sm text-muted-foreground">{t(`builtInRoles.${role.name}.description`)}</p>
+                                    <div className="flex items-center justify-between gap-4 py-2">
+                                        <label htmlFor={`built-in-export-${role.name}`} className="text-sm text-foreground">
+                                            {t("permissionLabels.EXPORT_DATA.action")}
+                                        </label>
+                                        <Switch
+                                            id={`built-in-export-${role.name}`}
+                                            aria-label={t("exportPermissionLabel", { role: t(`builtInRoles.${role.name}.name`) })}
+                                            checked={role.permissions.includes("EXPORT_DATA")}
+                                            disabled={role.exportPermissionEditable !== true || savingExportRole !== null}
+                                            onCheckedChange={(enabled) => void setBuiltInExport(role, enabled)}
+                                        />
+                                    </div>
+                                    {savingExportRole === role.name && <p className="text-xs text-muted-foreground">{t("exportPermissionSaving")}</p>}
+                                    <PermissionSummary role={role} groups={groups} />
                                 </div>
                             </li>
                         ))}
@@ -275,7 +311,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                 )}
             </Rise>
 
-            <Rise className="space-y-4">
+            {canManageRoles && <Rise className="space-y-4">
                 <SettingsSection
                     headingLevel={headingLevel}
                     title={t("customRolesLabel")}
@@ -303,11 +339,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                                     <span className="block truncate text-sm font-medium text-foreground">
                                         {role.name}
                                     </span>
-                                    <PermissionSummary
-                                        role={role}
-                                        groups={groups}
-                                        totalPermissions={totalPermissions}
-                                    />
+                                    <PermissionSummary role={role} groups={groups} />
                                 </div>
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
@@ -337,7 +369,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                         ))}
                     </ul>
                 )}
-            </Rise>
+            </Rise>}
 
             <RoleDialog
                 open={dialogOpen}
@@ -346,6 +378,8 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                 editing={editing}
                 onSubmit={submitRole}
             />
+
+            <ConfinementAcknowledgementDialog acknowledgement={confinement} />
 
             <DeleteRecordDialog
                 open={removeTarget !== null}

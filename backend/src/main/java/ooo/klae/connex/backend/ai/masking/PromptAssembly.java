@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import java.util.Objects;
+import java.util.List;
 
 /**
  * Public facade for assembling prompts after values have crossed the masking boundary. Callers
@@ -62,6 +63,18 @@ public final class PromptAssembly {
         public Builder userTurn(String maskedContent) {
             delegate.addMessage(MaskedMessage.ROLE_USER, maskedContent);
             return this;
+        }
+
+        /** Adds a message whose static instructions and masked provider text retain their origins. */
+        public Builder segmentedUserTurn(List<OutboundSegment> segments) {
+            delegate.addMessage(MaskedMessage.ROLE_USER, segments);
+            return this;
+        }
+
+        /** Adds a directive authored entirely by the server, without granting label-wide exemptions. */
+        public Builder staticUserTurn(String text) {
+            ctx.addTrustedStaticText(text);
+            return segmentedUserTurn(List.of(new OutboundSegment(text, OutboundSegment.Origin.SERVER_STATIC)));
         }
 
         /**

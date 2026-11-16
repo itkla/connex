@@ -10,10 +10,68 @@ This document is authoritative for person/company/deal identity matching, duplic
 - Hydrate the same-organization workspace visibility allowlist through the established control-access service, then use visibility-scoped `IdentityMapper` reads.
 - Strong evidence is exact canonical identity (email, phone, domain, external id as applicable).
 - Weak evidence is exact normalized name after a bounded broad candidate read and Java recheck.
+- Company name review also recognizes the boundary legal forms documented in
+  [Duplicate Review](DUPLICATE_REVIEW.md), after Unicode width/case/kana folding. These are weak
+  review keys only; canonical identity/name keys are unchanged. Variants never authorize
+  automatic attachment or merging.
 - Never auto-attach an unreviewed weak, shared, ambiguous, truncated, or aggregate-overflow result.
 - Every mapper statement remains parameterized and tenant/visibility scoped.
 
 Direct responses remain bounded to the established candidate ceiling; CSV responses retain their per-row and whole-request bounds. A truncated result is not acknowledgeable proof of completeness.
+
+Direct person review can explicitly permit separate creation from a bounded name-only result
+through `allowSeparateCreation`, while retaining `truncated=true`. This permission requires
+complete, empty canonical email/phone results, explicit user acknowledgement, and the same
+server-issued keyed proof at the locked final recheck, including when the displayed candidate list
+is empty. The existing duplicate proof store binds actor/workspace, normalized request, displayed
+result and the visible broad-name count/highest ID; expiry and transactional consumption prevent
+forgery and replay. Counts are not a substitute for consumption: deletion could restore them.
+The final preflight echoes the acknowledged proof instead of replacing a still-valid one.
+See [Duplicate Review](DUPLICATE_REVIEW.md#manual-creation-and-client-preflight).
+It never permits reuse or import resolution; company and deal overflow still blocks.
+
+### Person CSV identity decisions
+
+Person CSV imports use exact normalized email as their automatic matching and in-file combining
+key. A phone number, even alongside an exact name, is review evidence only: office numbers can
+belong to several people. Different emails or phone-only rows remain separate unless the importer
+explicitly links them to an owned contact. A phone candidate never automatically merges source
+rows, selects an update target, or prevents another person from being created.
+
+Repeated rows with the same email combine under the selected duplicate action, retaining the
+existing first-value/fill-empty or last-value/overwrite precedence and unioned references. Shared
+or changed phones cannot connect different email groups. Conflicting explicit targets for one
+email still fail closed; they are never resolved by row order.
+
+Both email and phone groups retain deterministic locks and current-state rechecks. Only email
+ownership authorizes or rejects an automatic person CSV decision; phone ownership is nonexclusive.
+An automatic target that loses its email before the locked recheck fails even if its phone still
+matches. Missing current phone evidence is checked per target, so another contact's phone identity
+does not suppress the selected contact's provenance backfill. Candidate visibility, truncation
+limits and one-use review proofs remain unchanged.
+
+## CSV headers and person names
+
+The CSV wizard suggests only exact known aliases for fields supported by the selected entity,
+after Unicode NFKC, case and space/underscore/hyphen normalization. Japanese headers remain
+Japanese. Company Name means the company link for contacts/deals and the record name for
+companies. Unsupported lifecycle/source fields, phonetic-name headers and uncertain headers stay
+unmapped; fragments never imply Tags. Competing columns for a single-valued target stay unmapped rather
+than choosing a winner by file order. An unambiguous full-name column takes precedence over
+initial split-name suggestions.
+
+Contacts may map one full-name column unchanged, or select one given-name and/or one family-name
+column. The Map step shows the composed sample and offers both orders. Japanese 姓/名 headers or
+the Japanese interface default to family then given; otherwise the default is given then family.
+Trim each selected part, omit empty parts and join with a single space. Keep single-column full
+names intact; do not guess where to split them. A full-name mapping combined with name parts, or
+multiple columns for a name part, blocks progression until the user resolves the conflict.
+
+Composition happens before preview through the existing single `name` target, using a derived
+column that cannot overwrite a source column. The original row values remain present. Preview
+and commit use the exact same derived rows and mapping, so the existing review context and proof
+bind the composed names. Changing name parts or their effective order requires a fresh review.
+The server continues to validate required names and all other imported fields.
 
 ## Review proofs
 
@@ -26,6 +84,7 @@ The server-derived context binds the proof to the complete workflow snapshot, in
 - field mapping;
 - duplicate action;
 - manual links;
+- explicit per-source-row company dependency links and skipped source-row indices;
 - referenced-company decisions;
 - rendered candidate/create-vs-match decisions.
 
@@ -64,17 +123,45 @@ Follow `docs/backend/LOCKING.md` for the exact organization/workspace/membership
 While locks are held:
 
 - requery current canonical identities;
-- automatic match targets must remain the unique owner of supplied identities;
-- creates must still have no owned match;
+- automatic match targets must remain the unique owner of supplied automatic matching identities
+  (email for person CSV imports);
+- creates must still have no owned automatic match;
 - locked final state, not preview state, authorizes the write.
 
 ## CSV dependency resolution
 
-Person/deal previews bind exact referenced-company names to the proof; deal proofs also bind every rendered create-vs-match decision.
+Person/deal previews bind referenced-company names and explicit per-source-row company choices to
+the proof; deal proofs also bind every rendered create-vs-match decision. The preview exposes each
+required dependency separately from the imported record's own duplicate candidates. Every source
+row remains addressable even when combined with another row.
+
+Company names are weak evidence: even a single visible name candidate requires explicit selection.
+`companyLinks` maps source-row indices to visible candidate ids. A reviewed bulk action expands to
+those same explicit row choices, only for rows with the same dependency key and the selected company
+in their complete visible candidate set. It does not establish a reusable name-to-company rule.
+Truncated results cannot be selected. Unselected ambiguous dependencies remain invalid. The chosen
+id is rechecked against the fresh canonical preflight response under the existing duplicate mutex;
+changing the choice or the visible result requires a fresh one-use proof. Conflicting company choices
+on rows combined into one mutation fail closed when that dependency is consumed, independent of row
+order. Every same-key contributor must resolve its own choice; bulk application remains explicit.
+Unused dependencies on skipped matches or already-filled company links do not block the import.
+An unresolved company choice that could target an existing owned deal still requires deal-update
+permission at preview admission; this permission check does not choose or attach the company.
+Candidate groups are serialized once in the preview's `companyCandidates` catalogue; source rows
+refer to the group by key. Repeating a dependency across many rows does not multiply the bounded
+candidate response.
+
+`skippedRows` retains original row indices but excludes those rows from validation, candidate
+requests, combining and dependency writes. Skips are counted in preview and commit. Editing a value
+changes the raw ordered request snapshot; edits obey the same server validation as uploaded values.
+Changing values, mapping, links or skips requires another preview. Neither skipping nor correction
+alters the existing target/identity lock order.
 
 At commit:
 
-- a unique visible company dependency may be reused;
+- an explicitly selected visible company dependency may be reused;
+- legal-form variants remain weak review evidence and never attach automatically; CSV rows using
+  a variant stay unresolved until an explicit visible candidate choice is reviewed and proof-bound;
 - ambiguous/truncated dependencies fail closed only for rows that consume them;
 - do not create a dependency under the duplicate mutex until all required target/identity revalidation passes;
 - lock writable matched targets individually in ascending record id and canonical identity groups in deterministic kind/value order;
@@ -87,7 +174,76 @@ An import that uses an auto-create custom-field mapping locks the affected recor
 set before writable record targets, as defined in `docs/backend/LOCKING.md`. This is a schema fence;
 the definition itself remains uncreated until target and identity revalidation succeeds.
 
+Auto-created custom fields use stable SHA-256-derived suffixes for non-ASCII labels, empty ASCII
+projections and labels whose keys would otherwise be truncated. Mixed Japanese/ASCII labels retain
+the complete label in the suffix input. An existing definition is reusable only in the active
+workspace and entity type, with the exact trimmed label, requested field type and active status.
+An unrelated, differently typed or archived definition at the preferred key instead selects a
+stable label/type-derived alternate key, which is subject to the same reuse checks. Creation still
+requires custom-field management permission. Existing legacy keys are not renamed or migrated.
+
+Preview and commit use the same key resolution and reject multiple columns targeting the same
+auto-created definition before a review is accepted. The template-set fence rechecks resolved keys
+and their presence before target locks, preventing a concurrent catalog change from silently
+redirecting imported values.
+
 Do not add a dependency-first lock pass; it reverses the interactive mutation order and creates a deadlock cycle.
+
+## Deal currencies
+
+Preview and commit validate supplied nonblank currency cells after resolving the existing deal
+match. `CurrencyCodes.updated` retains an unchanged stored spelling, including legacy buckets and
+padded/lowercase codes. New rows and changed currencies require supported ISO monetary codes.
+The locked target recheck uses normalized equality and refuses a legacy value that is no longer
+unchanged before dependency or record writes. Omitted cells keep existing import merge/default
+semantics; stored currencies are never inferred or repaired.
+
+Currency row refusals use `CURRENCY_INVALID` in the shared import problem-code contract. Review and
+downloadable errors localize each structured problem before joining, including combined currency
+and amount failures. Raw `errors` arrays and joined `reason` remain compatibility fields alongside
+`problems`. Older responses retain localized currency and company-variant refusals; other raw
+diagnostics become generic correction guidance instead of presentation copy. Currency admission
+remains inside the existing preview/commit proof and locked revalidation sequence.
+
+## Deal history dates
+
+Deal CSV mapping supports `closedAt` (Closed at) and `createdAt` (Created at), separately from
+`expectedCloseDate`. Both accept strict `yyyy-MM-dd`, `yyyy/MM/dd`, and ISO instants with an
+explicit offset. Date-only values mean the start of that day in the active workspace analytics
+reporting timezone (workspace override, then actor timezone, then UTC). They are converted to UTC
+before storing in the existing DATETIME columns, at second precision. Thus Tokyo's March 1 belongs
+to March's local revenue period even though its stored UTC timestamp begins on February 28.
+Unparseable or out-of-range dates are row errors in preview and commit; they never become today.
+
+The existing duplicate action governs both history targets: Fill empty retains stored dates,
+Overwrite uses supplied dates, and Skip changes nothing. A missing Created at on a new deal keeps
+the database's current-time default. Historical creation dates are written only by CSV import;
+ordinary creation and edits retain their existing semantics.
+
+Review exposes the effective dates and timezone for each writable row. Closed deals with no
+effective close date carry a non-blocking warning; the client names the affected source-row count
+and explains that import time will be used. Future close dates also carry a row warning. Open
+deals retain the outcome writer's existing behavior of clearing close dates. Closed dates supplied
+to that writer are preserved; missing dates still use current UTC time.
+
+Raw rows and mapping targets remain bound to the one-use proof. The rendered decision fingerprint
+also binds effective dates, warning flags, reporting timezone, effective stage, and outcome,
+including coalesced rows and matched-record merge semantics. A timezone, stage, or stored-date
+change that alters the reviewed result requires a fresh preview. Matched dates are rechecked under
+the existing target locks before dependencies or writes. Period revenue and cycle calculations
+continue to read the canonical `closed_at` and `created_at` columns. Realized revenue charts use
+won deals' `actual_value` and reporting-timezone buckets of `closed_at`, including wins that also
+have an expected close date. Projected series keep their expected-close date basis. Deal CSV
+exports append `closedAt` and `createdAt` after the existing columns, including custom fields and
+`tags`, preserving their positions. These timestamps are UTC ISO instants with an explicit `Z`, so
+exporting and reimporting the history targets preserves the same instants. Deal close-date displays and
+editors delegate to the shared frontend UTC parser and civil-input helpers, using the workspace
+reporting timezone above so the displayed close day matches its realized-revenue bucket regardless
+of the viewer's profile timezone. They do not use the browser/server host timezone. Other timestamp
+displays retain the profile timezone. Editor conversion preserves an
+unchanged repeated-hour instant and seconds, chooses the earlier occurrence for a new repeated-hour
+value, and rejects missing civil times. Bare calendar-only close and expected-close dates never shift.
+See [the frontend date/time contract](../frontend/DATES_AND_TIME_ZONES.md).
 
 ## Interaction-history imports
 
@@ -99,6 +255,7 @@ The Settings → Data interaction-history wizard imports one historical person p
 - Never call per-row domain services or publish rules, mentions, audit, or notifications from the backfill path.
 - Never auto-link shared or ambiguous candidates.
 - Keep the backfill inert: imported history does not masquerade as live user activity.
+- For completed task history, the supplied interaction occurrence is the completion instant (`completed_at`); open imported tasks have no completion instant. Do not infer one for previously stored rows.
 
 Source-less rows receive their stable semantic-occurrence ordinal before participant resolution. Identical legitimate interactions remain distinct, while replaying the same ordered file remains idempotent.
 
@@ -123,6 +280,22 @@ Person/company/deal create forms, staged contacts, and OCR review use the shared
 
 CSV clients retain only the proof for the exact preview snapshot and include it in the corresponding commit. Auth/workspace transitions discard stale proof state.
 
+The CSV review pages all source rows, including skipped and combined rows, and filters by status or
+pending decisions. Candidate lists are collapsed, with secondary suggestions suppressed for resolved
+matches. Phone layouts wrap values and actions without requiring horizontal table scrolling.
+Structured row `problems` carry stable codes and optional field labels for English/Japanese copy;
+legacy `errors`/`reason` fields are diagnostic compatibility fields and are never rendered directly.
+Batch mapping and review-limit refusals expose stable `IMPORT_*` codes. Existing-field mappings use
+the member-facing active schema. Two columns resolving to one definition (including Create aliases)
+are rejected during preview. Server-resolved mapping collisions return stable codes keyed by both
+source columns, so the Map step shows each refusal inline rather than reproducing database key
+resolution in the browser. Changing a mapping clears its stale refusal. A missing or archived mapped
+definition refuses commit rather than silently dropping its values; that refusal refreshes the active
+schema, preserves the draft and old target, and requires an explicit replacement or Ignore choice.
+The Map step also offers Refresh fields without discarding the draft. A failed commit discards its possibly consumed
+proof while retaining the file and choices, shows recovery guidance for its actual refusal category,
+and offers Map or a fresh review. The changed-input banner appears only when the input changed.
+
 ## Review checklist
 
 - All surfaces use the canonical matching service/boundary.
@@ -134,3 +307,12 @@ CSV clients retain only the proof for the exact preview snapshot and include it 
 - Interaction-history backfill remains direct-batch, replay-safe, and inert.
 - Notification baseline/counterfactual concurrency semantics remain intact.
 - Matching, proof replay, truncation, cross-workspace visibility, concurrent mutation, dependency, rollback, and backfill tests pass.
+
+## Default currency for deal CSV creation
+
+Deal preview returns the effective default currency and binds it to the one-use review context.
+A change to that default before commit refuses the old proof and requires a fresh preview.
+New deal rows with no currency use the active workspace's saved default, or the explained USD
+fallback when no setting exists. An explicit row currency takes precedence. Updates with no
+currency preserve the target deal's currency. Defaults never infer historical currencies or
+perform FX. Workspace settings are read from the control plane using the resolved workspace id.

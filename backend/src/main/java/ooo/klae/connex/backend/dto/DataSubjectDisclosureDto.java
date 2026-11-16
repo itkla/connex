@@ -5,20 +5,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonRawValue;
-
 import lombok.Data;
 
 /**
- * Operator-facing subject disclosure. Notes arrive as an already serialized JSON array, so
- * assembly retains at most one page of note objects at a time.
- *
- * <p>The serialized array itself is retained in full: the response payload, and therefore the
- * peak heap of one disclosure, still grows with the total size of the subject's note bodies.
- * The array is not streamed to the servlet output because the disclosure is assembled inside one
- * routed, read-only tenant transaction and is released only after a durable disclosure audit
- * record exists; a {@code StreamingResponseBody} body runs after both of those have ended and
- * would inherit neither the tenant route nor the read snapshot.
+ * Operator-facing subject disclosure. Notes are consumed synchronously in bounded pages inside
+ * the retained tenant snapshot; the remaining sections keep their existing materialized shape.
  */
 @Data
 public class DataSubjectDisclosureDto {
@@ -32,8 +23,7 @@ public class DataSubjectDisclosureDto {
     private List<CustomFieldValueDto> customFieldValues;
     private List<ActivityDto> activities;
     private List<ProviderCaptureEvidenceDto> providerCaptureEvidence;
-    @JsonRawValue
-    private String notes;
+    private DataSubjectDisclosureNotes notes;
     private List<RecordCommentThreadDisclosureDto> recordCommentThreads;
     private List<TaskDto> tasks;
     private List<AttachmentDto> attachments;

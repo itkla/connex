@@ -12,6 +12,7 @@ import {
 import { PEEK_PARAM } from './useRecordPeek';
 import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
 import {
+    isCurrentListPath,
     listStateAddress,
     parseListQuery,
     PIPELINE_EDIT_URL_KEY,
@@ -40,6 +41,7 @@ interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     searchFields: (item: T) => (string | undefined | null)[];
     initialDisplayMode?: SelectableDisplayMode;
     restoreUrlQuery?: boolean;
+    ownedUrlKeys?: readonly string[];
 }
 
 /**
@@ -57,6 +59,7 @@ interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
  * @param searchFields - the fields to search for in the records
  * @param initialDisplayMode - the mode to use before a stored preference is read
  * @param restoreUrlQuery - whether to initialize the query from the URL's sanitized `q` value
+ * @param ownedUrlKeys - additional query keys managed separately from the browser's facet filters
  */
 export function useRecordsBrowser<T extends { id: SelectionId }>(
     {
@@ -65,6 +68,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         searchFields,
         initialDisplayMode = 'table',
         restoreUrlQuery = false,
+        ownedUrlKeys,
     }: UseRecordsBrowserOptions<T>,
 ) {
     const pathname = usePathname();
@@ -72,6 +76,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const isMobile = useIsMobile();
     const { context } = useActions();
     const { activeWorkspaceId } = useWorkspace();
+    const reservedParamKeys = useMemo(() => new Set([...RESERVED_PARAM_KEYS, ...(ownedUrlKeys ?? [])]), [ownedUrlKeys]);
 
     const urlView = searchParams.get('view');
     const [displayMode, setDisplayMode] = useScopedViewPreference<SelectableDisplayMode>({
@@ -88,7 +93,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [filterState, setFilterState] = useState<FilterState>(() => {
         const state: FilterState = {};
         searchParams.forEach((value, key) => {
-            if (!RESERVED_PARAM_KEYS.has(key) && value) state[key] = value.split(',');
+            if (!reservedParamKeys.has(key) && value) state[key] = value.split(',');
         });
         return state;
     });
@@ -96,10 +101,11 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
     useEffect(() => {
+        if (!isCurrentListPath(pathname)) return;
         const params = new URLSearchParams(window.location.search);
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
-            if (!RESERVED_PARAM_KEYS.has(key)) params.delete(key);
+            if (!reservedParamKeys.has(key)) params.delete(key);
         }
         for (const [key, values] of Object.entries(filterState)) {
             if (values.length) params.set(key, values.join(','));
@@ -107,7 +113,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         const next = params.toString();
         if (next === window.location.search.replace(/^\?/, '')) return;
         window.history.replaceState(null, '', listStateAddress(pathname, next));
-    }, [displayMode, filterState, pathname, searchParams]);
+    }, [displayMode, filterState, pathname, reservedParamKeys, searchParams]);
 
     const effectiveDisplayMode: DisplayMode = effectiveListView(displayMode, isMobile);
 

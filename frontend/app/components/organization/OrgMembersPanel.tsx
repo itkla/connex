@@ -3,20 +3,27 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import { EllipsisHorizontalIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, EllipsisHorizontalIcon, KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
 
-import type { OrgMember, OrgRole } from "@/app/lib/types";
+import type { OrgMember, OrgRole, OwnershipOffer } from "@/app/lib/types";
 import {
     addOrgMemberByEmail,
     ApiError,
     getOrgMembers,
+    getOrgOwnershipOffers,
+    isOwnershipOfferCreated,
+    issueOrgMfaAttestation,
     removeOrgMember,
+    revokeOrgMfaAttestation,
+    revokeOrgOwnershipOffer,
     setOrgMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
+import { useConfinementAcknowledgement } from "@/app/hooks/useConfinementAcknowledgement";
 import { toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +58,8 @@ import {
     type SettingsPanelPresentation,
 } from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
+import ConfinementAcknowledgementDialog from "@/app/components/settings/ConfinementAcknowledgementDialog";
+import PasskeyApprovalCodeDialog from "@/app/components/settings/PasskeyApprovalCodeDialog";
 
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
@@ -59,11 +68,12 @@ function initial(name: string) {
 /**
  * The organization's administrators, and — for an owner — the controls that change them.
  *
- * Every mutation here is owner-only on the backend: adding an administrator, changing a role, and
- * removing one all pass `requireOrgOwner`. So an administrator who is not an owner reads the roster
- * and is offered nothing, rather than being shown controls that would come back refused. §6's rule
- * is to prefer no entry point over a locked door, and the manifest records the same fact as this
- * destination's `orgWrite: "owner"`.
+ * Every mutation here is owner-only on the backend: adding an administrator, changing a role,
+ * removing one, and creating or turning off a passkey approval code (#1534) all pass
+ * `requireOrgOwner`. So an administrator who is not an owner reads the roster and is offered
+ * nothing, rather than being shown controls that would come back refused. §6's rule is to prefer no
+ * entry point over a locked door, and the manifest records the same fact as this destination's
+ * `orgWrite: "owner"`.
  *
  * @param currentUserId - the viewer, so the roster can mark their own row
  * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
@@ -89,6 +99,7 @@ export default function OrgMembersPanel({
     const [busy, setBusy] = useState<number | null>(null);
     const [removeTarget, setRemoveTarget] = useState<OrgMember | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [approvalTarget, setApprovalTarget] = useState<OrgMember | null>(null);
     const [email, setEmail] = useState("");
     const [addRole, setAddRole] = useState<OrgRole>("admin");
     const [adding, setAdding] = useState(false);
@@ -122,13 +133,56 @@ export default function OrgMembersPanel({
         };
     }, [orgId, showApiError]);
 
+    const ownershipOffers = useScopeOwnershipOffers(
+        orgId,
+        isOwner,
+        getOrgOwnershipOffers,
+        (err) => showApiError(err, "ownershipOffersLoadFailed"),
+    );
+    const { openOffers, openOfferByOfferee } = ownershipOffers;
+    const confinement = useConfinementAcknowledgement();
+    const offersForNonMembers = openOffers.filter(
+        (offer) => !members.some((member) => member.id === offer.offereeUserId),
+    );
+
+    async function withdrawOffer(offer: OwnershipOffer) {
+        if (!orgId) return;
+        setBusy(offer.offereeUserId);
+        try {
+            await revokeOrgOwnershipOffer(orgId, offer.id);
+            ownershipOffers.forget(offer.id);
+            toastSuccess(t("ownershipOfferWithdrawn"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                showApiError(err);
+            }
+        } finally {
+            setBusy(null);
+        }
+    }
+
     async function changeRole(userId: number, next: OrgRole) {
         if (!orgId) return;
         setBusy(userId);
         try {
-            await setOrgMemberRole(orgId, userId, next);
-            await reload(orgId);
+            const name = members.find((member) => member.id === userId)?.displayName ?? "";
+            const result = await confinement.run(
+                t("confinementSubjectRole", { name, role: roleLabel(next) }),
+                (acknowledge) => setOrgMemberRole(orgId, userId, next, acknowledge),
+            );
+            if (result === null) return;
+            if (isOwnershipOfferCreated<OrgMember>(result)) {
+                ownershipOffers.remember(result.offer);
+                toastSuccess(t("ownershipOffered", { name }));
+                return;
+            }
+            const reloaded = await reload(orgId).then(
+                () => ({ ok: true as const }),
+                (error: unknown) => ({ ok: false as const, error }),
+            );
+            ownershipOffers.refresh();
             toastSuccess(t("roleUpdatedToast"));
+            if (!reloaded.ok) showApiError(reloaded.error, "membersRefreshFailed", "membersRefreshFailedDescription");
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
                 showApiError(err);
@@ -144,6 +198,7 @@ export default function OrgMembersPanel({
         try {
             await removeOrgMember(orgId, removeTarget.id);
             setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
+            ownershipOffers.refresh();
             toastSuccess(t("removedToast"));
             setRemoveTarget(null);
         } catch (err) {
@@ -159,10 +214,20 @@ export default function OrgMembersPanel({
         if (!orgId || email.trim().length === 0) return;
         setAdding(true);
         try {
-            await addOrgMemberByEmail(orgId, email.trim(), addRole);
+            const result = await confinement.run(
+                t("confinementSubjectAdd", { email: email.trim(), role: roleLabel(addRole) }),
+                (acknowledge) => addOrgMemberByEmail(orgId, email.trim(), addRole, acknowledge),
+            );
+            if (result === null) return;
+            if (isOwnershipOfferCreated<OrgMember>(result)) {
+                ownershipOffers.remember(result.offer);
+                toastSuccess(t("ownershipOffered", { name: email.trim() }));
+            } else {
+                ownershipOffers.refresh();
+                toastSuccess(t("addedToast"));
+            }
             await reload(orgId);
             setEmail("");
-            toastSuccess(t("addedToast"));
         } catch (err) {
             if (err instanceof ApiError && err.fieldErrors) setFieldErrors(err.fieldErrors);
             else if (!handlePasskeyStepUpError(err)) showApiError(err);
@@ -200,6 +265,9 @@ export default function OrgMembersPanel({
                             const lockedSoleOwner = member.orgRole === "owner" && ownerCount <= 1;
                             const editable = isOwner && !lockedSoleOwner;
                             const removable = isOwner && !lockedSoleOwner;
+                            const attestable = isOwner && !isSelf;
+                            const openOffer = openOfferByOfferee.get(member.id);
+                            const withdrawable = isOwner && openOffer !== undefined;
                             return (
                                 <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
                                     <Avatar>
@@ -216,6 +284,20 @@ export default function OrgMembersPanel({
                                             {isSelf && (
                                                 <Badge variant="outline" className="text-muted-foreground">
                                                     {t("you")}
+                                                </Badge>
+                                            )}
+                                            {openOffer && (
+                                                <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                    {t("ownershipPending")}
+                                                </Badge>
+                                            )}
+                                            {member.passkeyApprovalNeeded === true && (
+                                                <Badge
+                                                    variant="outline"
+                                                    className="border-warning/40 bg-warning/10 text-warning-foreground"
+                                                    title={t("passkeyNotApprovedHint")}
+                                                >
+                                                    {t("passkeyNotApproved")}
                                                 </Badge>
                                             )}
                                         </div>
@@ -238,7 +320,7 @@ export default function OrgMembersPanel({
                                         </Select>
                                     ) : member.orgRole === "owner" ? (
                                         <Badge
-                                            className="border-transparent bg-brand-light text-brand-dark"
+                                            className="border-transparent bg-brand-light text-brand-text"
                                             title={lockedSoleOwner ? t("lastOwnerTooltip") : undefined}
                                         >
                                             {roleLabel(member.orgRole)}
@@ -247,18 +329,39 @@ export default function OrgMembersPanel({
                                         <Badge variant="secondary">{roleLabel(member.orgRole)}</Badge>
                                     )}
 
-                                    {removable && (
+                                    {(removable || attestable) && (
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
-                                                <button type="button" aria-label={t("remove")} className={rowActionTrigger}>
+                                                <button
+                                                    type="button"
+                                                    aria-label={t("memberActions")}
+                                                    className={rowActionTrigger}
+                                                >
                                                     <EllipsisHorizontalIcon className="size-5" />
                                                 </button>
                                             </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-40">
-                                                <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(member)}>
-                                                    <TrashIcon className="size-4" />
-                                                    {t("remove")}
-                                                </DropdownMenuItem>
+                                            <DropdownMenuContent align="end" className="w-56">
+                                                {attestable && (
+                                                    <DropdownMenuItem onSelect={() => setApprovalTarget(member)}>
+                                                        <KeyIcon className="size-4" />
+                                                        {t("approvalCode")}
+                                                    </DropdownMenuItem>
+                                                )}
+                                                {withdrawable && openOffer && (
+                                                    <DropdownMenuItem
+                                                        disabled={busy === member.id}
+                                                        onSelect={() => withdrawOffer(openOffer)}
+                                                    >
+                                                        <ArrowUturnLeftIcon className="size-4" />
+                                                        {t("withdrawOwnershipOffer")}
+                                                    </DropdownMenuItem>
+                                                )}
+                                                {removable && (
+                                                    <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(member)}>
+                                                        <TrashIcon className="size-4" />
+                                                        {t("remove")}
+                                                    </DropdownMenuItem>
+                                                )}
                                             </DropdownMenuContent>
                                         </DropdownMenu>
                                     )}
@@ -266,6 +369,45 @@ export default function OrgMembersPanel({
                             );
                         })}
                     </ListCard>
+                )}
+
+                {offersForNonMembers.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                        <p className="px-1 text-xs font-medium text-muted-foreground">{t("pendingOffersTitle")}</p>
+                        <ListCard>
+                            {offersForNonMembers.map((offer) => {
+                                const label = offer.offereeDisplayName?.trim() || offer.offereeEmail?.trim() || t("offereeUnknown");
+                                return (
+                                    <li key={offer.id} className="flex items-center gap-3 px-4 py-3">
+                                        <Avatar>
+                                            <AvatarFallback>{initial(label)}</AvatarFallback>
+                                        </Avatar>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="truncate text-sm font-medium text-foreground">{label}</span>
+                                                <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                    {t("ownershipPending")}
+                                                </Badge>
+                                            </div>
+                                            {offer.offereeDisplayName && offer.offereeEmail ? (
+                                                <p className="truncate text-xs text-muted-foreground">{offer.offereeEmail}</p>
+                                            ) : null}
+                                        </div>
+                                        <Button
+                                            size="toolbar"
+                                            variant="outline"
+                                            disabled={busy === offer.offereeUserId}
+                                            onClick={() => withdrawOffer(offer)}
+                                        >
+                                            {busy === offer.offereeUserId
+                                                ? <Loader2Icon className="size-4 animate-spin" />
+                                                : t("withdrawOwnershipOffer")}
+                                        </Button>
+                                    </li>
+                                );
+                            })}
+                        </ListCard>
+                    </div>
                 )}
             </Rise>
 
@@ -349,6 +491,18 @@ export default function OrgMembersPanel({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <ConfinementAcknowledgementDialog acknowledgement={confinement} />
+
+            {orgId !== null && (
+                <PasskeyApprovalCodeDialog
+                    target={approvalTarget}
+                    organizationName={activeWorkspace?.orgName ?? ""}
+                    onClose={() => setApprovalTarget(null)}
+                    issue={(userId) => issueOrgMfaAttestation(orgId, userId)}
+                    revoke={(userId) => revokeOrgMfaAttestation(orgId, userId)}
+                />
+            )}
         </div>
     );
 }

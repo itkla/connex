@@ -23,6 +23,9 @@ concurrency:
 
 jobs:
   metadata:
+    concurrency:
+      group: vulnerability-sla
+      cancel-in-progress: false
     name: Resolve release metadata
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -204,7 +207,7 @@ jobs:
       - name: Verify pinned build toolchain
         run: |
           docker buildx version | grep -F 'v0.35.0'
-          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
+          docker buildx inspect --bootstrap | grep -E '^BuildKit version:[[:space:]]+v0\.31\.1$'
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
@@ -280,6 +283,10 @@ jobs:
           image: ghcr.io/${{ github.repository_owner }}/connex-${{ matrix.component }}@${{ steps.digest.outputs.digest }}
           fail-build: true
           severity-cutoff: high
+          # Fail on any High or Critical with an available fix; vendor-unfixed findings stay in the attested
+          # SBOM and are re-evaluated on every release (owner decision 2026-11-11).
+          only-fixed: true
+          config: .github/grype-release.yaml
           output-format: table
 
       - name: Install cosign
@@ -363,7 +370,7 @@ jobs:
       - name: Verify pinned build toolchain
         run: |
           docker buildx version | grep -F 'v0.35.0'
-          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
+          docker buildx inspect --bootstrap | grep -E '^BuildKit version:[[:space:]]+v0\.31\.1$'
 
       - name: Build dry-run candidate
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
@@ -409,6 +416,10 @@ jobs:
           image: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
           fail-build: true
           severity-cutoff: high
+          # Fail on any High or Critical with an available fix; vendor-unfixed findings stay in the attested
+          # SBOM and are re-evaluated on every release (owner decision 2026-11-11).
+          only-fixed: true
+          config: .github/grype-release.yaml
           output-format: table
 
       - name: Generate dry-run SBOM
@@ -549,11 +560,16 @@ jobs:
           sed -i 's/^CONNEX_HTTP_PORT=.*/CONNEX_HTTP_PORT=18088/' .env
           sed -i 's/^CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE=120/' .env
           sed -i 's/^CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=.*/CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE=120/' .env
-          sed -i "s/^CONNEX_BACKEND_DIGEST=.*/CONNEX_BACKEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-backend.json)/" .env
-          sed -i "s/^CONNEX_FRONTEND_DIGEST=.*/CONNEX_FRONTEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-frontend.json)/" .env
-          sed -i "s/^CONNEX_OCR_DIGEST=.*/CONNEX_OCR_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-ocr.json)/" .env
+          # Each digest is read into a variable first, so a jq failure stops the step instead of
+          # silently writing an empty value that only surfaces later as a Compose interpolation error.
+          for component in backend frontend ocr clamav; do
+            digest="$(jq -er '.digest | sub("^sha256:"; "")' "../release-${component}.json")"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::invalid ${component} digest"; exit 1; }
+            key="CONNEX_${component^^}_DIGEST"
+            grep -q "^${key}=" .env || { echo "::error::${key} is missing from eval.env.example"; exit 1; }
+            sed -i "s/^${key}=.*/${key}=${digest}/" .env
+          done
           sed -i "s/^CONNEX_OCR_SERVICE_TOKEN=.*/CONNEX_OCR_SERVICE_TOKEN=${TOKEN}/" .env
-          sed -i "s/^CONNEX_CLAMAV_DIGEST=.*/CONNEX_CLAMAV_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-clamav.json)/" .env
           # eval.env.example ships with malware scanning OFF because it declares no edition.
           # This step declares CONNEX_DEPLOYMENT_PROFILE=silo below, and a declared edition
           # REFUSES TO BOOT with scanning disabled -- so the sidecar and its token must be turned
@@ -570,6 +586,15 @@ jobs:
             'CONNEX_BOOTSTRAP_EMAIL=benchmark@example.test' \
             "CONNEX_BOOTSTRAP_PASSWORD=${PASSWORD}" \
             'CONNEX_BOOTSTRAP_DISPLAY_NAME=Release Benchmark' \
+            >> .env
+          # The benchmark signs in as the bootstrap owner, a privileged account that cannot enroll a
+          # passkey in CI, so default privileged-MFA confinement refuses every scan with 403. This
+          # throwaway qualification stack measures OCR accuracy and latency, not MFA posture, so it
+          # uses the documented staged-rollout opt-out with a named change actor. The backend writes
+          # that choice to its audit log at startup. Shipped templates stay enforced.
+          printf '%s\n' \
+            'CONNEX_PRIVILEGED_MFA_ENFORCED=false' \
+            'CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR=release-benchmark-qualification' \
             >> .env
           printf '%s' "$PASSWORD" > /tmp/benchmark-password
 
@@ -637,13 +662,13 @@ jobs:
             and .HostConfig.Privileged == false
             and (.HostConfig.CapDrop | index("ALL") != null)
             and (.HostConfig.SecurityOpt | index("no-new-privileges:true") != null)
-            and .HostConfig.Devices == []
+            and (.HostConfig.Devices == null or .HostConfig.Devices == [])
             and (.HostConfig.DeviceRequests == null or .HostConfig.DeviceRequests == [])
             and (.HostConfig.Binds == null or .HostConfig.Binds == [])
             and (.HostConfig.Mounts == null or .HostConfig.Mounts == [])
             and .Mounts == []
             and (.HostConfig.Tmpfs | keys) == ["/tmp"]
-            and (.HostConfig.Tmpfs["/tmp"] | contains("rw"))
+            and (.HostConfig.Tmpfs["/tmp"] | split(",") | index("ro") == null)
             and (.HostConfig.Tmpfs["/tmp"] | contains("noexec"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nosuid"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nodev"))
@@ -670,11 +695,12 @@ jobs:
             and .HostConfig.Privileged == false
             and (.HostConfig.CapDrop | index("ALL") != null)
             and (.HostConfig.SecurityOpt | index("no-new-privileges:true") != null)
-            and .HostConfig.Devices == []
+            and (.HostConfig.Devices == null or .HostConfig.Devices == [])
             and (.HostConfig.Binds == null or .HostConfig.Binds == [])
             and (.HostConfig.Mounts == null or .HostConfig.Mounts == [])
             and .Mounts == []
             and (.HostConfig.Tmpfs | keys) == ["/tmp"]
+            and (.HostConfig.Tmpfs["/tmp"] | split(",") | index("ro") == null)
             and (.HostConfig.Tmpfs["/tmp"] | contains("noexec"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nosuid"))
             and (.HostConfig.Tmpfs["/tmp"] | contains("nodev"))
@@ -875,6 +901,9 @@ jobs:
         run: docker compose down -v --remove-orphans || true
 
   promote:
+    concurrency:
+      group: vulnerability-sla
+      cancel-in-progress: false
     name: Promote immutable release tags
     needs: [metadata, candidate-images, release-set-smoke]
     if: ${{ always() && needs.metadata.outputs.release_mode == 'publish' && needs.metadata.result == 'success' && (needs.metadata.outputs.transaction_exists == 'true' || needs['release-set-smoke'].result == 'success') }}
@@ -935,7 +964,7 @@ jobs:
       - name: Verify pinned build toolchain
         run: |
           docker buildx version | grep -F 'v0.35.0'
-          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
+          docker buildx inspect --bootstrap | grep -E '^BuildKit version:[[:space:]]+v0\.31\.1$'
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
@@ -1079,11 +1108,14 @@ jobs:
           done
 
   release:
+    concurrency:
+      group: vulnerability-sla
+      cancel-in-progress: false
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [metadata, promote]
-    if: ${{ needs.metadata.outputs.release_mode == 'publish' }}
+    if: ${{ needs.metadata.outputs.release_mode == 'publish' && needs.metadata.result == 'success' && needs.promote.result == 'success' }}
     permissions:
       issues: write
       contents: write

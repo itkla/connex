@@ -157,6 +157,11 @@ public class AiAssistantWriteToolRegistry {
             if (lock == null) {
                 throw refused(name, "declares no lock for " + kind);
             }
+            if (lock.tagAssociations() && (lock.taskBoard()
+                    || lock.target() != TargetLock.RECORD_UPDATE
+                    || !Set.of("person", "company", "deal").contains(kind))) {
+                throw refused(name, "tag associations require a record root and no board lock");
+            }
             if ("task".equals(kind) != (lock.target() == TargetLock.TASK_ROW)
                     || "task".equals(kind) != (tool.freshness()
                             == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT)) {

@@ -29,6 +29,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import ooo.klae.connex.backend.delivery.CampaignDeliveryDiagnostics;
 import ooo.klae.connex.backend.delivery.DeliveryCapabilities;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryRequest;
@@ -97,6 +98,7 @@ public class SmtpDeliveryProvider implements MessageDispatcher {
         this.smtpDestinationGuard = smtpDestinationGuard;
         this.nanoTimeSource = nanoTimeSource;
         this.hostnameResolver = hostnameResolver;
+        SmtpDiagnosticLogFilter.install();
     }
 
     @Override
@@ -397,7 +399,7 @@ public class SmtpDeliveryProvider implements MessageDispatcher {
         if (message == null || message.isBlank()) {
             return "smtp rejected";
         }
-        String trimmed = message.trim();
+        String trimmed = CampaignDeliveryDiagnostics.scrub(message, null).trim();
         return trimmed.length() > DETAIL_LIMIT ? trimmed.substring(0, DETAIL_LIMIT) : trimmed;
     }
 

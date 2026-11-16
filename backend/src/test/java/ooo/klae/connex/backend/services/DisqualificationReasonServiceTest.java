@@ -27,6 +27,9 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Resolved fallback, materialisation, archival, uniqueness, audit, and RBAC behavior (#559). */
 class DisqualificationReasonServiceTest extends AbstractServiceTest {
@@ -54,7 +57,9 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         workspace = fresh;
         workspaceMapper.addMember(workspace.getId(), settingsOwner.getId(), "owner");
         User settingsMember = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, settingsMember);
         authenticateAs(settingsOwner, workspace.getId());
+        approveForStepUp(settingsOwner);
         var settingsRole = roleService.createRole(
             workspace.getId(), settingsOwner.getId(), "Reason manager " + unique(),
             List.of("WORKSPACE_SETTINGS"));
@@ -62,8 +67,10 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
             workspace.getId(), settingsOwner.getId(), settingsMember.getId(), settingsRole.getId());
         currentUser = settingsMember;
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void untouchedWorkspaceGetsExactlyTheNineBuiltInsWithoutPersistingRows() {
         List<DisqualificationReasonDto> reasons = reasonService.getActive();
@@ -78,6 +85,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(0, countRows());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void firstEditMaterializesEveryBuiltInAndRelabelsTheSelectedOne() {
         DisqualificationReasonDto fallback = reasonService.getAll().getFirst();
@@ -95,6 +103,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(1, auditCount("disqualification.reason.update"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customCodesAreUniqueWithinTheWorkspaceAtTheServiceAndDatabaseAndCannotBeRenamed() {
         DisqualificationReasonDto custom = reasonService.create(
@@ -115,6 +124,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(1, auditCount("disqualification.reason.create"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void archivedReasonsLeaveTheirLabelsResolvableAndCanBeRestored() {
         DisqualificationReasonDto custom = reasonService.create(
@@ -134,6 +144,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(1, auditCount("disqualification.reason.restore"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberWithoutWorkspaceSettingsCanReadButCannotUseAnyMutator() {
         DisqualificationReasonDto active = reasonService.create(
@@ -143,6 +154,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         reasonService.archive(archived.id());
         User member = newUser();
         authenticateAs(settingsOwner, workspace.getId());
+        approveForStepUp(settingsOwner);
         var role = roleService.createRole(
             workspace.getId(), settingsOwner.getId(), "Reason reader " + unique(), List.of("PERSON_UPDATE"));
         workspaceService.assignCustomRole(
@@ -161,6 +173,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertTrue(reasonService.resolve(workspace.getId(), archived.code()).archivedAt() != null);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void auditPayloadKeepsCallerAuthoredLabelsOutOfEveryReasonEvent() {
         String sensitiveLabel = "alex.personal@example.com";
@@ -184,6 +197,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         }
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void anotherWorkspaceCannotUpdateArchiveOrRestoreAReasonById() {
         DisqualificationReasonDto local = reasonService.create(
@@ -192,6 +206,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         User otherOwner = newUser();
         workspaceMapper.addMember(other.getId(), otherOwner.getId(), "owner");
         authenticateAs(otherOwner, other.getId());
+        approveForStepUp(otherOwner);
 
         assertThrows(ResourceNotFoundException.class, () -> reasonService.update(
             local.id(), request(local.code(), "Changed", false, 20)));
@@ -199,6 +214,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertThrows(ResourceNotFoundException.class, () -> reasonService.restore(local.id()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void codeAndPositionValidationRejectsValuesThatCannotBeStoredSafely() {
         DisqualificationReasonRequest canonicalRequest =

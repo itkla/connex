@@ -39,7 +39,7 @@ const COMPARISON = [
 function FeatureStatus({ value, t }: { value: ComparisonValue; t: LandingTranslation }) {
     if (typeof value === "string") return t(`pricing.values.${value}`);
     const Icon = value ? CheckIcon : MinusIcon;
-    return <><Icon aria-hidden="true" className={`ml-auto size-5 ${value ? "text-brand-dark dark:text-brand" : "text-muted-foreground"}`} /><span className="sr-only">{t(value ? "pricing.included" : "pricing.notIncluded")}</span></>;
+    return <><Icon aria-hidden="true" className={`ml-auto size-5 ${value ? "text-brand-text dark:text-brand-text" : "text-muted-foreground"}`} /><span className="sr-only">{t(value ? "pricing.included" : "pricing.notIncluded")}</span></>;
 }
 
 /** Shows plan comparisons without prices or plan selection at signup. */

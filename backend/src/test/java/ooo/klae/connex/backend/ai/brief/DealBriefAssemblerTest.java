@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.brief;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -79,9 +80,9 @@ class DealBriefAssemblerTest {
     @BeforeEach
     void setUp() {
         assembler = new DealBriefAssembler(
-            dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper);
-        lenient().when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
-            List<?> ids = invocation.getArgument(1);
+            dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+        lenient().when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(invocation -> {
+            List<?> ids = invocation.getArgument(2);
             List<Person> people = new ArrayList<>();
             for (Object value : ids) {
                 if (value instanceof Integer id) {
@@ -92,6 +93,53 @@ class DealBriefAssemblerTest {
             }
             return people;
         });
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"snapshot", "missing", "ordinary"})
+    void companyProfileScopeFailuresPropagateBeforeOptionalEnrichment(String kind) {
+        RuntimeException failure = switch (kind) {
+            case "snapshot" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+            case "missing" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload");
+            case "ordinary" -> new org.springframework.dao.DataAccessResourceFailureException("control unavailable");
+            default -> throw new AssertionError(kind);
+        };
+        Deal deal = deal();
+        deal.setCompanyId(31);
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal);
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(WORKSPACE_ID)).thenThrow(failure);
+            var companies = mock(ooo.klae.connex.backend.services.CompanyService.class);
+            lenient().when(companies.getCompanyById(31)).thenAnswer(call -> {
+                fixture.scopes.getForWorkspace(WORKSPACE_ID);
+                return new ooo.klae.connex.backend.beans.Company();
+            });
+            var relationships = new AiRelationshipContext(dealService,
+                mock(ooo.klae.connex.backend.services.PersonService.class),
+                mock(ooo.klae.connex.backend.services.ConnectionService.class), companies, java.time.Clock.systemUTC());
+            var guarded = new DealBriefAssembler(
+                dealService, scoringService, dealRiskService, relationships, personMapper, fixture.scopes);
+
+            assertSame(failure, assertThrows(RuntimeException.class, () -> guarded.assemble(WORKSPACE_ID, DEAL_ID)));
+
+            verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE_ID);
+            verify(companies, never()).getCompanyById(31);
+        }
+    }
+
+    @Test
+    void briefsWithoutCompanyWorkStillSkipFailingScopeReads() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            lenient().when(fixture.control.findOrganizationWorkspacesForShare(WORKSPACE_ID))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            var guarded = new DealBriefAssembler(
+                dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper, fixture.scopes);
+
+            guarded.assemble(WORKSPACE_ID, DEAL_ID);
+
+            org.mockito.Mockito.verifyNoInteractions(fixture.control);
+        }
     }
 
     /**
@@ -241,7 +289,7 @@ class DealBriefAssemblerTest {
         when(dealService.getTasksByDealId(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
 
         assertAssemblyCancelled();
-        verify(personMapper, never()).getByIds(anyInt(), anyList());
+        verify(personMapper, never()).getByIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyList());
     }
 
     @Test
@@ -252,17 +300,17 @@ class DealBriefAssemblerTest {
         }
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
         when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(people);
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(interruptingWith(List.of()));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(interruptingWith(List.of()));
 
         assertAssemblyCancelled();
-        verify(personMapper, times(1)).getByIds(anyInt(), anyList());
+        verify(personMapper, times(1)).getByIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyList());
     }
 
     @Test
     void interruptDuringTheLastPersonLookupStopsAssemblyBeforeWarmthIsScored() {
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
         when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person(), null)));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(interruptingWith(List.of(person())));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(interruptingWith(List.of(person())));
 
         assertAssemblyCancelled();
         verify(scoringService, never()).scoreContacts(anyInt(), anySet());
@@ -485,6 +533,7 @@ class DealBriefAssemblerTest {
             assertFalse(prompt.contains(second));
             assertEquals(new DealBriefSource("person", PERSON_ID), assembly.sourceRegistry().get("person.0"));
             assertEquals(new DealBriefSource("person", PERSON_ID + 1), assembly.sourceRegistry().get("person.1"));
+            assembly.context().exposeDispatchedPayload(prompt);
             Demasker.DemaskResult demasked = Demasker.demask(prompt, assembly.context());
             assertEquals(0, demasked.warnings());
             assertTrue(demasked.text().contains("- Name: " + names.getFirst() + "; Role: Champion; Source: person.0"));
@@ -569,7 +618,7 @@ class DealBriefAssemblerTest {
         when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(List.of(activity));
         when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(List.of(note));
         when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
-        when(personMapper.getByIds(WORKSPACE_ID, List.of(74))).thenReturn(List.of(ceased));
+        when(personMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(74))).thenReturn(List.of(ceased));
 
         BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
         String serialized = serialized(assembly.prompt());
@@ -647,8 +696,8 @@ class DealBriefAssemblerTest {
         when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(activities);
         when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(notes);
         when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(tasks);
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
-            List<?> ids = invocation.getArgument(1);
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(invocation -> {
+            List<?> ids = invocation.getArgument(2);
             List<Person> visible = new ArrayList<>();
             for (Object value : ids) {
                 if (value instanceof Integer id) {

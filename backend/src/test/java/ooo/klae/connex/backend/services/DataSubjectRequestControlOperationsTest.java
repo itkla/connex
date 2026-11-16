@@ -3,6 +3,9 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -10,23 +13,37 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance;
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.DataSubjectRequest;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.AiAgentDsrControlMapper;
 import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Pins actor, workspace, organization, membership, and request lock ordering for APPI writes.
@@ -47,6 +64,9 @@ class DataSubjectRequestControlOperationsTest {
     @Mock private AuditService auditService;
     @Mock private SessionSecurityService sessionSecurityService;
 
+    @Mock private AiAgentDsrControlMapper missionPurgeMapper;
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy;
+    private final ObjectMapper json = new ObjectMapper();
     private DataSubjectRequestControlOperations operations;
 
     @BeforeEach
@@ -58,8 +78,25 @@ class DataSubjectRequestControlOperationsTest {
             userMapper,
             orgMemberService,
             auditService,
-            sessionSecurityService);
+            sessionSecurityService,
+            missionPurgeMapper,
+            json, assistantPrivacy,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.ai.AiRestrictionEpoch.class));
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+    }
+
+    @Test
+    void unverifiedDisclosureReturnsSpecificCodeBeforeReadingSubjectData() {
+        DataSubjectRequest request = request(WORKSPACE_ID);
+        request.setIdentityVerifiedAt(null);
+        when(tenantLifecycleControlMapper.isOrgAdminForLifecycle(ORG_ID, ACTOR_ID)).thenReturn(true);
+        when(dataSubjectRequestMapper.findById(ORG_ID, request.getId())).thenReturn(request);
+
+        BadRequestException refused = assertThrows(BadRequestException.class,
+            () -> operations.prepareDisclosure(ORG_ID, request.getId(), ACTOR_ID));
+
+        assertEquals("DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED", refused.getCode());
+        verifyNoInteractions(workspaceMapper, auditService);
     }
 
     @Test
@@ -236,6 +273,145 @@ class DataSubjectRequestControlOperationsTest {
         order.verify(tenantLifecycleControlMapper).lockWorkspaceForShare(WORKSPACE_ID);
         order.verify(tenantLifecycleControlMapper).lockWorkspaceForShare(11);
         order.verify(tenantLifecycleControlMapper).lockActiveOrganizationForShare(ORG_ID);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void v2CompletionAcceptsDeletedWorkspaceOnlyWithVerifiedControlEvidence(boolean verified) {
+        String operation = UUID.randomUUID().toString();
+        var accepted = new AiAgentPurgeAcceptance(41, ORG_ID, 14, operation, UUID.randomUUID().toString(),
+                List.of(WORKSPACE_ID, 9), "2026-01-01T00:00:00Z", 2,
+                AiAgentPurgeAcceptance.ASSISTANT_SCOPE, AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY, 1L, 2L);
+        when(tenantLifecycleControlMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(WORKSPACE);
+        if (!verified) {
+            assertThrows(ConflictException.class, () -> operations.completeMissionPurge(accepted));
+            verifyNoInteractions(auditService);
+            return;
+        }
+        when(assistantPrivacy.deletedWorkspaceVerifiedAt(ORG_ID, operation, 9))
+                .thenReturn(LocalDateTime.of(2026, 1, 1, 0, 0));
+        when(tenantLifecycleControlMapper.lockActiveOrganizationForShare(ORG_ID)).thenReturn(ORG_ID);
+        when(dataSubjectRequestMapper.findByIdForUpdate(ORG_ID, 14)).thenReturn(request(WORKSPACE_ID));
+        when(assistantPrivacy.reconcileCompletion(ORG_ID, operation)).thenReturn(true);
+        AtomicReference<AuditLog> stored = new AtomicReference<>();
+        when(missionPurgeMapper.findCompletion(ORG_ID, 14, operation)).thenAnswer(call -> stored.get());
+        doAnswer(call -> {
+            var receipt = new AuditLog();
+            receipt.setChanges(json.writeValueAsString(call.getArgument(7)));
+            stored.set(receipt);
+            return null;
+        }).when(auditService).recordStrictScoped(eq(AiAgentPurgeAcceptance.COMPLETED), eq("organization"),
+                eq(ORG_ID), isNull(), eq(ORG_ID), any(), any(), any());
+
+        operations.completeMissionPurge(accepted);
+
+        verify(assistantPrivacy).reconcileCompletion(ORG_ID, operation);
+        assertEquals(json.readTree(json.writeValueAsString(accepted.metadata())), json.readTree(stored.get().getChanges()));
+    }
+
+    @Test
+    void v2CompletionWaitsForTerminalWorkspaceRootDeletion() {
+        var accepted = new AiAgentPurgeAcceptance(41, ORG_ID, 14, UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(), List.of(WORKSPACE_ID), "2026-01-01T00:00:00Z", 2,
+                AiAgentPurgeAcceptance.ASSISTANT_SCOPE, AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY, 1L, 2L);
+        when(tenantLifecycleControlMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(
+                new WorkspaceLifecycleRef(WORKSPACE_ID, ORG_ID, "Terminal", "terminal", "tearing_down"));
+
+        assertThrows(ConflictException.class, () -> operations.completeMissionPurge(accepted));
+
+        verifyNoInteractions(auditService);
+        verify(assistantPrivacy, never()).reconcileCompletion(ORG_ID, accepted.operationId());
+    }
+
+    @Test
+    void missionAcceptanceBindsLockedSnapshotToTheExactProvenPerson() {
+        DataSubjectRequest locked = request(WORKSPACE_ID);
+        locked.setId(14);
+        locked.setSubjectPersonId(29);
+        locked.setIdentityVerifiedAt(java.time.LocalDateTime.of(2026, 1, 1, 0, 0));
+        when(tenantLifecycleControlMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(WORKSPACE);
+        when(tenantLifecycleControlMapper.lockActiveOrganizationForShare(ORG_ID)).thenReturn(ORG_ID);
+        when(tenantLifecycleControlMapper.lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(dataSubjectRequestMapper.findByIdForUpdate(ORG_ID, 14)).thenReturn(locked);
+        var command = new ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest(
+                java.util.UUID.randomUUID().toString(), DataSubjectRequestSnapshot.token(locked),
+                ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.SCOPE,
+                ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.CUTOFF_POLICY);
+
+        ConflictException failure = assertThrows(ConflictException.class, () -> operations.acceptMissionPurge(
+                ORG_ID, 14, ACTOR_ID, command, java.util.List.of(WORKSPACE_ID), WORKSPACE_ID, 30));
+
+        assertEquals("dsr_snapshot_conflict", failure.getMessage());
+        verifyNoInteractions(auditService);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false,14,none", "false,2147483648,none",
+        "false,14,changed", "false,2147483648,changed",
+        "false,14,extra", "false,2147483648,extra",
+        "true,14,none", "true,2147483648,none",
+        "true,14,changed", "true,2147483648,changed",
+        "true,14,extra", "true,2147483648,extra"
+    })
+    void missionAuditRoundTripsIntegralIdsAndRejectsChangedEnvelopes(
+            boolean completion, long requestId, String corruption) {
+        DataSubjectRequest locked = request(WORKSPACE_ID);
+        locked.setId(requestId);
+        locked.setSubjectPersonId(29);
+        locked.setIdentityVerifiedAt(LocalDateTime.of(2026, 1, 1, 0, 0));
+        when(tenantLifecycleControlMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(WORKSPACE);
+        when(tenantLifecycleControlMapper.lockActiveOrganizationForShare(ORG_ID)).thenReturn(ORG_ID);
+        when(dataSubjectRequestMapper.findByIdForUpdate(ORG_ID, requestId)).thenReturn(locked);
+        String key = UUID.randomUUID().toString();
+        String operation = UUID.randomUUID().toString();
+        String action = completion ? AiAgentPurgeAcceptance.COMPLETED : AiAgentPurgeAcceptance.ACCEPTED;
+        AtomicReference<AuditLog> stored = new AtomicReference<>();
+        doAnswer(call -> {
+            ObjectNode metadata = (ObjectNode) json.readTree(json.writeValueAsString(call.getArgument(7)));
+            if ("changed".equals(corruption)) {
+                metadata.put("requestId", requestId + 1);
+            } else if ("extra".equals(corruption)) {
+                metadata.put("unexpected", true);
+            }
+            AuditLog row = new AuditLog();
+            row.setId(71);
+            row.setOrgId(ORG_ID);
+            row.setAction(action);
+            row.setChanges(json.writeValueAsString(metadata));
+            stored.set(row);
+            return null;
+        }).when(auditService).recordStrictScoped(eq(action), eq("organization"), eq(ORG_ID),
+                isNull(), eq(ORG_ID), any(), any(), any());
+        Runnable persist;
+        if (completion) {
+            when(missionPurgeMapper.findCompletion(ORG_ID, requestId, operation))
+                    .thenAnswer(call -> stored.get());
+            AiAgentPurgeAcceptance accepted = new AiAgentPurgeAcceptance(41, ORG_ID, requestId,
+                    operation, key, List.of(WORKSPACE_ID), "2026-01-01T00:00:00Z");
+            persist = () -> operations.completeMissionPurge(accepted);
+        } else {
+            when(tenantLifecycleControlMapper.lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID))
+                    .thenReturn(ACTOR_ID);
+            Workspace workspace = new Workspace();
+            workspace.setId(WORKSPACE_ID);
+            when(workspaceMapper.findByOrgId(ORG_ID)).thenReturn(List.of(workspace));
+            when(missionPurgeMapper.findAcceptanceByKey(ORG_ID, requestId, key))
+                    .thenAnswer(call -> stored.get());
+            AiAgentHoldingsPurgeRequest command = new AiAgentHoldingsPurgeRequest(key,
+                    DataSubjectRequestSnapshot.token(locked), AiAgentPurgeAcceptance.SCOPE,
+                    AiAgentPurgeAcceptance.CUTOFF_POLICY);
+            persist = () -> assertEquals(requestId, operations.acceptMissionPurge(ORG_ID, requestId,
+                    ACTOR_ID, command, List.of(WORKSPACE_ID), WORKSPACE_ID, 29).requestId());
+        }
+        if ("none".equals(corruption)) {
+            persist.run();
+            assertEquals(requestId, json.readTree(stored.get().getChanges()).path("requestId").asLong());
+        } else {
+            IllegalStateException failure = assertThrows(IllegalStateException.class, persist::run);
+            assertEquals("Mission purge " + (completion ? "completion" : "acceptance")
+                    + " audit did not preserve its contract", failure.getMessage());
+        }
     }
 
     private static DataSubjectRequest request(Integer workspaceId) {

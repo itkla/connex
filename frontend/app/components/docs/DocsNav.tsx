@@ -35,7 +35,7 @@ function DocsNavGroup({
                     aria-current={pathname === `/docs/${category.slug}` ? "page" : undefined}
                     className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors ${
                         pathname === `/docs/${category.slug}`
-                            ? "text-brand-dark"
+                            ? "text-brand-text"
                             : "text-foreground/85 hover:text-foreground"
                     }`}
                 >
@@ -66,7 +66,7 @@ function DocsNavGroup({
                                     aria-current={active ? "page" : undefined}
                                     className={`block rounded-md px-2 py-1.5 text-sm transition-colors ${
                                         active
-                                            ? "bg-brand-light font-medium text-brand-dark"
+                                            ? "bg-brand-light font-medium text-brand-text"
                                             : "text-muted-foreground hover:bg-muted hover:text-foreground"
                                     }`}
                                 >

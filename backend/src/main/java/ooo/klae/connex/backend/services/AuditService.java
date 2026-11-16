@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -23,6 +24,9 @@ import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AuditSupportRowDto;
+import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
@@ -42,6 +46,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @RequiredArgsConstructor
@@ -59,8 +64,10 @@ public class AuditService {
     private static final int IP_MAX = 45;
     private static final int HASH_LEN = 64;
     private static final int ERROR_MAX = 500;
+    private static final int FETCH_METADATA_MAX = 64;
     private static final int MAX_OFFSET = 100_000;
     private static final int EXPORT_MAX_LIMIT = 10_000;
+    private static final int EXPORT_SELECTION_MAX = 200;
 
     public static final String EXPORT_STEP_UP_ACTION = "auth.mfa.step_up.required";
     public static final String EXPORT_STEP_UP_SUMMARY = "Recent MFA required for data export";
@@ -149,6 +156,7 @@ public class AuditService {
     private final TenantContext tenantContext;
     private final ClientIpResolver clientIpResolver;
     private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
+    private final AutomationScope automationScope;
 
     /**
      * Collapses an attacker-influenced scanner signature to a fixed safe token.
@@ -326,6 +334,142 @@ public class AuditService {
                 context, true, true, workspaceId, orgId, true);
     }
 
+    /** Captures a strict refusal while roots are held and appends only after their transaction completes. */
+    public void deferStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason) {
+        Object context = reason == null ? null : Map.of("error", truncate(reason, ERROR_MAX));
+        AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE,
+                summary, null, context, true, workspaceId, orgId, true);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCompletion(int status) {
+                    appendAndObserve(entry, true);
+                }
+            });
+        } else {
+            appendAndObserve(entry, true);
+        }
+    }
+
+    /**
+     * Records a strict, independently scoped failure with advisory fetch metadata from the request.
+     *
+     * <p>Only the three fetch-metadata headers are copied. Each value is sanitized and capped at
+     * 64 characters. Absent headers, and values the request firewall rejects when read, are omitted
+     * so a malformed header can never suppress the row. Non-browser clients can forge these values,
+     * so they must never determine audit admission or authorization.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param reason fixed sanitized failure classification
+     * @param request denied request whose fetch metadata is advisory
+     */
+    public void recordStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason,
+            HttpServletRequest request) {
+        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null,
+                refusalContext(reason, request), true, true, workspaceId, orgId, true);
+    }
+
+    /**
+     * Records an already-decided refusal using the address selected for its denial-audit key.
+     * The forwarding header is not read again while building the row. A {@code User-Agent}
+     * value rejected by the request firewall is omitted; other request metadata and advisory
+     * fetch metadata retain their usual handling. Persistence failures propagate.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param reason fixed sanitized failure classification
+     * @param request already-denied request whose fetch metadata is advisory
+     * @param resolvedClientIp server-resolved address used by the denial-audit limiter
+     */
+    public void recordStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason,
+            HttpServletRequest request, String resolvedClientIp) {
+        AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE,
+                summary, null, refusalContext(reason, request), true, workspaceId, orgId, false);
+        entry.setIpAddress(truncate(resolvedClientIp, IP_MAX));
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
+            resolveDenialRequestMetadata(entry, attrs, request);
+        }
+        appendAndObserve(entry, true);
+    }
+
+    private Object refusalContext(String reason, HttpServletRequest request) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        if (reason != null) {
+            context.put("error", truncate(reason, ERROR_MAX));
+        }
+        copyFetchMetadata(request, context, "Sec-Fetch-Site", "secFetchSite");
+        copyFetchMetadata(request, context, "Sec-Fetch-Mode", "secFetchMode");
+        copyFetchMetadata(request, context, "Sec-Fetch-Dest", "secFetchDest");
+        return context.isEmpty() ? null : context;
+    }
+
+    /**
+     * Captures a rate-admitted denial now and appends it after the current outer transaction ends.
+     * Follows {@link #deferFailure}: never call from an inner transaction while an outer holder is
+     * suspended. Actor, explicit scope, resolved address and all request metadata are captured at
+     * registration; completion never consults thread/request context. The failure callback returns
+     * the limiter admission on either capture or append failure. Delivery remains best-effort and
+     * never changes the refusal; no independent append runs while the authorization roots are held.
+     * Completion is synchronous and may delay the HTTP response while an already-running writer
+     * commits, bounded by that writer's transaction or the database lock timeout. After rollback the
+     * outer holder owns no locks, so this wait cannot cycle back through that holder. Append failure
+     * remains best-effort and cannot replace the confinement exception.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param reason fixed refusal reason
+     * @param request refused request
+     * @param resolvedClientIp address used for limiter admission
+     * @param appendFailed callback releasing the captured admission
+     */
+    public void deferStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason,
+            HttpServletRequest request, String resolvedClientIp, Runnable appendFailed) {
+        try {
+            AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE,
+                summary, null, refusalContext(reason, request), true, workspaceId, orgId, false);
+            entry.setIpAddress(truncate(resolvedClientIp, IP_MAX));
+            resolveDenialRequestMetadata(entry, new ServletRequestAttributes(request), request);
+            deferIndependent(entry, appendFailed);
+        } catch (RuntimeException failure) {
+            appendFailed.run();
+            log.error("Failed to defer audit event action={} entityType={} entityId={}",
+                action, entityType, entityId, failure);
+        }
+    }
+
+    private static void copyFetchMetadata(HttpServletRequest request, Map<String, Object> context,
+            String header, String key) {
+        String value;
+        try {
+            value = request.getHeader(header);
+        } catch (RequestRejectedException rejected) {
+            return;
+        }
+        if (value != null) {
+            String cleaned = sanitizeAuditText(value).replaceAll("[\\p{Cc}]", " ").strip();
+            context.put(key, truncate(cleaned, FETCH_METADATA_MAX));
+        }
+    }
+
     /**
      * Records a single failed audit event. Never throws.
      * @param action
@@ -489,6 +633,10 @@ public class AuditService {
      * operation, not of whatever runs later.
      */
     private void deferIndependent(AuditLog entry) {
+        deferIndependent(entry, () -> { });
+    }
+
+    private void deferIndependent(AuditLog entry, Runnable appendFailed) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             appendAndObserve(entry, true);
             return;
@@ -499,6 +647,7 @@ public class AuditService {
                 try {
                     appendAndObserve(entry, true);
                 } catch (Exception e) {
+                    appendFailed.run();
                     log.error("Failed to record deferred audit event action={} entityType={} entityId={}",
                             entry.getAction(), entry.getEntityType(), entry.getEntityId(), e);
                 }
@@ -529,7 +678,7 @@ public class AuditService {
         entry.setOutcome(outcome);
         entry.setSummary(truncate(sanitizeAuditText(summary), SUMMARY_MAX));
         entry.setChanges(toSanitizedJson(changes));
-        entry.setContext(toSanitizedJson(context));
+        entry.setContext(contextWithExecutionOrigin(context));
 
         if (explicitScope) {
             entry.setWorkspaceId(workspaceId);
@@ -544,6 +693,23 @@ public class AuditService {
             resolveRequest(entry);
         }
         return entry;
+    }
+
+    private String contextWithExecutionOrigin(Object context) {
+        String json = toSanitizedJson(context);
+        AutomationScope.Origin origin = automationScope.origin();
+        if (origin == null) {
+            return json;
+        }
+        Map<String, Object> merged = new LinkedHashMap<>();
+        Object existing = readAuditJson(json);
+        if (existing instanceof Map<?, ?> fields) {
+            fields.forEach((key, value) -> merged.put(String.valueOf(key), value));
+        } else if (existing != null) {
+            merged.put("detail", existing);
+        }
+        merged.put("executionOrigin", origin.context());
+        return toSanitizedJson(merged);
     }
 
     private void appendAndObserve(AuditLog entry, boolean independent) {
@@ -639,7 +805,10 @@ public class AuditService {
      */
     public String exportRecent(int limit, int offset) {
         requireExportStepUp();
-        return toCsv(auditLogMapper.findWorkspaceExport(tenantContext.getWorkspaceId(), exportCap(limit), offset(offset)));
+        List<AuditLog> entries = auditLogMapper.findWorkspaceExport(
+            tenantContext.getWorkspaceId(), exportCap(limit), offset(offset), null, null, null);
+        return completedAuditExport(entries, tenantContext.getWorkspaceId(), tenantContext.getOrgId(),
+            limit, offset, false, false);
     }
 
     /**
@@ -652,8 +821,10 @@ public class AuditService {
      */
     public String exportForEntity(String entityType, int entityId, int limit, int offset) {
         requireExportStepUp();
-        return toCsv(auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId,
-                exportCap(limit), offset(offset)));
+        List<AuditLog> entries = auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId,
+            exportCap(limit), offset(offset));
+        return completedAuditExport(entries, tenantContext.getWorkspaceId(), tenantContext.getOrgId(),
+            limit, offset, false, true);
     }
 
     /**
@@ -665,7 +836,130 @@ public class AuditService {
      */
     public String exportRecentForOrg(int orgId, int limit, int offset) {
         requireExportStepUp();
-        return toCsv(auditLogMapper.findOrgExport(orgId, exportCap(limit), offset(offset)));
+        List<AuditLog> entries = auditLogMapper.findOrgExport(orgId, exportCap(limit), offset(offset), null);
+        return completedAuditExport(entries, null, orgId, limit, offset, false, false);
+    }
+
+    /**
+     * Exports at most 200 selected workspace audit rows, intersecting IDs with the current workspace
+     * and an optional complete entity scope. Selection never grants access to another workspace.
+     *
+     * @param entityType optional entity type, effective only with an entity ID
+     * @param entityId optional entity ID, effective only with an entity type
+     * @param ids nonempty selection of at most 200 positive audit IDs
+     * @param limit maximum rows, with the existing export cap
+     * @param offset rows to skip, with the existing offset cap
+     * @return redacted CSV for the authorized intersection
+     */
+    public String exportSelected(String entityType, Integer entityId, List<Integer> ids, int limit, int offset) {
+        requireExportStepUp();
+        List<Integer> selected = exportIds(ids);
+        boolean entityScoped = entityType != null && entityId != null;
+        List<AuditLog> entries = auditLogMapper.findWorkspaceExport(
+            tenantContext.getWorkspaceId(), exportCap(limit), offset(offset), selected,
+            entityScoped ? entityType : null, entityScoped ? entityId : null);
+        return completedAuditExport(entries, tenantContext.getWorkspaceId(), tenantContext.getOrgId(),
+            limit, offset, true, entityScoped);
+    }
+
+    /**
+     * Exports selected organization-plane audit rows after the caller's organization-admin check.
+     * Workspace audit rows remain excluded even when their IDs are selected explicitly.
+     *
+     * @param orgId authorized organization
+     * @param ids nonempty selection of at most 200 positive audit IDs
+     * @param limit maximum rows, with the existing export cap
+     * @param offset rows to skip, with the existing offset cap
+     * @return redacted CSV for the authorized intersection
+     */
+    public String exportSelectedForOrg(int orgId, List<Integer> ids, int limit, int offset) {
+        requireExportStepUp();
+        List<AuditLog> entries = auditLogMapper.findOrgExport(
+            orgId, exportCap(limit), offset(offset), exportIds(ids));
+        return completedAuditExport(entries, null, orgId, limit, offset, true, false);
+    }
+
+    /**
+     * Appends durable evidence after a CRM CSV has been assembled. Only server-selected entity and
+     * scope tokens, a row count and filter-presence flags are retained; record and filter values
+     * never enter this event. Persistence failure prevents the caller from releasing the CSV.
+     *
+     * @param entityType server-selected CRM entity type
+     * @param rowCount number of data rows in the prepared CSV
+     * @param memberScope canonical ownership scope, nullable for an unfiltered scope
+     * @param filtered whether native list filters narrowed the request
+     * @param segment whether the request also used a Smart Segment
+     */
+    public void recordDataExportCompleted(String entityType, int rowCount, MemberScope memberScope,
+            boolean filtered, boolean segment) {
+        MemberScope.Mode mode = memberScope == null ? MemberScope.Mode.ALL_TEAM : memberScope.mode();
+        recordStrict(entityType + ".export", entityType, null, null, "CSV export prepared", Map.of(
+            "format", "csv", "rowCount", rowCount, "scope", "workspace", "memberScope", mode.name(),
+            "filtered", filtered || mode != MemberScope.Mode.ALL_TEAM, "segment", segment));
+    }
+
+    /**
+     * Records authorization as an attempt and captures the original authenticated actor, request
+     * and execution origin for the one eventual asynchronous workspace-export completion.
+     */
+    public PreparedWorkspaceExportAudit recordWorkspaceExportStarted(
+            int workspaceId, int orgId, int actorId, int declaredTableCount) {
+        AuditLog completion = buildEntry("org.workspace.export", "workspace", workspaceId, null,
+            OUTCOME_SUCCESS, "Workspace ZIP export assembled", null, null, true, null, orgId, true);
+        if (completion.getActorId() == null || completion.getActorId() != actorId) {
+            throw new ForbiddenException("Workspace export actor does not match the authenticated member");
+        }
+        AuditLog attempt = buildEntry("org.workspace.export_started", "workspace", workspaceId, null,
+            "attempt", "Workspace ZIP export authorized", Map.of("declaredTableCount", declaredTableCount),
+            null, true, null, orgId, true);
+        appendAndObserve(attempt, true);
+        return new PreparedWorkspaceExportAudit(completion);
+    }
+
+    /** Appends counted success only after ZIP assembly, preserving the captured request identity. */
+    public void recordWorkspaceExportCompleted(PreparedWorkspaceExportAudit prepared,
+            long rowCount, int tableCount, long objectCount) {
+        Objects.requireNonNull(prepared, "prepared");
+        if (rowCount < 0 || tableCount < 0 || objectCount < 0) {
+            throw new IllegalArgumentException("Workspace export counts must be nonnegative");
+        }
+        if (!prepared.recorded.compareAndSet(false, true)) {
+            throw new IllegalStateException("Workspace export completion was already recorded");
+        }
+        prepared.completion.setChanges(toSanitizedJson(Map.of(
+            "format", "zip", "scope", "workspace", "rowCount", rowCount,
+            "tableCount", tableCount, "objectCount", objectCount)));
+        appendAndObserve(prepared.completion, true);
+    }
+
+    /** Opaque, single-use completion evidence captured before an export changes threads. */
+    public static final class PreparedWorkspaceExportAudit {
+        private final AuditLog completion;
+        private final AtomicBoolean recorded = new AtomicBoolean();
+
+        private PreparedWorkspaceExportAudit(AuditLog completion) {
+            this.completion = completion;
+        }
+    }
+
+    private String completedAuditExport(List<AuditLog> entries, Integer workspaceId, Integer orgId,
+            int limit, int offset, boolean selected, boolean entityScoped) {
+        String csv = toCsv(entries);
+        recordStrictScoped(workspaceId == null ? "organization.audit.export" : "audit.export",
+            "audit_log", null, workspaceId, orgId, null, "Audit CSV export prepared", Map.of(
+                "format", "csv", "rowCount", entries.size(),
+                "scope", workspaceId == null ? "organization" : "workspace",
+                "selected", selected, "entityScoped", entityScoped,
+                "limit", exportCap(limit), "offset", offset(offset)));
+        return csv;
+    }
+
+    private static List<Integer> exportIds(List<Integer> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > EXPORT_SELECTION_MAX
+                || ids.stream().anyMatch(id -> id == null || id < 1)) {
+            throw new BadRequestException("ids must contain between 1 and 200 positive audit IDs");
+        }
+        return ids.stream().distinct().toList();
     }
 
     /**
@@ -783,9 +1077,34 @@ public class AuditService {
         if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs)) {
             return;
         }
+        entry.setIpAddress(clientIp(attrs.getRequest()));
+        resolveRequestMetadata(entry, attrs);
+    }
+
+    private void resolveRequestMetadata(AuditLog entry, ServletRequestAttributes attrs) {
         HttpServletRequest req = attrs.getRequest();
-        entry.setIpAddress(clientIp(req));
         entry.setUserAgent(truncate(req.getHeader("User-Agent"), USER_AGENT_MAX));
+        entry.setSessionId(sessionHash(req));
+        entry.setRequestId(requestId(attrs));
+        String clientAssertedCorrelationId = MDC.get(CorrelationIds.MDC_KEY);
+        Integer orgId = entry.getOrgId();
+        if (CorrelationIds.isValid(clientAssertedCorrelationId) && orgId != null && orgId > 0) {
+            entry.setUntrustedClientAssertedCorrelationHmac(
+                correlationPseudonymizer.forStorage(orgId, clientAssertedCorrelationId));
+        }
+    }
+
+    /** The explicit denied request retains firewall checks absent from raw thread-bound attributes. */
+    private void resolveDenialRequestMetadata(AuditLog entry, ServletRequestAttributes attrs,
+            HttpServletRequest deniedRequest) {
+        HttpServletRequest req = attrs.getRequest();
+        String userAgent;
+        try {
+            userAgent = deniedRequest.getHeader("User-Agent");
+        } catch (RequestRejectedException rejected) {
+            userAgent = null;
+        }
+        entry.setUserAgent(truncate(userAgent, USER_AGENT_MAX));
         entry.setSessionId(sessionHash(req));
         entry.setRequestId(requestId(attrs));
         String clientAssertedCorrelationId = MDC.get(CorrelationIds.MDC_KEY);
@@ -1042,11 +1361,45 @@ public class AuditService {
         if (!(parsed instanceof Map<?, ?> context)) {
             return null;
         }
+        Map<String, Object> projected = new LinkedHashMap<>();
         Object error = metadataValue(context.get("error"));
-        if (!(error instanceof String string) || !SAFE_ERROR_TOKEN.matcher(string).matches()) {
-            return null;
+        if (error instanceof String string && SAFE_ERROR_TOKEN.matcher(string).matches()) {
+            projected.put("error", string);
         }
-        return toProjectedJson(Map.of("error", string));
+        Map<String, Object> origin = projectExecutionOrigin(context.get("executionOrigin"));
+        if (!origin.isEmpty()) {
+            projected.put("executionOrigin", origin);
+        }
+        return toProjectedJson(projected);
+    }
+
+    private static Map<String, Object> projectExecutionOrigin(Object value) {
+        if (!(value instanceof Map<?, ?> metadata)
+                || !(metadata.get("source") instanceof String source)
+                || !(metadata.get("executionMode") instanceof String mode)) {
+            return Map.of();
+        }
+        try {
+            AutomationScope.Source kind = AutomationScope.Source.valueOf(source.toUpperCase(Locale.ROOT));
+            Long definitionId = null;
+            Long runId = null;
+            if (kind == AutomationScope.Source.RULE || kind == AutomationScope.Source.WORKFLOW) {
+                String definitionKey = kind == AutomationScope.Source.RULE ? "ruleId" : "workflowId";
+                String runKey = kind == AutomationScope.Source.RULE ? "ruleExecutionId" : "workflowRunId";
+                if (!isExecutionId(metadata.get(definitionKey)) || !isExecutionId(metadata.get(runKey))) {
+                    return Map.of();
+                }
+                definitionId = ((Number) metadata.get(definitionKey)).longValue();
+                runId = ((Number) metadata.get(runKey)).longValue();
+            }
+            return new AutomationScope.Origin(kind, mode, definitionId, runId).context();
+        } catch (IllegalArgumentException exception) {
+            return Map.of();
+        }
+    }
+
+    private static boolean isExecutionId(Object value) {
+        return (value instanceof Integer || value instanceof Long) && ((Number) value).longValue() > 0;
     }
 
     private static SensitiveAuditFamily sensitiveAuditFamily(AuditLog entry) {

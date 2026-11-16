@@ -10,12 +10,14 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -32,6 +34,8 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
@@ -74,6 +78,56 @@ class ScoringServiceTest {
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
 
     @Test
+    void taskReplayAndFingerprintsUseOnlyRecordedCompletions() {
+        Person person = person(1, 10);
+        Task task = task(person, null, "2026-06-01 00:00:00");
+        task.setId(40);
+        task.setCompleted(false);
+        task.setCompletedAt(null);
+        TaskMapper tasks = mock(TaskMapper.class);
+        PersonMapper people = mock(PersonMapper.class);
+        when(tasks.getAllTasks(WS)).thenReturn(List.of(task));
+        when(people.getProcessablePersons(WS, "[1]")).thenReturn(List.of(person));
+        ScoringService service = new ScoringService(people, mock(CompanyMapper.class), mock(DealMapper.class),
+            mock(ActivityMapper.class), mock(NoteMapper.class), tasks, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
+        long[] frames = {NOW.minusSeconds(86_400).toEpochMilli(), NOW.toEpochMilli()};
+
+        assertTrue(service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()).isEmpty());
+        assertTrue(service.companySourceStateHashes(WS).isEmpty());
+        assertTrue(service.replayBands(WS, frames, (id, at) -> 10, Set.of(1), Map.of())
+            .contactFrames().getLast().isEmpty());
+
+        task.setCompleted(true);
+        assertTrue(service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()).isEmpty());
+        task.setCompletedAt("2026-06-30 00:00:00");
+        Map<Integer, String> completedHashes = service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of());
+        assertTrue(completedHashes.containsKey(1));
+        assertTrue(service.companySourceStateHashes(WS).containsKey(10));
+        ScoringService.ReplayBands replay = service.replayBands(WS, frames, (id, at) -> 10, Set.of(1), Map.of());
+        assertEquals("cold", replay.contactFrames().getFirst().get(1));
+        assertEquals("cool", replay.contactFrames().getLast().get(1));
+        assertEquals("cool", replay.companyFrames().getLast().get(10));
+        task.setCreatedAt("2026-05-01 00:00:00");
+        assertEquals(completedHashes, service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()));
+        task.setCompleted(false);
+        assertTrue(service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()).isEmpty());
+        assertTrue(service.companySourceStateHashes(WS).isEmpty());
+    }
+
+    @Test
+    void emptyOrNullOnlyCompanySelectionsDoNotTouchTheScopeBoundary() {
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        var companies = mock(CompanyMapper.class);
+        var service = new ScoringService(mock(PersonMapper.class), companies, mock(DealMapper.class),
+            mock(ActivityMapper.class), mock(NoteMapper.class), mock(TaskMapper.class), Clock.systemUTC(), scopes);
+        assertEquals(List.of(), service.scoreCompanies(7, Set.of()));
+        Set<Integer> nullOnly = new LinkedHashSet<>();
+        nullOnly.add(null);
+        assertEquals(List.of(), service.scoreCompanies(7, nullOnly));
+        verifyNoInteractions(scopes, companies);
+    }
+
+    @Test
     void contactSourceStateIsClockStableAndDetectsBackdatedWeightChange() {
         PersonMapper personMapper = mock(PersonMapper.class);
         CompanyMapper companyMapper = mock(CompanyMapper.class);
@@ -99,7 +153,7 @@ class ScoringServiceTest {
             activityMapper,
             noteMapper,
             taskMapper,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
         ScoringService later = new ScoringService(
             personMapper,
             companyMapper,
@@ -107,7 +161,7 @@ class ScoringServiceTest {
             activityMapper,
             noteMapper,
             taskMapper,
-            Clock.fixed(NOW.plusSeconds(60L * 60L * 24L * 90L), ZoneOffset.UTC));
+            Clock.fixed(NOW.plusSeconds(60L * 60L * 24L * 90L), ZoneOffset.UTC), recordScopes());
 
         Map<Integer, String> beforeHashes =
             before.contactSourceStateHashes(
@@ -151,7 +205,7 @@ class ScoringServiceTest {
         when(noteMapper.getWorkspaceNoteMetadataPage(WS, 100, 100)).thenReturn(List.of(notes.getLast()));
         ScoringService service = new ScoringService(mock(PersonMapper.class), mock(CompanyMapper.class),
             mock(DealMapper.class), mock(ActivityMapper.class), noteMapper, mock(TaskMapper.class),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         Map<Integer, String> before = service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of());
         notes.getLast().setCreatedAt("2026-06-28 12:00:00");
@@ -174,17 +228,17 @@ class ScoringServiceTest {
         Person person = person(1, 10);
         Activity activity = activity(person, "call", "2026-06-20 09:00:00");
         activity.setId(12);
-        when(personMapper.getProcessablePersons(WS)).thenReturn(List.of(person));
+        when(personMapper.getProcessablePersons(WS, "[1]")).thenReturn(List.of(person));
         when(dealMapper.getAllDeals(WS)).thenReturn(List.of());
         when(activityMapper.getAllActivities(WS)).thenReturn(List.of(activity));
         when(noteMapper.getWorkspaceNoteMetadataPage(WS, 0, 100)).thenReturn(List.of());
         when(taskMapper.getAllTasks(WS)).thenReturn(List.of());
         ScoringService before = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
         ScoringService later = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper,
-            Clock.fixed(NOW.plusSeconds(60L * 60L * 24L * 90L), ZoneOffset.UTC));
+            Clock.fixed(NOW.plusSeconds(60L * 60L * 24L * 90L), ZoneOffset.UTC), recordScopes());
 
         Map<Integer, String> beforeHashes = before.companySourceStateHashes(WS);
         Map<Integer, String> laterHashes = later.companySourceStateHashes(WS);
@@ -210,7 +264,7 @@ class ScoringServiceTest {
 
         assertEquals(live, asOfNow);
         assertNotEquals("cold", scoreFor(live, 1).getBand());
-        assertEquals("warmth-v1", scoreFor(live, 1).getModelVersion());
+        assertEquals("warmth-v2", scoreFor(live, 1).getModelVersion());
         assertEquals(NOW, scoreFor(live, 1).getAsOf());
     }
 
@@ -225,7 +279,7 @@ class ScoringServiceTest {
         RelationshipTemperatureDto live = service.scoreCompanies(WS).getFirst();
 
         assertEquals(List.of(live), service.scoreCompanies(WS, NOW));
-        assertEquals("warmth-v1", live.getModelVersion());
+        assertEquals("warmth-v2", live.getModelVersion());
         assertEquals(NOW, live.getAsOf());
     }
 
@@ -302,22 +356,22 @@ class ScoringServiceTest {
         TaskMapper taskMapper = mock(TaskMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         when(personMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(3, 2, 1)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(3, 2, 1)))
             .thenReturn(List.of(
                 new RelationshipScoreAggregateDto(1, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1),
                 new RelationshipScoreAggregateDto(3, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1)));
         ScoringService service = new ScoringService(personMapper, mock(CompanyMapper.class), mock(DealMapper.class),
-            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         List<RelationshipTemperatureDto> scores = service.scoreContacts(WS, new LinkedHashSet<>(List.of(3, 2, 1)));
 
         assertEquals(List.of(3, 1), scores.stream().map(RelationshipTemperatureDto::getId).toList());
         assertNotEquals("cold", scores.getFirst().getBand());
         verify(personMapper).getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(3, 2, 1));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(3, 2, 1));
         verifyNoInteractions(activityMapper, noteMapper, taskMapper);
-        verify(personMapper, never()).getAllPersons(anyInt());
-        verify(personMapper, never()).exists(anyInt(), anyInt());
+        verify(personMapper, never()).getAllPersons(anyInt(), org.mockito.ArgumentMatchers.anyString());
+        verify(personMapper, never()).exists(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
     }
 
     @Test
@@ -326,7 +380,7 @@ class ScoringServiceTest {
         ActivityMapper activityMapper = mock(ActivityMapper.class);
         ScoringService service = new ScoringService(
             personMapper, mock(CompanyMapper.class), mock(DealMapper.class), activityMapper,
-            mock(NoteMapper.class), mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC));
+            mock(NoteMapper.class), mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
         LinkedHashSet<Integer> ids = IntStream.rangeClosed(1, 1_001)
             .boxed()
             .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -334,8 +388,8 @@ class ScoringServiceTest {
         assertThrows(ooo.klae.connex.backend.exceptions.BadRequestException.class,
             () -> service.scoreContacts(WS, ids));
 
-        verify(personMapper, never()).getRelationshipScoreAggregatesByIds(anyInt(), any(), any(), anyList());
-        verify(personMapper, never()).getProcessablePersonIds(anyInt(), org.mockito.ArgumentMatchers.anyList());
+        verify(personMapper, never()).getRelationshipScoreAggregatesByIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), any(), any(), anyList());
+        verify(personMapper, never()).getProcessablePersonIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList());
         verify(activityMapper, never()).getActivitiesByPersonIds(anyInt(), org.mockito.ArgumentMatchers.anyList());
     }
 
@@ -349,22 +403,22 @@ class ScoringServiceTest {
         TaskMapper taskMapper = mock(TaskMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         when(companyMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(20, 15, 10)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(20, 15, 10)))
             .thenReturn(List.of(
                 new RelationshipScoreAggregateDto(10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1),
                 new RelationshipScoreAggregateDto(20, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1)));
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
-            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         List<RelationshipTemperatureDto> scores = service.scoreCompanies(WS, new LinkedHashSet<>(List.of(20, 15, 10)));
 
         assertEquals(List.of(20, 10), scores.stream().map(RelationshipTemperatureDto::getId).toList());
         assertEquals(1, scores.getFirst().getTouchCount());
         verify(companyMapper).getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(20, 15, 10));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(20, 15, 10));
         verifyNoInteractions(personMapper, dealMapper, activityMapper, noteMapper, taskMapper);
-        verify(companyMapper, never()).getAllCompanies(anyInt());
-        verify(companyMapper, never()).exists(anyInt(), anyInt());
+        verify(companyMapper, never()).getAllCompanies(anyInt(), org.mockito.ArgumentMatchers.anyString());
+        verify(companyMapper, never()).exists(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
     }
 
     @Test
@@ -394,17 +448,17 @@ class ScoringServiceTest {
         TaskMapper taskMapper = mock(TaskMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         when(companyMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10)))
             .thenReturn(List.of(new RelationshipScoreAggregateDto(10, 1001.0, 1001.0, 0.0,
                 "2026-06-29 12:00:00", 1001)));
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
-            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         RelationshipTemperatureDto score = service.scoreCompanies(WS, Set.of(10)).getFirst();
 
         assertEquals(1001, score.getTouchCount());
         verify(companyMapper).getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10));
         verifyNoInteractions(personMapper, dealMapper, activityMapper, noteMapper, taskMapper);
     }
 
@@ -431,18 +485,18 @@ class ScoringServiceTest {
     void mapCompanyScoringRejectsOversizedWorkspacesBeforeScanning() {
         CompanyMapper companyMapper = mock(CompanyMapper.class);
         when(companyMapper.countCompanies(
-            WS, null, null, false, null, MemberScope.allTeam(), false, null)).thenReturn(2_001L);
+            WS, "[1]", null, null, false, null, MemberScope.allTeam(), false, null)).thenReturn(2_001L);
         PersonMapper personMapper = mock(PersonMapper.class);
         ScoringService service = new ScoringService(
             personMapper, companyMapper, mock(DealMapper.class), mock(ActivityMapper.class),
-            mock(NoteMapper.class), mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC));
+            mock(NoteMapper.class), mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         assertThrows(ooo.klae.connex.backend.exceptions.BadRequestException.class,
             () -> service.scoreCompaniesForMap(WS));
 
-        verify(companyMapper, never()).getAllCompanies(anyInt());
-        verify(personMapper, never()).getAllPersons(anyInt());
-        verify(companyMapper, never()).getRelationshipScoreAggregates(anyInt(), any(), any());
+        verify(companyMapper, never()).getAllCompanies(anyInt(), org.mockito.ArgumentMatchers.anyString());
+        verify(personMapper, never()).getAllPersons(anyInt(), org.mockito.ArgumentMatchers.anyString());
+        verify(companyMapper, never()).getRelationshipScoreAggregates(anyInt(), org.mockito.ArgumentMatchers.anyString(), any(), any());
     }
 
     @Test
@@ -461,20 +515,20 @@ class ScoringServiceTest {
         NoteMapper noteMapper = mock(NoteMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         when(personMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1)))
             .thenReturn(List.of(new RelationshipScoreAggregateDto(1, 0.0, 0.0, 0.0, null, 0)));
         ActivityMapper activityMapper = mock(ActivityMapper.class);
         TaskMapper taskMapper = mock(TaskMapper.class);
         ScoringService service = new ScoringService(
             personMapper, mock(CompanyMapper.class), mock(DealMapper.class), activityMapper,
-            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         RelationshipTemperatureDto score = service.scoreContacts(WS, Set.of(1)).getFirst();
 
         assertEquals("cold", score.getBand());
         assertEquals(0, score.getTouchCount());
         verify(personMapper).getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1));
         verifyNoInteractions(noteMapper, activityMapper, taskMapper);
     }
 
@@ -511,24 +565,24 @@ class ScoringServiceTest {
         RelationshipEvidenceTotalsDto totals = new RelationshipEvidenceTotalsDto(200, contactAggregate.rawWeight(),
             0, 200, 0, contactAggregate.recentWeight(), contactAggregate.priorWeight(),
             contactAggregate.lastTouchAt(), contactAggregate.recentTouchCount());
-        when(personMapper.getRelationshipScoreAggregates(WS, reference, RelationshipWarmthModel.current().sqlParameters()))
+        when(personMapper.getRelationshipScoreAggregates(WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters()))
             .thenReturn(List.of(contactAggregate));
         when(personMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1)))
             .thenReturn(List.of(contactAggregate));
-        when(companyMapper.getRelationshipScoreAggregates(WS, reference, RelationshipWarmthModel.current().sqlParameters()))
+        when(companyMapper.getRelationshipScoreAggregates(WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters()))
             .thenReturn(List.of(companyAggregate));
         when(companyMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10)))
             .thenReturn(List.of(companyAggregate));
-        when(personMapper.getProcessablePersonIds(WS, List.of(1))).thenReturn(List.of(1));
-        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company(10)));
+        when(personMapper.getProcessablePersonIds(WS, "[1]", List.of(1))).thenReturn(List.of(1));
+        when(companyMapper.getByIds(WS, "[1]", List.of(10))).thenReturn(List.of(company(10)));
         when(personMapper.getRelationshipEvidenceTotals(
-            WS, 1, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001)).thenReturn(totals);
+            WS, "[1]", 1, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001)).thenReturn(totals);
         when(companyMapper.getRelationshipEvidenceTotals(
-            WS, 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001)).thenReturn(totals);
+            WS, "[1]", 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001)).thenReturn(totals);
         ScoringService service = new ScoringService(personMapper, companyMapper, mock(DealMapper.class),
-            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         RelationshipTemperatureDto contactScore = service.scoreContacts(WS, Set.of(1)).getFirst();
         RelationshipTemperatureDto companyScore = service.scoreCompanies(WS, Set.of(10)).getFirst();
@@ -553,7 +607,6 @@ class ScoringServiceTest {
         verifyNoInteractions(activityMapper, taskMapper);
         verify(noteMapper, never()).getAllNotes(anyInt());
         verify(noteMapper, never()).getNotesByPersonIds(anyInt(), anyList());
-        verify(noteMapper, never()).getWorkspaceNotesByCompanyIds(anyInt(), anyList());
     }
 
     @Test
@@ -570,15 +623,15 @@ class ScoringServiceTest {
         );
         RelationshipEvidenceTotalsDto totals = new RelationshipEvidenceTotalsDto(
             25, 5.0, 20, 3, 2, 4.0, 0.8, "2026-06-29 12:00:00", 20);
-        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getProcessablePersonIds(WS, "[1]", List.of(7))).thenReturn(List.of(7));
         when(personMapper.getRelationshipEvidenceTotals(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+            WS, "[1]", 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
         )).thenReturn(totals);
         when(personMapper.getRelationshipEvidenceContributors(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20
+            WS, "[1]", 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20
         )).thenReturn(rows);
         when(noteMapper.countOwnPrivateNotesForPersonEvidence(
-            WS, 7, 42, reference, 100_001)).thenReturn(2);
+            WS, "[1]", 7, 42, reference, 100_001)).thenReturn(2);
         ScoringService service = new ScoringService(
             personMapper,
             companyMapper,
@@ -586,7 +639,8 @@ class ScoringServiceTest {
             mock(ActivityMapper.class),
             noteMapper,
             mock(TaskMapper.class),
-            Clock.fixed(NOW, ZoneOffset.UTC)
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            recordScopes()
         );
 
         RelationshipEvidenceDto evidence = service.contactEvidence(WS, 7, 42);
@@ -613,11 +667,11 @@ class ScoringServiceTest {
         assertEquals(PrivateNoteCountScope.CURRENT_CALLER_ONLY,
             evidence.coverage().privateNoteCountScope());
         verify(personMapper).getRelationshipEvidenceTotals(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
+            WS, "[1]", 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
         verify(personMapper).getRelationshipEvidenceContributors(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20);
+            WS, "[1]", 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001, 20);
         verify(noteMapper).countOwnPrivateNotesForPersonEvidence(
-            WS, 7, 42, reference, 100_001);
+            WS, "[1]", 7, 42, reference, 100_001);
     }
 
     @Test
@@ -625,9 +679,9 @@ class ScoringServiceTest {
         PersonMapper personMapper = mock(PersonMapper.class);
         NoteMapper noteMapper = mock(NoteMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
-        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getProcessablePersonIds(WS, "[1]", List.of(7))).thenReturn(List.of(7));
         when(personMapper.getRelationshipEvidenceTotals(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+            WS, "[1]", 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
         )).thenReturn(new RelationshipEvidenceTotalsDto(
             100_001, 5.0, 100_001, 0, 0, 4.0, 0.8, "2026-06-29 12:00:00", 20));
         ScoringService service = new ScoringService(
@@ -637,15 +691,16 @@ class ScoringServiceTest {
             mock(ActivityMapper.class),
             noteMapper,
             mock(TaskMapper.class),
-            Clock.fixed(NOW, ZoneOffset.UTC)
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            recordScopes()
         );
 
         assertThrows(BadRequestException.class, () -> service.contactEvidence(WS, 7, 42));
 
         verify(personMapper, never()).getRelationshipEvidenceContributors(
-            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+            anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt(), any(), any(), anyInt(), anyInt());
         verify(noteMapper, never()).countOwnPrivateNotesForPersonEvidence(
-            anyInt(), anyInt(), anyInt(), any(), anyInt());
+            anyInt(), any(), anyInt(), anyInt(), any(), anyInt());
     }
 
     @Test
@@ -653,13 +708,13 @@ class ScoringServiceTest {
         PersonMapper personMapper = mock(PersonMapper.class);
         NoteMapper noteMapper = mock(NoteMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
-        when(personMapper.getProcessablePersonIds(WS, List.of(7))).thenReturn(List.of(7));
+        when(personMapper.getProcessablePersonIds(WS, "[1]", List.of(7))).thenReturn(List.of(7));
         when(personMapper.getRelationshipEvidenceTotals(
-            WS, 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+            WS, "[1]", 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
         )).thenReturn(new RelationshipEvidenceTotalsDto(
             0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0));
         when(noteMapper.countOwnPrivateNotesForPersonEvidence(
-            WS, 7, 42, reference, 100_001)).thenReturn(100_001);
+            WS, "[1]", 7, 42, reference, 100_001)).thenReturn(100_001);
         ScoringService service = new ScoringService(
             personMapper,
             mock(CompanyMapper.class),
@@ -667,15 +722,16 @@ class ScoringServiceTest {
             mock(ActivityMapper.class),
             noteMapper,
             mock(TaskMapper.class),
-            Clock.fixed(NOW, ZoneOffset.UTC)
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            recordScopes()
         );
 
         assertThrows(BadRequestException.class, () -> service.contactEvidence(WS, 7, 42));
 
         verify(personMapper, never()).getRelationshipEvidenceContributors(
-            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+            anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt(), any(), any(), anyInt(), anyInt());
         verify(noteMapper).countOwnPrivateNotesForPersonEvidence(
-            WS, 7, 42, reference, 100_001);
+            WS, "[1]", 7, 42, reference, 100_001);
     }
 
     @Test
@@ -685,12 +741,12 @@ class ScoringServiceTest {
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         Company company = new Company();
         company.setId(10);
-        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(companyMapper.getByIds(WS, "[1]", List.of(10))).thenReturn(List.of(company));
         when(companyMapper.getRelationshipEvidenceTotals(
-            WS, 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
+            WS, "[1]", 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001
         )).thenReturn(new RelationshipEvidenceTotalsDto(0, 0.0, 0, 0, 0, 0.0, 0.0, null, 0));
         when(noteMapper.countOwnPrivateNotesForCompanyEvidence(
-            WS, 10, 42, reference, 100_001)).thenReturn(3);
+            WS, "[1]", 10, 42, reference, 100_001)).thenReturn(3);
         ScoringService service = new ScoringService(
             mock(PersonMapper.class),
             companyMapper,
@@ -698,7 +754,8 @@ class ScoringServiceTest {
             mock(ActivityMapper.class),
             noteMapper,
             mock(TaskMapper.class),
-            Clock.fixed(NOW, ZoneOffset.UTC)
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            recordScopes()
         );
 
         RelationshipEvidenceDto evidence = service.companyEvidence(WS, 10, 42);
@@ -709,14 +766,14 @@ class ScoringServiceTest {
         assertTrue(evidence.coverage().limitedEvidence());
         assertEquals(3, evidence.coverage().callerPrivateNotesExcluded());
         verify(companyMapper, never()).getRelationshipEvidenceContributors(
-            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+            anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt(), any(), any(), anyInt(), anyInt());
     }
 
     @Test
     void companyEvidenceRejectsAnInvisibleCompanyBeforeReadingSourcesOrPrivateNoteCounts() {
         CompanyMapper companyMapper = mock(CompanyMapper.class);
         NoteMapper noteMapper = mock(NoteMapper.class);
-        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of());
+        when(companyMapper.getByIds(WS, "[1]", List.of(10))).thenReturn(List.of());
         ScoringService service = new ScoringService(
             mock(PersonMapper.class),
             companyMapper,
@@ -724,17 +781,18 @@ class ScoringServiceTest {
             mock(ActivityMapper.class),
             noteMapper,
             mock(TaskMapper.class),
-            Clock.fixed(NOW, ZoneOffset.UTC)
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            recordScopes()
         );
 
         assertThrows(ResourceNotFoundException.class, () -> service.companyEvidence(WS, 10, 42));
 
         verify(companyMapper, never()).getRelationshipEvidenceTotals(
-            anyInt(), anyInt(), any(), any(), anyInt());
+            anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt(), any(), any(), anyInt());
         verify(companyMapper, never()).getRelationshipEvidenceContributors(
-            anyInt(), anyInt(), any(), any(), anyInt(), anyInt());
+            anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt(), any(), any(), anyInt(), anyInt());
         verify(noteMapper, never()).countOwnPrivateNotesForCompanyEvidence(
-            anyInt(), anyInt(), anyInt(), any(), anyInt());
+            anyInt(), any(), anyInt(), anyInt(), any(), anyInt());
     }
 
     @Test
@@ -751,12 +809,12 @@ class ScoringServiceTest {
         RelationshipScoreAggregateDto company = new RelationshipScoreAggregateDto(
             10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1);
         when(personMapper.getRelationshipScoreAggregates(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(contact));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(contact));
         when(companyMapper.getRelationshipScoreAggregates(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(company));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(company));
         ScoringService service = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper,
-            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         ScoringService.WorkspaceScores scores = service.scoreWorkspace(WS);
 
@@ -765,11 +823,11 @@ class ScoringServiceTest {
         assertEquals(1, scores.contacts().getFirst().getTouchCount());
         assertEquals(1, scores.companies().getFirst().getTouchCount());
         verify(personMapper).getRelationshipScoreAggregates(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters());
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters());
         verify(companyMapper).getRelationshipScoreAggregates(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters());
-        verify(personMapper, never()).getAllPersons(anyInt());
-        verify(companyMapper, never()).getAllCompanies(anyInt());
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters());
+        verify(personMapper, never()).getAllPersons(anyInt(), org.mockito.ArgumentMatchers.anyString());
+        verify(companyMapper, never()).getAllCompanies(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(dealMapper, never()).getAllDeals(anyInt());
         verify(activityMapper, never()).getAllActivities(anyInt());
         verify(noteMapper, never()).getAllNotes(anyInt());
@@ -781,9 +839,9 @@ class ScoringServiceTest {
         CompanyMapper companyMapper = mock(CompanyMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         when(companyMapper.countCompanies(
-            WS, null, null, false, null, MemberScope.allTeam(), false, null)).thenReturn(1L);
+            WS, "[1]", null, null, false, null, MemberScope.allTeam(), false, null)).thenReturn(1L);
         when(companyMapper.getRelationshipScoreAggregates(
-                WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(
+                WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(
             new RelationshipScoreAggregateDto(
                 10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1)));
         PersonMapper personMapper = mock(PersonMapper.class);
@@ -793,15 +851,15 @@ class ScoringServiceTest {
         TaskMapper taskMapper = mock(TaskMapper.class);
         ScoringService service = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper,
-            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
 
         List<RelationshipTemperatureDto> scores = service.scoreCompaniesForMap(WS);
 
         assertEquals(List.of(10), scores.stream().map(RelationshipTemperatureDto::getId).toList());
         verify(companyMapper).getRelationshipScoreAggregates(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters());
-        verify(companyMapper, never()).getAllCompanies(anyInt());
-        verify(personMapper, never()).getAllPersons(anyInt());
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters());
+        verify(companyMapper, never()).getAllCompanies(anyInt(), org.mockito.ArgumentMatchers.anyString());
+        verify(personMapper, never()).getAllPersons(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(dealMapper, never()).getAllDeals(anyInt());
         verify(activityMapper, never()).getAllActivities(anyInt());
         verify(noteMapper, never()).getAllNotes(anyInt());
@@ -829,7 +887,7 @@ class ScoringServiceTest {
             temperature(13, "cold", "steady", null)
         );
         doReturn(contacts).when(service).scoreContacts(WS);
-        doReturn(companies).when(service).scoreCompanies(WS);
+        doReturn(companies).when(service).scoreCompanies(WS, "[1]");
 
         WarmthSummaryDto summary = service.summarize(WS);
 
@@ -838,7 +896,78 @@ class ScoringServiceTest {
         assertEquals(new TrendCounts(3, 4, 2), summary.contactTrends());
         assertEquals(new DecayCounts(2, 2, 2), summary.contactDecay());
         verify(service, times(1)).scoreContacts(WS);
-        verify(service, times(1)).scoreCompanies(WS);
+        verify(service, times(1)).scoreCompanies(WS, "[1]");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void evidenceUsesOneScopeForSubjectAdmissionAndPrivateEvidence(boolean companyEvidence) {
+        PersonMapper people = mock(PersonMapper.class);
+        CompanyMapper companies = mock(CompanyMapper.class);
+        NoteMapper notes = mock(NoteMapper.class);
+        RecordVisibilityScopeControlAccess scopes = recordScopes();
+        ScoringService service = new ScoringService(people, companies, mock(DealMapper.class),
+            mock(ActivityMapper.class), notes, mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC), scopes);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        if (companyEvidence) {
+            Company company = new Company();
+            company.setId(10);
+            when(companies.getByIds(WS, "[1]", List.of(10))).thenReturn(List.of(company));
+            service.companyEvidence(WS, 10, 42);
+            var order = inOrder(companies, scopes, notes);
+            order.verify(scopes).getForWorkspace(WS);
+            order.verify(scopes).withWorkspaceScopeRead(eq(WS), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), any());
+            order.verify(companies).getByIds(WS, "[1]", List.of(10));
+            order.verify(companies).getRelationshipEvidenceTotals(
+                WS, "[1]", 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
+            order.verify(notes).countOwnPrivateNotesForCompanyEvidence(WS, "[1]", 10, 42, reference, 100_001);
+        } else {
+            when(people.getProcessablePersonIds(WS, "[1]", List.of(7))).thenReturn(List.of(7));
+            service.contactEvidence(WS, 7, 42);
+            var order = inOrder(people, scopes, notes);
+            order.verify(scopes).getForWorkspace(WS);
+            order.verify(people).getProcessablePersonIds(WS, "[1]", List.of(7));
+            order.verify(people).getRelationshipEvidenceTotals(
+                WS, "[1]", 7, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
+            order.verify(notes).countOwnPrivateNotesForPersonEvidence(WS, "[1]", 7, 42, reference, 100_001);
+        }
+        verifyNoMoreInteractions(scopes, notes);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void refusedEvidenceSubjectsNeverReadPrivateCounts(boolean companyEvidence) {
+        PersonMapper people = mock(PersonMapper.class);
+        CompanyMapper companies = mock(CompanyMapper.class);
+        NoteMapper notes = mock(NoteMapper.class);
+        RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        ScoringService service = new ScoringService(people, companies, mock(DealMapper.class),
+            mock(ActivityMapper.class), notes, mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC), scopes);
+
+        assertThrows(ResourceNotFoundException.class, () -> {
+            if (companyEvidence) {
+                service.companyEvidence(WS, 10, 42);
+            } else {
+                service.contactEvidence(WS, 7, 42);
+            }
+        });
+
+        if (companyEvidence) {
+            verify(scopes).withWorkspaceScopeRead(eq(WS), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), any());
+            verify(scopes).getForWorkspace(WS);
+            verifyNoMoreInteractions(scopes);
+        } else {
+            verify(scopes).getForWorkspace(WS);
+            verifyNoMoreInteractions(scopes);
+        }
+        verifyNoInteractions(notes);
+    }
+
+    private static RecordVisibilityScopeControlAccess recordScopes() {
+        RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        when(scopes.getForWorkspace(WS)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(WS)));
+        return scopes;
     }
 
     private static RelationshipTemperatureDto scoreFor(List<RelationshipTemperatureDto> scores, int id) {
@@ -855,18 +984,18 @@ class ScoringServiceTest {
         RelationshipScoreAggregateDto company = new RelationshipScoreAggregateDto(
             10, count * 12.0, count * 12.0, 0.0, lastTouch, count);
         when(personMapper.getRelationshipScoreAggregates(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(contact));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(contact));
         when(personMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1)))
             .thenReturn(List.of(contact));
         when(companyMapper.getRelationshipScoreAggregates(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(company));
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(company));
         when(companyMapper.getRelationshipScoreAggregatesByIds(
-            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10)))
+            WS, "[1]", reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10)))
             .thenReturn(List.of(company));
         return new ScoringService(personMapper, companyMapper, mock(DealMapper.class),
             mock(ActivityMapper.class), mock(NoteMapper.class), mock(TaskMapper.class),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
     }
 
     private ScoringService service(Instant now, List<Person> persons, List<Company> companies, List<Deal> deals,
@@ -878,24 +1007,25 @@ class ScoringServiceTest {
         NoteMapper noteMapper = mock(NoteMapper.class);
         TaskMapper taskMapper = mock(TaskMapper.class);
         List<SourceTouch> sources = sourceTouches(activities, notes, tasks);
-        when(personMapper.getRelationshipScoreAggregates(eq(WS), any(), any()))
-            .thenAnswer(invocation -> contactAggregates(persons, sources, invocation.getArgument(1)));
-        when(personMapper.getRelationshipScoreAggregatesByIds(eq(WS), any(), any(), anyList()))
+        when(personMapper.getRelationshipScoreAggregates(eq(WS), org.mockito.ArgumentMatchers.anyString(), any(), any()))
+            .thenAnswer(invocation -> contactAggregates(persons, sources, invocation.getArgument(2)));
+        when(personMapper.getRelationshipScoreAggregatesByIds(eq(WS), org.mockito.ArgumentMatchers.anyString(), any(), any(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> ids = invocation.getArgument(3);
+                List<Integer> ids = invocation.getArgument(4);
                 return contactAggregates(persons.stream().filter(person -> ids.contains(person.getId())).toList(),
-                    sources, invocation.getArgument(1));
+                    sources, invocation.getArgument(2));
             });
-        when(companyMapper.getRelationshipScoreAggregates(eq(WS), any(), any()))
-            .thenAnswer(invocation -> companyAggregates(companies, persons, deals, sources, invocation.getArgument(1)));
-        when(companyMapper.getRelationshipScoreAggregatesByIds(eq(WS), any(), any(), anyList()))
+        when(companyMapper.getRelationshipScoreAggregates(eq(WS), org.mockito.ArgumentMatchers.anyString(), any(), any()))
+            .thenAnswer(invocation -> companyAggregates(companies, persons, deals, sources, invocation.getArgument(2)));
+        when(companyMapper.getRelationshipScoreAggregatesByIds(eq(WS), org.mockito.ArgumentMatchers.anyString(), any(), any(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> ids = invocation.getArgument(3);
+                List<Integer> ids = invocation.getArgument(4);
                 return companyAggregates(companies.stream().filter(company -> ids.contains(company.getId())).toList(),
-                    persons, deals, sources, invocation.getArgument(1));
+                    persons, deals, sources, invocation.getArgument(2));
             });
         Clock clock = Clock.fixed(now, ZoneOffset.UTC);
-        return new ScoringService(personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, clock);
+        return new ScoringService(personMapper, companyMapper, dealMapper, activityMapper,
+            noteMapper, taskMapper, clock, recordScopes());
     }
 
     /** Reference timestamp inputs keep conversion tests independent of SQL execution. */
@@ -906,8 +1036,8 @@ class ScoringServiceTest {
             activity.getTimestamp(), model.activityWeight(activity.getType()))));
         notes.stream().filter(note -> "workspace".equals(note.getVisibility())).forEach(note ->
             sources.add(new SourceTouch(note.getPerson(), note.getDeal(), note.getCreatedAt(), model.noteWeight())));
-        tasks.forEach(task -> sources.add(new SourceTouch(task.getPerson(), task.getDeal(),
-            task.getCreatedAt(), model.taskWeight())));
+        tasks.stream().filter(Task::isCompleted).forEach(task -> sources.add(new SourceTouch(task.getPerson(), task.getDeal(),
+            task.getCompletedAt(), model.taskWeight())));
         return sources;
     }
 
@@ -994,6 +1124,8 @@ class ScoringServiceTest {
         task.setPerson(person);
         task.setDeal(deal);
         task.setCreatedAt(createdAt);
+        task.setCompleted(true);
+        task.setCompletedAt(createdAt);
         return task;
     }
 

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -151,7 +153,7 @@ class ImportDealDependencySideEffectTest extends AbstractServiceTest {
             .findFirst()
             .orElseThrow();
         Company createdCompany = companyMapper.getCompanyById(
-            workspace.getId(), created.getCompanyId());
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getCompanyId());
         CustomFieldDefinition createdField = customFieldDefinitionMapper.getByKey(
             workspace.getId(), "deal", acceptedField);
         assertEquals(acceptedCompany, createdCompany.getName());
@@ -189,6 +191,7 @@ class ImportDealDependencySideEffectTest extends AbstractServiceTest {
 
     private void addLineItem(Deal deal) {
         DealLineItemRequest lineItem = new DealLineItemRequest();
+        lineItem.setConfirmValueReplacement(true);
         lineItem.setName("Import dependency guard " + unique());
         lineItem.setUnitPrice(new BigDecimal("25.00"));
         lineItem.setQuantity(BigDecimal.ONE);

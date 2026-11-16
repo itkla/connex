@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DealValueMapper">
+  <select id="getPriorManualValue" resultType="java.math.BigDecimal">
+    SELECT prior_manual_value FROM deal
+    WHERE workspace_id = #{workspaceId} AND id = #{dealId}
+  </select>
+
+  <select id="getPriorManualValueForUpdate" resultType="java.math.BigDecimal">
+    SELECT prior_manual_value FROM deal
+    WHERE workspace_id = #{workspaceId} AND id = #{dealId}
+    FOR UPDATE
+  </select>
+
+  <update id="setPriorManualValue">
+    UPDATE deal SET prior_manual_value = #{value}
+    WHERE workspace_id = #{workspaceId} AND id = #{dealId}
+  </update>
+</mapper>

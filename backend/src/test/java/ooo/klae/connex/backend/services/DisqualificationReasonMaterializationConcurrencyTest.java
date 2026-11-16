@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -62,6 +63,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /** Real-transaction proofs for vocabulary materialization and lifecycle/configuration serialization. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -121,6 +123,9 @@ class DisqualificationReasonMaterializationConcurrencyTest {
 
         firstMember = newMember("first", unique);
         secondMember = newMember("second", unique);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, owner);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, firstMember);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, secondMember);
         authenticate(owner);
         var firstRole = roleService.createRole(
             workspace.getId(), owner.getId(), "First reason manager " + unique,
@@ -209,7 +214,7 @@ class DisqualificationReasonMaterializationConcurrencyTest {
             releaseAndShutDown(executor, releaseArchive);
         }
 
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getLifecycleStage());
     }
 
@@ -318,9 +323,9 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         }
 
         assertEquals(PersonLifecycleStage.DISQUALIFIED,
-            personMapper.getPersonById(workspace.getId(), person.getId()).getLifecycleStage());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getLifecycleStage());
         assertEquals(PersonDisqualificationReason.NO_FIT,
-            personMapper.getPersonById(workspace.getId(), person.getId()).getDisqualifiedReason());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getDisqualifiedReason());
         assertEquals(9, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM disqualification_reason WHERE workspace_id = ?",
             Integer.class, workspace.getId()));
@@ -478,6 +483,8 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, user.getId());
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, user);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, user, request.getSession(), credential);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         tenantContext.set(
             workspace.getId(), organization.getId(), user.getId(),

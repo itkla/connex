@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.lenient;
 
@@ -71,6 +72,43 @@ class WorkflowDefinitionValidatorTest {
             new WorkflowTriggeredSendGate(true),
             systemActor);
         validator = new WorkflowDefinitionValidator(ruleDefinitionValidator);
+    }
+
+    @Test
+    void followUpValidationAcceptsZeroAndRejectsInvalidOrUnavailableRecipients() {
+        RuleAction task = action("create_task");
+        task.setTitle("Follow up");
+        task.setDueInDays(0);
+        task.setTargetUserId(23);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getRole(7, 23)).thenReturn("member");
+        WorkflowDefinition definition = followUpDefinition(task);
+        validator.validateForMutation("deal", "user", definition);
+        task.setDueInDays(365);
+        validator.validateForMutation("deal", "user", definition);
+        for (int days : List.of(-1, 366)) {
+            task.setDueInDays(days);
+            var failure = assertThrows(WorkflowDefinitionValidationException.class,
+                () -> validator.validateForMutation("deal", "user", definition));
+            assertEquals("config.dueInDays", failure.diagnostic().fieldPath());
+        }
+        task.setDueInDays(0);
+        task.setTargetUserId(-1);
+        var invalid = assertThrows(WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", definition));
+        assertEquals("config.targetUserId", invalid.diagnostic().fieldPath());
+        task.setType("notify");
+        task.setTargetUserId(29);
+        var unavailable = assertThrows(WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", definition));
+        assertEquals(WorkflowDiagnosticCode.ACTION_TARGET_MEMBER_UNAVAILABLE, unavailable.diagnostic().code());
+    }
+
+    private static WorkflowDefinition followUpDefinition(RuleAction action) {
+        return definition(List.of(new WorkflowNode.Trigger("trigger", entityChange()),
+            new WorkflowNode.Action("action", action), new WorkflowNode.End("end")),
+            List.of(edge("next", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                edge("done", "action", "end", WorkflowEdge.Outcome.NEXT)));
     }
 
     @AfterAll

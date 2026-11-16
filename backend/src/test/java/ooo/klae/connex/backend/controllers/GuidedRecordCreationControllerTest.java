@@ -13,6 +13,9 @@ import java.math.BigDecimal;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -80,6 +83,24 @@ class GuidedRecordCreationControllerTest {
         verify(service).createPerson(any(GuidedPersonCreateRequestDto.class));
         verify(service).createCompany(any(GuidedCompanyCreateRequestDto.class));
         verify(service).createDeal(any(GuidedDealCreateRequestDto.class));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" "})
+    void missingDealCurrenciesBindToTheCreateDefault(String currency) throws Exception {
+        when(service.createDeal(any())).thenAnswer(invocation -> {
+            GuidedDealCreateRequestDto request = invocation.getArgument(0);
+            Deal created = request.record().toBean();
+            created.setCurrency("USD");
+            return created;
+        });
+        String replacement = currency == null ? "" : "\"currency\":\"" + currency + "\",";
+        mockMvc.perform(post("/api/deals")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(dealBody().replace("\"currency\":\"USD\",", replacement)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.currency").value("USD"));
     }
 
     @Test

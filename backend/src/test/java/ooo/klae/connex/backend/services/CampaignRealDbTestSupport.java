@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 abstract class CampaignRealDbTestSupport extends AbstractServiceTest {
 
@@ -37,6 +38,7 @@ abstract class CampaignRealDbTestSupport extends AbstractServiceTest {
         workspace = fixture.workspace();
         currentUser = fixture.actor();
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
     }
 
     @AfterEach
@@ -107,6 +109,7 @@ abstract class CampaignRealDbTestSupport extends AbstractServiceTest {
         User actor = user("campaign_admin_" + suffix, "Campaign Admin " + suffix,
                 "admin-" + suffix + "@campaign.test");
         workspaceMapper.addMember(targetWorkspace.getId(), actor.getId(), "admin");
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, actor);
         return actor;
     }
 
@@ -139,6 +142,7 @@ abstract class CampaignRealDbTestSupport extends AbstractServiceTest {
         } finally {
             restoreDirectAuthentication(previous);
         }
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, actor);
         return new CampaignActorRole(actor, role);
     }
 

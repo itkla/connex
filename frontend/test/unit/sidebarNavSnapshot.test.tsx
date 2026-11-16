@@ -198,7 +198,7 @@ function translate(locale: string, key: string): string {
 }
 
 vi.mock("next-intl", () => ({
-    useLocale: () => localeState.locale,
+    useTimeZone: () => "UTC", useLocale: () => localeState.locale,
     useTranslations: (namespace?: string) => (key: string) =>
         translate(localeState.locale, namespace === undefined ? key : `${namespace}.${key}`),
 }));

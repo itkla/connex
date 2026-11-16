@@ -84,9 +84,10 @@ class SegmentMapperTest extends AbstractMapperTest {
             "op", "equals",
             "value", suspended.getName())).contains(suspended.getId()));
         assertTrue(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspace.getId(), actor.getId(), List.of(processable.getId(), suspended.getId()), null)
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), actor.getId(), List.of(processable.getId(), suspended.getId()), null)
             .contains(company.getId()));
-        assertTrue(segmentMapper.companyIdsNoActivitySince(workspace.getId(), 365_000, null)
+        assertTrue(segmentMapper.companyIdsNoActivitySince(
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), 365_000, null)
             .contains(company.getId()));
         assertTrue(segmentMapper.personLabels(
             workspace.getId(), List.of(suspended.getId())).stream()
@@ -130,16 +131,17 @@ class SegmentMapperTest extends AbstractMapperTest {
         activity.setTimestamp("2999-01-01 00:00:00");
         activityMapper.insert(activity);
         assertFalse(segmentMapper.companyIdsNoActivitySince(
-            workspace.getId(), 365_000, null).contains(company.getId()));
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), 365_000, null).contains(company.getId()));
         assertFalse(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspace.getId(), actor.getId(), List.of(target.getId()), null)
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), actor.getId(), List.of(target.getId()), null)
             .contains(company.getId()));
 
         assertTrue(shareMapper.unsharePerson(shared.getId(), sibling.getId(), workspace.getId()) > 0);
-        assertTrue(segmentMapper.companyIdsNoActivitySince(workspace.getId(), 365_000, null)
+        assertTrue(segmentMapper.companyIdsNoActivitySince(
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), 365_000, null)
             .contains(company.getId()));
         assertTrue(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspace.getId(), actor.getId(), List.of(target.getId()), null)
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), actor.getId(), List.of(target.getId()), null)
             .contains(company.getId()));
     }
 
@@ -314,6 +316,7 @@ class SegmentMapperTest extends AbstractMapperTest {
     private Map<String, Object> companyParams(int companyId) {
         return Map.of(
             "workspaceId", workspace.getId(),
+            "orgWorkspaceIdsJson", orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             "field", "company",
             "op", "is",
             "id", companyId);
@@ -322,6 +325,7 @@ class SegmentMapperTest extends AbstractMapperTest {
     private Map<String, Object> companiesParams(List<Integer> companyIds) {
         return Map.of(
             "workspaceId", workspace.getId(),
+            "orgWorkspaceIdsJson", orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             "field", "company",
             "op", "in",
             "ids", companyIds);

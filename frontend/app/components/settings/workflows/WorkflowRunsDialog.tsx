@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { ClockIcon } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import { getWorkflowRun, getWorkflowRuns } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
@@ -14,7 +15,8 @@ import {
     WORKFLOW_RUN_STATUS_CLASS,
     WorkflowRunStatusIcon,
 } from "@/app/components/settings/workflows/workflowRunStatus";
-import { RECORD_TYPES } from "@/app/components/settings/workflows/vocabulary";
+import WorkflowRunFailure from "@/app/components/settings/workflows/WorkflowRunFailure";
+import { runTargetKey, useWorkflowRunTargets } from "@/app/hooks/useWorkflowRunTargets";
 import WorkflowRunReference from "@/app/components/settings/workflows/WorkflowRunReference";
 import { workflowRunReferenceParts } from "@/app/components/settings/workflows/workflowRunKey";
 import { Badge } from "@/components/ui/badge";
@@ -49,8 +51,8 @@ export default function WorkflowRunsDialog({
     workspaceId: number;
     onSelectRun?: (run: WorkflowRunDetail) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkspaceWorkflows");
-    const tr = useTranslations("WorkflowAuthoring");
     const locale = useLocale();
     const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
     const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -62,6 +64,7 @@ export default function WorkflowRunsDialog({
     const detailControllerRef = useRef<AbortController | null>(null);
     const workspaceHeaders = useMemo(() => ({ "X-Workspace-Id": String(workspaceId) }), [workspaceId]);
     const detailLoading = detailLoadState === "loading";
+    const targets = useWorkflowRunTargets(runs, workspaceId);
 
     useEffect(() => {
         if (!open) return;
@@ -123,15 +126,6 @@ export default function WorkflowRunsDialog({
         }
     };
 
-    const targetLabel = (run: WorkflowRunSummary) => {
-        if (!run.trigger || run.trigger.recordId == null) return t("runs.scheduledTarget");
-        const type = run.trigger.recordType;
-        const record = type != null && RECORD_TYPES.includes(type)
-            ? tr(`record.${type}`)
-            : t("runs.recordFallback");
-        return t("runs.target", { record, id: run.trigger.recordId });
-    };
-
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
@@ -163,7 +157,7 @@ export default function WorkflowRunsDialog({
                             title={t("runs.errorTitle")}
                             body={t("runs.errorBody")}
                             action={(
-                                <Button variant="outline" size="sm" onClick={() => setAttempt((current) => current + 1)}>
+                                <Button variant="outline" size="toolbar" onClick={() => setAttempt((current) => current + 1)}>
                                     {t("runs.retry")}
                                 </Button>
                             )}
@@ -172,51 +166,74 @@ export default function WorkflowRunsDialog({
                         <RunMessage title={t("runs.emptyTitle")} body={t("runs.emptyBody")} />
                     ) : (
                         <ol className="divide-y divide-border">
-                            {runs.map((run) => (
-                                <li key={run.runKey} className="space-y-3 px-6 py-4">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <Badge variant="outline" className={WORKFLOW_RUN_STATUS_CLASS[normalizeWorkflowRunStatus(run.status)]}>
-                                            <WorkflowRunStatusIcon status={normalizeWorkflowRunStatus(run.status)} className="size-3" />
-                                            {run.status === "partial"
-                                                ? t("runs.legacyPartial")
-                                                : t(`runs.status.${normalizeWorkflowRunStatus(run.status)}`)}
-                                        </Badge>
-                                        <time
-                                            className="text-xs text-muted-foreground"
-                                            dateTime={normalizeWorkflowRunDateTime(run.startedAt)}
+                            {runs.map((run) => {
+                                const target = targets.values.get(runTargetKey(run));
+                                const targetFallback = run.trigger?.recordId == null
+                                    ? "runs.scheduledTarget"
+                                    : !["person", "company", "deal", "task", "document"].includes(run.trigger?.recordType ?? "")
+                                        ? "runs.targetNameNotRecorded"
+                                        : targets.pending.has(runTargetKey(run)) ? "runs.targetLoading"
+                                            : run.trigger?.recordType === "document" ? "runs.documentTargetUnavailable" : "runs.targetUnavailable";
+                                return (
+                                    <li key={run.runKey} className="space-y-3 px-6 py-4">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <Badge variant="outline" className={WORKFLOW_RUN_STATUS_CLASS[normalizeWorkflowRunStatus(run.status)]}>
+                                                <WorkflowRunStatusIcon status={normalizeWorkflowRunStatus(run.status)} className="size-3" />
+                                                {run.status === "partial"
+                                                    ? t("runs.legacyPartial")
+                                                    : t(`runs.status.${normalizeWorkflowRunStatus(run.status)}`)}
+                                            </Badge>
+                                            <time
+                                                className="text-xs text-muted-foreground"
+                                                dateTime={normalizeWorkflowRunDateTime(run.startedAt)}
+                                            >
+                                                {formatWorkflowRunDateTime(run.startedAt, locale, timeZone)}
+                                            </time>
+                                        </div>
+                                        <dl className="grid gap-2 text-xs sm:grid-cols-3">
+                                            <div className="min-w-0 space-y-1">
+                                                <dt className="text-muted-foreground">{t("runs.targetLabel")}</dt>
+                                                <dd className="font-medium text-foreground">
+                                                    {target ? (
+                                                        <Link className="break-words underline underline-offset-4" href={target.href}>
+                                                            {target.name}
+                                                        </Link>
+                                                    ) : t(targetFallback)}
+                                                </dd>
+                                            </div>
+                                            <div className="min-w-0 space-y-1">
+                                                <dt className="text-muted-foreground">{t("runs.idLabel")}</dt>
+                                                <dd className="-ml-2 text-foreground"><WorkflowRunReference runKey={run.runKey} /></dd>
+                                            </div>
+                                            <div className="min-w-0 space-y-1">
+                                                <dt className="text-muted-foreground">{t("runs.versionLabel")}</dt>
+                                                <dd className="font-medium text-foreground">
+                                                    {run.version ? t("versionShort", { number: run.version.number }) : t("runs.legacyVersion")}
+                                                </dd>
+                                            </div>
+                                        </dl>
+                                        {run.failure ? (
+                                            <div className="space-y-2">
+                                                <WorkflowRunFailure failure={run.failure} />
+                                                <Button variant="outline" size="toolbar" asChild>
+                                                    <Link href={`/workflows/${workflowId}`} onClick={() => onOpenChange(false)}>{t("runs.reviewWorkflow")}</Link>
+                                                </Button>
+                                            </div>
+                                        ) : null}
+                                        <Button
+                                            variant="ghost"
+                                            size="toolbar"
+                                            disabled={!run.stepDetailAvailable || detailLoading}
+                                            onClick={() => void loadDetail(run)}
                                         >
-                                            {formatWorkflowRunDateTime(run.startedAt, locale)}
-                                        </time>
-                                    </div>
-                                    <dl className="grid gap-2 text-xs sm:grid-cols-3">
-                                        <div className="min-w-0 space-y-1">
-                                            <dt className="text-muted-foreground">{t("runs.targetLabel")}</dt>
-                                            <dd className="font-medium text-foreground">{targetLabel(run)}</dd>
-                                        </div>
-                                        <div className="min-w-0 space-y-1">
-                                            <dt className="text-muted-foreground">{t("runs.idLabel")}</dt>
-                                            <dd className="-ml-2 text-foreground"><WorkflowRunReference runKey={run.runKey} /></dd>
-                                        </div>
-                                        <div className="min-w-0 space-y-1">
-                                            <dt className="text-muted-foreground">{t("runs.versionLabel")}</dt>
-                                            <dd className="font-medium text-foreground">
-                                                {run.version ? t("versionShort", { number: run.version.number }) : t("runs.legacyVersion")}
-                                            </dd>
-                                        </div>
-                                    </dl>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={!run.stepDetailAvailable || detailLoading}
-                                        onClick={() => void loadDetail(run)}
-                                    >
-                                        {run.stepDetailAvailable ? t("runs.inspectPath") : t("runs.legacySummaryOnly")}
-                                    </Button>
-                                </li>
-                            ))}
+                                            {run.stepDetailAvailable ? t("runs.inspectPath") : t("runs.legacySummaryOnly")}
+                                        </Button>
+                                    </li>
+                                );
+                            })}
                             {nextCursor ? (
                                 <li className="px-6 py-4">
-                                    <Button variant="outline" size="sm" disabled={moreLoading} onClick={() => void loadMore()}>
+                                    <Button variant="outline" size="toolbar" disabled={moreLoading} onClick={() => void loadMore()}>
                                         {t("runs.loadMore")}
                                     </Button>
                                 </li>
@@ -247,6 +264,7 @@ function RunDetail({
     locale: string;
     onOverlay?: (run: WorkflowRunDetail) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkspaceWorkflows");
     const normalizedStatus = normalizeWorkflowRunStatus(run.status);
     return (
@@ -258,14 +276,15 @@ function RunDetail({
                 </Badge>
                 {run.version ? <Badge variant="outline">{t("versionShort", { number: run.version.number })}</Badge> : null}
                 <time className="text-xs text-muted-foreground" dateTime={normalizeWorkflowRunDateTime(run.startedAt)}>
-                    {formatWorkflowRunDateTime(run.startedAt, locale)}
+                    {formatWorkflowRunDateTime(run.startedAt, locale, timeZone)}
                 </time>
                 {onOverlay && run.version ? (
-                    <Button className="ml-auto" variant="outline" size="sm" onClick={() => onOverlay(run)}>
+                    <Button className="ml-auto" variant="outline" size="toolbar" onClick={() => onOverlay(run)}>
                         {t("runs.showOverlay")}
                     </Button>
                 ) : null}
             </div>
+            {run.failure ? <WorkflowRunFailure failure={run.failure} /> : null}
             <ol className="space-y-2" aria-label={t("runs.pathLabel")}>
                 {run.path.map((step) => (
                     <li key={`${step.sequence}-${step.nodeId}`} className="rounded-xl border border-border bg-muted/25 p-3">
@@ -286,7 +305,7 @@ function RunDetail({
                             </span>
                         </div>
                         {step.failure ? (
-                            <p className="mt-2 text-xs text-destructive">{t("runs.failureAtNode")}</p>
+                            <WorkflowRunFailure failure={step.failure} />
                         ) : null}
                     </li>
                 ))}

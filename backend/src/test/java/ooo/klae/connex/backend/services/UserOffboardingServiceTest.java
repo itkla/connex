@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +67,8 @@ import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TeamMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Proves the service-layer offboarding fan-out does what the dropped
@@ -118,6 +122,35 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void accountErasureClearsProposalRequestersAcrossWorkspacesWithoutTransferringOwnership() {
+        User target = newUser();
+        User retainedOwner = newUser();
+        AiChatSession erasedSession = chatSession(target);
+        AiChatMessage erasedMessage = chatMessage(erasedSession, target, "Erased proposal requester");
+        chatTurn(erasedSession, target, "Resolved erased proposal");
+        String erasedKey = chatProposalSet(erasedMessage, target);
+        AiChatSession retainedSession = chatSession(retainedOwner);
+        AiChatMessage retainedMessage = chatMessage(retainedSession, retainedOwner, "Retained proposal requester");
+        chatTurn(retainedSession, retainedOwner, "Resolved retained proposal");
+        String retainedKey = chatProposalSet(retainedMessage, retainedOwner);
+        Workspace otherWorkspace = newOtherWorkspace();
+        AiChatSession otherSession = chatSession(otherWorkspace, target);
+        AiChatMessage otherMessage = chatMessage(otherSession, target, "Other workspace proposal requester");
+        chatTurn(otherSession, target, "Resolved other workspace proposal");
+        String otherKey = chatProposalSet(otherMessage, target);
+
+        offboardingService.eraseOrgDataReferences(target.getId());
+
+        assertNull(proposalRequester(workspace.getId(), erasedKey));
+        assertNull(proposalRequester(otherWorkspace.getId(), otherKey));
+        assertEquals(Integer.valueOf(retainedOwner.getId()), proposalRequester(workspace.getId(), retainedKey));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id = ? AND proposal_key = ?",
+            Integer.class, workspace.getId(), erasedKey));
+        assertNotNull(userMapper.getUserById(target.getId()));
+    }
+
+    @Test
     void teamReferencesDoNotBlockDeletionAndAreClearedAcrossWorkspaces() {
         User target = newUser();
         Team localTeam = teamInWorkspace(workspace, target);
@@ -134,6 +167,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(teamMapper.getById(otherWorkspace.getId(), otherTeam.getId()).getManagerUserId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberDetachmentClearsTeamSeatAndManagerReference() {
         User departing = newUser();
@@ -203,6 +237,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             retainedChatSession, retainedChatOwner, "Retained account transcript");
         chatToolCall(retainedChatMessage, retainedChatOwner, "retained_account_tool");
         chatTurn(retainedChatSession, retainedChatOwner, "Retained account turn");
+        AiChatSession sharedChatSession = chatSession(retainedChatOwner);
+        AiChatMessage sharedChatMessage = chatMessage(sharedChatSession, target, "Shared contribution");
+        chatToolCall(sharedChatMessage, target, "shared_account_tool");
+        chatTurn(sharedChatSession, target, "Shared account turn");
         aiChatMapper.insertParticipant(
             workspace.getId(), erasedChatSession.getId(), retainedChatOwner.getId());
         aiChatMapper.insertParticipant(
@@ -242,12 +280,12 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
 
         offboardingService.eraseOrgDataReferences(target.getId());
 
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
         assertNull(companyMapper.getCompanyById(
-            otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
+            otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherCompany.getId()).getOwnerId());
         assertNull(personMapper.getPersonById(
-            otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
+            otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherPerson.getId()).getOwnerId());
         assertTemplateActorsCleared(workspace.getId(), templateRoot);
         assertTemplateActorsCleared(otherWorkspace.getId(), otherTemplateRoot);
         assertSequenceActorsCleared(sequence.getId());
@@ -283,14 +321,14 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             Integer.class, consentEvent.getId()));
         assertNull(suppressionMapper.getById(workspace.getId(), suppression.getId()).getCreatedById());
         AiChatSession erasedChatAfter = aiChatMapper.getAccessibleSessionById(
-            workspace.getId(), retainedChatOwner.getId(), erasedChatSession.getId());
+            workspace.getId(), retainedChatOwner.getId(), erasedChatSession.getId(), 1L);
         AiChatMessage erasedMessageAfter = aiChatMapper.getMessageById(
-            workspace.getId(), erasedChatSession.getId(), erasedChatMessage.getId());
+            workspace.getId(), erasedChatSession.getId(), erasedChatMessage.getId(), 1L);
         assertNotNull(erasedChatAfter);
         assertNull(erasedChatAfter.getCreatedByUserId());
         assertFalse(erasedChatAfter.isOwnedByCurrentUser());
         assertNull(aiChatMapper.getAccessibleSessionById(
-            workspace.getId(), target.getId(), erasedChatSession.getId()));
+            workspace.getId(), target.getId(), erasedChatSession.getId(), 1L));
         assertNotNull(erasedMessageAfter);
         assertNull(erasedMessageAfter.getAuthorUserId());
         assertEquals("Erased account transcript", erasedMessageAfter.getContent());
@@ -306,6 +344,18 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(jdbcTemplate.queryForObject(
             "SELECT requested_by_user_id FROM ai_chat_turn WHERE workspace_id = ? AND session_id = ?",
             Integer.class, workspace.getId(), erasedChatSession.getId()));
+        assertEquals(retainedChatOwner.getId(), aiChatMapper.getSessionById(
+            workspace.getId(), retainedChatOwner.getId(), sharedChatSession.getId(), 1L).getCreatedByUserId());
+        AiChatMessage sharedMessageAfter = aiChatMapper.getMessageById(
+            workspace.getId(), sharedChatSession.getId(), sharedChatMessage.getId(), 1L);
+        assertNull(sharedMessageAfter.getAuthorUserId());
+        assertEquals("Shared contribution", sharedMessageAfter.getContent());
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT executed_by_user_id FROM ai_chat_tool_call WHERE workspace_id = ? AND message_id = ?",
+            Integer.class, workspace.getId(), sharedChatMessage.getId()));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT requested_by_user_id FROM ai_chat_turn WHERE workspace_id = ? AND session_id = ?",
+            Integer.class, workspace.getId(), sharedChatSession.getId()));
         RecordCommentThread retainedThread = recordCommentService.getThread(commentThread.getId());
         assertNull(retainedThread.getCreatedByUserId());
         assertNull(retainedThread.getResolvedByUserId());
@@ -345,6 +395,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             workspace.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberDetachmentCleansContentWhileTheMembershipStillExists() {
         User member = newUser();
@@ -376,13 +427,13 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
 
         offboardingService.detachMemberContent(workspace.getId(), member.getId());
 
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
         assertEquals(member.getId(),
-            companyMapper.getCompanyById(otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
+            companyMapper.getCompanyById(otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherCompany.getId()).getOwnerId());
         assertEquals(member.getId(),
-            personMapper.getPersonById(otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
+            personMapper.getPersonById(otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherPerson.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()).isEmpty());
         assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
@@ -406,6 +457,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberRemovalRetainsOwnedChatTranscriptAndRemovesOnlyParticipantGrant() {
         User departing = newUser();
@@ -413,6 +465,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         AiChatSession departingSession = chatSession(departing);
         AiChatMessage departingMessage = chatMessage(
             departingSession, departing, "Departing member transcript");
+        chatTurn(departingSession, departing, "Resolved departing proposal");
+        String departingKey = chatProposalSet(departingMessage, departing);
         AiChatSession retainedSession = chatSession(retainedOwner);
         AiChatMessage retainedMessage = chatMessage(
             retainedSession, retainedOwner, "Retained member transcript");
@@ -425,10 +479,12 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertFalse(aiChatMapper.isParticipant(
             workspace.getId(), retainedSession.getId(), departing.getId()));
         assertFalse(workspaceMapper.isMember(workspace.getId(), departing.getId()));
+        assertEquals(Integer.valueOf(departing.getId()), proposalRequester(workspace.getId(), departingKey));
         assertChatTranscriptOwnedBy(departingSession, departingMessage, departing);
         assertChatTranscriptOwnedBy(retainedSession, retainedMessage, retainedOwner);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void freshMembershipPurgesResidualSavedViewDataOnlyInTheRejoinedWorkspace() {
         User returning = newUser();
@@ -454,6 +510,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             otherWorkspace.getId(), returning.getId(), retainedView.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void freshMembershipPurgesResidualTeamSeatsAndManagerReferences() {
         User returning = newUser();
@@ -466,6 +523,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(teamMapper.getById(workspace.getId(), team.getId()).getManagerUserId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void freshMembershipRetainsOwnedTranscriptAndRejoiningOwnerCanReadAndAppend() {
         User returning = newUser();
@@ -501,7 +559,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertEquals(Integer.valueOf(returning.getId()), detail.session().getCreatedByUserId());
         assertEquals("Returning member transcript", detail.messages().items().getFirst().getContent());
         assertEquals("Message after rejoining", appended.getContent());
-        assertEquals(2, aiChatMapper.countMessages(workspace.getId(), returningSession.getId()));
+        assertEquals(2, aiChatMapper.countMessages(workspace.getId(), returningSession.getId(), 1L));
     }
 
     private Workspace newOtherWorkspace() {
@@ -571,8 +629,13 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     private AiChatSession chatSession(User owner) {
+        return chatSession(workspace, owner);
+    }
+
+    private AiChatSession chatSession(Workspace targetWorkspace, User owner) {
         AiChatSession session = new AiChatSession();
-        session.setWorkspaceId(workspace.getId());
+        session.setWorkspaceId(targetWorkspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(owner.getId());
         session.setTitle("Offboarding session " + unique());
         session.setVisibility("shared");
@@ -584,8 +647,9 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     private AiChatMessage chatMessage(AiChatSession session, User author, String content) {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(session.getWorkspaceId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(session.getId());
-        message.setSeq(1);
+        message.setSeq(aiChatMapper.nextMessageSequence(session.getWorkspaceId(), session.getId()));
         message.setAuthorKind("user");
         message.setAuthorUserId(author.getId());
         message.setContent(content);
@@ -609,18 +673,47 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             session.getWorkspaceId(), session.getId(), requester.getId(), terminalReason);
     }
 
+    private String chatProposalSet(AiChatMessage message, User requester) {
+        String proposalKey = UUID.randomUUID().toString();
+        assertEquals(1, jdbcTemplate.update(
+            "INSERT INTO ai_assistant_proposal_set "
+                + "(workspace_id, proposal_key, session_id, origin_turn_id, message_id, requested_by_user_id, "
+                + "step_number, call_ordinal, tool_name, invocation_mode, row_count, intent_fingerprint, "
+                + "scope_revision, privacy_generation) "
+                + "SELECT t.workspace_id, ?, t.session_id, t.id, ?, ?, 1, 0, 'assign_owner', 'scalar', "
+                + "1, ?, '1', 0 FROM ai_chat_turn t WHERE t.workspace_id = ? AND t.session_id = ?",
+            proposalKey, message.getId(), requester.getId(), "a".repeat(64),
+            message.getWorkspaceId(), message.getSessionId()));
+        assertEquals(1, jdbcTemplate.update(
+            "INSERT INTO ai_chat_tool_call "
+                + "(workspace_id, message_id, tool_name, status, arguments_json, idempotency_key, "
+                + "server_proposal, proposal_key, proposal_ordinal, proposal_prepared_at, created_at, updated_at) "
+                + "SELECT workspace_id, message_id, tool_name, 'proposed', '{}', ?, TRUE, proposal_key, "
+                + "1, created_at, created_at, created_at FROM ai_assistant_proposal_set "
+                + "WHERE workspace_id = ? AND proposal_key = ?",
+            UUID.randomUUID().toString(), message.getWorkspaceId(), proposalKey));
+        return proposalKey;
+    }
+
+    private Integer proposalRequester(int workspaceId, String proposalKey) {
+        return jdbcTemplate.queryForObject(
+            "SELECT requested_by_user_id FROM ai_assistant_proposal_set "
+                + "WHERE workspace_id = ? AND proposal_key = ?",
+            Integer.class, workspaceId, proposalKey);
+    }
+
     private void assertChatTranscriptOwnedBy(
             AiChatSession session, AiChatMessage message, User owner) {
         AiChatSession storedSession = aiChatMapper.getSessionById(
-            session.getWorkspaceId(), owner.getId(), session.getId());
+            session.getWorkspaceId(), owner.getId(), session.getId(), 1L);
         AiChatMessage storedMessage = aiChatMapper.getMessageById(
-            session.getWorkspaceId(), session.getId(), message.getId());
+            session.getWorkspaceId(), session.getId(), message.getId(), 1L);
         assertNotNull(storedSession);
         assertEquals(Integer.valueOf(owner.getId()), storedSession.getCreatedByUserId());
         assertNotNull(storedMessage);
         assertEquals(Integer.valueOf(owner.getId()), storedMessage.getAuthorUserId());
         assertEquals(message.getContent(), storedMessage.getContent());
-        assertEquals(1, aiChatMapper.countMessages(session.getWorkspaceId(), session.getId()));
+        assertEquals(1, aiChatMapper.countMessages(session.getWorkspaceId(), session.getId(), 1L));
     }
 
     private SavedView savedViewInWorkspace(Workspace targetWorkspace, User owner) {

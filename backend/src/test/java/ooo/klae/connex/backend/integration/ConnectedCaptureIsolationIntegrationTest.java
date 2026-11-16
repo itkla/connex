@@ -66,6 +66,8 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ConnectedCaptureIsolationIntegrationTest {
+    private static final int SIMULATED_STEP_UP_PASSKEY_ROW_ID = 0;
+
     private static final String PASSWORD = "Capture-Isolation-Pw1!";
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -165,7 +167,7 @@ class ConnectedCaptureIsolationIntegrationTest {
         MockHttpServletRequest stepUpRequest =
             new MockHttpServletRequest(context.getServletContext());
         stepUpRequest.setSession(ownerSession);
-        sessionSecurityService.markStepUp(stepUpRequest, owner.getId());
+        sessionSecurityService.markStepUp(stepUpRequest, owner.getId(), SIMULATED_STEP_UP_PASSKEY_ROW_ID);
         mockMvc.perform(delete(
                 "/api/account/connections/google/captured-data")
                 .header("X-Workspace-Id", ownerWorkspace.getId())
@@ -210,7 +212,7 @@ class ConnectedCaptureIsolationIntegrationTest {
         MockHttpServletRequest stepUpRequest =
             new MockHttpServletRequest(context.getServletContext());
         stepUpRequest.setSession(session);
-        sessionSecurityService.markStepUp(stepUpRequest, owner.getId());
+        sessionSecurityService.markStepUp(stepUpRequest, owner.getId(), SIMULATED_STEP_UP_PASSKEY_ROW_ID);
 
         mockMvc.perform(delete("/api/account/connections/google")
                 .header("X-Workspace-Id", workspace.getId())
@@ -285,7 +287,7 @@ class ConnectedCaptureIsolationIntegrationTest {
         MockHttpServletRequest stepUpRequest =
             new MockHttpServletRequest(context.getServletContext());
         stepUpRequest.setSession(session);
-        sessionSecurityService.markStepUp(stepUpRequest, owner.getId());
+        sessionSecurityService.markStepUp(stepUpRequest, owner.getId(), SIMULATED_STEP_UP_PASSKEY_ROW_ID);
 
         mockMvc.perform(delete(
                 "/api/account/connections/google/retained-data")

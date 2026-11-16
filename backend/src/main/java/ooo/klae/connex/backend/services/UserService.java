@@ -91,10 +91,17 @@ public class UserService implements UserDetailsService {
         return workspaceService.getMembers(workspaceService.getCurrentWorkspaceId());
     }
 
+    /** Reads at most fifty active members without materializing the workspace directory. */
+    public List<User> getUserOptions(String query) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String pattern = ooo.klae.connex.backend.util.LikePattern.containing(query.trim());
+        return tenantWorkScope.unroutedRead(() -> userMapper.getUserOptions(workspaceId, pattern));
+    }
+
     /** Returns requested active-member references without loading the whole workspace directory. */
     public List<UserReferenceDto> getActiveWorkspaceMemberReferences(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<UserReferenceDto> references = tenantWorkScope.unrouted(() ->
+        List<UserReferenceDto> references = tenantWorkScope.unroutedRead(() ->
             userMapper.getActiveWorkspaceMemberReferencesByIds(workspaceId, ids));
         Map<Integer, UserReferenceDto> referencesById = references.stream().collect(
             Collectors.toMap(UserReferenceDto::id, Function.identity()));
@@ -215,6 +222,7 @@ public class UserService implements UserDetailsService {
             revokeSessionsIfAccountIsGone(id);
             throw exception;
         }
+        sweepAssignmentsAfterDeletion(id);
         revokeSessionsAfterDeletion(id);
     }
 
@@ -228,13 +236,24 @@ public class UserService implements UserDetailsService {
      */
     private void revokeSessionsIfAccountIsGone(int id) {
         try {
-            boolean deleted = Boolean.TRUE.equals(tenantWorkScope.unrouted(
+            boolean deleted = Boolean.TRUE.equals(tenantWorkScope.unroutedRead(
                 () -> userMapper.getUserById(id) == null));
             if (deleted) {
+                sweepAssignmentsAfterDeletion(id);
                 revokeSessionsAfterDeletion(id);
             }
         } catch (RuntimeException exception) {
             log.warn("Could not determine whether account {} survived a failed deletion: {}",
+                id, exception.getClass().getSimpleName());
+        }
+    }
+
+    /** Keeps cleanup failure from preventing revocation or replacing an ambiguous-commit failure. */
+    private void sweepAssignmentsAfterDeletion(int id) {
+        try {
+            catalogOffboardingService.sweepAssignmentsAfterDeletion(id);
+        } catch (RuntimeException exception) {
+            log.error("Could not sweep assignments for deleted account {}: {}",
                 id, exception.getClass().getSimpleName());
         }
     }

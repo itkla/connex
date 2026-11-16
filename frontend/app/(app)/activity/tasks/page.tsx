@@ -3,13 +3,9 @@ import { redirect } from "next/navigation";
 import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailablePage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import {
-    getContacts,
     getCurrentUserResultFromCookie,
-    getDeals,
     getEffectivePermissionsResultFromCookie,
     getMyWorkspacesFromCookie,
-    getTasks,
-    getUsers,
 } from "@/app/lib/api";
 import TasksBrowser from "@/app/components/activity/tasks/TasksBrowser";
 
@@ -24,13 +20,7 @@ export default async function TasksPage() {
         redirect('/auth/login');
     }
 
-    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
-
-    const [tasks, persons, deals, users, permissionsResult, workspaceState] = await Promise.all([
-        getTasks(init),
-        getContacts({}, init),
-        getDeals(init),
-        getUsers(init),
+    const [permissionsResult, workspaceState] = await Promise.all([
         getEffectivePermissionsResultFromCookie(cookie),
         getMyWorkspacesFromCookie(cookie),
     ]);
@@ -38,10 +28,7 @@ export default async function TasksPage() {
 
     return (
         <TasksBrowser
-            tasks={tasks}
-            persons={persons}
-            deals={deals}
-            users={users}
+            key={workspaceState.activeWorkspaceId}
             currentUserId={user.id}
             canDeleteTasks={permissionsResult.data.includes('TASK_DELETE')}
             originWorkspaceId={workspaceState.activeWorkspaceId}

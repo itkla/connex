@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     defaultLocale,
+    localeFromAcceptLanguage,
     localeFromCookieHeader,
     localePreferenceFromCookieHeader,
     resolveLocale,
@@ -13,6 +14,41 @@ describe("resolveLocale", () => {
         expect(resolveLocale("fr")).toBe(defaultLocale);
         expect(resolveLocale(null)).toBe(defaultLocale);
         expect(resolveLocale(undefined)).toBe(defaultLocale);
+    });
+});
+
+describe("localeFromAcceptLanguage", () => {
+    it.each([
+        ["ja", "ja"],
+        ["ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7", "ja"],
+        ["en-GB,en;q=0.9,ja;q=0.8", "en"],
+        ["JA-jp", "ja"],
+        ["fr-FR,de;q=0.9,ja-JP;q=0.7,en;q=0.5", "ja"],
+        ["ja;q=0.4,en;q=0.9", "en"],
+        ["en;q=0.5,ja;q=0.9", "ja"],
+        ["ja;q=0.8,en;q=0.8", "ja"],
+        ["en;q=0.8,ja;q=0.8", "en"],
+        ["en;q=0,ja;q=0.1", "ja"],
+        ["ja;q=0,en;q=0.5", "en"],
+        ["*;q=1,ja;q=0.5", "ja"],
+        ["fr-FR,de;q=0.9", "en"],
+        ["*", "en"],
+        ["ja;q=0", "en"],
+        ["ja;q=oops,en", "en"],
+        ["ja;q=1.1,en", "en"],
+        ["ja;q=-1,en", "en"],
+        ["ja;q=0.1234,en", "en"],
+        ["ja;q=,en", "en"],
+        ["ja;q=0.9;q=0.8,en", "en"],
+        ["ja_JP,en", "en"],
+        ["japanese,en", "en"],
+        ["garbage!,ja", "ja"],
+        [" , ja-JP ; q=0.9 , en ; q=0.5 ", "ja"],
+        ["", "en"],
+        [null, "en"],
+        [undefined, "en"],
+    ])("resolves %j to %s", (header, locale) => {
+        expect(localeFromAcceptLanguage(header)).toBe(locale);
     });
 });
 

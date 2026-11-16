@@ -7,6 +7,14 @@
 # is stopped before backend activation, so incompatible component versions are never
 # served together. An atomic transaction record plus the EXIT/signal handler covers
 # ordinary failures; the next timer run recovers SIGKILL, reboot, and power-loss windows.
+# The target commit's deploy/staging/rollback-floor declares a migration required in
+# both JARs before rollback once the target backend may have run. A pre-backend
+# phase plus prior identities in the live JAR and serving backend proves the safe
+# exception. Otherwise a floor refusal persists forward_only and retries target
+# backend/frontend activation, smoke, and commit now and on subsequent timer runs.
+# The frontend launcher gates reboot startup on this transaction; recovery stops
+# the frontend before credential checks, and rollback retains its authorization
+# until the previous backend and frontend are restored as one pair.
 
 set -euo pipefail
 
@@ -28,6 +36,17 @@ FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
 TRANSACTION_FILE="$STATE_DIR/deploy-transaction"
 PRUNE_NEEDED_MARKER="$STATE_DIR/prune-needed"
 LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
+# Next.js writes these beneath its dist directory while it serves: 16.3 promotes build seeds into
+# server/route-cache on first request, and the fetch and image caches live under cache/. The
+# launcher keeps the sealed runtime as the server's working directory, so they appear inside the
+# bundle. They are runtime state, not build output: the frontend digest skips them, and sealing
+# refuses a runtime that already contains one, so no build output is ever left unhashed.
+FRONTEND_RUNTIME_CACHE_PATHS=(
+    .next/server/route-cache
+    .next/cache
+    .next-new/server/route-cache
+    .next-new/cache
+)
 FRONTEND_ENV=/etc/connex-staging/frontend.env
 SMOKE_LOGIN_FILE=/etc/connex-staging/smoke-login.json
 SMOKE_LOGIN_REQUIRED_UID=0
@@ -43,7 +62,11 @@ STABILITY_INTERVAL=15
 POLL_INTERVAL=5
 QUARANTINE_ALERT_THRESHOLD=4
 QUARANTINE_BYTES_ALERT_THRESHOLD=1073741824
-STAGING_MIN_FREE_BYTES=5368709120
+STAGING_MIN_FREE_BYTES=4294967296
+# Reserve cache growth separately from the sealed pair; 512 MiB covers more than
+# twice the observed 200–220 MB pair when no deployed tree can be measured.
+STAGING_BUILD_CACHE_MARGIN_BYTES=268435456
+STAGING_RELEASE_FALLBACK_BYTES=536870912
 
 SMOKE_COOKIE_JAR=
 SMOKE_SESSION_ACTIVE=0
@@ -51,6 +74,7 @@ ROLLBACK_ARMED=0
 ROLLBACK_IN_PROGRESS=0
 ROLLBACK_STATE=not_attempted
 RELEASE_COMMITTED=0
+PRE_TRANSACTION_TARGET_BUILT=0
 FAILURE_ACTIVE=0
 FAILURE_GATE=none
 FAILURE_COMPONENT=release
@@ -85,7 +109,7 @@ safe_sha_state() {
 
 safe_alert_label() {
     case "$1" in
-        bootstrap|preflight|build|bundle|frontend_quiesce|backend_restart|backend_health|frontend_restart|frontend_health|smoke_frontend|smoke_readiness|smoke_version|smoke_capabilities|smoke_auth_entry|smoke_login|smoke_authenticated_route|smoke_logout|smoke_cleanup|marker|recovery)
+        bootstrap|preflight|build|bundle|frontend_quiesce|backend_restart|backend_health|frontend_restart|frontend_health|smoke_frontend|smoke_readiness|smoke_version|smoke_capabilities|smoke_auth_entry|smoke_login|smoke_authenticated_route|smoke_logout|smoke_cleanup|marker|recovery|rollback_floor)
             printf '%s\n' "$1"
             ;;
         backend|frontend|release|authentication)
@@ -99,7 +123,7 @@ safe_alert_label() {
 
 safe_rollback_state() {
     case "$ROLLBACK_STATE" in
-        not_attempted|in_progress|complete|failed) printf '%s\n' "$ROLLBACK_STATE" ;;
+        not_attempted|in_progress|complete|failed|refused_floor) printf '%s\n' "$ROLLBACK_STATE" ;;
         *) printf 'invalid\n' ;;
     esac
 }
@@ -207,6 +231,33 @@ jar_git_sha() {
         fi
     done
     return 1
+}
+
+jar_contains_migration() {
+    local jar="$1" migration="$2" prefix content
+    for prefix in '' BOOT-INF/classes/; do
+        content="$(read_archive_entry "$jar" "${prefix}db/migration/$migration")" || return 1
+        [ -z "$content" ] || return 0
+    done
+    return 1
+}
+
+rollback_floor_allows_release() {
+    local previous="$1" path=deploy/staging/rollback-floor entry declaration floor
+    # Read the pinned commit, not the checkout: interrupted activation can leave
+    # the checkout at another release. Only a proven absence opts into legacy rollback.
+    entry="$(git -C "$STAGING_DIR" ls-tree "$DEPLOY_TARGET" -- "$path" 2>/dev/null)" || return 1
+    [ -n "$entry" ] || return 0
+    [[ "$entry" = "100644 blob "* || "$entry" = "100755 blob "* ]] || return 1
+    declaration="$(git -C "$STAGING_DIR" show "$DEPLOY_TARGET:$path" 2>/dev/null)" || return 1
+    floor="$(printf '%s\n' "$declaration" | sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d')" || return 1
+    [[ "$floor" =~ ^([a-zA-Z0-9_.-]+/)*V[0-9]+__[a-zA-Z0-9_.-]+\.sql$ ]] || return 1
+    case "/$floor/" in
+        */../*|*/./*) return 1 ;;
+    esac
+    archive_reader_available || return 1
+    jar_contains_migration "$RELEASES_DIR/$DEPLOY_TARGET/backend.jar" "$floor" \
+        && jar_contains_migration "$RELEASES_DIR/$previous/backend.jar" "$floor"
 }
 
 set_failure_context() {
@@ -333,11 +384,16 @@ release_manifest_value() {
 }
 
 frontend_tree_sha256() {
-    local runtime="$1"
+    local runtime="$1" cache_path
+    local -a runtime_cache=()
+    for cache_path in "${FRONTEND_RUNTIME_CACHE_PATHS[@]}"; do
+        [ "${#runtime_cache[@]}" -eq 0 ] || runtime_cache+=(-o)
+        runtime_cache+=(-path "./$cache_path")
+    done
     (
         local path value digest_line digest
         cd "$runtime" || exit 1
-        find . \( -type f -o -type l \) -print0 \
+        find . \( "${runtime_cache[@]}" \) -prune -o \( -type f -o -type l \) -print0 \
             | LC_ALL=C sort -z \
             | while IFS= read -r -d '' path; do
                 if [ -L "$path" ]; then
@@ -399,6 +455,16 @@ verify_release_bundle() {
     verify_release_directory "$sha" "$RELEASES_DIR/$sha"
 }
 
+frontend_runtime_has_cache() {
+    local runtime="$1" cache_path
+    for cache_path in "${FRONTEND_RUNTIME_CACHE_PATHS[@]}"; do
+        if [ -e "$runtime/$cache_path" ] || [ -L "$runtime/$cache_path" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 assemble_frontend_runtime() {
     local source_root="$1" dist_name="$2" runtime="$3" sha="$4"
     local dist_dir="$source_root/$dist_name"
@@ -431,6 +497,11 @@ seal_release_bundle() {
     pending="$(mktemp -d "$RELEASES_DIR/.release-${sha}.XXXXXX")" || return 1
     if ! cp -f "$backend_jar" "$pending/backend.jar" \
         || ! cp -a "$runtime" "$pending/frontend"; then
+        rm -rf "$pending" || true
+        return 1
+    fi
+    if frontend_runtime_has_cache "$pending/frontend"; then
+        log "Refusing to seal ${sha:0:8}: its frontend runtime already contains a Next.js runtime cache path"
         rm -rf "$pending" || true
         return 1
     fi
@@ -504,7 +575,9 @@ build_frontend_runtime_from_source() (
         || ! "$PNPM" install --frozen-lockfile --silent; then
         return 1
     fi
-    NEXT_DIST_DIR="$dist_name" "$PNPM" build || build_status=$?
+    # Fresh scratch builds never read the cache; required CI on main owns type checking.
+    NEXT_DIST_DIR="$dist_name" CONNEX_DISABLE_TURBOPACK_BUILD_CACHE=1 CONNEX_SKIP_BUILD_TYPECHECK=1 \
+        "$PNPM" build || build_status=$?
     if ! cp -f "$original_tsconfig" "$frontend_root/tsconfig.json" \
         || ! cmp -s "$original_tsconfig" "$frontend_root/tsconfig.json"; then
         restore_status=1
@@ -589,7 +662,7 @@ build_target_release() {
 write_transaction() {
     local phase="$1" temporary
     case "$phase" in
-        prepared|frontend_stopped|backend_live|frontend_live|committed) ;;
+        prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|rollback_starting|rollback_live|committed) ;;
         *) return 1 ;;
     esac
     is_git_sha "$DEPLOY_PREVIOUS" && is_git_sha "$DEPLOY_TARGET" \
@@ -623,25 +696,35 @@ commit_release_markers() {
 }
 
 read_transaction() {
-    local manifest="$TRANSACTION_FILE" schema prior target retained phase
-    [ -f "$manifest" ] && [ ! -L "$manifest" ] || return 1
-    schema="$(release_manifest_value "$manifest" schema_version)" || return 1
-    prior="$(release_manifest_value "$manifest" prior_sha)" || return 1
-    target="$(release_manifest_value "$manifest" target_sha)" || return 1
-    retained="$(release_manifest_value "$manifest" retained_sha)" || return 1
-    phase="$(release_manifest_value "$manifest" phase)" || return 1
-    [ "$schema" = "2" ] && is_git_sha "$prior" && is_git_sha "$target" \
-        && is_git_sha "$retained" || return 1
-    case "$phase" in
-        prepared|frontend_stopped|backend_live|frontend_live|committed) ;;
-        *) return 1 ;;
-    esac
-    printf '%s\t%s\t%s\t%s\n' "$prior" "$target" "$retained" "$phase"
+    local manifest="$TRANSACTION_FILE"
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] && [ -r "$manifest" ] || return 1
+    awk -F '\t' '
+        function sha(value) { return length(value) == 40 && value ~ /^[0-9a-f]+$/ }
+        NF != 2 || $1 !~ /^(schema_version|prior_sha|target_sha|retained_sha|phase)$/ || seen[$1]++ {
+            invalid = 1; next
+        }
+        { value[$1] = $2 }
+        END {
+            if (invalid || NR != 5 || value["schema_version"] != "2" ||
+                !sha(value["prior_sha"]) || !sha(value["target_sha"]) || !sha(value["retained_sha"]) ||
+                value["phase"] !~ /^(prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|rollback_starting|rollback_live|committed)$/) exit 1
+            printf "%s\t%s\t%s\t%s\n", value["prior_sha"], value["target_sha"], value["retained_sha"], value["phase"]
+        }
+    ' "$manifest"
 }
 
 activate_backend() {
-    local sha="$1"
+    local sha="$1" record prior target retained phase
     verify_release_bundle "$sha" || return 1
+    record="$(read_transaction)" || return 1
+    IFS=$'\t' read -r prior target retained phase <<< "$record"
+    [ "$prior" = "$DEPLOY_PREVIOUS" ] && [ "$target" = "$DEPLOY_TARGET" ] \
+        && [ "$retained" = "$DEPLOY_RETAINED" ] && [ "$target" = "$sha" ] || return 1
+    # Persist before touching the live JAR, not after health passes. An interrupted
+    # copy or restart must never be mistaken for a backend that could not have run.
+    if [ "$phase" != forward_only ]; then
+        write_transaction backend_starting || return 1
+    fi
     if ! cp -f "$RELEASES_DIR/$sha/backend.jar" "$LIVE_JAR" \
         || ! sudo systemctl restart connex-staging-backend \
         || ! wait_for_backend_sha "$sha" "$BACKEND_HEALTH_TIMEOUT" \
@@ -744,10 +827,56 @@ quiesce_frontend_and_switch_checkout() {
     ensure_frontend_launcher "$target"
 }
 
+target_backend_never_started() {
+    local previous="$1" record prior target retained phase backend live_jar
+    record="$(read_transaction)" || return 1
+    IFS=$'\t' read -r prior target retained phase <<< "$record"
+    [ "$prior" = "$previous" ] && [ "$target" = "$DEPLOY_TARGET" ] \
+        && [ "$retained" = "$DEPLOY_RETAINED" ] || return 1
+    case "$phase" in
+        prepared|frontend_stopped) ;;
+        *) return 1 ;;
+    esac
+    live_jar="$(jar_git_sha "$LIVE_JAR")" || return 1
+    backend="$(served_git_sha)" || return 1
+    [ "$live_jar" = "$prior" ] && [ "$backend" = "$prior" ]
+}
+
+rollback_requires_forward_recovery() {
+    local previous="$1" record prior target retained phase
+    if record="$(read_transaction)"; then
+        IFS=$'\t' read -r prior target retained phase <<< "$record"
+        case "$phase" in
+            forward_only) return 0 ;;
+            rollback_starting|rollback_live) return 1 ;;
+        esac
+    fi
+    target_backend_never_started "$previous" && return 1
+    ! rollback_floor_allows_release "$previous"
+}
+
+recover_forward_only() {
+    ROLLBACK_IN_PROGRESS=1
+    ROLLBACK_STATE=refused_floor
+    set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; forward-only recovery must complete the target release"
+    sudo systemctl stop connex-staging-frontend || return 1
+    write_transaction forward_only || return 1
+    log "Rollback refused; recovering target ${DEPLOY_TARGET:0:8} forward only..."
+    if ! recover_target_release; then
+        set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; forward-only recovery incomplete, the next timer run will retry the target release"
+        return 1
+    fi
+    set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; target release recovered forward and committed"
+}
+
 rollback_release() {
     local sha="$1" backend frontend
     ROLLBACK_IN_PROGRESS=1
     ROLLBACK_STATE=in_progress
+    if rollback_requires_forward_recovery "$sha"; then
+        recover_forward_only
+        return $?
+    fi
     if ! verify_release_bundle "$sha" || ! verify_release_bundle "$DEPLOY_RETAINED"; then
         log "Rollback FAILED: rollback or retained release bundle is invalid"
         ROLLBACK_STATE=failed
@@ -755,11 +884,13 @@ rollback_release() {
     fi
     log "Rolling back the complete application to ${sha:0:8}..."
     if ! sudo systemctl stop connex-staging-frontend \
+        || ! write_transaction rollback_starting \
         || ! ensure_frontend_launcher "$DEPLOY_TARGET" \
         || ! cp -f "$RELEASES_DIR/$sha/backend.jar" "$LIVE_JAR" \
         || ! sudo systemctl restart connex-staging-backend \
         || ! wait_for_backend_sha "$sha" "$ROLLBACK_HEALTH_TIMEOUT" \
         || ! verify_backend_stability "$sha" \
+        || ! write_transaction rollback_live \
         || ! activate_frontend "$sha"; then
         log "Rollback FAILED; component or release-marker state is uncertain"
         ROLLBACK_STATE=failed
@@ -1093,11 +1224,100 @@ report_quarantine_occupancy() {
 }
 
 staging_disk_headroom_sufficient() {
-    local available
+    local available required="${1:-$STAGING_MIN_FREE_BYTES}"
     available="$(df --output=avail -B1 "$STATE_DIR" | awk 'NR == 2 { print $1 }')" || return 1
     [[ "$available" =~ ^[0-9]+$ ]] || return 1
-    log "Staging filesystem headroom: $available bytes available; preflight requires at least $STAGING_MIN_FREE_BYTES bytes"
-    [ "$available" -ge "$STAGING_MIN_FREE_BYTES" ]
+    log "Staging filesystem headroom: $available bytes available; preflight requires at least $required bytes"
+    [ "$available" -ge "$required" ]
+}
+
+staging_build_headroom_sufficient() {
+    local deployed footprint="$STAGING_RELEASE_FALLBACK_BYTES" measured source=fallback required
+    if deployed="$(read_sha_file "$MARKER" 2>/dev/null)" \
+        && [ -d "$RELEASES_DIR/$deployed" ] && [ ! -L "$RELEASES_DIR/$deployed" ] \
+        && measured="$(du -sb -- "$RELEASES_DIR/$deployed" 2>/dev/null | awk 'NR == 1 { print $1 }')" \
+        && [[ "$measured" =~ ^[1-9][0-9]{0,17}$ ]]; then
+        footprint="$measured"
+        source=deployed
+    fi
+    required=$((STAGING_MIN_FREE_BYTES + footprint + STAGING_BUILD_CACHE_MARGIN_BYTES))
+    log "Staging build reserve: release_bytes=$footprint source=$source cache_margin_bytes=$STAGING_BUILD_CACHE_MARGIN_BYTES"
+    staging_disk_headroom_sufficient "$required"
+}
+
+# Inspect every visible reference, including descriptors and mappings whose cwd is
+# elsewhere. Other UIDs may hide /proc details; the atomic rename preserves any
+# unseen consumer's inodes, just as it does for retired releases.
+release_tree_has_visible_references() {
+    local path="$1" process_dirs process_dir process_uid deploy_uid link reference maps state
+    local indeterminate=0
+    path="$(readlink -f -- "$path")" || return 2
+    deploy_uid="$(id -u)" || return 2
+    process_dirs="$(list_process_directories)" || return 2
+    while IFS= read -r process_dir; do
+        [ -n "$process_dir" ] || continue
+        if ! process_uid="$(stat -c '%u' -- "$process_dir" 2>/dev/null)"; then
+            [ ! -d "$process_dir" ] || indeterminate=1
+            continue
+        fi
+        state="$(sed -n 's/^State:[[:space:]]*\([A-Z]\).*/\1/p' "$process_dir/status" 2>/dev/null)" || state=
+        [ "$state" != Z ] || continue
+        for link in "$process_dir/cwd" "$process_dir/root" "$process_dir/exe" "$process_dir"/fd/*; do
+            if reference="$(readlink -- "$link" 2>/dev/null)"; then
+                case "$reference" in "$path"|"$path"/*) return 0 ;; esac
+            elif [ "$process_uid" = "$deploy_uid" ] && [ -d "$process_dir" ]; then
+                # Descriptors can close during the scan; a missing fixed link on a
+                # live process instead means its references could not be inspected.
+                case "$link" in "$process_dir"/fd/*) ;; *) indeterminate=1 ;; esac
+            fi
+        done
+        if maps="$(cat "$process_dir/maps" 2>/dev/null)"; then
+            if [[ "$maps" = *"$path"* ]]; then return 0; fi
+        elif [ "$process_uid" = "$deploy_uid" ] && [ -d "$process_dir" ]; then
+            indeterminate=1
+        fi
+        if [ "$process_uid" = "$deploy_uid" ] && [ -d "$process_dir" ] \
+            && { [ ! -r "$process_dir/fd" ] || [ ! -x "$process_dir/fd" ]; }; then
+            indeterminate=1
+        fi
+    done <<< "$process_dirs"
+    [ "$indeterminate" -eq 0 ] || return 2
+    return 1
+}
+
+quarantine_unactivated_target() {
+    local target="$DEPLOY_TARGET" path quarantine deployed rollback frontend running running_sha pid extra usage=0
+    is_git_sha "$target" || return 1
+    path="$RELEASES_DIR/$target"
+    quarantine="$RELEASE_QUARANTINE_DIR/$target"
+    if [ ! -d "$path" ] || [ -L "$path" ] \
+        || [ -L "$RELEASES_DIR" ] || [ -L "$RELEASE_QUARANTINE_DIR" ] \
+        || ! deployed="$(read_sha_file "$MARKER" 2>/dev/null)" \
+        || ! rollback="$(read_sha_file "$ROLLBACK_MARKER" 2>/dev/null)" \
+        || ! frontend="$(read_sha_file "$FRONTEND_RELEASE_MARKER" 2>/dev/null)" \
+        || ! running="$(read_frontend_running 2>/dev/null)"; then
+        log "Unactivated target quarantine refused: release path or protected serving state is invalid"
+        return 1
+    fi
+    IFS=$'\t' read -r running_sha pid extra <<< "$running"
+    if [ "$target" = "$deployed" ] || [ "$target" = "$rollback" ] \
+        || [ "$target" = "$frontend" ] || [ "$target" = "$running_sha" ]; then
+        log "Unactivated target retained: protected release $target"
+        return 0
+    fi
+    release_tree_has_visible_references "$path" || usage=$?
+    if [ "$usage" -ne 1 ]; then
+        log "Unactivated target quarantine refused: process references exist or could not be inspected for $target"
+        return 1
+    fi
+    if [ -e "$quarantine" ] || [ -L "$quarantine" ] \
+        || ! atomic_quarantine_move_supported \
+        || ! command mv --no-copy -T -- "$path" "$quarantine"; then
+        log "Unactivated target quarantine refused: destination exists or atomic move failed for $target"
+        return 1
+    fi
+    log "Quarantined unactivated target $target; live release untouched"
+    report_quarantine_occupancy
 }
 
 prune_backlog_present() {
@@ -1105,9 +1325,19 @@ prune_backlog_present() {
         || quarantine_has_entries
 }
 
+quarantine_has_distinct_copy() {
+    local sha="$1" quarantine="$RELEASE_QUARANTINE_DIR/$1" release="$RELEASES_DIR/$1"
+    local quarantine_identity release_identity
+    is_git_sha "$sha" && [ -d "$quarantine" ] && [ ! -L "$quarantine" ] \
+        && [ -d "$release" ] && [ ! -L "$release" ] || return 1
+    quarantine_identity="$(stat -c '%d:%i' -- "$quarantine" 2>/dev/null)" || return 1
+    release_identity="$(stat -c '%d:%i' -- "$release" 2>/dev/null)" || return 1
+    [ "$quarantine_identity" != "$release_identity" ]
+}
+
 prune_releases() {
     local deployed rollback running running_sha running_pid extra control_group paths path sha usage kept=0
-    local quarantine_paths quarantine blocked=0 quarantined=0
+    local quarantine_paths quarantine blocked=0 deferred=0 quarantined=0
     if ! atomic_quarantine_move_supported; then
         log "Release pruning refused: mv does not support atomic no-copy quarantine moves"
         return 1
@@ -1139,11 +1369,20 @@ prune_releases() {
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         sha="$(basename "$path")" || return 1
-        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ] \
-            || [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] \
-            || [ "$sha" = "$running_sha" ]; then
+        if ! is_git_sha "$sha" || [ ! -d "$path" ] || [ -L "$path" ]; then
             log "Release pruning refused: quarantine contains an invalid or protected entry"
             return 1
+        fi
+        if [ "$sha" = "$deployed" ] || [ "$sha" = "$rollback" ] || [ "$sha" = "$running_sha" ]; then
+            # A retry seals a fresh tree without reviving the quarantined one. Only
+            # distinct directory identities prove this is a stale duplicate; the
+            # independent pruner still protects its SHA until both copies retire.
+            if quarantine_has_distinct_copy "$sha"; then
+                log "Release quarantine deferred: stale duplicate of protected release $sha"
+            else
+                log "Release pruning refused: quarantine contains an invalid or protected entry"
+                return 1
+            fi
         fi
     done <<< "$quarantine_paths"
     while IFS= read -r path; do
@@ -1186,8 +1425,13 @@ prune_releases() {
             fi
             quarantine="$RELEASE_QUARANTINE_DIR/$sha"
             if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then
-                log "Release pruning refused: quarantine destination already exists for $sha"
-                blocked=1
+                if quarantine_has_distinct_copy "$sha"; then
+                    log "Release pruning deferred: stale quarantine duplicate must be reclaimed before retiring $sha"
+                    deferred=1
+                else
+                    log "Release pruning refused: quarantine destination already exists for $sha"
+                    blocked=1
+                fi
                 continue
             fi
             # rename(2) within .staging is atomic. Existing cwd and open handles
@@ -1210,7 +1454,7 @@ prune_releases() {
             fi
         fi
     done <<< "$paths"
-    if [ "$blocked" -eq 0 ]; then
+    if [ "$blocked" -eq 0 ] && [ "$deferred" -eq 0 ]; then
         rm -f -- "$PRUNE_NEEDED_MARKER" || return 1
     fi
     if [ "$quarantined" -eq 1 ]; then
@@ -1219,9 +1463,8 @@ prune_releases() {
     [ "$blocked" -eq 0 ]
 }
 
-deployment_exit() {
-    local status="$1" cleanup_status=0
-    trap - EXIT INT TERM
+cleanup_smoke_on_exit() {
+    local cleanup_status=0
     if [ "$SMOKE_SESSION_ACTIVE" = "1" ]; then
         if ! logout_smoke_session; then
             log "Smoke session logout FAILED during exit; authenticated server-side session may remain"
@@ -1233,9 +1476,23 @@ deployment_exit() {
             cleanup_status=1
         fi
     fi
+    return "$cleanup_status"
+}
+
+deployment_exit() {
+    local status="$1" cleanup_status=0
+    trap - EXIT INT TERM
+    cleanup_smoke_on_exit || cleanup_status=1
+    if [ "$status" -ne 0 ] && [ "$PRE_TRANSACTION_TARGET_BUILT" = 1 ] \
+        && [ ! -e "$TRANSACTION_FILE" ] && [ ! -L "$TRANSACTION_FILE" ]; then
+        quarantine_unactivated_target || cleanup_status=1
+    fi
     if [ "$status" -ne 0 ] && [ "$ROLLBACK_ARMED" = "1" ] && [ "$ROLLBACK_IN_PROGRESS" != "1" ] \
         && [ "$RELEASE_COMMITTED" != "1" ]; then
         rollback_release "$DEPLOY_PREVIOUS" || cleanup_status=1
+        # A refused rollback can run another smoke while EXIT is already handling
+        # the original failure; that smoke needs cleanup even if it also fails.
+        cleanup_smoke_on_exit || cleanup_status=1
     fi
     if [ "$status" -ne 0 ] && [ "$FAILURE_ACTIVE" = "1" ]; then
         [ -z "$FAILURE_MESSAGE" ] || log "$FAILURE_MESSAGE"
@@ -1265,6 +1522,33 @@ guard_wrapper_contract() {
     fi
     set_failure_context preflight release "Deploy refused: installed wrapper is stale; prior checkout restored and operator update required"
     return 1
+}
+
+recover_target_release() {
+    local prior="$DEPLOY_PREVIOUS" target="$DEPLOY_TARGET"
+    set_failure_context frontend_quiesce frontend "Recovery could not stop the frontend before target activation"
+    sudo systemctl stop connex-staging-frontend || return 1
+    if ! validate_smoke_login_file; then
+        set_failure_context preflight authentication "Recovery refused: smoke credential file is missing or unsafe"
+        ROLLBACK_ARMED=1
+        return 1
+    fi
+    ROLLBACK_ARMED=1
+    set_failure_context backend_restart backend "Recovery could not reinstall and health-gate the target backend"
+    ensure_frontend_launcher "$target" || return 1
+    activate_backend "$target" || return 1
+    set_failure_context frontend_restart frontend "Recovery could not activate the target frontend"
+    activate_frontend "$target" || return 1
+    set_failure_context smoke_frontend release "Recovery smoke FAILED"
+    post_deploy_smoke "$target" || return 1
+    set_failure_context marker release "Recovery completed components but could not commit release markers"
+    commit_release_markers "$prior" "$target" || return 1
+    set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
+    ensure_prune_needed || return 1
+    rm -f "$TRANSACTION_FILE" || return 1
+    prune_releases || return 1
+    FAILURE_ACTIVE=0
+    log "Recovered and committed release ${target:0:8}"
 }
 
 recover_transaction() {
@@ -1312,31 +1596,16 @@ recover_transaction() {
         set_failure_context recovery release "Interrupted deploy had not activated anything; prior release stayed live and target will retry next cycle"
         return 1
     fi
-    if { [ "$phase" = "backend_live" ] || [ "$phase" = "frontend_live" ]; } \
-        && [ "$backend" = "$target" ]; then
-        if ! validate_smoke_login_file; then
-            set_failure_context preflight authentication "Recovery refused: smoke credential file is missing or unsafe"
-            ROLLBACK_ARMED=1
-            return 1
-        fi
-        ROLLBACK_ARMED=1
-        set_failure_context backend_restart backend "Recovery could not reinstall and health-gate the target backend"
-        sudo systemctl stop connex-staging-frontend || return 1
-        ensure_frontend_launcher "$target" || return 1
-        activate_backend "$target" || return 1
-        set_failure_context frontend_restart frontend "Recovery could not activate the target frontend"
-        activate_frontend "$target" || return 1
-        set_failure_context smoke_frontend release "Recovery smoke FAILED"
-        post_deploy_smoke "$target" || return 1
-        set_failure_context marker release "Recovery completed components but could not commit release markers"
-        commit_release_markers "$prior" "$target" || return 1
-        set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
-        ensure_prune_needed || return 1
-        rm -f "$TRANSACTION_FILE" || return 1
-        prune_releases || return 1
+    if rollback_requires_forward_recovery "$prior"; then
+        recover_forward_only || return 1
+        deploy_failure_alert
         FAILURE_ACTIVE=0
-        log "Recovered and committed release ${target:0:8}"
         return 0
+    fi
+    if { [ "$phase" = "backend_starting" ] || [ "$phase" = "backend_live" ] || [ "$phase" = "frontend_live" ]; } \
+        && [ "$backend" = "$target" ]; then
+        recover_target_release
+        return $?
     fi
 
     ROLLBACK_ARMED=1
@@ -1419,7 +1688,7 @@ main() {
 
     # Disk headroom gates only new deploy work. Existing transactions must recover
     # first because activation may already have stopped or replaced live components.
-    if ! staging_disk_headroom_sufficient; then
+    if ! staging_build_headroom_sufficient; then
         set_failure_context preflight release "Deploy refused: staging filesystem has insufficient free-space headroom"
         return 1
     fi
@@ -1466,6 +1735,7 @@ main() {
 
     set_failure_context build release "Deploy FAILED while building the isolated target release; live release untouched"
     build_target_release "$DEPLOY_TARGET" || return 1
+    PRE_TRANSACTION_TARGET_BUILT=1
 
     set_failure_context bundle release "Deploy FAILED while verifying the target release pair"
     verify_release_bundle "$DEPLOY_PREVIOUS" && verify_release_bundle "$DEPLOY_TARGET" || return 1
@@ -1477,6 +1747,7 @@ main() {
         return 1
     fi
     write_transaction prepared || return 1
+    PRE_TRANSACTION_TARGET_BUILT=0
 
     set_failure_context frontend_quiesce frontend "Deploy FAILED while quiescing or switching the checkout; prior release remains committed"
     quiesce_frontend_and_switch_checkout "$DEPLOY_TARGET" || return 1

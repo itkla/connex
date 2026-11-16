@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -27,9 +28,13 @@ import ooo.klae.connex.backend.dto.InviteDto;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.MemberRoleChange;
+import ooo.klae.connex.backend.dto.OwnershipOfferCreatedDto;
+import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
 import ooo.klae.connex.backend.dto.UpdateWorkspaceIdentityRequest;
+import ooo.klae.connex.backend.dto.UpdateWorkspaceCurrencyRequest;
 import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
@@ -37,8 +42,10 @@ import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Workspace membership and switching. Lists the caller's workspaces, creates a
@@ -49,10 +56,13 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 @RequiredArgsConstructor
 public class WorkspaceController {
     private final WorkspaceService workspaceService;
+    private final ooo.klae.connex.backend.services.OwnershipOfferService ownershipOfferService;
+    private final PrivilegedMfaAttestationService attestationService;
     private final InviteService inviteService;
     private final InviteLinkService inviteLinkService;
     private final AllowedDomainService allowedDomainService;
     private final AuthService authService;
+    private final TenantWorkScope tenantWorkScope;
     private final WorkspaceCookie workspaceCookie;
 
     @GetMapping
@@ -93,6 +103,15 @@ public class WorkspaceController {
             request.getTimezone(),
             request.getExpectedName(),
             request.getExpectedTimezone(),
+            request.getExpectedIdentityVersion());
+    }
+
+    @PatchMapping("/{id}/default-currency")
+    public WorkspaceIdentityDto updateDefaultCurrency(
+            @PathVariable int id,
+            @Valid @RequestBody UpdateWorkspaceCurrencyRequest request) {
+        return workspaceService.updateDefaultCurrency(
+            id, authService.getCurrentUser().getId(), request.getDefaultCurrency(),
             request.getExpectedIdentityVersion());
     }
 
@@ -140,7 +159,7 @@ public class WorkspaceController {
 
     @DeleteMapping("/{id}/invites/{inviteId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void revokeInvite(@PathVariable int id, @PathVariable int inviteId) {
+    public void revokeInvite(@PathVariable int id, @PathVariable String inviteId) {
         inviteService.revokeInvite(id, inviteId, authService.getCurrentUser().getId());
     }
 
@@ -183,23 +202,41 @@ public class WorkspaceController {
     }
 
     @PostMapping("/{id}/members")
-    public MemberDto addMember(@PathVariable int id, @Valid @RequestBody AddMemberRequest request) {
+    public InviteResultDto addMember(@PathVariable int id, @Valid @RequestBody AddMemberRequest request) {
         return inviteService.addExistingMember(id, authService.getCurrentUser().getId(), request.getEmail(), request.getRole());
     }
 
     @PatchMapping("/{id}/members/{userId}")
-    public MemberDto updateMemberRole(@PathVariable int id, @PathVariable int userId,
+    public ResponseEntity<?> updateMemberRole(@PathVariable int id, @PathVariable int userId,
             @Valid @RequestBody UpdateMemberRoleRequest request) {
-        int actorId = authService.getCurrentUser().getId();
-        if (request.getRoleId() != null) {
-            return workspaceService.assignCustomRole(id, actorId, userId, request.getRoleId());
-        }
-        return workspaceService.changeMemberRole(id, actorId, userId, request.getRole());
+        int actorId = tenantWorkScope.unroutedRead(() -> authService.getCurrentUser().getId());
+        boolean acknowledged = Boolean.TRUE.equals(request.getAcknowledgeConfinement());
+        MemberRoleChange<MemberDto> result = ownershipOfferService.changeWorkspaceRole(
+            id, actorId, userId, request.getRole(), request.getRoleId(), acknowledged);
+        return result.offer() == null ? ResponseEntity.ok(result.currentMember())
+            : ResponseEntity.accepted().body(OwnershipOfferCreatedDto.from(result));
     }
 
     @DeleteMapping("/{id}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable int id, @PathVariable int userId) {
         workspaceService.removeMember(id, authService.getCurrentUser().getId(), userId);
+    }
+
+    /**
+     * Issues a one-time code attesting a member's passkey for privileged MFA in this workspace's
+     * organization (#1534). The code is returned once and must reach the member out of band.
+     */
+    @PostMapping("/{id}/members/{userId}/mfa-attestations")
+    @ResponseStatus(HttpStatus.CREATED)
+    public MfaAttestationCodeDto issueMfaAttestation(@PathVariable int id, @PathVariable int userId) {
+        return attestationService.issueForWorkspace(id, authService.getCurrentUser().getId(), userId);
+    }
+
+    /** Revokes a member's open attestation code for this workspace's organization (#1534). */
+    @DeleteMapping("/{id}/members/{userId}/mfa-attestations")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeMfaAttestation(@PathVariable int id, @PathVariable int userId) {
+        attestationService.revokeForWorkspace(id, authService.getCurrentUser().getId(), userId);
     }
 }

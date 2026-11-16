@@ -31,7 +31,7 @@ export default function UserAvatar({
     const fallback = (
         <span
             className={cn(
-                "flex h-full w-full items-center justify-center bg-brand-light font-medium text-brand-dark",
+                "flex h-full w-full items-center justify-center bg-brand-light font-medium text-brand-text",
                 TEXT_CLASS[type],
             )}
         >

@@ -40,6 +40,9 @@ public final class TablePlaneRegistry {
         "SPRING_SESSION",
         "SPRING_SESSION_ATTRIBUTES",
         "ai_provider_config",
+        "ai_assistant_privacy_fence",
+        "ai_assistant_privacy_operation",
+        "ai_assistant_privacy_operation_workspace",
         "api_credential",
         "api_credential_scope",
         "organization_ai_budget",
@@ -62,11 +65,14 @@ public final class TablePlaneRegistry {
         "one_time_link_flow",
         "org_allowed_domain",
         "org_member",
+        "ownership_offer",
         "org_placement",
         "organization",
         "organization_duplicate_decision_lock",
         "passkey_bootstrap_confirmation_token",
         "password_reset_token",
+        "privileged_credential_attestation",
+        "privileged_mfa_attestation_grant",
         "privileged_mfa_recovery_redemption",
         "registration_verification_token",
         "provider_connection",
@@ -99,10 +105,16 @@ public final class TablePlaneRegistry {
     /** All physical control-plane tables. */
     public static final Set<String> CONTROL_PLANE_TABLES = controlPlaneTables();
 
-    /** Direct workspace-keyed control state that is not tenant-export content. */
+    /**
+     * Direct workspace-keyed control state that is not tenant-export content.
+     * Privacy placement receipts remain organization-owned evidence through workspace disappearance.
+     */
     public static final Set<String> CONTROL_PLANE_WORKSPACE_STATE_TABLES = Set.of(
+        "ai_assistant_privacy_operation_workspace",
         "api_credential",
         "audit_log",
+        "ownership_offer",
+        "privileged_mfa_attestation_grant",
         "secret_value",
         "tenant_cleanup_tombstone",
         "tenant_export_download_grant",
@@ -117,7 +129,14 @@ public final class TablePlaneRegistry {
     /** Workspace-scoped tenant content — the future per-org catalog. */
     public static final Set<String> ORG_DATA_TABLES = Set.of(
         "activity",
+        "ai_assistant_proposal_set",
         "ai_brief_schedule",
+        "ai_agent_run",
+        "ai_agent_action",
+        "ai_agent_segment",
+        "ai_agent_privacy_barrier",
+        "ai_agent_privacy_work",
+        "ai_agent_privacy_object",
         "ai_chat_message",
         "ai_chat_session",
         "ai_chat_session_participant",
@@ -139,6 +158,7 @@ public final class TablePlaneRegistry {
         "campaign_audience_snapshot",
         "campaign_delivery",
         "campaign_delivery_event",
+        "campaign_delivery_unsubscribe_token",
         "campaign_message",
         "campaign_message_revision",
         "campaign_send",
@@ -176,6 +196,7 @@ public final class TablePlaneRegistry {
         "product",
         "entity_reference",
         "historical_notification_baseline",
+        "warmth_notification_model_state",
         "identity_collision",
         "introduction",
         "job_run",

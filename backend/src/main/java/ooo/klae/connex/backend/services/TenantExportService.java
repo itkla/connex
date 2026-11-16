@@ -12,22 +12,26 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.LongConsumer;
+import java.util.function.LongSupplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -61,9 +65,7 @@ import tools.jackson.databind.ObjectMapper;
  * a truncated ZIP; strict authorization audit is durable before any response body begins.
  */
 @Service
-@RequiredArgsConstructor
 public class TenantExportService {
-    private static final String AUDIT_ACTION = "org.workspace.export";
     static final int MAX_CONCURRENT_EXPORTS = 4;
     private static final long OBJECT_ADMISSION_RETRY_NANOS =
         Duration.ofMillis(10).toNanos();
@@ -79,8 +81,82 @@ public class TenantExportService {
     private final TenantLifecycleProperties properties;
     private final ObjectMapper objectMapper;
     private final Clock clock;
-    private final ScheduledThreadPoolExecutor deadlineExecutor = deadlineExecutor();
+    private final AiAssistantPrivacyService assistantPrivacyService;
+    private final AiAssistantPrivacyPublicationGuard publicationGuard;
+    private final LongSupplier nanoTime;
+    private final LongConsumer admissionWait;
+    private final ScheduledThreadPoolExecutor deadlineExecutor;
     private final ThreadPoolExecutor cancellationExecutor = cancellationExecutor();
+
+    /** Constructs the export service with the system monotonic clock and admission wait. */
+    @Autowired
+    public TenantExportService(
+            OrgMemberService orgMemberService,
+            SessionSecurityService sessionSecurityService,
+            TenantWorkScope tenantWorkScope,
+            TenantLifecycleControlOperations controlOperations,
+            TenantLifecycleAccess lifecycleAccess,
+            TenantExportSnapshotTransaction snapshotTransaction,
+            ManagedObjectService managedObjectService,
+            AuditService auditService,
+            TenantLifecycleProperties properties,
+            ObjectMapper objectMapper,
+            Clock clock,
+            AiAssistantPrivacyService assistantPrivacyService,
+            AiAssistantPrivacyPublicationGuard publicationGuard) {
+        this(
+            orgMemberService,
+            sessionSecurityService,
+            tenantWorkScope,
+            controlOperations,
+            lifecycleAccess,
+            snapshotTransaction,
+            managedObjectService,
+            auditService,
+            properties,
+            objectMapper,
+            clock,
+            assistantPrivacyService,
+            publicationGuard,
+            System::nanoTime,
+            LockSupport::parkNanos,
+            deadlineExecutor());
+    }
+
+    TenantExportService(
+            OrgMemberService orgMemberService,
+            SessionSecurityService sessionSecurityService,
+            TenantWorkScope tenantWorkScope,
+            TenantLifecycleControlOperations controlOperations,
+            TenantLifecycleAccess lifecycleAccess,
+            TenantExportSnapshotTransaction snapshotTransaction,
+            ManagedObjectService managedObjectService,
+            AuditService auditService,
+            TenantLifecycleProperties properties,
+            ObjectMapper objectMapper,
+            Clock clock,
+            AiAssistantPrivacyService assistantPrivacyService,
+            AiAssistantPrivacyPublicationGuard publicationGuard,
+            LongSupplier nanoTime,
+            LongConsumer admissionWait,
+            ScheduledThreadPoolExecutor deadlineExecutor) {
+        this.orgMemberService = orgMemberService;
+        this.sessionSecurityService = sessionSecurityService;
+        this.tenantWorkScope = tenantWorkScope;
+        this.controlOperations = controlOperations;
+        this.lifecycleAccess = lifecycleAccess;
+        this.snapshotTransaction = snapshotTransaction;
+        this.managedObjectService = managedObjectService;
+        this.auditService = auditService;
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+        this.clock = clock;
+        this.assistantPrivacyService = assistantPrivacyService;
+        this.publicationGuard = publicationGuard;
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+        this.admissionWait = Objects.requireNonNull(admissionWait, "admissionWait");
+        this.deadlineExecutor = Objects.requireNonNull(deadlineExecutor, "deadlineExecutor");
+    }
 
     /**
      * Performs synchronous authorization, database-global admission, spool creation, and strict
@@ -97,6 +173,7 @@ public class TenantExportService {
             int workspaceId,
             int actorId) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
+        orgMemberService.requireExportData(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         AcquiredWorkspace acquired = controlOperations.acquireExport(
             orgId,
@@ -114,22 +191,16 @@ public class TenantExportService {
         try {
             Route route = lifecycleAccess.capture(acquired.workspace(), orgId);
             objectSpool = createObjectSpool();
-            auditService.recordStrictIndependentScoped(
-                AUDIT_ACTION,
-                "workspace",
-                acquired.workspace().id(),
-                null,
-                orgId,
-                "workspace:" + acquired.workspace().id(),
-                "Tenant export authorized and streaming started",
-                Map.of("declaredTableCount", declaredTableCount()));
+            AuditService.PreparedWorkspaceExportAudit preparedAudit = auditService.recordWorkspaceExportStarted(
+                acquired.workspace().id(), orgId, actorId, declaredTableCount());
             TenantExportDownload download = new TenantExportDownload(
                 acquired.workspace().id(),
                 acquired.workspace().orgId(),
                 actorId,
                 route,
                 operationLease,
-                objectSpool);
+                objectSpool,
+                preparedAudit);
             return download;
         } catch (RuntimeException | Error exception) {
             cleanupBeforeTransfer(exception, operationLease, objectSpool);
@@ -137,7 +208,7 @@ public class TenantExportService {
         }
     }
 
-    private void writeBundle(
+    private Snapshot writeBundle(
             int orgId,
             int workspaceId,
             int actorId,
@@ -146,9 +217,9 @@ public class TenantExportService {
             OutputStream output,
             TrackedResource outputResource,
             TenantExportExecution execution) throws IOException {
-        lifecycleAccess.withRoute(route, actorId, () -> {
+        return lifecycleAccess.withRoute(route, actorId, () -> {
             try {
-                writeRoutedBundle(
+                return writeRoutedBundle(
                     orgId,
                     workspaceId,
                     actorId,
@@ -156,14 +227,13 @@ public class TenantExportService {
                     output,
                     outputResource,
                     execution);
-                return null;
             } catch (IOException exception) {
                 throw new ExportWriteException(exception);
             }
         });
     }
 
-    private void writeRoutedBundle(
+    private Snapshot writeRoutedBundle(
             int orgId,
             int workspaceId,
             int actorId,
@@ -173,13 +243,44 @@ public class TenantExportService {
             TenantExportExecution execution) throws IOException {
         Instant generatedAt = clock.instant();
         OutputStream ownedOutput = new FilterOutputStream(output) {
+            private boolean failed;
+
+            @Override
+            public void write(int value) throws IOException {
+                guardedWrite(() -> out.write(value));
+            }
+
+            @Override
+            public void write(byte[] bytes, int offset, int length) throws IOException {
+                guardedWrite(() -> out.write(bytes, offset, length));
+            }
+
+            @Override
+            public void flush() throws IOException {
+                guardedWrite(out::flush);
+            }
+
+            private void guardedWrite(AiAssistantPrivacyPublicationGuard.IoAction action) throws IOException {
+                if (failed) {
+                    throw new IOException("Tenant export output is unavailable");
+                }
+                execution.checkActive();
+                try {
+                    publicationGuard.withCurrent(orgId, execution.organizationPrivacyGeneration(), action);
+                } catch (IOException | RuntimeException failure) {
+                    failed = true;
+                    throw failure;
+                }
+            }
+
             @Override
             public void close() throws IOException {
                 outputResource.close();
             }
         };
+        Snapshot snapshot;
         try (ZipOutputStream zip = new ZipOutputStream(ownedOutput)) {
-            Snapshot snapshot =
+            snapshot =
                 snapshotTransaction.capture(workspaceId, zip, objectSpool, execution);
             long writtenObjects =
                 writeObjects(zip, workspaceId, actorId, objectSpool, execution);
@@ -203,6 +304,8 @@ public class TenantExportService {
             zip.closeEntry();
             zip.finish();
         }
+        execution.checkActive();
+        return snapshot;
     }
 
     private long writeObjects(
@@ -266,7 +369,7 @@ public class TenantExportService {
         TooManyRequestsException admissionFailure = null;
         while (true) {
             execution.checkActive();
-            long remainingNanos = objectDeadlineNanos - System.nanoTime();
+            long remainingNanos = objectDeadlineNanos - nanoTime.getAsLong();
             if (remainingNanos <= 0) {
                 if (admissionFailure != null) {
                     throw admissionFailure;
@@ -287,12 +390,12 @@ public class TenantExportService {
         }
     }
 
-    private static void waitForObjectAdmission(long objectDeadlineNanos) {
-        long remainingNanos = objectDeadlineNanos - System.nanoTime();
+    private void waitForObjectAdmission(long objectDeadlineNanos) {
+        long remainingNanos = objectDeadlineNanos - nanoTime.getAsLong();
         if (remainingNanos <= 0) {
             return;
         }
-        LockSupport.parkNanos(
+        admissionWait.accept(
             Math.min(remainingNanos, OBJECT_ADMISSION_RETRY_NANOS));
         if (Thread.interrupted()) {
             Thread.currentThread().interrupt();
@@ -432,6 +535,7 @@ public class TenantExportService {
         private final OperationLease operationLease;
         private final AtomicReference<Path> objectSpool;
         private final TenantExportExecution execution;
+        private final AuditService.PreparedWorkspaceExportAudit preparedAudit;
 
         private TenantExportDownload(
                 int workspaceId,
@@ -439,17 +543,21 @@ public class TenantExportService {
                 int actorId,
                 Route route,
                 OperationLease operationLease,
-                Path objectSpool) {
+                Path objectSpool,
+                AuditService.PreparedWorkspaceExportAudit preparedAudit) {
             this.workspaceId = workspaceId;
             this.orgId = orgId;
             this.actorId = actorId;
             this.route = route;
             this.operationLease = operationLease;
             this.objectSpool = new AtomicReference<>(objectSpool);
+            this.preparedAudit = Objects.requireNonNull(preparedAudit, "preparedAudit");
             execution = new TenantExportExecution(
                 properties.getExportTimeout(),
                 cancellationExecutor,
-                this::cleanupOwnedResources);
+                this::cleanupOwnedResources,
+                nanoTime);
+            execution.bindOrganizationGeneration(assistantPrivacyService.current(orgId));
             execution.armDeadline(deadlineExecutor);
         }
 
@@ -468,7 +576,7 @@ public class TenantExportService {
                 if (spool == null) {
                     throw new IllegalStateException("Tenant export object-reference spool is unavailable");
                 }
-                writeBundle(
+                Snapshot snapshot = writeBundle(
                     orgId,
                     workspaceId,
                     actorId,
@@ -477,6 +585,17 @@ public class TenantExportService {
                     output,
                     outputResource,
                     execution);
+                long rowCount = 0;
+                for (CapturedTable table : snapshot.tables()) {
+                    rowCount = Math.addExact(rowCount, table.rowCount());
+                }
+                long completedRows = rowCount;
+                execution.checkActive();
+                tenantWorkScope.unrouted(() -> {
+                    auditService.recordWorkspaceExportCompleted(preparedAudit,
+                        completedRows, snapshot.tables().size(), snapshot.objectCount());
+                    return null;
+                });
             } catch (ExportWriteException exception) {
                 primary = exception.ioException();
                 throw exception.ioException();

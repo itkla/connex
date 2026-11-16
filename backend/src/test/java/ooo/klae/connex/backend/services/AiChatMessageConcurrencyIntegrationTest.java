@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /** Proves concurrent appends serialize on the session root and allocate gap-free sequences. */
@@ -79,6 +80,7 @@ class AiChatMessageConcurrencyIntegrationTest {
         workspace.setName("AI chat concurrency " + unique);
         workspace.setSlug("ai-chat-concurrency-" + unique);
         workspaceMapper.insert(workspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
 
         actors = IntStream.range(0, APPEND_COUNT)
             .mapToObj(index -> user("ai-chat-" + index + "-" + unique))
@@ -89,6 +91,7 @@ class AiChatMessageConcurrencyIntegrationTest {
 
         session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(actors.getFirst().getId());
         session.setTitle("Concurrent appends");
         session.setVisibility("shared");
@@ -110,6 +113,7 @@ class AiChatMessageConcurrencyIntegrationTest {
             jdbcTemplate.update(
                 "DELETE FROM workspace_member WHERE workspace_id = ?",
                 workspace.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
         if (actors != null) {
@@ -118,6 +122,7 @@ class AiChatMessageConcurrencyIntegrationTest {
             }
         }
         if (organization != null) {
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organization.getId());
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
     }
@@ -182,7 +187,7 @@ class AiChatMessageConcurrencyIntegrationTest {
         }
 
         List<AiChatMessage> messages = chatMapper.listMessages(
-            workspace.getId(), session.getId(), 100, 0);
+            workspace.getId(), session.getId(), 100, 0, 1L);
         assertEquals(APPEND_COUNT, messages.size());
         assertEquals(
             IntStream.rangeClosed(1, APPEND_COUNT).boxed().toList(),

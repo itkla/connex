@@ -155,11 +155,15 @@ public class WorkflowPrincipalLockService {
                 throw new ForbiddenException(
                     "Requires the RULE_MANAGE permission in this workspace");
             }
+            Permission permission;
             try {
-                permissions.add(Permission.valueOf(value));
+                permission = Permission.valueOf(value);
             } catch (IllegalArgumentException exception) {
                 throw new ForbiddenException(
                     "Requires the RULE_MANAGE permission in this workspace");
+            }
+            if (Permission.isGrantable(permission)) {
+                permissions.add(permission);
             }
         }
         if (!permissions.contains(Permission.RULE_MANAGE)) {

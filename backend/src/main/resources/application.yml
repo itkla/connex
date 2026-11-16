@@ -49,6 +49,13 @@ management:
                 exclude: "*"
 
 connex:
+    data-subject-disclosure:
+        delivery-timeout-ms: ${CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS:120000}
+    account:
+        assignment-sweep:
+            delay-ms: ${CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_DELAY_MS:300000}
+            initial-delay-ms: ${CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_INITIAL_DELAY_MS:300000}
+            page-size: ${CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_PAGE_SIZE:200}
     record-creation:
         guided-cutover-enabled: "${CONNEX_RECORD_CREATION_GUIDED_CUTOVER_ENABLED:false}"
     sequences:
@@ -150,6 +157,11 @@ connex:
             recovery-token-sha256: ${CONNEX_PRIVILEGED_MFA_RECOVERY_TOKEN_SHA256:}
             recovery-expires-at: ${CONNEX_PRIVILEGED_MFA_RECOVERY_EXPIRES_AT:}
             recovery-actor: ${CONNEX_PRIVILEGED_MFA_RECOVERY_ACTOR:}
+            # Per-organization attestation of privileged passkeys (#1534). When true, a privileged
+            # account is confined unless one of its passkeys is approved in every organization where
+            # it is privileged, and privileged step-ups must be signed by such a passkey. Defaults on;
+            # opting out requires a change actor and is recorded in the strict startup policy audit.
+            attestation-enforced: ${CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED:true}
             # Out-of-band confirmation for a FIRST passkey on a privileged account (#1506).
             # Fail-closed: enrollment is refused until the emailed link is redeemed, so a stolen
             # password alone cannot install an attacker-controlled second factor. Independent of
@@ -176,6 +188,7 @@ connex:
         same-site: ${CONNEX_WORKSPACE_COOKIE_SAME_SITE:Lax}
         secure: ${CONNEX_WORKSPACE_COOKIE_SECURE:true}
     request-limits:
+        mission-decision-max-body-bytes: ${CONNEX_MISSION_DECISION_MAX_BODY_BYTES:16384}
         max-body-bytes: ${CONNEX_API_MAX_BODY_BYTES:10485760}
         import-max-body-bytes: ${CONNEX_IMPORT_MAX_BODY_BYTES:67108864}
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
@@ -578,6 +591,9 @@ mybatis:
         map-underscore-to-camel-case: true
 
 server:
+    tomcat:
+        # NIO initializes its blocking write timeout from this connector setting.
+        connection-timeout: ${CONNEX_TOMCAT_CONNECTION_TIMEOUT:30s}
     servlet:
         session:
             timeout: ${CONNEX_SESSION_IDLE_TIMEOUT:30m}

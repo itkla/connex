@@ -69,6 +69,25 @@ class InviteLinkMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void activeLinksExcludeExpiredExhaustedAndRevokedLinksAndStayWorkspaceScoped() {
+        String active = createLink(14, 2);
+        createLink(-1, null);
+        String exhausted = createLink(14, 1);
+        inviteLinkMapper.incrementUsedCount(inviteLinkMapper.findByToken(exhausted).getId());
+        String revoked = createLink(14, null);
+        inviteLinkMapper.markRevoked(inviteLinkMapper.findByToken(revoked).getId(), workspace.getId());
+        Workspace other = newWorkspace();
+        User creator = newUser();
+        inviteLinkMapper.insert(other.getId(), "other_" + unique(), "member", 14, null, creator.getId());
+
+        var listed = inviteLinkMapper.findActiveByWorkspace(workspace.getId());
+
+        assertEquals(java.util.List.of(inviteLinkMapper.findByToken(active).getId()),
+                listed.stream().map(link -> link.getId()).toList());
+        assertEquals(1, inviteLinkMapper.findActiveByWorkspace(other.getId()).size());
+    }
+
+    @Test
     void redemptionTracking_recordAndDetect() {
         String token = createLink(14, null);
         WorkspaceInviteLink link = inviteLinkMapper.findByToken(token);

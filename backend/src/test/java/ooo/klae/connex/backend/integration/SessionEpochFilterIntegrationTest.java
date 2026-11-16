@@ -2,8 +2,20 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
@@ -16,10 +28,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -27,6 +42,7 @@ import org.springframework.web.context.WebApplicationContext;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
 
@@ -43,7 +59,8 @@ class SessionEpochFilterIntegrationTest {
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
-    @Autowired private UserMapper userMapper;
+    @MockitoSpyBean private UserMapper userMapper;
+    @MockitoSpyBean private LoginRateLimiter loginRateLimiter;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
     @Autowired private SpringSessionMapper springSessionMapper;
 
@@ -83,6 +100,45 @@ class SessionEpochFilterIntegrationTest {
                         .session(session)
                         .with(authentication(authenticated)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void logoutInvalidatesTheSessionEvenWhenTheEpochLookupWouldFail() throws Exception {
+        MockHttpSession session = AuthenticatedSessions.stampedSession(account);
+        doThrow(new DataAccessResourceFailureException("Epoch lookup unavailable"))
+                .when(userMapper).currentSessionEpoch(account.getId());
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .session(session)
+                        .with(authentication(authenticated))
+                        .with(csrf().asHeader()))
+                .andExpect(status().isOk());
+
+        assertTrue(session.isInvalid());
+        assertThrows(IllegalStateException.class, () -> session.getAttribute("SPRING_SECURITY_CONTEXT"));
+        verify(userMapper, never()).currentSessionEpoch(anyInt());
+        verify(userMapper, never()).epochRestampGrant(anyInt());
+    }
+
+    @Test
+    void throttledOneTimeLinkExchangeSkipsEpochAndRecoveryGrantQueriesForAStaleSession()
+            throws Exception {
+        MockHttpSession session = AuthenticatedSessions.stampedSession(account);
+        assertEquals(1, userMapper.bumpSessionEpoch(account.getId()));
+        doReturn(false).when(loginRateLimiter).tryAcquireOneTimeLinkExchange(any(), anyLong());
+
+        mockMvc.perform(post("/api/invites/exchange")
+                        .session(session)
+                        .with(authentication(authenticated))
+                        .with(csrf().asHeader())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("Not a JSON body"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"));
+
+        verify(loginRateLimiter).tryAcquireOneTimeLinkExchange(any(), anyLong());
+        verify(userMapper, never()).currentSessionEpoch(anyInt());
+        verify(userMapper, never()).epochRestampGrant(anyInt());
     }
 
     @Test

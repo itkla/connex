@@ -8,7 +8,7 @@ import {
     NoSymbolIcon,
     UserPlusIcon,
 } from '@heroicons/react/24/outline';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
 import type {
@@ -18,6 +18,7 @@ import type {
     DuplicatePreflightResponse,
     PersonDuplicatePreflightRequest,
 } from '@/app/lib/types';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { formatDateTime } from '@/app/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,8 +27,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 type PreflightState = {
-    status: 'idle' | 'checking' | 'ready' | 'error';
-    response: DuplicatePreflightResponse | null;
+    status: 'ready';
+    response: DuplicatePreflightResponse;
+    acknowledged: boolean;
+    origin: RequestInit;
+} | {
+    status: 'idle' | 'checking' | 'error';
+    response: null;
     acknowledged: boolean;
 };
 
@@ -53,10 +59,11 @@ export default function CaptureReviewDialog({
     busy: boolean;
     canCreatePeople: boolean;
     onBack: () => void;
-    onDecide: (decision: CaptureReviewDecision) => Promise<boolean>;
+    onDecide: (decision: CaptureReviewDecision, init?: RequestInit) => Promise<boolean>;
     onApprove: () => Promise<boolean>;
-    onPreflight: (request: PersonDuplicatePreflightRequest) => Promise<DuplicatePreflightResponse>;
+    onPreflight: (request: PersonDuplicatePreflightRequest, init?: RequestInit) => Promise<DuplicatePreflightResponse>;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AccountCaptureReviews');
     const tConnections = useTranslations('AccountConnections');
     const locale = useLocale();
@@ -69,11 +76,14 @@ export default function CaptureReviewDialog({
     });
     const [preflight, setPreflight] = useState<PreflightState>(INITIAL_PREFLIGHT);
 
-    const resolve = async (decision: CaptureReviewDecision) => {
-        if (await onDecide(decision)) onBack();
+    const resolve = async (decision: CaptureReviewDecision, init?: RequestInit) => {
+        if (await onDecide(decision, init)) onBack();
     };
 
     const create = async () => {
+        const origin = preflight.status === 'ready'
+            ? preflight.origin
+            : workspacePinnedRequest(renderedWorkspaceId());
         if (preflight.status === 'ready' && preflight.response) {
             const hasCandidates = preflight.response.candidates.length > 0 || preflight.response.truncated;
             if (hasCandidates && !preflight.acknowledged) return;
@@ -83,7 +93,7 @@ export default function CaptureReviewDialog({
                 duplicateReviewToken: preflight.response.reviewToken,
                 rememberExact,
                 version: review.version,
-            });
+            }, origin);
             return;
         }
 
@@ -93,9 +103,9 @@ export default function CaptureReviewDialog({
                 name: contact.name || null,
                 emails: contact.email ? [contact.email] : [],
                 phones: contact.phone ? [contact.phone] : [],
-            });
+            }, origin);
             const hasCandidates = response.candidates.length > 0 || response.truncated;
-            setPreflight({ status: 'ready', response, acknowledged: !hasCandidates });
+            setPreflight({ status: 'ready', response, acknowledged: !hasCandidates, origin });
             if (!hasCandidates) {
                 await resolve({
                     action: 'create',
@@ -103,7 +113,7 @@ export default function CaptureReviewDialog({
                     duplicateReviewToken: response.reviewToken,
                     rememberExact,
                     version: review.version,
-                });
+                }, origin);
             }
         } catch {
             setPreflight({ status: 'error', response: null, acknowledged: false });
@@ -132,7 +142,7 @@ export default function CaptureReviewDialog({
                 <dl className="grid gap-1 text-xs text-muted-foreground">
                     <div className="flex flex-wrap gap-1">
                         <dt>{t('occurredAt')}</dt>
-                        <dd>{formatDateTime(review.occurredAt, locale)}</dd>
+                        <dd>{formatDateTime(review.occurredAt, locale, timeZone)}</dd>
                     </div>
                     <div className="flex min-w-0 flex-wrap gap-1">
                         <dt>{t('sourceId')}</dt>

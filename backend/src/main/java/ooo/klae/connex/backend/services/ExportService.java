@@ -1,12 +1,18 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
@@ -22,6 +28,7 @@ import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
@@ -32,6 +39,7 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.util.CsvFormulaGuard;
+import ooo.klae.connex.backend.tenant.Permission;
 
 /**
  * Builds RFC-4180 CSV exports for contacts, companies, deals, and products, scoped to the active
@@ -51,6 +59,7 @@ public class ExportService {
     private final CompanyMapper companyMapper;
     private final ProductMapper productMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final TagMapper tagMapper;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
     private final CustomFieldValueService customFieldValueService;
@@ -66,12 +75,22 @@ public class ExportService {
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             WarmthFilter warmth) {
+        return exportPersons(query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, firstResponseStates, noFirstResponse, warmth, null);
+    }
+
+    /** Exports the browser's tag-filtered active set under the existing export restrictions. */
+    public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            WarmthFilter warmth, List<Integer> tagIds) {
         requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<Person> people = personMapper.getPersonsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope,
+            workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, false, warmth);
+            firstResponseStates, noFirstResponse, false, warmth, tagIds);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());
@@ -107,7 +126,11 @@ public class ExportService {
             row.add(disqualificationLabel(p.getDisqualifiedReason(), reasonLabels, locale));
             writeRow(sb, row);
         }
-        return sb.toString();
+        String csv = sb.toString();
+        auditService.recordDataExportCompleted("person", people.size(), memberScope,
+            hasFilters(query, companies, titles, noCompany, lifecycleStages, noLifecycle,
+                leadSources, noLeadSource, firstResponseStates, noFirstResponse, warmth), false);
+        return csv;
     }
 
     /**
@@ -116,9 +139,19 @@ public class ExportService {
     public String exportCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
             MemberScope memberScope, WarmthFilter warmth) {
         requireExportStepUp();
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        ExportedCsv exported = recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> exportCompaniesWithinVisibilityScope(query, industry, noIndustry, ids, memberScope, warmth, resolvedVisibilityScope));
+        auditService.recordDataExportCompleted("company", exported.rowCount(), memberScope,
+            hasFilters(query, industry, noIndustry, ids, warmth), false);
+        return exported.csv();
+    }
+
+    private ExportedCsv exportCompaniesWithinVisibilityScope(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
+            MemberScope memberScope, WarmthFilter warmth, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Company> companies = companyMapper.getCompaniesFiltered(
-            workspaceId, query, industry, noIndustry, ids, memberScope, false, warmth);
+            workspaceId, operationVisibilityScope.workspaceIdsJson(), query, industry, noIndustry, ids, memberScope, false, warmth);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "company");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("company", companies.stream().map(Company::getId).toList());
@@ -138,14 +171,18 @@ public class ExportService {
             row.add(joinTags(tags.get(c.getId())));
             writeRow(sb, row);
         }
-        return sb.toString();
+        return new ExportedCsv(sb.toString(), companies.size());
     }
 
-    /** CSV of products matching the current catalog search (all products when unfiltered). */
-    public String exportProducts(String query) {
+    /**
+     * CSV of products matching the catalog search and the browser's Billing, Availability, and
+     * Effective dates facets (all products when unfiltered).
+     */
+    public String exportProducts(String query, ProductFacetFilter facets) {
+        Objects.requireNonNull(facets, "facets");
         requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Product> products = productMapper.getFiltered(workspaceId, query);
+        List<Product> products = productMapper.getFiltered(workspaceId, query, facets);
 
         StringBuilder sb = new StringBuilder();
         writeRow(sb, List.of(
@@ -166,7 +203,10 @@ public class ExportService {
                 product.getEffectiveStart() == null ? "" : product.getEffectiveStart().toString(),
                 product.getEffectiveEnd() == null ? "" : product.getEffectiveEnd().toString()));
         }
-        return sb.toString();
+        String csv = sb.toString();
+        auditService.recordDataExportCompleted("product", products.size(), null,
+            hasFilters(query) || !facets.equals(ProductFacetFilter.none()), false);
+        return csv;
     }
 
     /**
@@ -177,10 +217,21 @@ public class ExportService {
             List<String> statuses, List<String> risks,
             MemberScope memberScope) {
         requireExportStepUp();
+        ExportedCsv exported = recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> exportDealsWithinDealVisibility(query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope));
+        auditService.recordDataExportCompleted("deal", exported.rowCount(), memberScope,
+            hasFilters(query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks), false);
+        return exported.csv();
+    }
+
+    private ExportedCsv exportDealsWithinDealVisibility(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
+            List<String> statuses, List<String> risks,
+            MemberScope memberScope) {
         List<Deal> deals = dealService.queryDealsForExport(
             query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
-        return renderDeals(deals);
+        return new ExportedCsv(renderDeals(deals), deals.size());
     }
 
     /** CSV of deals matching both a Smart Segment and the complete native list filter. */
@@ -189,13 +240,39 @@ public class ExportService {
             List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
         requireExportStepUp();
+        ExportedCsv exported = recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> exportSegmentDealsWithinDealVisibility(definition, query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope));
+        auditService.recordDataExportCompleted("deal", exported.rowCount(), memberScope, true, true);
+        return exported.csv();
+    }
+
+    private ExportedCsv exportSegmentDealsWithinDealVisibility(SegmentDefinition definition, String query, String currency,
+            List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         List<Deal> deals = dealService.querySegmentDealsForExport(
             definition, query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
-        return renderDeals(deals);
+        return new ExportedCsv(renderDeals(deals), deals.size());
+    }
+
+    private record ExportedCsv(String csv, int rowCount) {
+    }
+
+    private static boolean hasFilters(Object... values) {
+        for (Object value : values) {
+            if (value instanceof String text && !text.isBlank()
+                    || value instanceof List<?> list && !list.isEmpty()
+                    || Boolean.TRUE.equals(value)
+                    || value instanceof WarmthFilter warmth && warmth.restrictsRows()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void requireExportStepUp() {
+        workspaceService.requirePermission(Permission.EXPORT_DATA);
         try {
             sessionSecurityService.requireExportStepUp();
         } catch (RecentAuthenticationRequiredException exception) {
@@ -206,6 +283,7 @@ public class ExportService {
 
     private String renderDeals(List<Deal> deals) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "deal");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("deal", deals.stream().map(Deal::getId).toList());
@@ -215,17 +293,20 @@ public class ExportService {
         for (Company c : companyMapper.getCompaniesForDedup(workspaceId)) companyNames.put(c.getId(), c.getName());
         Map<Integer, String> pipelineNames = new HashMap<>();
         Map<Integer, String> stageNames = new HashMap<>();
-        for (var pipeline : pipelineMapper.getAllPipelines(workspaceId)) {
+        for (var pipeline : pipelineMapper.getAllPipelines(workspaceId, orgWorkspaceIdsJson)) {
             pipelineNames.put(pipeline.getId(), pipeline.getName());
-            for (var stage : pipelineMapper.getStagesByPipelineId(workspaceId, pipeline.getId())) {
+            for (var stage : pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipeline.getId())) {
                 stageNames.put(stage.getId(), stage.getName());
             }
         }
 
         StringBuilder sb = new StringBuilder();
-        writeRow(sb, headers(
+        List<String> columnHeaders = headers(
             List.of("id", "name", "value", "currency", "company", "pipeline", "stage", "expectedCloseDate", "status"),
-            defs));
+            defs);
+        columnHeaders.add("closedAt");
+        columnHeaders.add("createdAt");
+        writeRow(sb, columnHeaders);
         for (Deal d : deals) {
             List<String> row = new ArrayList<>();
             row.add(Integer.toString(d.getId()));
@@ -239,9 +320,17 @@ public class ExportService {
             row.add(dealStatus(d.getWon()));
             appendCustom(row, defs, custom.get(d.getId()));
             row.add(joinTags(tags.get(d.getId())));
+            row.add(exportInstant(d.getClosedAt()));
+            row.add(exportInstant(d.getCreatedAt()));
             writeRow(sb, row);
         }
         return sb.toString();
+    }
+
+    private static String exportInstant(String value) {
+        return value == null || value.isBlank() ? null
+            : LocalDateTime.parse(value, DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss"))
+                .toInstant(ZoneOffset.UTC).toString();
     }
 
     private List<CustomFieldDefinition> activeDefinitions(int workspaceId, String entityType) {

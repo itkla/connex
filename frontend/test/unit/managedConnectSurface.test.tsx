@@ -6,7 +6,7 @@ import { NowProvider } from "@/app/hooks/useNow";
 
 vi.mock("next-intl", () => ({
     useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
-    useLocale: () => "en",
+    useTimeZone: () => "UTC", useLocale: () => "en",
 }));
 
 function renderCard(overrides: { managedUnavailable: boolean }): string {

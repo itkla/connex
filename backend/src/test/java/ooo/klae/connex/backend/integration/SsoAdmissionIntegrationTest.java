@@ -40,6 +40,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.Organization;
@@ -58,6 +59,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /**
  * Exercises verified OIDC callback completion with real account, identity, membership, and session
@@ -66,6 +68,7 @@ import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
  */
 @SpringBootTest(properties = "connex.signup.mode=invite")
 class SsoAdmissionIntegrationTest {
+    @Autowired private JdbcTemplate approvalJdbc;
 
     private static final String ISSUER = "https://attacker.example.test";
     private static final String GOOGLE_ISSUER = "https://accounts.google.com";
@@ -269,6 +272,8 @@ class SsoAdmissionIntegrationTest {
         request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, actor.getId());
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, actor.getId());
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(approvalJdbc, actor);
+        OwnershipOfferTestFixtures.stepUp(approvalJdbc, actor, request.getSession(), credential);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         return actor;
     }

@@ -20,14 +20,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
@@ -40,11 +45,14 @@ import ooo.klae.connex.backend.beans.TaskReminderCandidate;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -89,6 +97,8 @@ public class NotificationReconciliationService {
     private final DealRiskService dealRiskService;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * Reconciles a workspace's reminder notifications. The {@code includeRelationshipNudges} flag
@@ -108,31 +118,59 @@ public class NotificationReconciliationService {
      * inbox is never half-written. Pass collaborators must not join this transaction with their own
      * {@code @Transactional}: a caught exception that crossed a joined proxy would mark the
      * transaction rollback-only and void this isolation.
+     *
+     * @return observed changes, conservatively counting degraded passes as work so failures are never sampled away
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
+    public int reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
+        RecordVisibilityScope recordVisibilityScope = includeRelationshipNudges
+            ? preloadRecordVisibilityScope(workspaceId)
+            : null;
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        if (recordVisibilityScope == null) {
+            return Objects.requireNonNull(transaction.execute(status ->
+                reconcileWorkspace(workspaceId, includeRelationshipNudges, null)));
+        }
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId, recordVisibilityScope, () ->
+            Objects.requireNonNull(transaction.execute(status ->
+                reconcileWorkspace(workspaceId, includeRelationshipNudges, recordVisibilityScope))));
+    }
+
+    /** Opens the reminder snapshot only after the organization mutex has been acquired. */
+    private int reconcileWorkspace(
+            int workspaceId,
+            boolean includeRelationshipNudges,
+            RecordVisibilityScope recordVisibilityScope) {
         duplicateDecisionLockService.lockBackgroundOrganization(workspaceId);
-        reconcileSourcePayloads(workspaceId);
+        int changedCount = reconcileSourcePayloads(workspaceId);
         Instant evaluationInstant = clock.instant();
         String triggeredAt = utcTimestamp(evaluationInstant);
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
-        List<HistoricalNotificationBaseline> baselines =
-            notificationMapper.findHistoricalNotificationBaselines(workspaceId);
         Map<PreferenceKey, Boolean> preferences = loadPreferences(workspaceId);
         Map<ReminderKey, Notification> expected = new LinkedHashMap<>();
         Set<String> managedTypes = new HashSet<>();
 
-        runManagedPass(workspaceId, expected, managedTypes, TASK_TYPE, true, true, "Task-reminder",
+        changedCount += runManagedPass(workspaceId, expected, managedTypes, TASK_TYPE, true, true, "Task-reminder",
             staged -> addTaskReminders(
                 workspaceId, existing, staged, preferences, triggeredAt, evaluationInstant));
-        runManagedPass(workspaceId, expected, managedTypes, DEAL_TYPE, true, true, "Deal-close-reminder",
+        changedCount += runManagedPass(workspaceId, expected, managedTypes, DEAL_TYPE, true, true, "Deal-close-reminder",
             staged -> addDealCloseReminders(
                 workspaceId, existing, staged, preferences, triggeredAt, evaluationInstant));
 
         RelationshipSourceSnapshot relationshipSources =
-            includeRelationshipNudges
+            includeRelationshipNudges && recordVisibilityScope != null
                 ? relationshipSourceSnapshot(workspaceId, evaluationInstant)
                 : null;
+        if (includeRelationshipNudges && relationshipSources == null) changedCount++;
+        if (relationshipSources != null && recordVisibilityScope != null) {
+            int baselineChanges = baselineWarmthModel(workspaceId, evaluationInstant, recordVisibilityScope);
+            if (baselineChanges < 0) {
+                changedCount++;
+                relationshipSources = null;
+            } else {
+                changedCount += baselineChanges;
+            }
+        }
         Map<Integer, RelationshipTemperatureDto> temperatures =
             relationshipSources == null
                 ? null
@@ -144,7 +182,7 @@ public class NotificationReconciliationService {
         Map<ReminderKey, String> dealRiskSourceStates = new LinkedHashMap<>();
         if (includeRelationshipNudges) {
             boolean scored = temperatures != null;
-            runManagedPass(workspaceId, expected, managedTypes, RELATIONSHIP_TYPE, true, scored,
+            changedCount += runManagedPass(workspaceId, expected, managedTypes, RELATIONSHIP_TYPE, true, scored,
                 "Relationship-nudge",
                 staged -> addRelationshipNudges(
                     workspaceId,
@@ -154,13 +192,14 @@ public class NotificationReconciliationService {
                     triggeredAt,
                     temperatures,
                     evaluationInstant));
-            runManagedPass(workspaceId, expected, managedTypes, INTRO_OPPORTUNITY_TYPE,
-                properties.isIntroOpportunitiesEnabled(), scored, "Intro-opportunity",
-                staged -> addIntroOpportunities(workspaceId, staged, preferences, triggeredAt, temperatures));
+            changedCount += runManagedPass(workspaceId, expected, managedTypes, INTRO_OPPORTUNITY_TYPE,
+                properties.isIntroOpportunitiesEnabled(), scored && recordVisibilityScope != null, "Intro-opportunity",
+                staged -> addIntroOpportunities(
+                    workspaceId, staged, preferences, triggeredAt, temperatures, recordVisibilityScope));
             Map<ReminderKey, String> stagedDealRiskSourceStates =
                 new LinkedHashMap<>();
-            runManagedPass(workspaceId, expected, managedTypes, DEAL_RISK_TYPE,
-                properties.isDealRiskEnabled(), scored, "Deal-risk",
+            changedCount += runManagedPass(workspaceId, expected, managedTypes, DEAL_RISK_TYPE,
+                properties.isDealRiskEnabled(), scored && recordVisibilityScope != null, "Deal-risk",
                 staged -> addDealRiskNotifications(
                     workspaceId,
                     staged,
@@ -168,7 +207,7 @@ public class NotificationReconciliationService {
                     triggeredAt,
                     temperatures,
                     contactSourceStateHashes,
-                    stagedDealRiskSourceStates));
+                    stagedDealRiskSourceStates, recordVisibilityScope));
             if (managedTypes.contains(DEAL_RISK_TYPE)
                     && properties.isDealRiskEnabled()
                     && scored) {
@@ -176,7 +215,9 @@ public class NotificationReconciliationService {
             }
         }
 
-        Set<ReminderKey> historicallySuppressed = reconcileHistoricalBaselines(
+        List<HistoricalNotificationBaseline> baselines =
+            notificationMapper.findHistoricalNotificationBaselines(workspaceId);
+        HistoricalBaselineResult baselineResult = reconcileHistoricalBaselines(
             workspaceId,
             expected,
             managedTypes,
@@ -184,10 +225,13 @@ public class NotificationReconciliationService {
             contactSourceStateHashes,
             preferences,
             dealRiskSourceStates);
-        expected.entrySet().stream()
-            .filter(entry -> !historicallySuppressed.contains(entry.getKey()))
-            .map(Map.Entry::getValue)
-            .forEach(notificationDelivery::deliver);
+        Set<ReminderKey> historicallySuppressed = baselineResult.suppressed();
+        changedCount += baselineResult.changedCount();
+        for (Map.Entry<ReminderKey, Notification> entry : expected.entrySet()) {
+            if (!historicallySuppressed.contains(entry.getKey()) && notificationDelivery.deliver(entry.getValue())) {
+                changedCount++;
+            }
+        }
         for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
             Notification notification = entry.getValue();
             if (notification.getResolvedAt() == null
@@ -200,58 +244,85 @@ public class NotificationReconciliationService {
                     notification.getId(),
                     triggeredAt
                 );
+                log.debug("Notification state decision branch=missing_reminder workspace={} recipient={} "
+                        + "notificationId={} rows={} transactionActive={} synchronizationActive={}",
+                    workspaceId, notification.getRecipientId(), notification.getId(), rows,
+                    TransactionSynchronizationManager.isActualTransactionActive(),
+                    TransactionSynchronizationManager.isSynchronizationActive());
                 if (rows > 0) {
+                    changedCount += rows;
                     stateVersionService.markChanged(notification.getRecipientId());
                 }
             }
         }
+        return changedCount;
     }
 
     /** Resolves payloads whose source or context is no longer accessible to the recipient. */
-    public void reconcileSourcePayloads(int workspaceId) {
+    public int reconcileSourcePayloads(int workspaceId) {
         List<Integer> recipientIds = notificationMapper.findInaccessibleNotificationRecipientIds(workspaceId);
         if (recipientIds.isEmpty()) {
-            return;
+            return 0;
         }
         int rows = notificationMapper.resolveInaccessibleNotifications(
             workspaceId, utcTimestamp(clock.instant()));
+        log.debug("Notification state decision branch=inaccessible_sources workspace={} recipients={} "
+                + "rows={} transactionActive={} synchronizationActive={}",
+            workspaceId, recipientIds, rows, TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isSynchronizationActive());
         if (rows > 0) {
             recipientIds.forEach(stateVersionService::markChanged);
         }
+        return rows;
     }
 
+    /** Uses a record-visibility scope resolved before the historical writer acquired any locks. */
     HistoricalExpectationSnapshot historicalExpectationSnapshot(
             int workspaceId,
-            Instant evaluationInstant) {
+            Instant evaluationInstant,
+            RecordVisibilityScope recordVisibilityScope) {
         return historicalExpectationSnapshot(
             workspaceId,
             evaluationInstant,
-            HistoricalBaselineScope.empty());
+            HistoricalBaselineScope.empty(),
+            recordVisibilityScope);
     }
 
     HistoricalExpectationSnapshot historicalExpectationSnapshot(
             int workspaceId,
             Instant evaluationInstant,
-            HistoricalBaselineScope exclusion) {
+            HistoricalBaselineScope exclusion,
+            RecordVisibilityScope recordVisibilityScope) {
+        return historicalExpectationSnapshot(workspaceId, evaluationInstant, exclusion, recordVisibilityScope, false);
+    }
+
+    private HistoricalExpectationSnapshot historicalExpectationSnapshot(
+            int workspaceId,
+            Instant evaluationInstant,
+            HistoricalBaselineScope exclusion,
+            RecordVisibilityScope recordVisibilityScope,
+            boolean warmthOnly) {
         String triggeredAt = utcTimestamp(evaluationInstant);
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
         Map<PreferenceKey, Boolean> preferences = Map.of();
         Map<ReminderKey, Notification> expected = new LinkedHashMap<>();
-        addTaskReminders(
-            workspaceId,
-            existing,
-            expected,
-            preferences,
-            triggeredAt,
-            evaluationInstant,
-            exclusion.taskIds());
-        addDealCloseReminders(
-            workspaceId,
-            existing,
-            expected,
-            preferences,
-            triggeredAt,
-            evaluationInstant);
+        if (!warmthOnly) {
+            addTaskReminders(
+                workspaceId,
+                existing,
+                expected,
+                preferences,
+                triggeredAt,
+                evaluationInstant,
+                exclusion.taskIds());
+            addDealCloseReminders(
+                workspaceId,
+                existing,
+                expected,
+                preferences,
+                triggeredAt,
+                evaluationInstant);
+        }
         RelationshipSourceSnapshot relationshipSources =
             relationshipSourceSnapshotStrict(
                 workspaceId, evaluationInstant, exclusion);
@@ -269,7 +340,7 @@ public class NotificationReconciliationService {
             evaluationInstant);
         if (properties.isIntroOpportunitiesEnabled()) {
             addIntroOpportunities(
-                workspaceId, expected, preferences, triggeredAt, temperatures);
+                workspaceId, expected, preferences, triggeredAt, temperatures, recordVisibilityScope);
         }
         if (properties.isDealRiskEnabled()) {
             Map<ReminderKey, String> dealRiskSourceStates = new LinkedHashMap<>();
@@ -280,7 +351,7 @@ public class NotificationReconciliationService {
                 triggeredAt,
                 temperatures,
                 contactSourceStateHashes,
-                dealRiskSourceStates);
+                dealRiskSourceStates, recordVisibilityScope);
             Map<HistoricalExpectationKey, String> historicalSourceStates =
                 historicalSourceStates(workspaceId, dealRiskSourceStates);
             Map<HistoricalExpectationKey, HistoricalExpectation> snapshot =
@@ -421,7 +492,56 @@ public class NotificationReconciliationService {
         }
     }
 
-    private Set<ReminderKey> reconcileHistoricalBaselines(
+    private int baselineWarmthModel(
+            int workspaceId,
+            Instant evaluationInstant,
+            RecordVisibilityScope visibilityScope) {
+        String currentVersion = RelationshipWarmthModel.current().version();
+        String previousVersion = notificationMapper.getWarmthModelVersion(workspaceId);
+        if (currentVersion.equals(previousVersion)) return 0;
+        int changedCount = 0;
+        if (previousVersion != null) {
+            HistoricalExpectationSnapshot snapshot;
+            try {
+                snapshot = historicalExpectationSnapshot(workspaceId, evaluationInstant,
+                    HistoricalBaselineScope.empty(), visibilityScope, true);
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                log.warn("Warmth model baseline failed for workspace={} exceptionClass={}",
+                    workspaceId, exception.getClass().getSimpleName());
+                return -1;
+            }
+            changedCount += notificationMapper.deletePreviousWarmthBaselines(workspaceId, currentVersion);
+            List<HistoricalNotificationBaseline> replacements = new ArrayList<>();
+            for (Map.Entry<HistoricalExpectationKey, HistoricalExpectation> entry
+                    : snapshot.expectations().entrySet()) {
+                HistoricalExpectation expectation = entry.getValue();
+                if (!warmthDerivedType(expectation.type())) continue;
+                HistoricalNotificationBaseline baseline = new HistoricalNotificationBaseline();
+                baseline.setWorkspaceId(workspaceId);
+                baseline.setRecipientId(entry.getKey().recipientId());
+                baseline.setDedupeKey(entry.getKey().dedupeKey());
+                baseline.setNotificationType(expectation.type());
+                baseline.setBaselineSeverity(expectation.severity());
+                baseline.setSourceStateHash(expectation.sourceStateHash());
+                baseline.setImportRunId(hashValues(List.of("warmth-model-cutover", currentVersion)));
+                replacements.add(baseline);
+            }
+            for (int offset = 0; offset < replacements.size(); offset += BASELINE_BATCH_SIZE) {
+                changedCount += notificationMapper.insertHistoricalNotificationBaselines(workspaceId,
+                    replacements.subList(offset, Math.min(offset + BASELINE_BATCH_SIZE, replacements.size())));
+            }
+        }
+        changedCount += notificationMapper.setWarmthModelVersion(workspaceId, currentVersion);
+        return changedCount;
+    }
+
+    private static boolean warmthDerivedType(String type) {
+        return RELATIONSHIP_TYPE.equals(type) || INTRO_OPPORTUNITY_TYPE.equals(type) || DEAL_RISK_TYPE.equals(type);
+    }
+
+    private HistoricalBaselineResult reconcileHistoricalBaselines(
             int workspaceId,
             Map<ReminderKey, Notification> expected,
             Set<String> managedTypes,
@@ -430,8 +550,13 @@ public class NotificationReconciliationService {
             Map<PreferenceKey, Boolean> preferences,
             Map<ReminderKey, String> dealRiskSourceStates) {
         Set<ReminderKey> suppressed = new HashSet<>();
+        int changedCount = 0;
         List<HistoricalNotificationBaseline> removals = new ArrayList<>();
         for (HistoricalNotificationBaseline baseline : baselines) {
+            if (warmthDerivedType(baseline.getNotificationType())
+                    && !RelationshipWarmthModel.current().version().equals(baseline.getModelVersion())) {
+                continue;
+            }
             ReminderKey key = new ReminderKey(
                 workspaceId, baseline.getRecipientId(), baseline.getDedupeKey());
             Notification notification = expected.get(key);
@@ -468,6 +593,7 @@ public class NotificationReconciliationService {
                 Math.min(offset + BASELINE_BATCH_SIZE, removals.size()));
             int deleted = notificationMapper.deleteHistoricalNotificationBaselines(
                 workspaceId, batch);
+            changedCount += deleted;
             if (deleted != batch.size()) {
                 for (HistoricalNotificationBaseline baseline : batch) {
                     ReminderKey key = new ReminderKey(
@@ -480,7 +606,7 @@ public class NotificationReconciliationService {
                 }
             }
         }
-        return suppressed;
+        return new HistoricalBaselineResult(Set.copyOf(suppressed), changedCount);
     }
 
     /**
@@ -493,7 +619,7 @@ public class NotificationReconciliationService {
      * logged, its staged notifications are discarded, and its type is left unmanaged so the
      * resolve pass cannot clear reminders that were never recomputed.
      */
-    private void runManagedPass(
+    private int runManagedPass(
         int workspaceId,
         Map<ReminderKey, Notification> expected,
         Set<String> managedTypes,
@@ -505,18 +631,22 @@ public class NotificationReconciliationService {
     ) {
         if (!enabled) {
             managedTypes.add(type);
-            return;
+            return 0;
         }
         if (!ready) {
-            return;
+            return 0;
         }
         try {
             Map<ReminderKey, Notification> staged = new LinkedHashMap<>();
             pass.accept(staged);
             expected.putAll(staged);
             managedTypes.add(type);
+            return 0;
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             log.warn("{} reconciliation failed for workspace={}", label, workspaceId, exception);
+            return 1;
         }
     }
 
@@ -652,14 +782,15 @@ public class NotificationReconciliationService {
         String triggeredAt,
         Map<Integer, RelationshipTemperatureDto> temperatures,
         Map<Integer, String> contactSourceStateHashes,
-        Map<ReminderKey, String> sourceStates
+        Map<ReminderKey, String> sourceStates,
+        RecordVisibilityScope scope
     ) {
         Map<Integer, DealRiskService.NotificationRiskState> byDeal = new HashMap<>();
         for (DealRiskService.NotificationRiskState state
                 : dealRiskService.assessWorkspaceNotificationStates(
                     workspaceId,
                     temperatures,
-                    contactSourceStateHashes)) {
+                    contactSourceStateHashes, scope)) {
             byDeal.put(state.assessment().getDealId(), state);
         }
         if (byDeal.isEmpty()) {
@@ -734,6 +865,18 @@ public class NotificationReconciliationService {
         return notification;
     }
 
+    /** Preserves pass isolation when the pre-lock control snapshot is unavailable. */
+    private RecordVisibilityScope preloadRecordVisibilityScope(int workspaceId) {
+        try {
+            return recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
+            return null;
+        }
+    }
+
     /**
      * Surfaces the workspace's top reverse-introduction opportunities (issue #43) as info-level
      * nudges to every member — anyone can make the intro. Each opportunity is deduped per recipient
@@ -746,10 +889,11 @@ public class NotificationReconciliationService {
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
         String triggeredAt,
-        Map<Integer, RelationshipTemperatureDto> temperatures
+        Map<Integer, RelationshipTemperatureDto> temperatures,
+        RecordVisibilityScope recordVisibilityScope
     ) {
         List<IntroSuggestionDto> suggestions = introductionService.computeSuggestions(
-            workspaceId, properties.getIntroOpportunityLimit(), temperatures);
+            workspaceId, properties.getIntroOpportunityLimit(), temperatures, recordVisibilityScope);
         if (suggestions.isEmpty()) {
             return;
         }
@@ -887,6 +1031,10 @@ public class NotificationReconciliationService {
         String cutoff = utcTimestamp(clock.instant().minusSeconds(retentionDays * 86_400L));
         List<Integer> recipientIds = notificationMapper.findPurgeRecipientIds(workspaceId, cutoff);
         int rows = notificationMapper.purgeWorkspaceReminderHistory(workspaceId, cutoff);
+        log.debug("Notification state decision branch=purged_history workspace={} recipients={} "
+                + "rows={} transactionActive={} synchronizationActive={}",
+            workspaceId, recipientIds, rows, TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isSynchronizationActive());
         if (rows > 0) {
             recipientIds.forEach(stateVersionService::markChanged);
         }
@@ -971,6 +1119,8 @@ public class NotificationReconciliationService {
                     Set.of(),
                     Set.of(),
                     Set.of()));
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             log.warn("Warmth scoring failed for workspace={}; skipping relationship passes this cycle",
                 workspaceId, exception);
@@ -1326,6 +1476,8 @@ public class NotificationReconciliationService {
     private static String utcTimestamp(Instant instant) {
         return LocalDateTime.ofInstant(instant, ZoneOffset.UTC).format(MYSQL_DATETIME);
     }
+
+    private record HistoricalBaselineResult(Set<ReminderKey> suppressed, int changedCount) {}
 
     private record ReminderKey(int workspaceId, int recipientId, String dedupeKey) {}
 

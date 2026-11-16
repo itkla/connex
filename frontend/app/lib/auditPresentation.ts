@@ -32,7 +32,19 @@ export type AuditMetadataLabelKey =
     | 'metaStopReason'
     | 'metaDemaskWarnings'
     | 'metaParseOutcome'
-    | 'metaReason';
+    | 'metaReason'
+    | 'metaExportRows'
+    | 'metaExportScope'
+    | 'metaExportFiltered'
+    | 'metaExportSegment'
+    | 'metaExportSelected'
+    | 'metaExportFormat'
+    | 'metaExportImages'
+    | 'metaExportDocuments'
+    | 'metaExportWidgets'
+    | 'metaExportTables'
+    | 'metaExportObjects'
+    | 'metaExportSnapshot';
 
 export type AuditMetadataRow = {
     key: string;
@@ -257,6 +269,33 @@ const AI_FIELDS: readonly MetadataField[] = [
     { key: 'reason', labelKey: 'metaReason', validate: knownString(AI_REASONS) },
 ];
 
+const EXPORT_TARGETS = new Map([
+    ['report.export', 'export.report'],
+    ['org.workspace.export', 'export.workspace'],
+    ['org.workspace.export_started', 'export.workspace'],
+    ['person.export', 'export.person'],
+    ['company.export', 'export.company'],
+    ['deal.export', 'export.deal'],
+    ['product.export', 'export.product'],
+    ['audit.export', 'export.audit'],
+    ['organization.audit.export', 'export.audit'],
+]);
+
+const EXPORT_FIELDS: readonly MetadataField[] = [
+    { key: 'format', labelKey: 'metaExportFormat', validate: knownString(new Set(['csv', 'png', 'zip'])) },
+    { key: 'imageCount', labelKey: 'metaExportImages', validate: nonNegativeInteger },
+    { key: 'documentCount', labelKey: 'metaExportDocuments', validate: nonNegativeInteger },
+    { key: 'widgetCount', labelKey: 'metaExportWidgets', validate: nonNegativeInteger },
+    { key: 'tableCount', labelKey: 'metaExportTables', validate: nonNegativeInteger },
+    { key: 'objectCount', labelKey: 'metaExportObjects', validate: nonNegativeInteger },
+    { key: 'snapshot', labelKey: 'metaExportSnapshot', validate: booleanValue },
+    { key: 'rowCount', labelKey: 'metaExportRows', validate: nonNegativeInteger },
+    { key: 'scope', labelKey: 'metaExportScope', validate: knownString(new Set(['workspace', 'organization'])) },
+    { key: 'filtered', labelKey: 'metaExportFiltered', validate: booleanValue },
+    { key: 'segment', labelKey: 'metaExportSegment', validate: booleanValue },
+    { key: 'selected', labelKey: 'metaExportSelected', validate: booleanValue },
+];
+
 function metadataRows(
     changes: Record<string, unknown> | null | undefined,
     fields: readonly MetadataField[],
@@ -270,11 +309,11 @@ function metadataRows(
     });
 }
 
-function fixedMetadata(entry: Pick<AuditLogEntry, 'entityType' | 'entityId' | 'targetLabel' | 'outcome'>) {
+function fixedMetadata(entry: Pick<AuditLogEntry, 'entityType' | 'entityId' | 'targetLabel' | 'outcome'>): AuditMetadataRow[] {
     const target = entry.targetLabel
         ?? (entry.entityType && entry.entityId != null ? `${entry.entityType} #${entry.entityId}` : null);
     return [
-        { key: 'result', labelKey: 'metaResult' as const, value: entry.outcome, mono: false },
+        { key: 'result', labelKey: 'metaResult' as const, value: entry.outcome ?? null, mono: false },
         { key: 'target', labelKey: 'metaTarget' as const, value: target, mono: false },
     ];
 }
@@ -305,7 +344,7 @@ export function auditOutcome(
     if (isSecretEntry(entry)) {
         return entry.outcome === 'success' || entry.outcome === 'failure' ? entry.outcome : null;
     }
-    if (!isAiEntry(entry)) return entry.outcome;
+    if (!isAiEntry(entry)) return entry.outcome ?? null;
     const metadataOutcome = knownString(AI_OUTCOMES)(entry.changes?.outcome);
     if (typeof metadataOutcome === 'string') return metadataOutcome;
     return entry.outcome != null && AI_OUTCOMES.has(entry.outcome) ? entry.outcome : null;
@@ -314,7 +353,9 @@ export function auditOutcome(
 /** Returns the target label that may be rendered for an audit row. */
 export function auditTargetLabel(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'targetLabel' | 'changes'>,
-): string | null {
+): string | null | undefined {
+    const exportTarget = EXPORT_TARGETS.get(entry.action);
+    if (exportTarget !== undefined) return exportTarget;
     if (isSecretEntry(entry)) {
         const purpose = knownString(SECRET_PURPOSES)(entry.changes?.purpose);
         if (typeof purpose === 'string') return purpose;
@@ -339,7 +380,7 @@ export function auditTargetLabel(
 export function auditSummary(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'summary'>,
 ): string | null {
-    return isSensitiveAuditEntry(entry) ? null : entry.summary;
+    return isSensitiveAuditEntry(entry) || EXPORT_TARGETS.has(entry.action) ? null : entry.summary ?? null;
 }
 
 /** Returns a controlled error category for sensitive audit rows. */
@@ -356,6 +397,15 @@ export function presentAuditEntry(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'entityId' | 'targetLabel' | 'outcome' | 'changes'>,
 ): AuditPresentation {
     const changes = entry.changes;
+    if (EXPORT_TARGETS.has(entry.action)) {
+        return {
+            diffs: [],
+            metadata: [
+                ...fixedMetadata({ ...entry, targetLabel: auditTargetLabel(entry) }),
+                ...metadataRows(changes, EXPORT_FIELDS),
+            ],
+        };
+    }
     const secretEntry = isSecretEntry(entry);
     if (secretEntry || isAiEntry(entry)) {
         const result = auditOutcome(entry);

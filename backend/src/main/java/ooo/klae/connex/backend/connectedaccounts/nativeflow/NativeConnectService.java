@@ -96,7 +96,7 @@ public class NativeConnectService {
     public NativePairingStatusResponse pairingStatus(String provider) {
         requireNativeProvider(provider);
         int userId = workspaceService.getCurrentUserId();
-        NativeConnectSession session = tenantWorkScope.unrouted(
+        NativeConnectSession session = tenantWorkScope.unroutedRead(
             () -> sessionPersistence.poll(userId, provider));
         if (session == null) {
             return new NativePairingStatusResponse("none", null, null);

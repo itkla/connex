@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArrowTopRightOnSquareIcon,
     BoltIcon,
@@ -53,8 +53,10 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import DealAvatar from '@/app/components/records/deals/DealAvatar';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
+import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
+import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
-import type { Activity, Company, CompanyEngagement, Contact, DealRisk, DealSummary, Task } from '@/app/lib/types';
+import type { Activity, Company, CompanyEngagement, Contact, Deal, DealRisk, DealSummary, Task } from '@/app/lib/types';
 
 type Props = {
     target: PeekTarget | null;
@@ -71,7 +73,7 @@ type Props = {
 type PeekData =
     | { kind: 'person'; contact: Contact }
     | { kind: 'company'; company: Company; engagement: CompanyEngagement | null }
-    | { kind: 'deal'; summary: DealSummary; company: Company | null; risk: DealRisk | null; tasks: Task[]; activities: Activity[] };
+    | { kind: 'deal'; deal: Deal; summary: DealSummary; company: Company | null; risk: DealRisk | null; tasks: Task[]; activities: Activity[] };
 
 const PEEK_COLLECTIONS = {
     person: 'contacts',
@@ -101,7 +103,8 @@ function RecordPeekDrawer({
     const messageT = useTranslations();
     const locale = useLocale();
     const router = useRouter();
-    const { run, getAction, isAvailableForRecord } = useActions();
+    const { run, getAction, isAvailableForRecord, context } = useActions();
+    const reportingTimezone = context.workspace?.timezone ?? context.user?.timezone ?? 'UTC';
     const { record: recordRecent } = useRecentRecords();
     const isMobile = useIsMobile();
 
@@ -254,7 +257,7 @@ function RecordPeekDrawer({
                         </div>
                     )}
 
-                    {data && !loading && <PeekBody data={data} locale={locale} t={t} />}
+                    {data && !loading && <PeekBody data={data} locale={locale} t={t} reportingTimezone={reportingTimezone} />}
                 </div>
 
                 {target && !error && (
@@ -323,7 +326,8 @@ function PeekAvatar({ target, data }: { target: PeekTarget | null; data: PeekDat
     return <span className="grid size-10 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"><BuildingOffice2Icon className="size-5" /></span>;
 }
 
-function PeekBody({ data, locale, t }: { data: PeekData; locale: string; t: ReturnType<typeof useTranslations> }) {
+function PeekBody({ data, locale, t, reportingTimezone }: { data: PeekData; locale: string; t: ReturnType<typeof useTranslations>; reportingTimezone: string }) {
+    const timeZone = useTimeZone();
     const { factorText } = useRiskText();
     if (data.kind === 'person') {
         const openTasks = (data.contact.tasks ?? []).filter((task) => !task.completed);
@@ -366,7 +370,8 @@ function PeekBody({ data, locale, t }: { data: PeekData; locale: string; t: Retu
                     [t('status'), dealStatusLabel(data.summary.status, t)],
                     [t('stage'), data.summary.stageName ?? '—'],
                     [t('value'), formatCurrency(data.summary.value, data.summary.currency, locale)],
-                    [t('expectedClose'), data.summary.expectedCloseDate ? formatShortDate(data.summary.expectedCloseDate, locale) : '—'],
+                    [t('closedAt'), isDealClosed(data.deal) ? formatDealClosedAt(data.deal.closedAt, locale, reportingTimezone) : '—'],
+                    [t('expectedClose'), data.summary.expectedCloseDate ? formatShortDate(data.summary.expectedCloseDate, locale, timeZone) : '—'],
                     [t('company'), data.summary.companyName ?? '—'],
                     [t('owner'), data.summary.ownerName ?? '—'],
                 ]}
@@ -408,7 +413,7 @@ function Facts({ rows }: { rows: [string, string][] }) {
 }
 
 function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: ReturnType<typeof useTranslations> }) {
-    const now = useLiveNow();
+    const timeZone = useTimeZone();
     return (
         <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -423,7 +428,7 @@ function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: R
                         <li key={task.id} className="flex items-center justify-between gap-3 text-sm">
                             <span className="min-w-0 truncate text-foreground">{task.description}</span>
                             {task.dueDate && (
-                                <span className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(task.dueDate, locale, now)}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{formatShortDate(task.dueDate, locale, timeZone)}</span>
                             )}
                         </li>
                     ))}
@@ -434,6 +439,7 @@ function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: R
 }
 
 function ActivitySection({ activities, locale, t }: { activities: Activity[]; locale: string; t: ReturnType<typeof useTranslations> }) {
+    const timeZone = useTimeZone();
     const now = useLiveNow();
     return (
         <section className="space-y-2">
@@ -450,7 +456,7 @@ function ActivitySection({ activities, locale, t }: { activities: Activity[]; lo
                             <p className="truncate text-sm text-foreground">{activity.subject}</p>
                             <p className="text-xs text-muted-foreground">
                                 {activity.type}
-                                {activity.timestamp ? ` · ${formatRelativeTime(activity.timestamp, locale, now)}` : ''}
+                                {activity.timestamp ? ` · ${formatRelativeTime(activity.timestamp, locale, now, timeZone)}` : ''}
                             </p>
                         </li>
                     ))}
@@ -516,5 +522,5 @@ async function loadPeek(target: PeekTarget): Promise<PeekData> {
     const company = deal.company == null
         ? null
         : await getCompanyById(deal.company).catch(() => null);
-    return { kind: 'deal', summary, company, risk, tasks, activities: sortActivities(activities) };
+    return { kind: 'deal', deal, summary, company, risk, tasks, activities: sortActivities(activities) };
 }

@@ -25,7 +25,7 @@ export default async function TaskSummary({
                 </span>
                 <Link
                     href="/activity/tasks"
-                    className="text-xs text-brand hover:text-brand-hover"
+                    className="text-xs text-brand-text hover:text-brand-text"
                 >
                     {t('viewAll')}
                 </Link>

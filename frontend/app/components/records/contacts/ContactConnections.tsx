@@ -23,10 +23,12 @@ import {
     getContactIntroPath,
     removeContactConnection,
 } from '@/app/lib/api';
+import { useDetailSections, useDetailSectionData } from '@/app/hooks/useDetailSections';
+import DetailSectionState from '@/app/components/records/DetailSectionState';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useContactIntroAsk } from '@/app/components/records/contacts/introAsk';
 import { INTRODUCTIONS_PATH } from '@/app/components/introductions/introductionLinks';
-import type { Contact, IntroPath, PersonConnection } from '@/app/lib/types';
+import type { ContactPickerOption, IntroPath, PersonConnection } from '@/app/lib/types';
 
 const TYPES = ['knows', 'colleague', 'former_colleague', 'friend'] as const;
 const TYPE_KEYS: Record<string, string> = {
@@ -49,14 +51,21 @@ export default function ContactConnections({
     contactId: number;
     contactName: string;
     initialConnections: PersonConnection[];
-    initialIntroPath: IntroPath;
+    initialIntroPath: IntroPath | null;
 }) {
     const t = useTranslations('ContactConnections');
     const showApiError = useApiErrorToast('ContactConnections');
     const tIntro = useTranslations('Introductions');
-    const [connections, setConnections] = useState(initialConnections);
+    const tContact = useTranslations('ContactsPage');
+    const [connections, setConnections] = useDetailSectionData('contactConnections', initialConnections);
     const [introPath, setIntroPath] = useState(initialIntroPath);
-    const [selected, setSelected] = useState<Contact | null>(null);
+    const introResult = useDetailSections()?.results.contactIntroPath;
+    const [seenIntroResult, setSeenIntroResult] = useState(introResult);
+    if (introResult !== seenIntroResult) {
+        setSeenIntroResult(introResult);
+        if (introResult?.kind === 'loaded') setIntroPath(introResult.data);
+    }
+    const [selected, setSelected] = useState<ContactPickerOption | null>(null);
     const [type, setType] = useState<string>('knows');
     const [busy, setBusy] = useState(false);
     const [pickerOpen, setPickerOpen] = useState(false);
@@ -112,6 +121,7 @@ export default function ContactConnections({
 
     return (
         <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+            <DetailSectionState sectionKeys={['contactIntroPath']} title={t('warmPath')}>
             <div className="border-b border-border px-6 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -119,14 +129,14 @@ export default function ContactConnections({
                     </p>
                     <Link
                         href={INTRODUCTIONS_PATH}
-                        className="text-xs text-brand transition-colors hover:text-brand-hover"
+                        className="text-xs text-brand-text transition-colors hover:text-brand-text"
                     >
                         {t('seeAllPaths')}
                     </Link>
                 </div>
-                {introPath.directlyKnown ? (
+                {introPath?.directlyKnown ? (
                     <p className="mt-1.5 text-sm text-foreground">{t('alreadyKnown', { name: contactName })}</p>
-                ) : introPath.reachable ? (
+                ) : introPath?.reachable ? (
                     <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1">
                         {introPath.steps.map((step, i) => (
                             <span key={step.personId} className="flex items-center gap-1.5">
@@ -134,7 +144,7 @@ export default function ContactConnections({
                                 <Link
                                     href={`/records/contacts/${step.personId}`}
                                     className={cn(
-                                        'text-sm transition-colors hover:text-brand-hover',
+                                        'text-sm transition-colors hover:text-brand-text',
                                         i === 0 || i === introPath.steps.length - 1
                                             ? 'font-medium text-foreground'
                                             : 'text-muted-foreground',
@@ -145,9 +155,9 @@ export default function ContactConnections({
                             </span>
                         ))}
                     </div>
-                ) : (
+                ) : introPath ? (
                     <p className="mt-1.5 text-sm text-muted-foreground">{t('noPath')}</p>
-                )}
+                ) : null}
                 {bridge ? (
                     <Button
                         type="button"
@@ -164,6 +174,8 @@ export default function ContactConnections({
                 ) : null}
             </div>
 
+            </DetailSectionState>
+            <DetailSectionState sectionKeys={['contactConnections']} title={tContact('connections')}>
             {connections.length > 0 ? (
                 <ul className="divide-y divide-border">
                     {connections.map((connection) => (
@@ -171,7 +183,7 @@ export default function ContactConnections({
                             <div className="min-w-0 flex-1">
                                 <Link
                                     href={`/records/contacts/${connection.personId}`}
-                                    className="block truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                    className="block truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                                 >
                                     {connection.personName}
                                 </Link>
@@ -201,31 +213,31 @@ export default function ContactConnections({
                 <div className="min-w-0 flex-1">
                     <Combobox
                         items={candidates}
-                        filter={null}
-                        itemToStringLabel={(c: Contact) => c.name}
+                        serverSearch={contactSearch.serverSearch}
+                        itemToStringLabel={(c: ContactPickerOption) => c.name}
                         value={selected}
                         onOpenChange={setPickerOpen}
                         onInputValueChange={contactSearch.onInputValueChange}
-                        onValueChange={(c) => setSelected((c as Contact | null) ?? null)}
+                        onValueChange={(c) => setSelected(c)}
                     >
                         <ComboboxInput
                             placeholder={t('addPlaceholder')}
                             className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
                         />
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>
+                                {contactSearch.loading
+                                    ? t('searching')
+                                    : contactSearch.error
+                                      ? t('searchFailed')
+                                      : t('noContacts')}
+                            </ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>
-                                    {contactSearch.loading
-                                        ? t('searching')
-                                        : contactSearch.error
-                                          ? t('searchFailed')
-                                          : t('noContacts')}
-                                </ComboboxEmpty>
-                                {candidates.map((c) => (
+                                {(c: (typeof candidates)[number]) => (
                                     <ComboboxItem key={c.id} value={c}>
                                         {c.name}
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -254,6 +266,7 @@ export default function ContactConnections({
                     <PlusIcon className="size-4" strokeWidth={2.5} />
                 </Button>
             </div>
+            </DetailSectionState>
         </div>
     );
 }

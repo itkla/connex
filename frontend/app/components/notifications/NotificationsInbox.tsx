@@ -3,7 +3,7 @@
 import { ArrowUturnLeftIcon, BellSnoozeIcon, CheckCircleIcon, EllipsisHorizontalIcon, ExclamationTriangleIcon, EyeIcon, FunnelIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import { useReducedMotion } from "motion/react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -143,6 +143,7 @@ function NotificationManagementMenu({
  * @returns The notifications inbox component.
  */
 export default function NotificationsInbox() {
+    const timeZone = useTimeZone();
     const t = useTranslations("Notifications");
     const tf = useTranslations("Filters");
     const locale = useLocale();
@@ -904,7 +905,7 @@ export default function NotificationsInbox() {
                                             </h2>
                                             {!item.readAt ? <span className={cn("size-1.5 shrink-0 rounded-full", style.dot)} /> : null}
                                             <span className="text-xs text-muted-foreground">
-                                                {formatRelativeTime(item.triggeredAt, locale, now)}
+                                                {formatRelativeTime(item.triggeredAt, locale, now, timeZone)}
                                             </span>
                                             {item.workspaceName ? (
                                                 <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -912,7 +913,7 @@ export default function NotificationsInbox() {
                                                 </span>
                                             ) : null}
                                             {hasPriority ? (
-                                                <span className="rounded-full bg-brand-light px-1.5 py-0.5 text-[11px] font-medium text-brand-dark">
+                                                <span className="rounded-full bg-brand-light px-1.5 py-0.5 text-[11px] font-medium text-brand-text">
                                                     {t("priority")}
                                                 </span>
                                             ) : null}
@@ -933,7 +934,7 @@ export default function NotificationsInbox() {
                                         ) : isSnoozed ? (
                                             <>
                                                 <span className="hidden text-xs text-muted-foreground sm:inline">
-                                                    {t("snoozedUntil", { date: formatDateTime(item.snoozedUntil ?? undefined, locale) })}
+                                                    {t("snoozedUntil", { date: formatDateTime(item.snoozedUntil ?? undefined, locale, timeZone) })}
                                                 </span>
                                                 <Button
                                                     variant="ghost"

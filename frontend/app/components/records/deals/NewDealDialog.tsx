@@ -1,6 +1,6 @@
 'use client';
 
-import { Dispatch, FormEvent, SetStateAction, WheelEvent, useEffect, useRef } from 'react';
+import { Dispatch, FormEvent, SetStateAction, WheelEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
@@ -20,11 +20,15 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { isFieldError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import DealPipelineSetup from '@/app/components/records/deals/DealPipelineSetup';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError } from '@/app/lib/toast';
 import {
     TagIcon,
@@ -38,7 +42,7 @@ import {
 const comboInputClass =
     'rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand';
 const comboLeadIconClass =
-    'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand';
+    'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand-text';
 
 /**
  * Whether a deal-create payload has diverged from its seeded baseline, so a container can drive the
@@ -70,13 +74,14 @@ type Props = {
     setPayload: Dispatch<SetStateAction<CreateDealPayload>>;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
+    onPipelineCreated?: (pipeline: Pipeline, stages: Stage[]) => void;
     isCreating: boolean;
     isSuccess?: boolean;
     /** Whether the payload has diverged from its seeded baseline; drives the accidental-discard guard. */
     isDirty?: boolean;
     /** Selected company record supplied by a parent that already resolved it. */
     selectedCompany?: Company | null;
-    createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
+    createNewDeal: (duplicateReviewToken: string, init?: RequestInit) => void | Promise<void>;
     requestInit?: RequestInit;
 };
 
@@ -87,6 +92,7 @@ export default function NewDealDialog({
     setPayload,
     pipelines,
     stagesByPipeline,
+    onPipelineCreated,
     isCreating,
     isSuccess = false,
     isDirty = false,
@@ -115,6 +121,7 @@ export default function NewDealDialog({
                         setPayload={setPayload}
                         pipelines={pipelines}
                         stagesByPipeline={stagesByPipeline}
+                        onPipelineCreated={onPipelineCreated}
                         isCreating={isCreating}
                         isSuccess={isSuccess}
                         selectedCompany={selectedCompany}
@@ -122,8 +129,8 @@ export default function NewDealDialog({
                         requestInit={requestInit}
                     />
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </>
     );
 }
@@ -159,11 +166,12 @@ type NewDealFormProps = {
     setPayload: Dispatch<SetStateAction<CreateDealPayload>>;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
+    onPipelineCreated?: (pipeline: Pipeline, stages: Stage[]) => void;
     isCreating: boolean;
     isSuccess?: boolean;
     /** Selected company record supplied by a parent that already resolved it. */
     selectedCompany?: Company | null;
-    createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
+    createNewDeal: (duplicateReviewToken: string, init?: RequestInit) => void | Promise<void>;
     requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
@@ -178,6 +186,7 @@ type NewDealFieldsProps = {
     clearError: (key: string) => void;
     companySearch: ReturnType<typeof useCompanySearch>;
     duplicatePreflight: ReturnType<typeof useDuplicatePreflight>;
+    pipelineSetup: ReactNode;
 };
 
 function NewDealFields({
@@ -189,8 +198,10 @@ function NewDealFields({
     clearError,
     companySearch,
     duplicatePreflight,
+    pipelineSetup,
 }: NewDealFieldsProps) {
     const t = useTranslations('DealsNewDialog');
+    const { activeWorkspace } = useWorkspace();
     const selectedPipeline = pipelines.find((pipeline) => pipeline.id === payload.pipeline) ?? null;
     const selectedCompany = companySearch.companies.find((company) => company.id === payload.company) ?? null;
     const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
@@ -237,6 +248,7 @@ function NewDealFields({
                     acknowledged={duplicatePreflight.acknowledged}
                     onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                     onRetry={duplicatePreflight.retry}
+                    workspaceRefusal={duplicatePreflight.workspaceRefusal}
                 />
             </div>
 
@@ -277,8 +289,13 @@ function NewDealFields({
                             currency: event.target.value.toUpperCase(),
                         }))}
                         className={cn(fieldInputClass, 'px-3')}
-                        placeholder="USD"
+                        placeholder={workspaceDefaultCurrency(activeWorkspace)}
                     />
+                    <p className="text-sm text-muted-foreground">
+                        {t(activeWorkspace?.defaultCurrency ? 'workspaceCurrencySaved' : 'workspaceCurrencyFallback', {
+                            currency: workspaceDefaultCurrency(activeWorkspace),
+                        })}
+                    </p>
                 </div>
             </div>
 
@@ -310,13 +327,13 @@ function NewDealFields({
                             </InputGroupAddon>
                         </ComboboxInput>
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
                             <ComboboxList onWheel={handleListWheel}>
-                                <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
-                                {pipelines.map((pipeline) => (
+                                {(pipeline: (typeof pipelines)[number]) => (
                                     <ComboboxItem key={pipeline.id} value={pipeline}>
                                         {pipeline.name}
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -351,13 +368,13 @@ function NewDealFields({
                             </InputGroupAddon>
                         </ComboboxInput>
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
                             <ComboboxList onWheel={handleListWheel}>
-                                <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
-                                {stages.map((stage) => (
+                                {(stage: (typeof stages)[number]) => (
                                     <ComboboxItem key={stage.id} value={stage}>
                                         {stage.name}
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -367,11 +384,14 @@ function NewDealFields({
                 </div>
             </div>
 
+            {pipelineSetup}
+
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                 <Label htmlFor="deal-company">{t('company')}</Label>
                 <Combobox
-                    items={companySearch.companies}
-                    filter={null}
+                    items={companySearch.options}
+                    serverSearch={companySearch.serverSearch}
+                    autoHighlight
                     itemToStringLabel={(company: Company) => company.name}
                     value={selectedCompany}
                     onInputValueChange={companySearch.onInputValueChange}
@@ -391,13 +411,13 @@ function NewDealFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
+                        <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompaniesFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={handleListWheel}>
-                            <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                            {companySearch.companies.map((company) => (
+                            {(company: (typeof companySearch.companies)[number]) => (
                                 <ComboboxItem key={company.id} value={company}>
                                     {company.name}
                                 </ComboboxItem>
-                            ))}
+                            )}
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>
@@ -434,6 +454,7 @@ export function NewDealForm({
     setPayload,
     pipelines,
     stagesByPipeline,
+    onPipelineCreated,
     isCreating,
     isSuccess = false,
     selectedCompany,
@@ -444,6 +465,13 @@ export function NewDealForm({
     const t = useTranslations('DealsNewDialog');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const submissionPendingRef = useRef(false);
+    const { activeWorkspaceId } = useWorkspace();
+    const [createdPipeline, setCreatedPipeline] = useState<{ workspaceId: number | null; pipeline: Pipeline; stages: Stage[] } | null>(null);
+    if (createdPipeline && createdPipeline.workspaceId !== activeWorkspaceId) setCreatedPipeline(null);
+    const availablePipelines = createdPipeline && !pipelines.some((pipeline) => pipeline.id === createdPipeline.pipeline.id)
+        ? [...pipelines, createdPipeline.pipeline] : pipelines;
+    const availableStages = createdPipeline
+        ? { ...stagesByPipeline, [createdPipeline.pipeline.id]: createdPipeline.stages } : stagesByPipeline;
     const companySearch = useCompanySearch(
         active,
         [payload.company],
@@ -466,13 +494,14 @@ export function NewDealForm({
     }, [companySearch.error, t]);
 
     const handleCreate = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current || duplicatePreflight.blocked) return;
         submissionPendingRef.current = true;
         resetFieldErrors();
         try {
-            const duplicateDecision = await duplicatePreflight.reviewNow();
+            const duplicateDecision = await duplicatePreflight.reviewNow(origin);
             if (!duplicateDecision.allowed || !duplicateDecision.duplicateReviewToken) return;
-            await createNewDeal(duplicateDecision.duplicateReviewToken);
+            await createNewDeal(duplicateDecision.duplicateReviewToken, origin);
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {
@@ -519,12 +548,23 @@ export function NewDealForm({
                     <NewDealFields
                         payload={payload}
                         setPayload={setPayload}
-                        pipelines={pipelines}
-                        stagesByPipeline={stagesByPipeline}
+                        pipelines={availablePipelines}
+                        stagesByPipeline={availableStages}
                         fieldErrors={fieldErrors}
                         clearError={clearError}
                         companySearch={companySearch}
                         duplicatePreflight={duplicatePreflight}
+                        pipelineSetup={
+                            <DealPipelineSetup key={activeWorkspaceId} needed={availablePipelines.length === 0} requestInit={requestInit} onCreated={(pipeline, stages) => {
+                                setCreatedPipeline({ workspaceId: activeWorkspaceId, pipeline, stages });
+                                onPipelineCreated?.(pipeline, stages);
+                                const firstOpenStage = [...stages].sort((a, b) => a.position - b.position)
+                                    .find((stage) => !stage.success && !stage.failure);
+                                setPayload((previous) => ({ ...previous, pipeline: pipeline.id, stage: firstOpenStage?.id ?? 0 }));
+                                clearError('pipeline');
+                                clearError('stage');
+                            }} />
+                        }
                     />
 
                     <div className="ncd-rise mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '340ms' }}>
@@ -532,7 +572,7 @@ export function NewDealForm({
                         <Button
                             type="submit"
                             variant="brand"
-                            disabled={isCreating || isSuccess || duplicatePreflight.blocked}
+                            disabled={isCreating || isSuccess || duplicatePreflight.blocked || availablePipelines.length === 0}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}

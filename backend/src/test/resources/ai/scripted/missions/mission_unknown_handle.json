@@ -1,0 +1,24 @@
+{
+  "id": "mission_unknown_handle",
+  "selector": "connex_script_mission_unknown_handle",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r999\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I reviewed [the selected record](record:r1).\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

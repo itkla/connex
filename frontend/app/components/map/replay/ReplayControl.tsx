@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { motion, useReducedMotion } from 'motion/react';
 import { PauseIcon, PlayIcon } from '@heroicons/react/24/solid';
 import { ArrowPathIcon, ChevronDoubleLeftIcon, ClockIcon } from '@heroicons/react/24/outline';
@@ -16,7 +17,7 @@ export type ReplayPhase = 'idle' | 'loading' | 'active';
 function formatAsOf(date: string, locale: string): string {
     const parsed = new Date(`${date}T00:00:00Z`);
     if (Number.isNaN(parsed.getTime())) return date;
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',

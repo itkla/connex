@@ -112,7 +112,7 @@ public class AiAssistantDraftDocumentWriteTool implements AiAssistantWriteTool {
             throw new ConflictException("Assistant proposal target changed");
         }
         DealDocumentDto document = documentService.generate(
-                execution.row().target().id(), resolution.id());
+                execution.row().target().id(), resolution.id(), execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", "executed");
         outcome.put("recordType", "document");

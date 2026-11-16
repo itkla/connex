@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,6 +77,41 @@ class SearchServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         SearchResultsDto results = searchService.search(company.getName());
         assertTrue(results.getCompanies().stream().anyMatch(c -> c.getId() == company.getId()));
+    }
+
+    @Test
+    void subsetReturnsOnlySelectedGroups() {
+        String sentinel = sentinel();
+        Product product = newProduct(sentinel);
+        newCampaign(sentinel);
+        newWorkflow(sentinel, false);
+
+        SearchResultsDto results = searchService.search(sentinel, Set.of("products"));
+
+        assertEquals(product.getId(), results.getProducts().getFirst().id());
+        assertTrue(results.getCampaigns().isEmpty());
+        assertTrue(results.getWorkflows().isEmpty());
+    }
+
+    @Test
+    void invalidTypeSelectionIsRejected() {
+        assertThrows(BadRequestException.class,
+            () -> searchService.search("needle", Set.of("unknown")));
+        assertThrows(BadRequestException.class,
+            () -> searchService.search("needle", Set.of()));
+    }
+
+    @Test
+    void selectedDeniedGroupStaysEmptyAlongsideReadableGroups() {
+        String sentinel = sentinel();
+        newWorkflow(sentinel, false);
+        Product product = newProduct(sentinel);
+        demoteCurrentUserTo("member");
+
+        SearchResultsDto results = searchService.search(sentinel, Set.of("workflows", "products"));
+
+        assertTrue(results.getWorkflows().isEmpty());
+        assertEquals(product.getId(), results.getProducts().getFirst().id());
     }
 
     @Test

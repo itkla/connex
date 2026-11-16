@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.PersonReferenceDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonQualificationDto;
@@ -72,6 +73,7 @@ import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 import jakarta.validation.Valid;
@@ -128,6 +130,25 @@ public class PersonController {
         return persons.stream().map(PersonDto::from).toList();
     }
 
+    /** Returns bounded visible contact records without relationship-history expansion. */
+    @GetMapping("/references")
+    public List<PersonReferenceDto> getPersonReferences(@RequestParam(required = false) List<Integer> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BadRequestException("ids are required for contact references");
+        }
+        if (ids.size() > PageBounds.MAX_SIZE) {
+            throw new BadRequestException("At most " + PageBounds.MAX_SIZE + " contact references may be requested");
+        }
+        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
+        for (Integer id : ids) {
+            if (id == null || id < 1) {
+                throw new BadRequestException("ids must be positive integers");
+            }
+            normalized.add(id);
+        }
+        return personService.getPersonReferences(List.copyOf(normalized)).stream().map(PersonReferenceDto::from).toList();
+    }
+
     /**
      * GET endpoint for a paginated, searchable, sortable slice of people.
      * Only the rows in scope are queried from the database.
@@ -162,7 +183,8 @@ public class PersonController {
         @RequestParam(required = false) List<String> warmthBands,
         @RequestParam(defaultValue = "false") boolean noWarmth,
         @RequestParam(required = false) Integer goesColdWithinDays,
-        @RequestParam(defaultValue = "false") boolean archived
+        @RequestParam(defaultValue = "false") boolean archived,
+        @RequestParam(required = false) List<Integer> tagIds
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
@@ -170,14 +192,10 @@ public class PersonController {
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         WarmthFilter warmth = warmthFilterResolver.resolve(
             warmthBands, noWarmth, goesColdWithinDays, sortKey);
-        List<PersonDto> items = personService.getPersonsPage(query, sortKey, dir, companies, titles, noCompany,
+        var result = personService.queryPersonsPage(query, sortKey, dir, companies, titles, noCompany,
             memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, warmth,
-            bounds.size(), bounds.offset())
-            .stream().map(PersonDto::from).toList();
-        return new PageResponse<>(items, personService.countPersons(
-            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth));
+            firstResponseStates, noFirstResponse, archived, warmth, bounds.size(), bounds.offset(), tagIds);
+        return new PageResponse<>(result.items().stream().map(PersonDto::from).toList(), result.total());
     }
 
     /**
@@ -207,13 +225,14 @@ public class PersonController {
         @RequestParam(required = false) List<String> warmthBands,
         @RequestParam(defaultValue = "false") boolean noWarmth,
         @RequestParam(required = false) Integer goesColdWithinDays,
-        @RequestParam(defaultValue = "false") boolean archived
+        @RequestParam(defaultValue = "false") boolean archived,
+        @RequestParam(required = false) List<Integer> tagIds
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         WarmthFilter warmth = warmthFilterResolver.resolve(
             warmthBands, noWarmth, goesColdWithinDays, null);
-        if (!archived
+        if ((tagIds == null || tagIds.isEmpty()) && !archived
             && (warmth == null || !warmth.restrictsRows())
             && query == null
             && (companies == null || companies.isEmpty())
@@ -230,7 +249,7 @@ public class PersonController {
         }
         return personService.getMatchingPersonIds(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth, tagIds);
     }
 
     /**
@@ -242,17 +261,7 @@ public class PersonController {
     public PersonFacets getPersonFacets(
         @RequestParam(defaultValue = "false") boolean warmth
     ) {
-        return new PersonFacets(
-            personService.distinctCompanies(),
-            personService.distinctTitles(),
-            personService.hasPersonWithoutCompany(),
-            personService.countsByOwner(),
-            personService.countArchivedPersons(),
-            personService.countsByLifecycleStage(),
-            personService.countsByLeadSource(),
-            personService.countsByFirstResponseState(),
-            warmth ? personService.countsByWarmthBand(warmthFilterResolver.forFacets()) : null
-        );
+        return personService.getPersonFacets(warmth ? warmthFilterResolver.forFacets() : null);
     }
 
     /**
@@ -316,7 +325,7 @@ public class PersonController {
     }
 
     /**
-     * PUT endpoint to set the contact's processing and third-party-provision restrictions.
+     * Patches only supplied processing and third-party-provision flags, preserving omitted flags.
      * @param id contact id
      * @param dto requested restriction state
      * @return the updated contact

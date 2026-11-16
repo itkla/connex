@@ -1,1 +1,3 @@
 method	path	state	owner	eol	migration	issue
+GET	/api/orgs/{orgId}/data-subject-requests/{requestId}/disclosure	retired	Backend maintainers	2026-10-14	POST /api/orgs/{orgId}/data-subject-requests/{requestId}/disclosure	#2004
+HEAD	/api/orgs/{orgId}/data-subject-requests/{requestId}/disclosure	retired	Backend maintainers	2026-10-14	POST /api/orgs/{orgId}/data-subject-requests/{requestId}/disclosure	#2004

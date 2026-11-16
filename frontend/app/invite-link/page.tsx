@@ -111,7 +111,7 @@ export default function InviteLinkPage() {
                         <p className="mt-2 text-sm text-muted-foreground">{t("invalidBody")}</p>
                         <Link
                             href="/dashboard"
-                            className="mt-6 inline-block text-sm font-medium text-brand-dark hover:underline"
+                            className="mt-6 inline-block text-sm font-medium text-brand-text hover:underline"
                         >
                             {t("backToApp")}
                         </Link>
@@ -120,7 +120,7 @@ export default function InviteLinkPage() {
                     <div className="text-center">
                         <span
                             aria-hidden
-                            className="mx-auto grid size-12 place-items-center rounded-xl bg-brand-light text-lg font-semibold text-brand-dark"
+                            className="mx-auto grid size-12 place-items-center rounded-xl bg-brand-light text-lg font-semibold text-brand-text"
                         >
                             {state.preview.workspaceName.trim().charAt(0).toUpperCase()}
                         </span>

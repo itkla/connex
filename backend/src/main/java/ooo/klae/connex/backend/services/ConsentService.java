@@ -5,6 +5,8 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -15,6 +17,7 @@ import ooo.klae.connex.backend.dto.ContactChannelConsentDto;
 import ooo.klae.connex.backend.dto.ContactChannelConsentRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.StaleRecordException;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -42,10 +45,24 @@ public class ConsentService {
                 .map(ConsentService::toDto).toList();
     }
 
-    /** Upserts one consent state and appends a history event for every accepted change request. */
-    @Transactional
+    /** Applies trusted internal state changes, including absolute unsubscribe/provider revocations. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.CONSENT_MANAGE)
     public ContactChannelConsentDto setForPerson(int personId, ContactChannelConsentRequest request) {
+        return writeForPerson(personId, request, false);
+    }
+
+    /** Conditionally updates the version explicitly reviewed by an HTTP caller. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.CONSENT_MANAGE)
+    public ContactChannelConsentDto setForPersonConditionally(int personId, ContactChannelConsentRequest request) {
+        if (request == null || request.expectedVersion() == null || request.expectedVersion() < 0) {
+            throw new BadRequestException("An expected consent version is required");
+        }
+        return writeForPerson(personId, request, true);
+    }
+
+    private ContactChannelConsentDto writeForPerson(int personId, ContactChannelConsentRequest request, boolean conditional) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireOwnedPerson(workspaceId, personId);
         if (request == null) {
@@ -62,11 +79,12 @@ public class ConsentService {
         }
         String source = requireText(request.source(), "Consent source", 64);
         String evidenceRef = trimToNull(request.evidenceRef());
-        String previousStatus = consentMapper.getForPerson(workspaceId, personId).stream()
-                .filter(current -> channel.equals(current.getChannel()) && purpose.equals(current.getPurpose()))
-                .map(ContactChannelConsent::getStatus)
-                .findFirst()
-                .orElse(null);
+        ContactChannelConsent before = conditional
+                ? consentMapper.getBySubjectForUpdate(workspaceId, personId, channel, purpose)
+                : consentMapper.getForPerson(workspaceId, personId).stream()
+                        .filter(current -> channel.equals(current.getChannel()) && purpose.equals(current.getPurpose()))
+                        .findFirst().orElse(null);
+        String previousStatus = before == null ? null : before.getStatus();
 
         ContactChannelConsent consent = new ContactChannelConsent();
         consent.setWorkspaceId(workspaceId);
@@ -77,11 +95,27 @@ public class ConsentService {
         consent.setSource(source);
         consent.setEvidenceRef(evidenceRef);
         consent.setCapturedAt(request.capturedAt());
-        consentMapper.upsert(consent);
+        if (!conditional) {
+            consentMapper.upsert(consent);
+        } else {
+            long expectedVersion = request.expectedVersion();
+            if (expectedVersion == 0) {
+                if (before != null) throw new StaleRecordException(before.getVersion());
+                try {
+                    consentMapper.insert(consent);
+                } catch (DuplicateKeyException ex) {
+                    throw staleConsent(workspaceId, personId, channel, purpose);
+                }
+            } else if (consentMapper.updateIfVersion(consent, expectedVersion) == 0) {
+                throw staleConsent(workspaceId, personId, channel, purpose);
+            }
+        }
+        ContactChannelConsent persisted = consentMapper.getBySubjectForUpdate(workspaceId, personId, channel, purpose);
+        if (persisted == null) throw new ResourceNotFoundException("Consent state was not persisted");
 
         ContactChannelConsentEvent event = new ContactChannelConsentEvent();
         event.setWorkspaceId(workspaceId);
-        event.setConsentId(consent.getId());
+        event.setConsentId(persisted.getId());
         event.setPersonId(personId);
         event.setChannel(channel);
         event.setPurpose(purpose);
@@ -92,11 +126,13 @@ public class ConsentService {
         consentMapper.insertEvent(event);
         auditService.record("consent.update", "person", personId, null,
                 "Updated contact consent", auditService.singleChange("status", previousStatus, status));
-        return consentMapper.getForPerson(workspaceId, personId).stream()
-                .filter(current -> channel.equals(current.getChannel()) && purpose.equals(current.getPurpose()))
-                .findFirst()
-                .map(ConsentService::toDto)
-                .orElseThrow(() -> new ResourceNotFoundException("Consent state was not persisted"));
+        return toDto(persisted);
+    }
+
+    private StaleRecordException staleConsent(int workspaceId, int personId, String channel, String purpose) {
+        requireOwnedPerson(workspaceId, personId);
+        ContactChannelConsent current = consentMapper.getBySubject(workspaceId, personId, channel, purpose);
+        return new StaleRecordException(current == null ? 0 : current.getVersion());
     }
 
     private void requireOwnedPerson(int workspaceId, int personId) {
@@ -109,7 +145,7 @@ public class ConsentService {
         return new ContactChannelConsentDto(
                 consent.getId(), consent.getPersonId(), consent.getChannel(), consent.getPurpose(),
                 consent.getStatus(), consent.getSource(), consent.getEvidenceRef(), consent.getCapturedAt(),
-                consent.getUpdatedAt());
+                consent.getUpdatedAt(), consent.getVersion());
     }
 
     private static String normalizeToken(String value, String label) {

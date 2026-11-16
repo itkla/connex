@@ -17,9 +17,10 @@ import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
+import ooo.klae.connex.backend.util.CompanyReviewNameNormalizer;
 
 /**
- * Pure canonical normalization for identity matching.
+ * Pure canonical identity normalization and weak name comparison.
  */
 @Service
 @RequiredArgsConstructor
@@ -61,6 +62,15 @@ public class MatchingService {
      */
     public Optional<String> normalizeName(String raw) {
         return CanonicalNameNormalizer.normalize(raw);
+    }
+
+    /**
+     * Compares company legal-form variants as weak review evidence only.
+     * @param raw authored company name
+     * @return review comparison name, or empty when no valid base name remains
+     */
+    public Optional<String> normalizeCompanyNameForReview(String raw) {
+        return CompanyReviewNameNormalizer.normalize(raw);
     }
 
     /**

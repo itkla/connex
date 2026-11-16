@@ -153,7 +153,7 @@ async function renderAcceptance(initialPreview = preview()) {
     const root = createRoot(container, { onCaughtError: vi.fn() });
     await act(async () => {
         root.render(
-            <NextIntlClientProvider locale="en" messages={MESSAGES}>
+            <NextIntlClientProvider locale="en" messages={MESSAGES} timeZone="UTC">
                 <DocumentAcceptance initialPreview={initialPreview} />
             </NextIntlClientProvider>,
         );
@@ -169,7 +169,7 @@ async function renderStrictAcceptance(initialPreview = preview()) {
     const root = createRoot(container, { onCaughtError: vi.fn() });
     await act(async () => {
         root.render(
-            <NextIntlClientProvider locale="en" messages={MESSAGES}>
+            <NextIntlClientProvider locale="en" messages={MESSAGES} timeZone="UTC">
                 <StrictMode>
                     <DocumentAcceptance initialPreview={initialPreview} />
                 </StrictMode>
@@ -460,7 +460,9 @@ describe("document acceptance", () => {
         vi.stubEnv("TZ", "Asia/Tokyo");
         const initial = preview();
         const utcDisplay = formatUtcDateTime(initial.content.generatedAt, "en");
-        const browserLocalDisplay = formatDateTime(initial.content.generatedAt, "en");
+        const browserLocalDisplay = new Intl.DateTimeFormat("en", {
+            dateStyle: "medium", timeStyle: "short", timeZone: "UTC",
+        }).format(new Date(initial.content.generatedAt));
         expect(utcDisplay).not.toBe(browserLocalDisplay);
 
         const rendered = await renderAcceptance(initial);

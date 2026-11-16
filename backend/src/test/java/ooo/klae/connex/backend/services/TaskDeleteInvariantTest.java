@@ -24,6 +24,11 @@ import ooo.klae.connex.backend.notifications.NotificationDelivery;
 
 @ExtendWith(MockitoExtension.class)
 class TaskDeleteInvariantTest {
+    @org.junit.jupiter.api.BeforeEach
+    void installCompanyScopeFixture() {
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.install(taskService);
+    }
+
 
     @Mock TaskMapper taskMapper;
     @Mock DealMapper dealMapper;

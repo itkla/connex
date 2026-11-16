@@ -24,6 +24,7 @@ public class ObjectDeletionTransactionExecutor {
     private final WorkspaceObjectStorageQuotaService quotaService;
     private final ObjectStorageProperties properties;
     private final Clock clock;
+    private final ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper privacyObjectMapper;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ObjectDeletionTombstone enqueueTenant(
@@ -95,6 +96,7 @@ public class ObjectDeletionTransactionExecutor {
                 return;
             }
             quotaService.release(task.workspaceId(), task.objectKey());
+            privacyObjectMapper.acknowledgeDeleted(task.workspaceId(), task.id(), task.objectKey());
             tenantQueueMapper.deleteById(task.workspaceId(), task.id());
         } catch (ObjectStorageException exception) {
             tenantQueueMapper.reschedule(task.workspaceId(), task.id(), nextAttemptAt());

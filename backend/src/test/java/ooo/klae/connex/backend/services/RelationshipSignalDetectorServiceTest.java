@@ -74,13 +74,13 @@ class RelationshipSignalDetectorServiceTest {
             companyMapper,
             dealMapper,
             new ObjectMapper(),
-            Clock.fixed(AS_OF, java.time.ZoneOffset.UTC));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+            Clock.fixed(AS_OF, java.time.ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> ids = invocation.getArgument(1);
+                List<Integer> ids = invocation.getArgument(2);
                 return ids.stream().map(RelationshipSignalDetectorServiceTest::person).toList();
             });
-        when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of());
+        when(companyMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of());
         when(scoringService.contactSourceStateHashes(
                 WORKSPACE_ID, java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
             .thenReturn(Map.of());
@@ -187,7 +187,7 @@ class RelationshipSignalDetectorServiceTest {
             1,
             null,
             null,
-            "warmth-v1",
+            "warmth-v2",
             AS_OF);
         when(scoringService.scoreWorkspace(WORKSPACE_ID)).thenReturn(
             new ScoringService.WorkspaceScores(List.of(cooling), List.of()));
@@ -357,7 +357,7 @@ class RelationshipSignalDetectorServiceTest {
         Activity touch = activity(71, subject, "meeting", "2026-07-09 12:00:00");
         SourceScoringFixture fixture = sourceScoringFixture(List.of(subject), List.of(touch));
         when(fixture.personMapper().getRelationshipScoreAggregates(
-                eq(WORKSPACE_ID), any(), any()))
+                eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), any(), any()))
             .thenReturn(List.of(new RelationshipScoreAggregateDto(
                 subject.getId(), 0.5, 0.0, 1.0, touch.getTimestamp(), 0)));
         ScoringService beforeScoring = fixture.serviceAt(AS_OF);
@@ -389,7 +389,7 @@ class RelationshipSignalDetectorServiceTest {
             List.of(bridgePerson, targetPerson), List.of(touch));
         IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
         PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
-        when(introductionMapper.findWarmPathCandidates(WORKSPACE_ID)).thenReturn(List.of(
+        when(introductionMapper.findWarmPathCandidates(WORKSPACE_ID, "[7]")).thenReturn(List.of(
             introCandidate(bridgePerson.getId(), "Bridge"),
             introCandidate(targetPerson.getId(), "Target")));
         when(introductionMapper.findIntroExcludedPersonIds(WORKSPACE_ID)).thenReturn(List.of());
@@ -509,7 +509,7 @@ class RelationshipSignalDetectorServiceTest {
             3,
             "2026-08-20",
             daysUntilCold,
-            "warmth-v1",
+            "warmth-v2",
             AS_OF);
     }
 
@@ -524,7 +524,7 @@ class RelationshipSignalDetectorServiceTest {
             3,
             null,
             null,
-            "warmth-v1",
+            "warmth-v2",
             AS_OF);
     }
 
@@ -570,13 +570,13 @@ class RelationshipSignalDetectorServiceTest {
         ActivityMapper activityMapper = mock(ActivityMapper.class);
         NoteMapper noteMapper = mock(NoteMapper.class);
         TaskMapper taskMapper = mock(TaskMapper.class);
-        when(personMapper.getProcessablePersons(WORKSPACE_ID)).thenReturn(people);
-        when(personMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), any(), any()))
-            .thenAnswer(invocation -> activityAggregates(people, activities, invocation.getArgument(1)));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(people);
-        when(companyMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), any(), any()))
+        when(personMapper.getProcessablePersons(WORKSPACE_ID, "[7,8,9]")).thenReturn(people);
+        when(personMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), any(), any()))
+            .thenAnswer(invocation -> activityAggregates(people, activities, invocation.getArgument(2)));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(people);
+        when(companyMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), any(), any()))
             .thenReturn(List.of());
-        when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of());
+        when(companyMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of());
         when(activityMapper.getAllActivities(WORKSPACE_ID)).thenReturn(activities);
         when(noteMapper.getWorkspaceNoteMetadataPage(WORKSPACE_ID, 0, 100)).thenReturn(List.of());
         when(taskMapper.getAllTasks(WORKSPACE_ID)).thenReturn(List.of());
@@ -635,7 +635,7 @@ class RelationshipSignalDetectorServiceTest {
             fixture.companyMapper(),
             fixture.dealMapper(),
             new ObjectMapper(),
-            Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+            Clock.fixed(evaluationInstant, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     private static WarmPathService warmPathService(
@@ -644,6 +644,9 @@ class RelationshipSignalDetectorServiceTest {
             PersonMapper personMapper,
             ScoringService sourceScoringService,
             Instant evaluationInstant) {
+        RecordVisibilityScopeControlAccess scopeAccess = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        when(scopeAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(WORKSPACE_ID)));
         return new WarmPathService(
             introductionMapper,
             edgeReader,
@@ -652,7 +655,8 @@ class RelationshipSignalDetectorServiceTest {
             mock(WorkspaceService.class),
             mock(AuthService.class),
             mock(TaskService.class),
-            Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+            Clock.fixed(evaluationInstant, ZoneOffset.UTC),
+            scopeAccess);
     }
 
     private record SourceScoringFixture(
@@ -671,7 +675,8 @@ class RelationshipSignalDetectorServiceTest {
                 activityMapper,
                 noteMapper,
                 taskMapper,
-                Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+                Clock.fixed(evaluationInstant, ZoneOffset.UTC),
+                ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         }
     }
 

@@ -1,0 +1,248 @@
+// @vitest-environment jsdom
+import { act, useEffect } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { PrivilegedMfaStandingState } from "@/app/hooks/usePrivilegedMfaStanding";
+import type { PasskeyRegistrationRequirements } from "@/app/lib/types";
+
+const store = vi.hoisted(() => ({
+    requirements: null as PasskeyRegistrationRequirements | null,
+    reason: null as "enrollment" | "attestation" | null,
+    listeners: new Set<() => void>(),
+    identityListeners: new Set<() => void>(),
+    outcomes: [] as Array<{ outcome: "applied" | "superseded" | "failed"; requirements?: PasskeyRegistrationRequirements }>,
+    settle: vi.fn(),
+}));
+
+vi.mock("@/app/lib/api", () => ({
+    currentPrivilegedMfaRequirements: () => store.requirements,
+    privilegedMfaConfinementReason: () => store.reason,
+    subscribePrivilegedMfaConfinement: (listener: () => void) => {
+        store.listeners.add(listener);
+        return () => store.listeners.delete(listener);
+    },
+    subscribeClientRequestIdentityInvalidation: (listener: () => void) => {
+        store.identityListeners.add(listener);
+        return () => store.identityListeners.delete(listener);
+    },
+    settlePrivilegedMfaStanding: store.settle,
+}));
+
+function requirements(standing: PasskeyRegistrationRequirements["standing"]): PasskeyRegistrationRequirements {
+    return {
+        currentPasswordRequired: false,
+        emailConfirmationRequired: false,
+        emailConfirmationSatisfied: false,
+        standing,
+        approvalGaps: [],
+    };
+}
+
+let container: HTMLDivElement;
+let root: Root;
+let latest: PrivilegedMfaStandingState | null = null;
+
+async function mountHook() {
+    const { usePrivilegedMfaStanding } = await import("@/app/hooks/usePrivilegedMfaStanding");
+    function Probe() {
+        const state = usePrivilegedMfaStanding();
+        useEffect(() => {
+            latest = state;
+        });
+        return null;
+    }
+    await act(async () => root.render(<Probe />));
+}
+
+function current(): PrivilegedMfaStandingState {
+    if (latest === null) throw new Error("usePrivilegedMfaStanding did not render");
+    return latest;
+}
+
+beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    latest = null;
+    store.requirements = null;
+    store.reason = null;
+    store.outcomes = [];
+    store.settle.mockImplementation(async () => {
+        const next = store.outcomes.shift() ?? { outcome: "failed" as const };
+        if (next.requirements) {
+            store.requirements = next.requirements;
+            store.reason = next.requirements.standing === "ATTESTATION_REQUIRED" ? "attestation" : null;
+            for (const listener of store.listeners) listener();
+        }
+        return next.outcome;
+    });
+});
+
+afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.clearAllMocks();
+});
+
+describe("the privileged-MFA standing a surface sees", () => {
+    it("reads on mount and reports the decisive standing", async () => {
+        store.outcomes = [{ outcome: "applied", requirements: requirements("ATTESTATION_REQUIRED") }];
+        await mountHook();
+
+        expect(store.settle).toHaveBeenCalledWith("check");
+        expect(current().status).toBe("ready");
+        expect(current().confined).toBe(true);
+        expect(current().reason).toBe("attestation");
+        expect(current().requirements?.standing).toBe("ATTESTATION_REQUIRED");
+    });
+
+    it("reports a failed read until a later one decides", async () => {
+        store.outcomes = [{ outcome: "failed" }, { outcome: "applied", requirements: requirements("SATISFIED") }];
+        await mountHook();
+        expect(current().status).toBe("failed");
+        expect(current().confined).toBe(false);
+
+        await act(async () => {
+            await current().refresh();
+        });
+
+        expect(current().status).toBe("ready");
+        expect(current().confined).toBe(false);
+    });
+
+    it("reports the confinement reason before any read has decided", async () => {
+        store.reason = "attestation";
+        store.settle.mockImplementation(() => new Promise(() => undefined));
+        await mountHook();
+
+        expect(current().status).toBe("loading");
+        expect(current().reason).toBe("attestation");
+        expect(current().confined).toBe(true);
+    });
+
+    it("surfaces a failed read after a ceremony even while an older standing is cached", async () => {
+        store.outcomes = [
+            { outcome: "applied", requirements: requirements("ATTESTATION_REQUIRED") },
+            { outcome: "failed" },
+            { outcome: "failed" },
+            { outcome: "applied", requirements: requirements("SATISFIED") },
+        ];
+        await mountHook();
+        expect(current().status).toBe("ready");
+
+        await act(async () => {
+            await current().refresh("ceremony");
+        });
+        expect(current().status).toBe("failed");
+        expect(current().confined).toBe(true);
+
+        await act(async () => {
+            await current().refresh("check");
+        });
+        expect(current().status).toBe("failed");
+
+        await act(async () => {
+            await current().refresh("check");
+        });
+        expect(current().status).toBe("ready");
+        expect(current().confined).toBe(false);
+    });
+
+    it("keeps showing the cached standing when only a background check fails, but marks it unconfirmed", async () => {
+        store.outcomes = [{ outcome: "applied", requirements: requirements("SATISFIED") }, { outcome: "failed" }];
+        await mountHook();
+        expect(current().fresh).toBe(true);
+
+        await act(async () => {
+            await current().refresh("check");
+        });
+
+        expect(current().status).toBe("ready");
+        expect(current().fresh).toBe(false);
+    });
+
+    it("ignores the late failure of a ceremony read that a newer successful check overtook", async () => {
+        store.outcomes = [{ outcome: "applied", requirements: requirements("ATTESTATION_REQUIRED") }];
+        await mountHook();
+        let failCeremony: (outcome: "failed") => void = () => undefined;
+        store.settle.mockImplementationOnce(() => new Promise((resolve) => {
+            failCeremony = resolve;
+        }));
+        store.outcomes = [{ outcome: "applied", requirements: requirements("SATISFIED") }];
+
+        let ceremony: Promise<unknown> = Promise.resolve();
+        await act(async () => {
+            ceremony = current().refresh("ceremony");
+        });
+        await act(async () => {
+            await current().refresh("check");
+        });
+        await act(async () => {
+            failCeremony("failed");
+            await ceremony;
+        });
+
+        expect(current().status).toBe("ready");
+        expect(current().fresh).toBe(true);
+        expect(current().confined).toBe(false);
+    });
+
+    it("never lets an older refresh's late success clear a newer failure", async () => {
+        store.outcomes = [{ outcome: "applied", requirements: requirements("UNPRIVILEGED") }];
+        await mountHook();
+        let finishOlder: (outcome: "superseded") => void = () => undefined;
+        store.settle.mockImplementationOnce(() => new Promise((resolve) => {
+            finishOlder = resolve;
+        }));
+        store.outcomes = [{ outcome: "failed" }];
+
+        let older: Promise<unknown> = Promise.resolve();
+        await act(async () => {
+            older = current().refresh("check");
+        });
+        await act(async () => {
+            await current().refresh("check");
+        });
+        expect(current().fresh).toBe(false);
+
+        await act(async () => {
+            finishOlder("superseded");
+            await older;
+        });
+
+        expect(current().fresh).toBe(false);
+    });
+
+    it("stays loading, and so not cleared, before any read has decided", async () => {
+        store.settle.mockImplementation(() => new Promise(() => undefined));
+        await mountHook();
+
+        expect(current().status).toBe("loading");
+        expect(current().requirements).toBeNull();
+    });
+
+    it("re-reads when the tab returns and when the identity changes, and stops once unmounted", async () => {
+        store.outcomes = [
+            { outcome: "applied", requirements: requirements("SATISFIED") },
+            { outcome: "applied", requirements: requirements("SATISFIED") },
+            { outcome: "applied", requirements: requirements("SATISFIED") },
+        ];
+        await mountHook();
+        expect(store.settle).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            document.dispatchEvent(new Event("visibilitychange"));
+        });
+        await act(async () => {
+            for (const listener of store.identityListeners) listener();
+        });
+        expect(store.settle).toHaveBeenCalledTimes(3);
+
+        await act(async () => root.unmount());
+        root = createRoot(container);
+        document.dispatchEvent(new Event("visibilitychange"));
+        expect(store.identityListeners.size).toBe(0);
+        expect(store.settle).toHaveBeenCalledTimes(3);
+    });
+});

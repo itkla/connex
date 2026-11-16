@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -153,7 +155,7 @@ class ImportPersistenceReplayTest extends AbstractServiceTest {
         ImportCycle first = runCycle(definition);
         int personId = importedPersonIds().getFirst();
         int dealId = importedDealIds().getFirst();
-        Person person = personMapper.getPersonById(workspace.getId(), personId);
+        Person person = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), personId);
         newActivity(currentUser, person, dealMapper.getDealById(workspace.getId(), dealId));
         newTask(currentUser, person, dealMapper.getDealById(workspace.getId(), dealId));
         newNotification(workspace.getId(), currentUser.getId());
@@ -174,15 +176,23 @@ class ImportPersistenceReplayTest extends AbstractServiceTest {
         assertEquals(6, afterFirst.artifacts().tags());
         assertEquals(2, afterFirst.artifacts().relationships());
         assertEquals(1, afterFirst.artifacts().notifications());
-        assertEquals(2, afterFirst.artifacts().relationshipEvidenceEvents());
+        assertEquals(1, afterFirst.artifacts().relationshipEvidenceEvents());
         assertEquals(afterFirst, afterSecond);
         assertEquals(afterFirst, afterThird);
     }
 
     private ImportCycle runCycle(ReplayDefinition definition) {
         ImportResult company = reviewAndCommitCompany(definition.companyRequest());
-        ImportResult person = reviewAndCommitPerson(definition.personRequest());
-        ImportResult deal = reviewAndCommitDeal(definition.dealRequest());
+        Integer selectedCompanyId = jdbcTemplate.queryForObject(
+            "SELECT id FROM company WHERE workspace_id = ? AND name = ?", Integer.class,
+            workspace.getId(), definition.companyName());
+        assertNotNull(selectedCompanyId);
+        ImportRequest personRequest = definition.personRequest();
+        personRequest.setCompanyLinks(Map.of(0, selectedCompanyId));
+        ImportRequest dealRequest = definition.dealRequest();
+        dealRequest.setCompanyLinks(Map.of(0, selectedCompanyId));
+        ImportResult person = reviewAndCommitPerson(personRequest);
+        ImportResult deal = reviewAndCommitDeal(dealRequest);
         return new ImportCycle(company, person, deal);
     }
 
@@ -235,7 +245,7 @@ class ImportPersistenceReplayTest extends AbstractServiceTest {
             personEmail,
             dealName);
         List<Map<String, Object>> tasks = jdbcTemplate.queryForList(
-            "SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, "
+            "SELECT t.id, t.workspace_id, t.description, t.completed, t.completed_at, t.status, t.position, "
                 + "t.due_date, t.assigned_to_id, t.person_id, t.deal_id, t.created_at, "
                 + "t.updated_at FROM task t LEFT JOIN person p ON p.id = t.person_id "
                 + "LEFT JOIN deal d ON d.id = t.deal_id "

@@ -48,10 +48,10 @@ export function isBuiltInDisqualificationReason(
 /** Resolves stored custom labels, localized built-ins, and unknown historical codes in that order. */
 export function disqualificationReasonLabel(
     code: string,
-    storedLabel: string | null,
+    storedLabel: string | null | undefined,
     translate: (key: `reason.${BuiltInContactDisqualificationReason}`) => string,
 ): string {
-    if (storedLabel !== null) return storedLabel;
+    if (storedLabel != null) return storedLabel;
     return isBuiltInDisqualificationReason(code) ? translate(`reason.${code}`) : code;
 }
 

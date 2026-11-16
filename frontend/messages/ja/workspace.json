@@ -30,7 +30,11 @@
         "joinTitle": "招待リンクをお持ちですか？",
         "joinPlaceholder": "招待リンクを貼り付け",
         "joinButton": "続行",
-        "joinInvalid": "有効な招待リンクではないようです。"
+        "joinInvalid": "有効な招待リンクではないようです。",
+        "standingFailedTitle": "アカウントを確認できませんでした",
+        "standingFailedBody": "しばらくしてからもう一度お試しください。オーナー提案の辞退やログアウトは引き続き行えます。",
+        "standingRetry": "再試行",
+        "confinedRecheck": "もう一度確認"
     },
     "InviteAccept": {
         "metaTitle": "招待を承認",
@@ -153,6 +157,14 @@
         "showArchived": "アーカイブ済みを表示（{count}）"
     },
     "WorkspaceIdentity": {
+        "currencyTitle": "案件の既定の通貨",
+        "currencyDescription": "新規案件には、この通貨があらかじめ設定されます。既存の案件の通貨や金額は変更されません。",
+        "currencyLabel": "既定の通貨",
+        "currencyEffective": "現在の既定の通貨は、ワークスペースで設定された {currency} です。案件ごとに別の通貨を選ぶこともできます。",
+        "currencyFallback": "現在の既定の通貨は {currency} です。ワークスペースの設定が未保存のため、従来の USD を使用しています。使用する通貨を選んで保存してください。",
+        "currencyInvalid": "一覧から対応している通貨を選択してください。",
+        "currencySaved": "案件の既定の通貨を保存しました",
+        "currencySave": "既定の通貨を保存",
         "title": "ワークスペース情報",
         "description": "メンバーに表示される名前と、共有レポートの日付境界を正しく保ちます。",
         "nameLabel": "ワークスペース名",
@@ -208,6 +220,23 @@
         "memberActions": "メンバーの操作",
         "inviteActions": "招待の操作",
         "remove": "削除",
+        "removeTitle": "{name}さんをメンバーから外しますか？",
+        "removeDescription": "この方は{workspace}にアクセスできなくなります。Connexのアカウントとワークスペース内のレコードは残ります。",
+        "removeOwnershipConsequences": "この方が担当する連絡先・会社・案件・キャンペーン・シーケンスは担当者なしになり、タスクも未割り当てになります。メンバーから外した後に各レコードを確認し、別のメンバーを割り当ててください。",
+        "removeRejoinConsequences": "有効な招待リンクがあれば、再び参加できます。メンバーから外しても、未承認の招待や共有リンクは無効になりません。不要なものは確認のうえ、個別に無効にしてください。",
+        "reviewInvitations": "招待リンクを確認",
+        "removedDescription": "この方が担当していた連絡先・会社・案件・キャンペーン・シーケンスは担当者なしに、タスクは未割り当てになりました。未承認の招待と共有リンクは変更されていません。",
+        "revokeLinkConsequences": "リンクを無効にすると、他の招待者を含め、このリンクからは誰も参加できなくなります。すでに参加したメンバーには影響しません。",
+        "replaceInvite": "招待を作り直す",
+        "replaceInviteHint": "再読み込み後にリンクをコピーするには、招待を作り直してください。以前の招待は使えなくなります。",
+        "emailAccepted": "メール配信サービスが招待メールを受け付けました。受信箱への到着は確認できていません。リンクをコピーして共有することもできます。",
+        "emailSkipped": "メール配信が設定されていないため、メールは送信されていません。招待リンクをコピーして共有してください。",
+        "emailFailed": "招待は作成されましたが、メールを送信できませんでした。リンクをコピーして共有するか、招待を作り直して再度お試しください。",
+        "emailUnconfirmed": "招待は作成されました。メールの送信は確認できていません。必要に応じてリンクをコピーして共有してください。",
+        "copyFailed": "招待リンクをコピーできませんでした",
+        "copyFailedDescription": "招待は引き続き有効です。下のリンクを選択してコピーするか、「リンクをコピー」をもう一度お試しください。",
+        "inviteUrl": "招待リンク",
+        "close": "閉じる",
         "removeConfirm": "確認",
         "cancel": "キャンセル",
         "removed": "メンバーを削除しました",
@@ -228,6 +257,8 @@
         "sendInvite": "招待を送信",
         "sending": "送信中",
         "inviteCreated": "招待リンクをクリップボードにコピーしました",
+        "invitationCreated": "招待を作成しました",
+        "inviteNoExpiry": "有効期限なし",
         "memberInvited": "招待を送信しました。相手の通知に表示されます。",
         "inviteFailed": "招待を作成できませんでした",
         "pendingTitle": "保留中の招待",
@@ -268,7 +299,19 @@
         "domainsLoadFailedBody": "設定が変更されたわけではありません。内容を読み込めなかったため、しばらくしてからもう一度お試しください。",
         "domainRemoved": "ドメインを削除しました",
         "domainRemoveFailed": "ドメインを削除できませんでした",
-        "domainsEmpty": "ドメインの制限はありません。招待リンクを知っている人は、メールアドレスに関係なく参加できます。"
+        "domainsEmpty": "ドメインの制限はありません。招待リンクを知っている人は、メールアドレスに関係なく参加できます。",
+        "approvalCode": "パスキー承認コード",
+        "ownershipOffered": "{name} にオーナー権限を提案しました。承認されるとオーナーになります。",
+        "ownershipPending": "オーナー提案中",
+        "withdrawOwnershipOffer": "オーナー提案を取り消す",
+        "ownershipOfferWithdrawn": "オーナー提案を取り消しました",
+        "ownershipOffersLoadFailed": "保留中のオーナー提案を読み込めませんでした",
+        "ownershipOfferWithdrawFailed": "オーナー提案を取り消せませんでした",
+        "confinementSubjectRole": "{name} を {role} に変更",
+        "passkeyNotApproved": "パスキー未承認",
+        "passkeyNotApprovedHint": "この組織で承認されたパスキーがまだありません。このメンバーのメニューからパスキー承認コードを発行してください。",
+        "membersRefreshFailed": "メンバー一覧を更新できませんでした",
+        "membersRefreshFailedDescription": "変更は保存されました。最新の承認状況を表示するには、ページを再読み込みしてください。"
     },
     "WorkspaceRoles": {
         "title": "ロール",
@@ -288,13 +331,13 @@
         "deleteFailed": "ロールを削除できませんでした",
         "loadFailed": "ロールを読み込めませんでした",
         "nameRequired": "ロール名を入力してください",
-        "noAccess": "ロールを管理できるのはワークスペースのオーナーのみです。",
+        "noAccess": "現在のロールではワークスペースのロールを管理できません。アクセス権が必要な場合は、ワークスペースのオーナーに依頼してください。",
         "empty": "カスタムロールはまだありません。",
         "permissionCount": "{count} 件の権限",
         "defaultRolesLabel": "標準ロール",
         "customRolesLabel": "カスタムロール",
         "builtInBadge": "標準",
-        "builtInSubtitle": "標準のアクセスレベルです。これらは編集できません。",
+        "builtInSubtitle": "標準のアクセス権限です。データのエクスポート権限はロールごとに変更できます。",
         "fullAccess": "すべての権限",
         "noPermissions": "権限なし",
         "createTitle": "新しいロール",
@@ -305,14 +348,280 @@
         "selectAll": "すべて選択",
         "clearAll": "クリア",
         "create": "ロールを作成",
-        "noPermissionsHint": "このロールに許可するアクションを少なくとも 1 つ選択してください。",
+        "noPermissionsHint": "操作の権限が選択されていません。ワークスペースのメンバーとして公開されているレコードは引き続き閲覧できます。",
         "roleEntityLabel": "ロール",
         "permissionLabels": {
-            "teamManage": {
-                "group": "チーム",
-                "action": "管理"
+            "COMPANY_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースに会社を作成できます。"
+            },
+            "COMPANY_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできる会社を編集できます。"
+            },
+            "COMPANY_DELETE": {
+                "action": "アーカイブ・復元",
+                "description": "アクセスできる会社をアーカイブ・復元できます。アーカイブ後も履歴は保持され、元に戻せます。"
+            },
+            "PERSON_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースに連絡先を作成できます。"
+            },
+            "PERSON_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできる連絡先を編集できます。"
+            },
+            "PERSON_DELETE": {
+                "action": "アーカイブ・復元",
+                "description": "アクセスできる連絡先をアーカイブ・復元できます。アーカイブ後も履歴は保持され、元に戻せます。"
+            },
+            "DEAL_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースに案件を作成できます。"
+            },
+            "DEAL_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできる案件を編集できます。"
+            },
+            "DEAL_DELETE": {
+                "action": "削除",
+                "description": "アクセスできる案件を削除できます。下書き以外の文書がある案件の削除には、カスタムロールが割り当てられていない組み込みのオーナーまたは管理者ロールも必要です。"
+            },
+            "ACTIVITY_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにアクティビティを作成できます。"
+            },
+            "ACTIVITY_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるアクティビティを編集できます。連携アカウントから自動取得されたアクティビティは閲覧のみ可能です。"
+            },
+            "ACTIVITY_DELETE": {
+                "action": "削除",
+                "description": "アクセスできるアクティビティを削除できます。連携アカウントから自動取得されたアクティビティは閲覧のみ可能です。"
+            },
+            "NOTE_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにメモを作成できます。"
+            },
+            "NOTE_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるメモを編集できます。"
+            },
+            "NOTE_DELETE": {
+                "action": "削除",
+                "description": "アクセスできるメモを削除できます。"
+            },
+            "TASK_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにタスクを作成できます。"
+            },
+            "TASK_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるタスクを編集できます。"
+            },
+            "TASK_DELETE": {
+                "action": "削除",
+                "description": "アクセスできるタスクを削除できます。"
+            },
+            "REPORT_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにレポートを作成できます。"
+            },
+            "REPORT_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるレポートを編集できます。"
+            },
+            "REPORT_DELETE": {
+                "action": "削除",
+                "description": "自分が作成したレポートとスナップショットを削除できます。ほかのメンバーが作成した内容や、定期配信のスナップショットを含むレポートの削除には、カスタムロールが割り当てられていない組み込みのオーナーまたは管理者ロールが必要です。"
+            },
+            "COMMENT_CREATE": {
+                "action": "コメントを追加",
+                "description": "アクセスできるレコードにコメントを追加できます。"
+            },
+            "COMMENT_MODERATE": {
+                "action": "コメントを管理",
+                "description": "アクセスできるレコードで、ほかの作成者のコメント本文を削除できます。コメントの追加権限も必要です。自分のコメントの削除にコメントの管理権限は不要です。"
+            },
+            "ATTACHMENT_CREATE": {
+                "action": "ファイルをアップロード",
+                "description": "アクセスできるレコードにファイルをアップロードできます。"
+            },
+            "ATTACHMENT_DELETE": {
+                "action": "ファイルを削除",
+                "description": "アクセスできるファイルを削除できます。隔離されたファイルの削除には、隔離ファイルの管理権限も必要です。"
+            },
+            "ATTACHMENT_QUARANTINE_MANAGE": {
+                "action": "隔離ファイルを管理",
+                "description": "隔離されたファイルの状態を確認・管理できます。ファイルの内容を閲覧する権限は付与されません。"
+            },
+            "REPORT_READ": {
+                "action": "レポートを閲覧",
+                "description": "ワークスペースのレポートを閲覧できます。作成・編集には別の権限が必要です。"
+            },
+            "GOAL_READ": {
+                "action": "目標を閲覧",
+                "description": "目標と進捗を閲覧できます。"
+            },
+            "GOAL_MANAGE": {
+                "action": "目標を管理",
+                "description": "目標を作成・編集・削除できます。"
+            },
+            "PIPELINE_MANAGE": {
+                "action": "パイプラインを管理",
+                "description": "パイプラインとステージを作成・編集・削除できます。"
+            },
+            "TAG_MANAGE": {
+                "action": "タグを管理",
+                "description": "ワークスペースのタグを作成・編集・削除できます。"
+            },
+            "PRODUCT_MANAGE": {
+                "action": "商品を管理",
+                "description": "ワークスペースの商品一覧で商品を作成・編集・削除できます。"
+            },
+            "DOCUMENT_MANAGE": {
+                "action": "文書テンプレートと承認ポリシーを管理",
+                "description": "文書テンプレートを作成・編集・削除し、文書の承認ポリシーを設定できます。案件の文書の編集には案件の編集権限が、送信・承認にはそれぞれ別の権限が必要です。"
+            },
+            "DOCUMENT_SEND": {
+                "action": "文書を送信",
+                "description": "文書の送信、再送、送信の無効化を行えます。"
+            },
+            "DOCUMENT_APPROVE": {
+                "action": "文書を承認",
+                "description": "レビュー対象の文書を承認・却下できます。承認ポリシーを管理する権限は付与されません。"
+            },
+            "CUSTOM_FIELD_MANAGE": {
+                "action": "カスタム項目を管理",
+                "description": "カスタム項目の定義を作成・編集・削除できます。"
+            },
+            "SHARE_MANAGE": {
+                "action": "共有を管理",
+                "description": "このワークスペースが所有する会社・連絡先・パイプラインの組織内での共有を管理できます。共有先のワークスペースへの参加が必要です。プライバシー保護の制限は引き続き適用されます。"
+            },
+            "MEMBER_MANAGE": {
+                "action": "メンバーを管理",
+                "description": "自分の権限の範囲でメンバーを招待・解除し、組み込みのロールを割り当てできます。オーナーの変更はワークスペースのオーナーのみが行え、新たにオーナーになる方の承諾が必要です。カスタムロールの割り当てにはロールの管理権限が必要です。"
+            },
+            "ROLE_MANAGE": {
+                "action": "ロールを管理",
+                "description": "自分が持つ権限の範囲でカスタムロールを作成・編集・割り当てし、未使用のロールを削除できます。オーナーに割り当てられているロールの変更には、ワークスペースのオーナーの資格も必要です。カスタムロールではオーナーの資格は付与されません。"
+            },
+            "AUDIT_READ": {
+                "action": "ワークスペースの監査ログを閲覧",
+                "description": "ワークスペースの監査履歴を閲覧できます。組織の監査ログには別の権限が必要です。"
+            },
+            "WORKSPACE_SETTINGS": {
+                "action": "ワークスペース設定を管理",
+                "description": "ワークスペースの設定を編集できます。組織のセキュリティやシングルサインオンの設定には組織の権限が必要です。AI設定には組織管理者の権限が必要です。"
+            },
+            "API_CREDENTIAL_MANAGE": {
+                "action": "API認証情報を管理",
+                "description": "自分の権限の範囲でAPI認証情報を発行し、ワークスペース内の認証情報の確認・失効を行えます。"
+            },
+            "RULE_MANAGE": {
+                "action": "ワークフローを管理",
+                "description": "ワークスペースのワークフローを作成・編集・公開・管理できます。実行する操作には、それぞれの権限が必要です。"
+            },
+            "CAMPAIGN_VIEW": {
+                "action": "キャンペーンを閲覧",
+                "description": "キャンペーンと結果を閲覧できます。連絡先の配信対象の詳細確認には連絡に関する設定の管理権限が、編集・送信にはそれぞれ別の権限が必要です。"
+            },
+            "CAMPAIGN_MANAGE": {
+                "action": "キャンペーンを管理",
+                "description": "キャンペーンを作成・編集・削除し、メッセージと配信対象を管理できます。連絡先の配信対象や送信の下書きの作成には連絡に関する設定の管理権限も必要です。送信には別の権限が必要です。"
+            },
+            "CAMPAIGN_SEND": {
+                "action": "キャンペーンを送信",
+                "description": "送信条件を満たす宛先にキャンペーンを送信できます。連絡に関する設定とプライバシー保護の制限は引き続き適用されます。"
+            },
+            "CONSENT_MANAGE": {
+                "action": "連絡に関する設定を管理",
+                "description": "このワークスペースが所有する連絡先のマーケティングに関する設定と、ワークスペースの配信対象からの除外を管理できます。プライバシー保護の制限は引き続き適用されます。"
+            },
+            "AI_USE": {
+                "action": "AI機能を利用",
+                "description": "組織でAIプロバイダーが設定され、機能が有効な場合にAsk ConnexとAI機能を利用できます。ほかのメンバーの非公開チャットへのアクセス権は付与されません。AI設定には組織管理者の権限が必要です。"
+            },
+            "AI_SESSION_SHARE": {
+                "action": "自分のチャットを共有",
+                "description": "AIの回答がまだない自分のチャットを共有し、ワークスペースのメンバーを招待できます。自分と参加者の双方にAI機能の利用権限も必要です。"
+            },
+            "AI_SESSION_ADMIN": {
+                "action": "退出したメンバーのチャットを閲覧",
+                "description": "作成者がワークスペースを退出した後に保管されたチャットを閲覧できます。内容の変更や作成者に代わる送信はできません。"
+            },
+            "SEQUENCE_VIEW": {
+                "action": "シーケンスを閲覧",
+                "description": "アクセスできるシーケンスのテンプレートを閲覧できます。編集・公開にはシーケンスの管理権限が必要です。"
+            },
+            "SEQUENCE_MANAGE": {
+                "action": "シーケンスを管理",
+                "description": "アクセスできるシーケンスのテンプレートを作成・編集・アーカイブ・公開できます。キャンペーンを送信する権限は付与されません。"
+            },
+            "TEAM_MANAGE": {
+                "action": "チームを管理",
+                "description": "チームを作成し、メンバーとマネージャーを管理できます。チームへの所属だけではワークスペースの権限は付与されません。"
+            },
+            "EXPORT_DATA": {
+                "action": "データのエクスポート",
+                "description": "アクセスできるデータをエクスポートします。レコード、レポート、監査ログの閲覧権限とセキュリティ要件は引き続き適用されます。"
             }
-        }
+        },
+        "confinementSubjectRoleEdit": "ロール「{name}」の変更を保存",
+        "permissionGroups": {
+            "COMPANY": "会社",
+            "PERSON": "連絡先",
+            "DEAL": "案件",
+            "ACTIVITY": "アクティビティ",
+            "NOTE": "メモ",
+            "COMMENT": "コメント",
+            "TASK": "タスク",
+            "ATTACHMENT": "ファイル",
+            "REPORT": "レポート",
+            "GOAL": "目標",
+            "PIPELINE": "パイプライン",
+            "TAG": "タグ",
+            "PRODUCT": "商品",
+            "DOCUMENT": "文書",
+            "CUSTOM": "カスタム項目",
+            "SHARE": "共有",
+            "MEMBER": "メンバー",
+            "ROLE": "ロール",
+            "AUDIT": "監査ログ",
+            "WORKSPACE": "ワークスペース設定",
+            "API": "API認証情報",
+            "RULE": "ワークフロー",
+            "CAMPAIGN": "キャンペーン",
+            "CONSENT": "連絡に関する設定",
+            "AI": "Ask ConnexとAI機能",
+            "SEQUENCE": "シーケンス",
+            "TEAM": "チーム",
+            "EXPORT": "データのエクスポート"
+        },
+        "accessDetails": "許可される操作・されない操作を確認",
+        "accessScopeHint": "「許可」と表示された操作のみ実行できます。レコードの公開範囲、組織の権限、セキュリティ上の確認は引き続き適用されます。",
+        "allowed": "許可",
+        "notAllowed": "許可なし",
+        "unknownPermission": "追加の操作",
+        "unknownPermissionDescription": "この操作の説明はまだありません。権限を付与する前にワークスペースのオーナーに確認してください。",
+        "unknownPermissionGroup": "追加の権限",
+        "builtInRoles": {
+            "owner": {
+                "name": "オーナー",
+                "description": "メンバーとロールの管理を含む、ワークスペースのすべての権限を持ちます。組織の権限は別途必要で、AI設定には組織管理者の権限が必要です。"
+            },
+            "admin": {
+                "name": "管理者",
+                "description": "ワークスペース設定、メンバー、ワークフローを管理し、AI機能を利用できます。AI設定には組織管理者の権限が必要です。カスタムロールの管理やワークスペースのオーナー権限の付与はできません。"
+            },
+            "member": {
+                "name": "メンバー",
+                "description": "連絡先、案件、アクティビティ、メモ、コメント、タスク、ファイル、レポートを扱えます。ワークスペース設定、メンバー、ロール、ワークフローの管理やAI機能の利用はできません。"
+            }
+        },
+        "exportPermissionSaving": "エクスポート権限を保存中…",
+        "exportPermissionLabel": "{role}によるデータのエクスポートを許可"
     },
     "WorkflowAuthoring": {
         "noAccess": "このワークスペースでワークフローを管理する権限がありません。必要な場合はワークスペース管理者にご相談ください。",
@@ -333,6 +642,12 @@
         "actionBodyPlaceholder": "メッセージ（任意）",
         "actionNotePlaceholder": "メモの内容",
         "dueIn": "期限までの日数",
+        "taskAssignee": "タスクの担当者",
+        "notificationRecipient": "通知の受信者",
+        "workflowMember": "ワークフローの実行メンバー",
+        "workflowCreator": "ワークフローを作成したメンバー",
+        "recipientHelp": "ワークスペースのメンバーを選んでください。レコードの担当者を自動で選ぶ機能は、まだ利用できません。",
+        "dueInHelp": "当日を期日にする場合は0を指定してください（0〜365日）。",
         "respondWithin": "初回応答期限（時間）",
         "activityTypePlaceholder": "アクティビティの種類（例: 電話）",
         "activitySubjectPlaceholder": "件名",
@@ -517,6 +832,17 @@
             "additional": "追加のワークスペース権限"
         },
         "validationReady": "確認が完了しました。この下書きは公開できます。",
+        "validationBlocked": "この下書きはまだ公開できません。必要な権限と設定を確認してください。",
+        "publicationReason": {
+            "delay": "この環境では待機ステップを実行できません。待機ステップを削除してから公開してください。",
+            "multiple_conditions": "この環境では条件ステップを1つにまとめる必要があります。確認項目をそのステップにまとめてから公開してください。",
+            "no_branch_actions": "「いいえ」の分岐は、操作を行わずに終了する必要があります。操作を「はい」の分岐に移すか、削除してください。",
+            "action_limit": "この環境では操作を16件まで実行できます。超過分を削除してから公開してください。",
+            "condition_position": "条件ステップはすべての操作より前に配置する必要があります。開始条件の直後に移してください。",
+            "unsupported_structure": "この環境ではこの分岐を実行できません。条件ステップを1つにして、その後に操作を順番に並べてください。"
+        },
+        "unavailableBadge": "実行できません",
+        "executionUnavailable": "この環境ではこのワークフローを実行できません。管理者にご相談ください。",
         "validationErrorTitle": "公開前に問題を {count} 件修正してください",
         "authoringModeLabel": "編集表示",
         "authoringMode": {
@@ -663,7 +989,7 @@
             "description": "{name} に記録されたすべての実行です。",
             "detailTitle": "実行経路",
             "detailDescription": "実行 #{run} が行った内容です。",
-            "legacyDetailDescription": "以前の実行 #{run} が行った内容です。",
+            "legacyDetailDescription": "実行 A{run}の概要です。",
             "emptyTitle": "実行履歴はまだありません",
             "emptyBody": "このワークフローはまだ実行されていません。",
             "errorTitle": "実行履歴を読み込めませんでした",
@@ -683,14 +1009,23 @@
             "recordFallback": "レコード",
             "target": "{record} #{id}",
             "latest": "最終実行 {time}",
-            "legacyVersion": "以前の自動化から引き継いだ実行",
+            "legacyVersion": "公開バージョンの記録なし",
             "legacyPartial": "一部のみ完了",
-            "legacySummaryOnly": "この実行は概要のみが残っています",
+            "legacySummaryOnly": "この実行のステップ詳細は記録されていません",
             "inspectPath": "経路を確認",
             "showOverlay": "ワークフロー上に表示",
             "pathLabel": "実行された内容",
             "durationPending": "進行中",
             "durationMs": "{value} ミリ秒",
+            "failedAction": "操作 {number} · {action}",
+            "failureUnknown": "この実行は完了できませんでした。詳しい理由は記録されていません。",
+            "failureRecovery": "再実行する前に、ワークフローの設定とレコードをご確認ください。成功した操作による変更は、すでに保存されている場合があります。",
+            "reviewWorkflow": "ワークフローを確認",
+            "targetUnavailable": "レコード名を読み込めませんでした",
+            "documentTargetUnavailable": "ドキュメントを表示できません",
+            "targetLoading": "レコード名を読み込み中…",
+            "targetNameNotRecorded": "この履歴ではレコード名を表示できません",
+            "failureTitle": "この実行をご確認ください",
             "failureAtNode": "このステップが失敗しました。",
             "stepFailure": "このステップに起因する失敗",
             "actionOutcome": {
@@ -710,7 +1045,7 @@
                 "intervention_required": "対応が必要"
             },
             "reference": "実行 #{run}",
-            "legacyReference": "以前の実行 #{run}",
+            "legacyReference": "実行 A{run}",
             "copyReference": "{reference} — 実行の参照コードをコピー",
             "referenceCopied": "実行の参照コードをコピーしました",
             "referenceCopyFailed": "実行の参照コードをコピーできませんでした"
@@ -767,7 +1102,7 @@
             "delay_duration_below_minimum": "待機時間は1分以上にしてください。",
             "delay_duration_above_maximum": "1回の待機は30日を超えることができません。",
             "cumulative_delay_above_maximum": "この経路の待機時間は合計90日を超えることができません。",
-            "legacy_projection_unsupported": "このワークフローを動かしている自動化では、これらのステップをまだ実行できません。分岐を簡素にするか、移行についてサポートにご相談ください。",
+            "legacy_projection_unsupported": "この環境ではこれらのステップを実行できません。分岐を簡素にしてから公開してください。",
             "actor_unavailable": "設定されたワークフロー実行者を利用できません。",
             "record_unavailable": "選択したレコードを利用できないか、表示権限がありません。",
             "trigger_filter_not_matched": "選択したレコードはトリガーフィルターに一致しません。",
