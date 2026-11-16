@@ -41,7 +41,7 @@ import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePermissionCheck } from "@/app/hooks/usePermissions";
 import { useOrgExportPermissions } from "@/app/hooks/useOrgExportPermissions";
 import { useOwnedUrlParams } from "@/app/hooks/useOwnedUrlParams";
-import { auditListParams, readAuditListState, type AuditFilters as Filters, type AuditOutcomeFilter as OutcomeFilter, type AuditRangeFilter as RangeFilter, type AuditSort as Sort } from "@/app/lib/auditListState";
+import { AUDIT_SYSTEM_ACTOR, auditListParams, readAuditListState, type AuditFilters as Filters, type AuditOutcomeFilter as OutcomeFilter, type AuditRangeFilter as RangeFilter, type AuditSort as Sort } from "@/app/lib/auditListState";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
@@ -323,8 +323,8 @@ export default function AuditLogBrowser({
     const systemLabel = t("actorSystem");
 
     const actorKeyOf = useMemo(
-        () => (e: AuditLogEntry) => (orgId === undefined ? e.actorLabel : e.currentActorLabel ?? e.actorLabel) ?? systemLabel,
-        [orgId, systemLabel],
+        () => (e: AuditLogEntry) => (orgId === undefined ? e.actorLabel : e.currentActorLabel ?? e.actorLabel) ?? AUDIT_SYSTEM_ACTOR,
+        [orgId],
     );
 
     const verbTotal = useMemo(() => {
@@ -364,8 +364,10 @@ export default function AuditLogBrowser({
     );
 
     const actorOptions = useMemo(
-        () => [...actorTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({ value, total })),
-        [actorTotal],
+        () => [...actorTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({
+            value, total, label: value === AUDIT_SYSTEM_ACTOR ? systemLabel : value,
+        })),
+        [actorTotal, systemLabel],
     );
 
     const matches = useMemo(
@@ -614,7 +616,7 @@ export default function AuditLogBrowser({
             chips.push({ id: "r", label: map[filters.range], onRemove: () => setFilters((p) => ({ ...p, range: "all" })) });
         }
         for (const a of filters.actors) {
-            chips.push({ id: `a-${a}`, label: a, onRemove: () => toggleSet("actors", a) });
+            chips.push({ id: `a-${a}`, label: a === AUDIT_SYSTEM_ACTOR ? systemLabel : a, onRemove: () => toggleSet("actors", a) });
         }
         return chips;
     })();

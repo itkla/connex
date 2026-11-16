@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { auditListParams, readAuditListState } from '@/app/lib/auditListState';
+import { AUDIT_SYSTEM_ACTOR, auditListParams, readAuditListState } from '@/app/lib/auditListState';
 
 describe('audit URL state', () => {
+    it('preserves the stable system key and leaves real actor labels unchanged', () => {
+        const { filters, sort } = readAuditListState(null);
+        filters.actors = new Set([AUDIT_SYSTEM_ACTOR, 'System', 'システム', 'Auditor']);
+        const actors = auditListParams(filters, sort).actors;
+        expect(actors).toBe(JSON.stringify([AUDIT_SYSTEM_ACTOR, 'System', 'システム', 'Auditor']));
+        const restored = readAuditListState(new URLSearchParams({ actors: actors ?? '' }));
+        expect(restored.filters.actors).toEqual(filters.actors);
+    });
+
     it('round-trips every filter, Unicode actor punctuation and sort', () => {
         const params = new URLSearchParams({ q: ' consent ', verbs: 'create,delete', entities: 'person,company',
             outcome: 'failed', actors: JSON.stringify(['山田, 太郎', 'Operations & support']), range: '7d', sort: 'oldest' });

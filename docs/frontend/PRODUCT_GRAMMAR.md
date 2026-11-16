@@ -314,8 +314,9 @@ List-state writers check their owning pathname against the address bar before ch
 Workspace and organization audit browsers restore search, action, entity, outcome, actor, date range,
 and sort from their URL. They write only their owned parameters through `useOwnedUrlParams`, preserving
 other parameters, section fragments and router history state without navigation. Clearing filters
-removes their parameters while retaining the selected sort. Actor labels use a JSON array so commas
-and Japanese names survive sharing and reload.
+removes their parameters while retaining the selected sort. Actor keys use a JSON array so commas
+and Japanese names survive sharing and reload. Unattributed events use the locale-independent
+`__system__` key; options and chips translate its label only for display.
 
 No indices are added to history state, no global history tracker is installed, and no entries or guessed distances are used. If native positions are unavailable or do not identify a nonzero delta, the existing safe fallback restores the rendered editor's URL/state in the reached slot using the native history prototype. This unknown-distance fallback replaces that slot rather than restoring the cursor: Keep editing can consume a Back/Forward destination and lose its query context. Discard explicitly routes to the captured destination. This bounded limitation preserves URL/page consistency without guessing. Cross-document departures retain the native leave warning.
 

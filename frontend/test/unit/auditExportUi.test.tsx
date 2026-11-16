@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AuditLogBrowser from "@/app/components/admin/AuditLogBrowser";
 import OrgAuditPanel from "@/app/components/organization/OrgAuditPanel";
+import { AUDIT_SYSTEM_ACTOR, auditListParams, readAuditListState } from "@/app/lib/auditListState";
 import type { AuditLogEntry } from "@/app/lib/types";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import englishAdmin from "@/messages/en/admin.json";
@@ -63,6 +64,60 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
 
 describe("audit export controls", () => {
+    it.each([false, true])("preserves the system actor from English to Japanese (organization: %s)", async (organization) => {
+        const rows: AuditLogEntry[] = [
+            { id: 73, action: "company.update", entityType: "company", outcome: "success", createdAt: "2026-11-05T11:00:00Z" },
+            ...entries,
+        ];
+        const path = `/settings/${organization ? "organization" : "workspace"}/audit-diagnostics`;
+        window.history.replaceState(null, "", path);
+        view("en", organization, rows);
+        fireEvent.keyDown(await screen.findByRole("button", { name: englishAdmin.AdminAuditLog.filterActor }), { key: "Enter" });
+        const englishSystem = await screen.findByRole("menuitemcheckbox", { name: /^System/ });
+        expect(englishSystem.textContent).toContain("1");
+        fireEvent.click(englishSystem);
+        fireEvent.keyDown(englishSystem, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+        const englishState = readAuditListState(new URLSearchParams(window.location.search));
+        const serialized = new URLSearchParams(Object.entries(auditListParams(englishState.filters, englishState.sort)).flatMap(
+            ([key, value]) => value === undefined ? [] : [[key, value]],
+        ));
+        cleanup();
+        window.history.replaceState(null, "", `${path}?${serialized}`);
+        view("ja", organization, rows);
+        const labels = japaneseAdmin.AdminAuditLog;
+        const resultCount = (shown: number) => labels.resultCount.replace("{shown}", String(shown)).replace("{total}", String(rows.length));
+        expect(await screen.findByText(resultCount(1))).toBeTruthy();
+        expect(screen.getAllByText(labels.actorSystem).length).toBeGreaterThan(0);
+        expect(document.body.textContent).not.toContain(AUDIT_SYSTEM_ACTOR);
+        expect(new URLSearchParams(window.location.search).get("actors")).toBe(JSON.stringify([AUDIT_SYSTEM_ACTOR]));
+        await waitFor(() => expect(screen.getByRole("button", { name: labels.exportCsv }).hasAttribute("disabled")).toBe(false));
+        fireEvent.click(screen.getByRole("button", { name: labels.exportCsv }));
+        await waitFor(() => expect(api.exportRows).toHaveBeenCalledWith([73], organization ? 3 : undefined, expect.anything()));
+
+        fireEvent.keyDown(screen.getByRole("button", { name: labels.filterActor }), { key: "Enter" });
+        const japaneseSystem = await screen.findByRole("menuitemcheckbox", { name: /^システム/ });
+        expect(japaneseSystem.textContent).toContain("1");
+        expect(japaneseSystem.getAttribute("aria-checked")).toBe("true");
+        expect(screen.getByRole("menu").textContent).not.toContain(AUDIT_SYSTEM_ACTOR);
+        fireEvent.click(screen.getByRole("menuitem", { name: labels.clear }));
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+        expect(new URLSearchParams(window.location.search).get("actors")).toBeNull();
+        expect(screen.getByText(resultCount(rows.length))).toBeTruthy();
+
+        fireEvent.keyDown(screen.getByRole("button", { name: labels.filterActor }), { key: "Enter" });
+        const reselected = await screen.findByRole("menuitemcheckbox", { name: /^システム/ });
+        fireEvent.click(reselected);
+        fireEvent.keyDown(reselected, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+        const removeSystem = japaneseCommon.Filters.removeFilter.replace("{label}", labels.actorSystem);
+        expect(removeSystem).not.toContain(AUDIT_SYSTEM_ACTOR);
+        fireEvent.click(screen.getByRole("button", { name: removeSystem }));
+        expect(new URLSearchParams(window.location.search).get("actors")).toBeNull();
+        expect(screen.getByText(resultCount(rows.length))).toBeTruthy();
+    });
+
     it.each([false, true])("restores and clears shareable audit filters (organization: %s)", async (organization) => {
         const params = new URLSearchParams({ q: 'company', verbs: 'export', entities: 'company', outcome: 'success',
             actors: JSON.stringify([organization ? 'Current auditor' : 'Auditor']), range: '30d', sort: 'oldest', context: 'keep' });

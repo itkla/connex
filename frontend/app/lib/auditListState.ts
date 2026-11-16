@@ -1,5 +1,8 @@
 import { parseListQuery } from '@/app/hooks/listStateUrl';
 
+/** Locale-independent filter identity for audit events without a named actor. */
+export const AUDIT_SYSTEM_ACTOR = '__system__';
+
 export type AuditOutcomeFilter = 'all' | 'success' | 'failed';
 export type AuditRangeFilter = 'all' | 'today' | '7d' | '30d';
 export type AuditSort = 'newest' | 'oldest';
