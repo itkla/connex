@@ -1080,7 +1080,8 @@ function problemText(t: ReturnType<typeof useTranslations>, problem: ImportProbl
     return t(t.has(key) ? key : 'problems.ROW_INVALID', { field: problem.field ?? '' });
 }
 
-function CompanyChoices({ row, allRows, selectedId, onChoice }: {
+/** Shows automatic company creation or the explicit choice required by the preview. */
+export function CompanyChoices({ row, allRows, selectedId, onChoice }: {
     row: ImportRowAnalysis;
     allRows: ImportRowAnalysis[];
     selectedId?: number;
@@ -1089,16 +1090,19 @@ function CompanyChoices({ row, allRows, selectedId, onChoice }: {
     const t = useTranslations('importExport');
     const dependency = row.companyDependency;
     if (!dependency) return null;
+    if (!dependency.truncated && !dependency.candidates?.length && dependency.selectedId == null && selectedId == null) {
+        return <p className="break-words text-xs text-muted-foreground">{t('companyWillCreate', { name: dependency.name })}</p>;
+    }
     const selected = dependency.candidates?.find((candidate) => candidate.recordId === selectedId);
     const indices = selectedId == null ? [] : companyChoiceRows(allRows, row, selectedId);
     return <details open={selectedId == null}>
         <summary className="cursor-pointer py-2 text-xs font-medium">
-            {t('companyChoice', { name: dependency.name })}
+            {t(selected ? 'companySelected' : 'companyChoice', { name: selected?.name ?? dependency.name })}
             {selected && <span className="block break-words font-normal text-muted-foreground">
                 {t('linkedTo', { name: [selected.name, selected.industry, selected.website].filter(Boolean).join(' · ') })}
             </span>}
         </summary>
-        <p className="mb-2 text-xs text-muted-foreground">{t(dependency.truncated ? 'problems.COMPANY_TRUNCATED' : 'companyChoiceHint')}</p>
+        {(dependency.truncated || !selected) && <p className="mb-2 text-xs text-muted-foreground">{t(dependency.truncated ? 'problems.COMPANY_TRUNCATED' : 'companyChoiceHint')}</p>}
         {!dependency.truncated && <DuplicateCandidates entity="companies" candidates={dependency.candidates ?? []}
             linkedId={selectedId} allowShared onLink={(candidate) => onChoice([row.rowIndex], candidate.recordId)} />}
         {selected && <div className="mt-2 space-y-2">

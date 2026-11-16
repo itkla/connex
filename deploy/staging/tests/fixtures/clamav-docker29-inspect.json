@@ -1,0 +1,144 @@
+[
+  {
+    "Id": "1111111111111111111111111111111111111111111111111111111111111111",
+    "Image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "Name": "/connex-staging-clamav",
+    "State": {
+      "Running": true
+    },
+    "HostConfig": {
+      "Binds": null,
+      "ContainerIDFile": "",
+      "LogConfig": {
+        "Type": "json-file",
+        "Config": {}
+      },
+      "NetworkMode": "bridge",
+      "PortBindings": {
+        "8091/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "8091"
+          }
+        ]
+      },
+      "RestartPolicy": {
+        "Name": "unless-stopped",
+        "MaximumRetryCount": 0
+      },
+      "AutoRemove": false,
+      "VolumeDriver": "",
+      "VolumesFrom": null,
+      "ConsoleSize": [
+        0,
+        0
+      ],
+      "CapAdd": null,
+      "CapDrop": null,
+      "CgroupnsMode": "private",
+      "Dns": null,
+      "DnsOptions": [],
+      "DnsSearch": [],
+      "ExtraHosts": null,
+      "GroupAdd": null,
+      "IpcMode": "private",
+      "Cgroup": "",
+      "Links": null,
+      "OomScoreAdj": 0,
+      "PidMode": "",
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyRootfs": true,
+      "SecurityOpt": null,
+      "Tmpfs": {
+        "/tmp": "size=512m,mode=1777,noexec,nosuid,nodev"
+      },
+      "UTSMode": "",
+      "UsernsMode": "",
+      "ShmSize": 67108864,
+      "Runtime": "runc",
+      "Isolation": "",
+      "CpuShares": 0,
+      "Memory": 1992294400,
+      "NanoCpus": 0,
+      "CgroupParent": "",
+      "BlkioWeight": 0,
+      "BlkioWeightDevice": [],
+      "BlkioDeviceReadBps": [],
+      "BlkioDeviceWriteBps": [],
+      "BlkioDeviceReadIOps": [],
+      "BlkioDeviceWriteIOps": [],
+      "CpuPeriod": 0,
+      "CpuQuota": 0,
+      "CpuRealtimePeriod": 0,
+      "CpuRealtimeRuntime": 0,
+      "CpusetCpus": "",
+      "CpusetMems": "",
+      "Devices": [],
+      "DeviceCgroupRules": null,
+      "DeviceRequests": null,
+      "MemoryReservation": 0,
+      "MemorySwap": 1992294400,
+      "MemorySwappiness": null,
+      "OomKillDisable": null,
+      "PidsLimit": null,
+      "Ulimits": [],
+      "CpuCount": 0,
+      "CpuPercent": 0,
+      "IOMaximumIOps": 0,
+      "IOMaximumBandwidth": 0,
+      "MaskedPaths": [
+        "/proc/acpi",
+        "/proc/asound",
+        "/proc/interrupts",
+        "/proc/kcore",
+        "/proc/keys",
+        "/proc/latency_stats",
+        "/proc/sched_debug",
+        "/proc/scsi",
+        "/proc/timer_list",
+        "/proc/timer_stats",
+        "/sys/devices/virtual/powercap",
+        "/sys/firmware"
+      ],
+      "ReadonlyPaths": [
+        "/proc/bus",
+        "/proc/fs",
+        "/proc/irq",
+        "/proc/sys",
+        "/proc/sysrq-trigger"
+      ]
+    },
+    "Config": {
+      "User": "10002",
+      "Env": [
+        "CONNEX_CLAMAV_SERVICE_TOKEN=<redacted>",
+        "CONNEX_CLAMAV_MAX_SCAN_BYTES=<redacted>",
+        "CONNEX_CLAMAV_STARTUP_TIMEOUT_SECONDS=<redacted>",
+        "CONNEX_CLAMAV_SIGNATURE_WARN_AGE_SECONDS=<redacted>",
+        "CONNEX_CLAMAV_SIGNATURE_MAX_AGE_SECONDS=<redacted>",
+        "CONNEX_CLAMAV_MAX_CONCURRENT_SCANS=<redacted>",
+        "CONNEX_CLAMAV_SCAN_TIMEOUT_SECONDS=<redacted>",
+        "CONNEX_CLAMAV_MAX_REQUEST_HANDLERS=<redacted>",
+        "CONNEX_CLAMAV_SIGNATURE_SOURCE=<redacted>",
+        "PATH=<redacted>",
+        "LANG=<redacted>",
+        "GPG_KEY=<redacted>",
+        "PYTHON_VERSION=<redacted>",
+        "PYTHON_SHA256=<redacted>",
+        "PYTHONDONTWRITEBYTECODE=<redacted>",
+        "PYTHONUNBUFFERED=<redacted>",
+        "HOME=<redacted>",
+        "DEBIAN_FRONTEND=<redacted>"
+      ]
+    },
+    "Mounts": [],
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "Aliases": null
+        }
+      }
+    }
+  }
+]

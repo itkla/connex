@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { createServerPickerSearch } from '@/lib/server-picker-search';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as testingRender, screen, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Combobox, ComboboxChips, ComboboxChipsInput, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '@/components/ui/combobox';
+import { Combobox, ComboboxTrigger, ComboboxChips, ComboboxChipsInput, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '@/components/ui/combobox';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/components/ui/drawer';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
@@ -12,6 +12,10 @@ import { useTimeZoneSearch } from '@/app/hooks/useTimeZoneSearch';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import messages from '@/messages/en/common.json';
 import jaMessages from '@/messages/ja/common.json';
+
+function render(children: ReactNode) {
+    return testingRender(<NextIntlClientProvider locale="en" messages={messages}>{children}</NextIntlClientProvider>);
+}
 
 const choices = ['Fuji Logistics', '北川商事', 'Kitagawa', 'ガーデン商事', ...Array.from({ length: 200 }, (_, i) => `Company ${i}`)];
 
@@ -250,5 +254,18 @@ describe('nested dismissal and safe focus', () => {
                 : <Dialog open><DialogContent><DialogTitle>編集</DialogTitle><DialogDescription>連絡先を編集</DialogDescription></DialogContent></Dialog>}
         </NextIntlClientProvider>);
         expect(screen.getByRole('button', { name: '閉じる' })).toBeTruthy();
+    });
+});
+
+describe('A11Y-21 combobox trigger names', () => {
+    it.each(['en', 'ja'] as const)('names the default chevron and accepts a caller label (%s)', (locale) => {
+        render(<NextIntlClientProvider locale={locale} messages={locale === 'en' ? messages : jaMessages}>
+            <Combobox items={['A']}><ComboboxInput aria-label="Company" /></Combobox>
+            <Combobox items={['A']}><ComboboxTrigger aria-label="Choose company" /></Combobox>
+            <Combobox items={['A']}><ComboboxTrigger aria-label="Company choices">Company choices</ComboboxTrigger></Combobox>
+        </NextIntlClientProvider>);
+        expect(screen.getByRole('button', { name: locale === 'en' ? 'Show options' : '候補を表示' })).toBeTruthy();
+        expect(screen.getByRole('combobox', { name: 'Choose company' })).toBeTruthy();
+        expect(screen.getByRole('combobox', { name: 'Company choices' })).toBeTruthy();
     });
 });

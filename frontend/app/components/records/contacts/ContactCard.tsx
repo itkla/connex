@@ -4,7 +4,7 @@ import { EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type KeyboardEvent, useState } from 'react';
-import { copyToClipboard, readableTextColor } from '@/app/lib/utils';
+import { copyToClipboard, initials, readableTextColor } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
@@ -24,12 +24,6 @@ import {
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { RecordActionMenuTrigger, RecordContextMenu } from '@/app/components/records/RecordActionMenu';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-
-function initialsOf(name: string): string {
-    const parts = name.trim().split(/\s+/).filter(Boolean);
-    if (parts.length === 0) return '?';
-    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
-}
 
 const AVATAR_TINTS = [
     'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
@@ -211,7 +205,7 @@ export default function ContactCard({
                     className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04]"
                     fallback={(
                         <span className={cn('flex h-full w-full items-center justify-center', tintFor(name))}>
-                            <span className="text-5xl font-semibold tracking-tight select-none">{initialsOf(name)}</span>
+                            <span className="text-5xl font-semibold tracking-tight select-none">{initials(name)}</span>
                         </span>
                     )}
                 />

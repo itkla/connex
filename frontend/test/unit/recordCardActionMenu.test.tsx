@@ -287,6 +287,16 @@ async function renderDealKanban(permissions: readonly string[], options: {
 }
 
 describe('real record card action menus', () => {
+    it.each([
+        ['🚀 宇宙 太郎', '宇'],
+        ['𠮷野 家', '𠮷'],
+        ['山田 太郎', '山'],
+        ['Jane Q Doe', 'JD'],
+    ])('renders shared avatar initials for %s', async (name, expected) => {
+        await renderCard(<ContactCard id={1} name={name} readOnly />);
+        expect(container.querySelector('.select-none')?.textContent).toBe(expected);
+    });
+
     it.each([false, true])('pins the current Quick-edit snapshot with a workspace switch pending: %s', async (switchPending) => {
         const pending = deferred<Response>();
         const onQuickEdit = vi.fn();
