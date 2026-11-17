@@ -357,13 +357,45 @@ jobs:
       - name: Smoke-test standalone image optimization
         run: bash frontend/ci/smoke_image.sh connex-frontend-ci
 
+  frontend-unit:
+    name: Frontend — unit tests
+    needs: classify
+    if: needs.classify.outputs.cross_stack == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          package_json_file: frontend/package.json
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm rebuild sharp
+      - name: Unit tests (vitest)
+        working-directory: frontend
+        run: node_modules/.bin/vitest run
+
   frontend-tests:
-    # Required check on main (see #853). Keep the job name stable for branch protection.
-    name: Frontend — unit & e2e
+    # Each shard boots its own MySQL, backend and frontend, so shards share no data. The suite is
+    # fullyParallel, so --shard splits individual tests and the shards stay balanced by test count.
+    name: Frontend — e2e (shard ${{ matrix.shard }}/4)
     needs: classify
     if: needs.classify.outputs.cross_stack == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       mysql:
         image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
@@ -394,9 +426,6 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --ignore-scripts
           pnpm rebuild sharp
-      - name: Unit tests (vitest)
-        working-directory: frontend
-        run: node_modules/.bin/vitest run
       - name: Set up JDK 26
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
         with:
@@ -540,7 +569,7 @@ jobs:
           exit 1
       - name: E2E tests (Playwright)
         working-directory: frontend
-        run: node_modules/.bin/playwright test
+        run: node_modules/.bin/playwright test --shard=${{ matrix.shard }}/4
       - name: Surface server logs on failure
         if: failure()
         run: |
@@ -550,7 +579,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-${{ matrix.shard }}
           path: |
             frontend/playwright-report
             frontend/test-results
@@ -558,10 +587,30 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  frontend-browser:
+    # Required check on main (see #853). Keep the job name stable for branch protection.
+    name: Frontend — unit & e2e
+    needs: [classify, frontend-unit, frontend-tests]
+    # Keep the required check stable and fail closed even when a dependency fails or is cancelled.
+    if: always() && needs.classify.outputs.cross_stack == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require unit tests and every e2e shard to succeed
+        env:
+          UNIT_RESULT: ${{ needs.frontend-unit.result }}
+          E2E_RESULT: ${{ needs.frontend-tests.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$UNIT_RESULT" != success || "$E2E_RESULT" != success ]]; then
+            echo "::error::Frontend tests did not all succeed: unit=$UNIT_RESULT, e2e=$E2E_RESULT"
+            exit 1
+          fi
+
   required:
     name: CI — required
     if: always()
-    needs: [classify, ocr, clamav, migrations, backup, support-bundle, backend, frontend, frontend-tests]
+    needs: [classify, ocr, clamav, migrations, backup, support-bundle, backend, frontend, frontend-browser]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -575,7 +624,7 @@ jobs:
           SUPPORT_BUNDLE_RESULT: ${{ needs.support-bundle.result }}
           BACKEND_RESULT: ${{ needs.backend.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
-          FRONTEND_TESTS_RESULT: ${{ needs.frontend-tests.result }}
+          FRONTEND_TESTS_RESULT: ${{ needs.frontend-browser.result }}
         run: |
           set -euo pipefail
           for result in \

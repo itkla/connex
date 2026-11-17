@@ -240,6 +240,37 @@ class CiChangeClassificationTest(unittest.TestCase):
         categories = self.classify(".github/workflows/ci.yml")
         self.assertTrue(all(categories.values()))
 
+    def test_every_e2e_shard_runs_and_the_required_check_waits_for_all_of_them(self) -> None:
+        """The Playwright shard list and the `--shard` denominator must describe the same split.
+
+        A matrix that names fewer shards than the denominator silently never runs part of the suite,
+        and the required `Frontend — unit & e2e` check must still wait for the unit tests and every
+        shard, so splitting the browser stack can never turn a red shard into a green merge gate.
+        """
+        jobs = self.workflow["jobs"]
+        e2e = jobs["frontend-tests"]
+        shards = e2e["strategy"]["matrix"]["shard"]
+        self.assertFalse(e2e["strategy"]["fail-fast"])
+        playwright = next(
+            step for step in e2e["steps"] if step.get("name") == "E2E tests (Playwright)"
+        )
+        denominator = int(playwright["run"].rsplit("/", 1)[1])
+        self.assertEqual(list(range(1, denominator + 1)), shards)
+        self.assertIn("--shard=${{ matrix.shard }}/", playwright["run"])
+        self.assertTrue(
+            all("vitest" not in str(step) for step in e2e["steps"]),
+            "unit tests run in their own job, not before every e2e shard",
+        )
+
+        gate = jobs["frontend-browser"]
+        self.assertEqual("Frontend — unit & e2e", gate["name"])
+        self.assertEqual(["classify", "frontend-unit", "frontend-tests"], gate["needs"])
+        self.assertTrue(gate["if"].startswith("always() && "))
+        check = gate["steps"][0]
+        self.assertEqual("${{ needs.frontend-unit.result }}", check["env"]["UNIT_RESULT"])
+        self.assertEqual("${{ needs.frontend-tests.result }}", check["env"]["E2E_RESULT"])
+        self.assertIn("frontend-browser", jobs["required"]["needs"])
+
     def test_e2e_backend_has_a_scoped_privileged_mfa_rollout_override(self) -> None:
         frontend_tests = self.workflow["jobs"]["frontend-tests"]
         boot = next(

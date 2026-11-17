@@ -188,7 +188,7 @@ in [ESIGNATURE.md](ESIGNATURE.md).
 
 ## Seeded identities (deterministic volume seeder)
 
-`frontend-tests` runs the [volume seeder](VOLUME_SEEDER.md) against its fresh `connex_seed_e2e` schema **before** booting the backend — `SeederGuard` allows only a non-web one-shot process, so it can never run inside the serving app. The step tees the Gradle console into `test/e2e/.artifacts/seeder.log`.
+Each `frontend-tests` e2e shard runs the [volume seeder](VOLUME_SEEDER.md) against its own fresh `connex_seed_e2e` schema **before** booting the backend — `SeederGuard` allows only a non-web one-shot process, so it can never run inside the serving app. The step tees the Gradle console into `test/e2e/.artifacts/seeder.log`.
 
 Specs read identities from that log via `test/e2e/support/seed.ts`:
 
@@ -320,7 +320,10 @@ The public-docs browser case selects a category and then an article explicitly; 
 - Specs only touch **records seeded for that spec** (distinct contacts per flow), and desktop/phone projects own separate tenants and fixture files, so the default 2 workers never race each other.
 - CI runs with `retries: 2` and uploads **traces + screenshots + the HTML report** on failure; locally retries are 0 so flake is visible, not hidden.
 - A test that flakes repeatedly gets fixed or quarantined with `test.fixme()` plus a linked issue — never a lengthened timeout as a "fix", and never deleted silently.
-- The CI job (`Frontend — unit & e2e` in `.github/workflows/ci.yml`) is a **required check** on `main` (#853, graduated in 735d885a). A failure there blocks merges, so every step in that job has to stay deterministic.
+- The required check `Frontend — unit & e2e` in `.github/workflows/ci.yml` gates `main` (#853, graduated in 735d885a). It waits for two parts, so a failure in either blocks merges and every step has to stay deterministic:
+  - `Frontend — unit tests` runs Vitest.
+  - `Frontend — e2e (shard N/4)` runs the Playwright suite as four `--shard=N/4` slices. Each shard boots its own MySQL, seeded schema, backend and frontend, so shards share no data. The suite is `fullyParallel`, so Playwright splits individual tests, puts the setup project each slice depends on into that shard, and keeps the shards balanced by test count. Reproduce one shard locally with `node_modules/.bin/playwright test --shard=2/4`.
+  - `test_ci_change_classification.py` fails if the shard list and the `/4` denominator ever disagree, because a missing shard would silently skip part of the suite.
 
 ## Ownership-offer confinement parity
 
