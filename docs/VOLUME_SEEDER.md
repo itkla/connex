@@ -75,8 +75,8 @@ row-count summaries, and closes the application context.
 
 ## CI invocation
 
-The `Frontend — unit & e2e` job in `.github/workflows/ci.yml` runs the seeder against the fresh
-`connex_seed_e2e` schema its MySQL service creates per run, **after** building the war and
+Each e2e shard of the `frontend-tests` job in `.github/workflows/ci.yml` runs the seeder against
+the fresh `connex_seed_e2e` schema its own MySQL service creates per run, **after** building the war and
 **before** booting the backend. The guard permits only a non-web one-shot process, so the seeder
 cannot run inside the serving app, and the dedicated catalog prefix satisfies the one-shot
 contract:
