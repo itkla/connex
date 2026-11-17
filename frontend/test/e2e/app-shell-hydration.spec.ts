@@ -67,7 +67,8 @@ for (const locale of ["en", "ja"] as const) {
                     }).click();
                 }
                 await page.getByRole("button", {
-                    name: message(locale, "workspace", "WorkspaceSwitcher.switchAria"), exact: true,
+                    name: new RegExp(message(locale, "workspace", "WorkspaceSwitcher.switchAria")
+                        .replace("{workspace}", ".+").replace("{count}", ".+")),
                 }).click();
                 await expect(page.getByRole("menu")).toBeVisible();
                 await page.keyboard.press("Escape");
