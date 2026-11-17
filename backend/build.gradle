@@ -209,18 +209,63 @@ isDatabaseBacked = { String name, Set visiting ->
 	return backed
 }
 def fullTestClasses = testSources.findAll { name, source -> source.runnable }.keySet().toSorted()
-def testPartition = [unitTest: new TreeSet(), dbTestShard1: new TreeSet(),
-	dbTestShard2: new TreeSet(), scriptedTrajectoryTest: new TreeSet()]
+// Database shards are filled by recorded class durations, longest first, onto the least-loaded
+// shard (#2443). The fill runs over every recorded name, present or not, so adding or deleting a
+// class never moves another recorded class. A class with no recorded duration lands on a shard
+// chosen by its name hash, which is equally stable. Only refreshing gradle/db-test-timings.tsv
+// rebalances. The last shard also runs scriptedTrajectoryTest, so it starts with that load.
+def dbShardCount = 3
+def dbShardTasks = (1..dbShardCount).collect { "dbTestShard${it}".toString() }
+def dbShardTimingsFile = file('gradle/db-test-timings.tsv')
+def isScriptedTrajectoryClass = { String name ->
+	org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(
+		scriptedTrajectoryPattern, name.replace('.', '/') + '.class')
+}
+def dbShardTimings = [:]
+dbShardTimingsFile.readLines('UTF-8').eachWithIndex { line, index ->
+	if (line.isBlank() || line.startsWith('#')) {
+		return
+	}
+	def fields = line.split('\t', -1)
+	if (fields.length != 2 || !(fields[0] ==~ /[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+/) ||
+		!(fields[1] ==~ /\d+(\.\d+)?/)) {
+		throw new GradleException("Malformed ${dbShardTimingsFile.name} line ${index + 1}: ${line}")
+	}
+	if (dbShardTimings.put(fields[0], new BigDecimal(fields[1])) != null) {
+		throw new GradleException("Duplicate ${dbShardTimingsFile.name} entry: ${fields[0]}")
+	}
+}
+def dbShardLoads = (0..<dbShardCount).collect { BigDecimal.ZERO }
+dbShardTimings.each { name, seconds ->
+	if (isScriptedTrajectoryClass(name)) {
+		dbShardLoads[dbShardCount - 1] += seconds
+	}
+}
+def recordedDbShard = [:]
+dbShardTimings.findAll { name, seconds -> !isScriptedTrajectoryClass(name) }
+	.sort { left, right -> right.value <=> left.value ?: left.key <=> right.key }
+	.each { name, seconds ->
+		def target = 0
+		for (int shard = 1; shard < dbShardCount; shard++) {
+			if (dbShardLoads[shard] < dbShardLoads[target]) {
+				target = shard
+			}
+		}
+		recordedDbShard[name] = target
+		dbShardLoads[target] += seconds
+	}
+def testPartition = [unitTest: new TreeSet()] +
+	dbShardTasks.collectEntries { [(it): new TreeSet()] } +
+	[scriptedTrajectoryTest: new TreeSet()]
 fullTestClasses.each { name ->
-	def classPath = name.replace('.', '/') + '.class'
-	if (org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(scriptedTrajectoryPattern, classPath)) {
+	if (isScriptedTrajectoryClass(name)) {
 		testPartition.scriptedTrajectoryTest.add(name)
 	} else if (!isDatabaseBacked(name, new HashSet())) {
 		testPartition.unitTest.add(name)
-	} else if (classPath.startsWith('ooo/klae/connex/backend/services/')) {
-		testPartition.dbTestShard1.add(name)
 	} else {
-		testPartition.dbTestShard2.add(name)
+		def shard = recordedDbShard.containsKey(name) ?
+			recordedDbShard[name] : Math.floorMod(name.hashCode(), dbShardCount)
+		testPartition[dbShardTasks[shard]].add(name)
 	}
 }
 
@@ -342,7 +387,7 @@ tasks.register('verifyTestPartition') {
 		}
 		def ownerNames = findOwners(compiledClasses.findAll { name, model -> !fixtures.containsKey(name) })
 		// Gradle's candidate tree applies the task's actual include/exclude patterns.
-		def selections = ['unitTest', 'dbTestShard1', 'dbTestShard2', 'scriptedTrajectoryTest']
+		def selections = (['unitTest'] + dbShardTasks + ['scriptedTrajectoryTest'])
 			.collectEntries { taskName ->
 				[(taskName): selectedOwners(tasks.named(taskName, Test).get().candidateClassFiles.files, ownerNames)]
 			}
@@ -468,18 +513,18 @@ tasks.named('test') {
 
 // The new CI tasks retain the local test task's system properties, source/ledger/date inputs and
 // seeder isolation probe. Otherwise a split could silently drop that guard or reuse stale results.
-['unitTest', 'dbTestShard1', 'dbTestShard2'].each { taskName ->
+(['unitTest'] + dbShardTasks).each { taskName ->
 	tasks.register(taskName, Test) {
 		def localTest = tasks.named('test', Test).get()
 		group = 'verification'
 		description = taskName == 'unitTest' ? 'Runs DB-free backend tests.' :
-			"Runs isolated backend database shard ${taskName.takeRight(1)} of 2."
+			"Runs isolated backend database shard ${taskName - 'dbTestShard'} of ${dbShardCount}."
 		testClassesDirs = sourceSets.test.output.classesDirs
 		classpath = sourceSets.test.runtimeClasspath
 		useJUnitPlatform()
 		systemProperties localTest.systemProperties
 		inputs.files(fileTree('src/main/java') { include '**/*.java' })
-		inputs.files('build.gradle', '../frontend/next.config.ts',
+		inputs.files('build.gradle', 'gradle/db-test-timings.tsv', '../frontend/next.config.ts',
 			'../docs/backend/api-surface.tsv', '../docs/backend/api-surface-policy.txt',
 			'../docs/backend/api-lifecycle.tsv')
 		inputs.property('apiLifecycleDate', java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString())
