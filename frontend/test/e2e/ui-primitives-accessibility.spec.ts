@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { csrfBootstrap, seeder } from "./support/api";
 import { runFixture } from "./support/fixtures";
 import { useLocale } from "./support/locale";
+import { message } from "./support/messages";
 
 test.beforeEach(async ({ page }) => { await useLocale(page, "en"); });
 
@@ -87,8 +88,16 @@ async function expectForcedFocus(control: Locator) {
 
 test("state-opened pipeline and company dialogs restore keyboard focus @mobile", async ({ page }) => {
     for (const item of [
-        { path: "/records/pipelines", opener: "Add pipeline", title: "New pipeline" },
-        { path: "/records/companies", opener: "Add company", title: "New company" },
+        {
+            path: "/records/pipelines",
+            opener: message("en", "pipelines", "PipelinesBrowser.addPipelineAriaLabel"),
+            title: message("en", "pipelines", "PipelinesNewDialog.title"),
+        },
+        {
+            path: "/records/companies",
+            opener: message("en", "companies", "CompaniesBrowser.addCompanyAriaLabel"),
+            title: message("en", "companies", "CompaniesNewDialog.title"),
+        },
     ]) {
         await page.goto(item.path);
         const opener = page.getByRole("main").getByRole("button", { name: item.opener, exact: true }).first();
