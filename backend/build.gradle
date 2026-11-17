@@ -209,51 +209,18 @@ isDatabaseBacked = { String name, Set visiting ->
 	return backed
 }
 def fullTestClasses = testSources.findAll { name, source -> source.runnable }.keySet().toSorted()
-// Database shards are filled by recorded class durations, longest first, onto the least-loaded
-// shard (#2443). The fill runs over every recorded name, present or not, so adding or deleting a
-// class never moves another recorded class. A class with no recorded duration lands on a shard
-// chosen by its name hash, which is equally stable. Only refreshing gradle/db-test-timings.tsv
-// rebalances. The last shard also runs scriptedTrajectoryTest, so it starts with that load.
+// Database shards follow package boundaries, so classes that share Spring test contexts stay in one
+// fork and each shard builds as few contexts as possible (#2443). A per-class split by recorded
+// time scattered those classes and spent the saving on context rebuilds. Service tests and the
+// integration suite each fill a shard; every other DB-backed test shares the last shard with
+// scriptedTrajectoryTest.
 def dbShardCount = 3
 def dbShardTasks = (1..dbShardCount).collect { "dbTestShard${it}".toString() }
-def dbShardTimingsFile = file('gradle/db-test-timings.tsv')
+def dbShardPackages = ['ooo/klae/connex/backend/services/', 'ooo/klae/connex/backend/integration/']
 def isScriptedTrajectoryClass = { String name ->
 	org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(
 		scriptedTrajectoryPattern, name.replace('.', '/') + '.class')
 }
-def dbShardTimings = [:]
-dbShardTimingsFile.readLines('UTF-8').eachWithIndex { line, index ->
-	if (line.isBlank() || line.startsWith('#')) {
-		return
-	}
-	def fields = line.split('\t', -1)
-	if (fields.length != 2 || !(fields[0] ==~ /[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+/) ||
-		!(fields[1] ==~ /\d+(\.\d+)?/)) {
-		throw new GradleException("Malformed ${dbShardTimingsFile.name} line ${index + 1}: ${line}")
-	}
-	if (dbShardTimings.put(fields[0], new BigDecimal(fields[1])) != null) {
-		throw new GradleException("Duplicate ${dbShardTimingsFile.name} entry: ${fields[0]}")
-	}
-}
-def dbShardLoads = (0..<dbShardCount).collect { BigDecimal.ZERO }
-dbShardTimings.each { name, seconds ->
-	if (isScriptedTrajectoryClass(name)) {
-		dbShardLoads[dbShardCount - 1] += seconds
-	}
-}
-def recordedDbShard = [:]
-dbShardTimings.findAll { name, seconds -> !isScriptedTrajectoryClass(name) }
-	.sort { left, right -> right.value <=> left.value ?: left.key <=> right.key }
-	.each { name, seconds ->
-		def target = 0
-		for (int shard = 1; shard < dbShardCount; shard++) {
-			if (dbShardLoads[shard] < dbShardLoads[target]) {
-				target = shard
-			}
-		}
-		recordedDbShard[name] = target
-		dbShardLoads[target] += seconds
-	}
 def testPartition = [unitTest: new TreeSet()] +
 	dbShardTasks.collectEntries { [(it): new TreeSet()] } +
 	[scriptedTrajectoryTest: new TreeSet()]
@@ -263,9 +230,9 @@ fullTestClasses.each { name ->
 	} else if (!isDatabaseBacked(name, new HashSet())) {
 		testPartition.unitTest.add(name)
 	} else {
-		def shard = recordedDbShard.containsKey(name) ?
-			recordedDbShard[name] : Math.floorMod(name.hashCode(), dbShardCount)
-		testPartition[dbShardTasks[shard]].add(name)
+		def classPath = name.replace('.', '/') + '.class'
+		def shard = dbShardPackages.findIndexOf { classPath.startsWith(it) }
+		testPartition[dbShardTasks[shard < 0 ? dbShardCount - 1 : shard]].add(name)
 	}
 }
 
@@ -524,7 +491,7 @@ tasks.named('test') {
 		useJUnitPlatform()
 		systemProperties localTest.systemProperties
 		inputs.files(fileTree('src/main/java') { include '**/*.java' })
-		inputs.files('build.gradle', 'gradle/db-test-timings.tsv', '../frontend/next.config.ts',
+		inputs.files('build.gradle', '../frontend/next.config.ts',
 			'../docs/backend/api-surface.tsv', '../docs/backend/api-surface-policy.txt',
 			'../docs/backend/api-lifecycle.tsv')
 		inputs.property('apiLifecycleDate', java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString())

@@ -21,6 +21,7 @@ import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -113,6 +114,11 @@ class ProviderCapturePlaneRoutingIntegrationTest {
             TenantRoutingConfig.decorate(
                 pool, properties, tenantContext);
         sqlSessionFactory = sqlSessionFactory(routing);
+    }
+
+    @AfterEach
+    void clearTenantScope() {
+        tenantContext.clear();
     }
 
     @AfterAll
