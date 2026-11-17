@@ -58,7 +58,10 @@ beforeEach(() => {
     api.create.mockResolvedValue({});
     api.save.mockResolvedValue({ ...workspace, defaultCurrency: 'USD', identityVersion: 3 });
 });
-afterEach(cleanup);
+afterEach(async () => {
+    cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+});
 
 describe('workspace default deal currency', () => {
     it('uses only the explicit setting or the explained historical fallback', () => {
