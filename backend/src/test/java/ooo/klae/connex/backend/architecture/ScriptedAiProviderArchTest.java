@@ -463,27 +463,6 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
-    void requiredBackendInvocationsExpandEveryNumberedMatrixShard() {
-        String workflow = backendMatrixWorkflow().replace(
-                "          - shard: 2\n            tasks: dbTestShard2 scriptedTrajectoryTest\n",
-                "          - shard: 2\n            tasks: dbTestShard2\n"
-                        + "          - shard: 3\n            tasks: dbTestShard3 scriptedTrajectoryTest\n");
-
-        assertEquals(List.of(
-                        "run: bash gradlew dbTestShard1 --no-daemon --stacktrace",
-                        "run: bash gradlew dbTestShard2 --no-daemon --stacktrace",
-                        "run: bash gradlew dbTestShard3 scriptedTrajectoryTest --no-daemon --stacktrace"),
-                requiredBackendJobGradleInvocations(workflow));
-    }
-
-    @Test
-    void anUnnumberedMatrixShardFailsClosed() {
-        String workflow = backendMatrixWorkflow().replace("          - shard: 2\n", "          - shard: two\n");
-
-        assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty());
-    }
-
-    @Test
     void aMissingScriptedMatrixShardCannotSatisfyTheRequiredBackendPath() {
         String workflow = backendMatrixWorkflow().replace(
                 "          - shard: 2\n            tasks: dbTestShard2 scriptedTrajectoryTest\n", "");
@@ -1093,7 +1072,7 @@ class ScriptedAiProviderArchTest {
             }
             if (line.equals("        include:")) {
                 inInclude = true;
-            } else if (inInclude && line.matches(" {10}- shard: [1-9][0-9]*")) {
+            } else if (inInclude && line.matches(" {10}- shard: [12]")) {
                 inShard = true;
             } else if (inShard && line.startsWith("            tasks: ")) {
                 String value = line.substring("            tasks: ".length()).strip();

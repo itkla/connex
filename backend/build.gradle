@@ -209,30 +209,18 @@ isDatabaseBacked = { String name, Set visiting ->
 	return backed
 }
 def fullTestClasses = testSources.findAll { name, source -> source.runnable }.keySet().toSorted()
-// Database shards follow package boundaries, so classes that share Spring test contexts stay in one
-// fork and each shard builds as few contexts as possible (#2443). A per-class split by recorded
-// time scattered those classes and spent the saving on context rebuilds. Service tests and the
-// integration suite each fill a shard; every other DB-backed test shares the last shard with
-// scriptedTrajectoryTest.
-def dbShardCount = 3
-def dbShardTasks = (1..dbShardCount).collect { "dbTestShard${it}".toString() }
-def dbShardPackages = ['ooo/klae/connex/backend/services/', 'ooo/klae/connex/backend/integration/']
-def isScriptedTrajectoryClass = { String name ->
-	org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(
-		scriptedTrajectoryPattern, name.replace('.', '/') + '.class')
-}
-def testPartition = [unitTest: new TreeSet()] +
-	dbShardTasks.collectEntries { [(it): new TreeSet()] } +
-	[scriptedTrajectoryTest: new TreeSet()]
+def testPartition = [unitTest: new TreeSet(), dbTestShard1: new TreeSet(),
+	dbTestShard2: new TreeSet(), scriptedTrajectoryTest: new TreeSet()]
 fullTestClasses.each { name ->
-	if (isScriptedTrajectoryClass(name)) {
+	def classPath = name.replace('.', '/') + '.class'
+	if (org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(scriptedTrajectoryPattern, classPath)) {
 		testPartition.scriptedTrajectoryTest.add(name)
 	} else if (!isDatabaseBacked(name, new HashSet())) {
 		testPartition.unitTest.add(name)
+	} else if (classPath.startsWith('ooo/klae/connex/backend/services/')) {
+		testPartition.dbTestShard1.add(name)
 	} else {
-		def classPath = name.replace('.', '/') + '.class'
-		def shard = dbShardPackages.findIndexOf { classPath.startsWith(it) }
-		testPartition[dbShardTasks[shard < 0 ? dbShardCount - 1 : shard]].add(name)
+		testPartition.dbTestShard2.add(name)
 	}
 }
 
@@ -354,7 +342,7 @@ tasks.register('verifyTestPartition') {
 		}
 		def ownerNames = findOwners(compiledClasses.findAll { name, model -> !fixtures.containsKey(name) })
 		// Gradle's candidate tree applies the task's actual include/exclude patterns.
-		def selections = (['unitTest'] + dbShardTasks + ['scriptedTrajectoryTest'])
+		def selections = ['unitTest', 'dbTestShard1', 'dbTestShard2', 'scriptedTrajectoryTest']
 			.collectEntries { taskName ->
 				[(taskName): selectedOwners(tasks.named(taskName, Test).get().candidateClassFiles.files, ownerNames)]
 			}
@@ -480,12 +468,12 @@ tasks.named('test') {
 
 // The new CI tasks retain the local test task's system properties, source/ledger/date inputs and
 // seeder isolation probe. Otherwise a split could silently drop that guard or reuse stale results.
-(['unitTest'] + dbShardTasks).each { taskName ->
+['unitTest', 'dbTestShard1', 'dbTestShard2'].each { taskName ->
 	tasks.register(taskName, Test) {
 		def localTest = tasks.named('test', Test).get()
 		group = 'verification'
 		description = taskName == 'unitTest' ? 'Runs DB-free backend tests.' :
-			"Runs isolated backend database shard ${taskName - 'dbTestShard'} of ${dbShardCount}."
+			"Runs isolated backend database shard ${taskName.takeRight(1)} of 2."
 		testClassesDirs = sourceSets.test.output.classesDirs
 		classpath = sourceSets.test.runtimeClasspath
 		useJUnitPlatform()
