@@ -47,7 +47,10 @@ for (const component of ["WorkspaceSwitcher", "NotificationBell", "TagsBrowser"]
             render(<NextIntlClientProvider locale="en" timeZone="UTC" messages={{ ...workspace, ...notifications, ...activity, ...common, ...records }}>
                 <TooltipProvider><aside aria-label="Primary sidebar">{view}</aside></TooltipProvider>
             </NextIntlClientProvider>);
-            const name = component === "WorkspaceSwitcher" ? workspace.WorkspaceSwitcher.switchAria
+            const name = component === "WorkspaceSwitcher"
+                ? workspace.WorkspaceSwitcher.switchAria
+                    .replace("{workspace}", "Sales")
+                    .replace("{count}", workspace.WorkspaceSwitcher.oneWorkspace)
                 : component === "NotificationBell" ? notifications.Notifications.bellLabel
                 : activity.ActivityLibraryTags.actionsAria.replace("{name}", "Priority");
             const trigger = screen.getByRole("button", { name });
