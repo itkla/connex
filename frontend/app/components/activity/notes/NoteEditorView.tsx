@@ -1,16 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import {
     ArrowLeftIcon,
-    BriefcaseIcon,
     CheckCircleIcon,
     ExclamationCircleIcon,
     LockClosedIcon,
-    UserIcon,
     UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { Contact, Deal, Note, NoteVisibility, User } from "@/app/lib/types";
@@ -30,6 +27,9 @@ import { noteContentToVisibleText } from "@/app/lib/references";
 import { renderedWorkspaceNavigationVersion, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { toastDismiss, toastError, toastInfo } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
+import { noteRecordLinks } from "@/app/lib/noteRecordLinks";
+import { parseMysqlDateTime } from "@/app/lib/utils";
+import NoteRecordLinks from "./NoteRecordLinks";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecordReturnLink from "@/app/components/records/RecordReturnLink";
 import { PageShell } from "@/app/components/PageShell";
@@ -43,6 +43,14 @@ type NoteEditorDraft = {
     title: string;
     content: string;
     visibility: NoteVisibility;
+};
+
+type NoteLinkState = {
+    source: Note | null;
+    revision: number;
+    links: { person: number | null; deal: number | null };
+    references: Note["references"];
+    acknowledgedUpdatedAt?: string;
 };
 
 const KEPT_DRAFT_LABEL_LENGTH = 48;
@@ -100,16 +108,24 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [originWorkspaceId] = useState(activeWorkspaceId);
     const [originNavigationVersion] = useState(renderedWorkspaceNavigationVersion);
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
-    const [linkState, setLinkState] = useState({
+    const [linkState, setLinkState] = useState<NoteLinkState>({
         source: note,
         revision: 0,
         links: { person: note?.person ?? null, deal: note?.deal ?? null },
+        references: note?.references,
     });
     if (linkState.source !== note) {
+        const propUpdatedAt = parseMysqlDateTime(note?.updatedAt);
+        const acknowledgedAt = parseMysqlDateTime(linkState.acknowledgedUpdatedAt);
+        const adopt = !Number.isFinite(propUpdatedAt) || !Number.isFinite(acknowledgedAt) || propUpdatedAt > acknowledgedAt;
         setLinkState({
+            ...linkState,
             source: note,
-            revision: linkState.revision + 1,
-            links: { person: note?.person ?? null, deal: note?.deal ?? null },
+            ...(adopt ? {
+                revision: linkState.revision + 1,
+                links: { person: note?.person ?? null, deal: note?.deal ?? null },
+                references: note?.references,
+            } : {}),
         });
     }
     const { links, revision: linkRevision } = linkState;
@@ -242,10 +258,12 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
                 if (stateRef.current.linkRevision === snapshot.linkRevision) {
                     stateRef.current = { ...stateRef.current, ...savedLinks };
-                    setLinkState((current) => current.revision === snapshot.linkRevision
-                        ? { ...current, links: savedLinks }
-                        : current);
                 }
+                setLinkState((current) => ({
+                    ...current,
+                    acknowledgedUpdatedAt: saved.updatedAt,
+                    ...(current.revision === snapshot.linkRevision ? { links: savedLinks, references: saved.references } : {}),
+                }));
                 if (snapshot.noteId == null && saved?.id) {
                     rekeyEditorDraft(`note:${saved.id}`);
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
@@ -305,10 +323,12 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
             if (stateRef.current.linkRevision === snapshot.linkRevision) {
                 stateRef.current = { ...stateRef.current, ...savedLinks };
-                setLinkState((current) => current.revision === snapshot.linkRevision
-                    ? { ...current, links: savedLinks }
-                    : current);
             }
+            setLinkState((current) => ({
+                ...current,
+                acknowledgedUpdatedAt: saved.updatedAt,
+                ...(current.revision === snapshot.linkRevision ? { links: savedLinks, references: saved.references } : {}),
+            }));
             rekeyEditorDraft(`note:${saved.id}`);
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);
@@ -353,13 +373,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         dirtyRef.current = true;
     };
 
-    const recordHref = person
-        ? `/records/contacts/${person.id}`
-        : deal
-          ? `/records/deals/${deal.id}`
-          : null;
-    const recordLabel = person?.name ?? deal?.name ?? null;
-    const RecordIcon = person ? UserIcon : BriefcaseIcon;
+    const recordLinks = noteRecordLinks({ ...links, references: linkState.references }, person, deal);
     const displayTitle = deriveNoteTitle({ title, content }, t("untitled"));
 
     return (
@@ -407,18 +421,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
 
                     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                         {author ? <span>{author.displayName || author.username}</span> : null}
-                        {recordHref && recordLabel ? (
-                            <>
-                                <span aria-hidden="true">·</span>
-                                <Link
-                                    href={recordHref}
-                                    className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-foreground transition-colors hover:bg-accent"
-                                >
-                                    <RecordIcon className="h-3.5 w-3.5" />
-                                    <span className="max-w-[16rem] truncate">{recordLabel}</span>
-                                </Link>
-                            </>
-                        ) : null}
+                        <NoteRecordLinks links={recordLinks} />
                         <SegmentedControl<NoteVisibility>
                             ariaLabel={t("visibilityAria")}
                             className="ml-auto"

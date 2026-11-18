@@ -55,6 +55,14 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void noteMutationTimestampReadsRemainTenantScoped() {
+        assertTrue(interceptor.requiresResolvedContext(NS + "NoteMapper.getNoteTimestamps"));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+
+        assertThrows(ForbiddenException.class, () -> interceptor.enforce(NS + "NoteMapper.getNoteTimestamps"));
+    }
+
+    @Test
     void dormantProposalStorageRequiresScopeForEveryStatement() {
         for (String method : Set.of("insert", "insertMember", "findByKey", "findByCallIdentity",
                 "listMembers", "hasCompleteMembership")) {

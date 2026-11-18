@@ -12,7 +12,6 @@ import RecentRecordBridge from '@/app/components/actions/RecentRecordBridge';
 import ActionRecordBridge from '@/app/components/actions/ActionRecordBridge';
 import type { ReactNode } from 'react';
 import { BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
-import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getTimeZone, getLocale, getTranslations } from 'next-intl/server';
 
 import {
@@ -53,14 +52,11 @@ import {
     type UserReference,
 } from '@/app/lib/types';
 import {
-    formatCompactCurrency,
-    formatCurrency,
     formatDate,
     formatDateTime,
 } from '@/app/lib/utils';
 import { requestNow } from '@/app/lib/requestClock';
 import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
-import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
 
 import Rise from '@/app/components/motion/Rise';
 import { PageShell } from '@/app/components/PageShell';
@@ -71,14 +67,15 @@ import Timeline from '@/app/components/me/Timeline';
 import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from '@/app/components/me/timelineEntries';
 import Attachments from '@/app/components/attachments/Attachments';
 import CommentsSection from '@/app/components/records/comments/CommentsSection';
-import SummaryTile from '@/app/components/SummaryTile';
 import AskConnexRecordEntry from '@/app/components/ask-connex/AskConnexRecordEntry';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
+import { DealDetailProvider } from '@/app/components/records/deals/DealDetailState';
+import { DealDetailStage, DealDetailStatus, DealDetailAmount, DealDetailClosedAt, DealDetailPerformance } from '@/app/components/records/deals/DealDetailValues';
 import EngineEvaluationPanel from '@/app/components/records/EngineEvaluationPanel';
 import DealRationalePanel from '@/app/components/records/deals/DealRationalePanel';
 import DealRiskPanel from '@/app/components/records/deals/DealRiskPanel';
 import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleProgress';
-import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
+import { dealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
@@ -180,7 +177,6 @@ export default async function DealPage({ params }: DealPageProps) {
     const stagesByPipeline: Record<number, Stage[]> = pipeline
         ? { [pipeline.id]: stages }
         : {};
-    const currentStage = stages.find((s) => s.id === deal.stage) ?? null;
     const personSeeds = dealPeople.map(({ person }) => person);
     const dealSeeds = [deal];
     const knownUsers = new Map<number, UserReference>([
@@ -198,11 +194,7 @@ export default async function DealPage({ params }: DealPageProps) {
     for (const user of fetchedUsers) knownUsers.set(user.id, user);
     const relatedUsers = [...knownUsers.values()];
 
-    const outcome: DealOutcome = dealOutcome(deal.won);
-    const closed = outcome !== 'open';
-    const variance =
-        closed && deal.value > 0 ? (deal.actualValue - deal.value) / deal.value : null;
-    const currency = deal.currency || 'USD';
+    const outcome = dealOutcome(deal.won);
     const stakeholderWarmth = await getContactTemperatures(
         personSeeds.map((person) => person.id),
         init,
@@ -217,6 +209,7 @@ export default async function DealPage({ params }: DealPageProps) {
 
     return (
         <DetailSectionsProvider key={`${detailWorkspaceId}:${id}`} recordId={id} workspaceId={detailWorkspaceId} initial={{ dealActivities: activitiesResult, dealNotes: notesResult, dealTasks: tasksResult, dealDocuments: documentsResult, dealLineItems: lineItemsResult }}>
+        <DealDetailProvider key={`${detailWorkspaceId}:${id}`} initial={deal}>
         <PageShell>
                 <RecordStickyContext
                     anchorId="deal-record-identity"
@@ -260,11 +253,11 @@ export default async function DealPage({ params }: DealPageProps) {
                                     {pipeline ? (
                                         <span className="inline-flex items-center gap-2">
                                             {pipeline.name}
-                                            {currentStage ? <> · {currentStage.name}</> : null}
-                                            <StatusPill outcome={outcome} t={t} />
+                                            <DealDetailStage stages={stages} />
+                                            <DealDetailStatus />
                                         </span>
                                     ) : (
-                                        <StatusPill outcome={outcome} t={t} />
+                                        <DealDetailStatus />
                                     )}
                                     {deal.expectedCloseDate ? (
                                         <span className="inline-flex items-center gap-1">
@@ -275,14 +268,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                 </h3>
                             </div>
 
-                            <div className="flex flex-col items-end gap-1">
-                                <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                                    {closed ? t('actual') : t('projected')} · {currency}
-                                </span>
-                                <div className="text-3xl font-extrabold tracking-tight text-foreground tabular-nums">
-                                    {formatCurrency(closed ? deal.actualValue : deal.value, currency, locale)}
-                                </div>
-                            </div>
+                            <DealDetailAmount />
                         </header>
                     </RecordDetailSection>
 
@@ -319,11 +305,11 @@ export default async function DealPage({ params }: DealPageProps) {
                                     <SectionHeader title={t('details')} />
                                     <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                                         <InfoRow label={t('pipeline')} value={pipeline?.name ?? '—'} />
-                                        <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
+                                        <DealDetailStage stages={stages} row />
                                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
                                         <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
                                         <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale, timeZone)} />
-                                        <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : '—'} />
+                                        <DealDetailClosedAt timezone={timezone} />
                                         <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale, timeZone)} />
                                         <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale, timeZone)} />
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
@@ -399,25 +385,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                             </div>
                                         }
                                     />
-                                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                                        <SummaryTile label={t('projectedValue')} value={formatCompactCurrency(deal.value, currency, locale)} />
-                                        <SummaryTile
-                                            label={t('actualValue')}
-                                            value={closed ? formatCompactCurrency(deal.actualValue, currency, locale) : '—'}
-                                        />
-                                        <SummaryTile
-                                            label={t('variance')}
-                                            value={
-                                                variance != null
-                                                    ? `${variance >= 0 ? '+' : ''}${(variance * 100).toFixed(1)}%`
-                                                    : '—'
-                                            }
-                                        />
-                                        <SummaryTile
-                                            label={closed ? t('closed') : t('expectedClose')}
-                                            value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : formatDate(deal.expectedCloseDate, locale, timeZone)}
-                                        />
-                                    </div>
+                                    <DealDetailPerformance timezone={timezone} />
                                 </div>
                             </RecordDetailSection>
 
@@ -528,6 +496,7 @@ export default async function DealPage({ params }: DealPageProps) {
                     </RecordDetailSection>
                 </Rise>
         </PageShell>
+        </DealDetailProvider>
         </DetailSectionsProvider>
     );
 }
@@ -545,27 +514,5 @@ function SectionLabelWithTooltip({ title, tooltip }: { title: string; tooltip: R
                 <TooltipContent>{tooltip}</TooltipContent>
             </Tooltip>
         </div>
-    );
-}
-
-function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => string }) {
-    if (outcome === 'won') {
-        return (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
-                <CheckCircleIcon className="size-3" /> {t('statusWon')}
-            </span>
-        );
-    }
-    if (outcome === 'lost') {
-        return (
-            <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
-                <XCircleIcon className="size-3" /> {t('statusLost')}
-            </span>
-        );
-    }
-    return (
-        <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-foreground">
-            {t('statusOpen')}
-        </span>
     );
 }

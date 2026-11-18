@@ -7,11 +7,9 @@ import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { PlusIcon } from '@heroicons/react/24/solid';
 import {
     ArrowUpRightIcon,
-    BriefcaseIcon,
     EllipsisHorizontalIcon,
     PencilSquareIcon,
     TrashIcon,
-    UserIcon,
 } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
@@ -42,6 +40,8 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import { formatDate } from '@/app/lib/utils';
 import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
+import { noteRecordLinks, type NoteRecordLink } from '@/app/lib/noteRecordLinks';
+import NoteRecordLinks from './NoteRecordLinks';
 import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
 import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
@@ -273,14 +273,7 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
                                                     key={note.id}
                                                     note={note}
                                                     author={userById.get(note.author)}
-                                                    recordLabel={
-                                                        note.person
-                                                            ? personById.get(note.person)?.name ?? null
-                                                            : note.deal
-                                                              ? dealById.get(note.deal)?.name ?? null
-                                                              : null
-                                                    }
-                                                    recordKind={note.person ? 'person' : note.deal ? 'deal' : null}
+                                                    recordLinks={noteRecordLinks(note, personById.get(note.person ?? 0), dealById.get(note.deal ?? 0))}
                                                     locale={locale}
                                                     labels={{
                                                         untitled: t('untitled'),
@@ -369,8 +362,7 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
 function NoteRow({
     note,
     author,
-    recordLabel,
-    recordKind,
+    recordLinks,
     locale,
     labels,
     onOpen,
@@ -379,8 +371,7 @@ function NoteRow({
 }: {
     note: Note;
     author: User | undefined;
-    recordLabel: string | null;
-    recordKind: 'person' | 'deal' | null;
+    recordLinks: NoteRecordLink[];
     locale: string;
     labels: { untitled: string; actionsAria: string; open: string; edit: string; delete: string };
     onOpen: () => void;
@@ -391,7 +382,6 @@ function NoteRow({
     const title = deriveNoteTitle(note, labels.untitled);
     const snippet = noteSnippet(note.content);
     const authorName = author ? author.displayName || author.username : null;
-    const RecordIcon = recordKind === 'deal' ? BriefcaseIcon : UserIcon;
 
     return (
         <li className="group relative flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/40">
@@ -425,12 +415,7 @@ function NoteRow({
                 ) : null}
                 <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {authorName ? <span>{authorName}</span> : null}
-                    {recordLabel ? (
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                            <RecordIcon className="size-3.5 shrink-0" />
-                            <span className="max-w-[12rem] truncate">{recordLabel}</span>
-                        </span>
-                    ) : null}
+                    <NoteRecordLinks links={recordLinks} interactive={false} />
                     <span>{formatDate(note.updatedAt ?? note.createdAt, locale, timeZone)}</span>
                 </span>
             </Link>

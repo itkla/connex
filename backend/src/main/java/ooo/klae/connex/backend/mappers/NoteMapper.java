@@ -28,6 +28,8 @@ public interface NoteMapper {
     List<Note> getNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Note> getNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId);
     Note getNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** Returns database-owned timestamps for one note after an authorized write. */
+    Note getNoteTimestamps(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Note> getVisibleNotesPage(
         @Param("workspaceId") int workspaceId,
         @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,

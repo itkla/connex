@@ -2,13 +2,17 @@
 
 import { useLocale, useTimeZone, useTranslations } from 'next-intl';
 import Link from 'next/link';
-import type { ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 
 import { useNow } from '@/app/hooks/useNow';
 import DealBriefPanel from '@/app/components/records/deals/DealBriefPanel';
 import { buildDealCitationTitles } from '@/app/lib/dealBriefCitations';
 import type { Contact } from '@/app/lib/types';
 import { useDetailSections } from '@/app/hooks/useDetailSections';
+import { usePermission } from '@/app/hooks/usePermissions';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
+import { Button } from '@/components/ui/button';
 import DetailSectionState from '@/app/components/records/DetailSectionState';
 import ContactsGrid from '@/app/components/records/companies/ContactsGrid';
 import PipelineCard from '@/app/components/records/PipelineCard';
@@ -66,16 +70,26 @@ export function DealDocumentsSection(props: Omit<ComponentProps<typeof DealDocum
     </DetailSectionState>;
 }
 
-/** Employment history keeps its existing successful-empty presentation. */
-export function ContactEmploymentSection() {
+/** Employment history exposes the existing company-change dialog beside the current employer. */
+export function ContactEmploymentSection({ contact }: { contact: Contact }) {
     const result = useDetailSections()?.results.contactEmployment;
     const t = useTranslations('ContactsPage');
+    const tActions = useTranslations('ContactsActionsMenu');
+    const [changeOpen, setChangeOpen] = useState(false);
+    const canUpdate = usePermission('PERSON_UPDATE');
+    const { activeWorkspaceId } = useWorkspace();
+    const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;
+    const canChangeCompany = canUpdate && owned;
     const locale = useLocale();
     const zone = useTimeZone();
     return <DetailSectionState sectionKeys={['contactEmployment']} title={t('employmentHistory')}>
-        {result?.kind === 'loaded' && result.data.length > 0 ? <div>
-            <SectionHeader title={t('employmentHistory')} />
-            <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+        {result?.kind === 'loaded' ? <div>
+            <SectionHeader title={t('employmentHistory')} action={canChangeCompany ? (
+                <Button variant="outline" size="inline" onClick={() => setChangeOpen(true)}>
+                    {contact.companyId != null || contact.company ? tActions('changeCompany') : tActions('associateWithCompany')}
+                </Button>
+            ) : undefined} />
+            {result.data.length > 0 ? <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                 {result.data.map((stint) => <li key={stint.id} className="px-6 py-4 xl:px-4">
                     <div className="flex items-center justify-between gap-2">
                         {stint.companyId ? <Link href={`/records/companies/${stint.companyId}`} className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text">
@@ -88,7 +102,8 @@ export function ContactEmploymentSection() {
                         {formatShortDate(stint.startedAt ?? undefined, locale, zone)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale, zone) : t('present')}
                     </p>
                 </li>)}
-            </ol>
+            </ol> : <p className="px-6 text-sm text-muted-foreground">{t('noEmploymentHistory')}</p>}
+            {canChangeCompany ? <ChangeCompanyDialog open={changeOpen} onOpenChange={setChangeOpen} contacts={[contact]} /> : null}
         </div> : null}
     </DetailSectionState>;
 }

@@ -1,30 +1,33 @@
+'use client';
+
 import { Fragment, type CSSProperties } from 'react';
-import { calendarDayInTimeZone } from '@/app/lib/timeZone';
-import { requestNow } from '@/app/lib/requestClock';
+import { calendarDayInTimeZone, DEFAULT_TIME_ZONE } from '@/app/lib/timeZone';
+import { useLiveNow } from '@/app/hooks/useNow';
+import { useDealDetail } from './DealDetailState';
 import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
-import { getTimeZone, getLocale, getTranslations } from 'next-intl/server';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import { type Stage, type NoteReference, type DealStageHistory } from '@/app/lib/types';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { formatDate, formatShortDate, parseMysqlDateTime, parseCalendarDateUtc, toDatetimeLocalValue } from '@/app/lib/utils';
 import { formatDealClosedAt } from './dealDates';
-import { classifyStage, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
+import { classifyStage, dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 type ScheduleTone = 'early' | 'late' | 'neutral';
 
-export default async function DealLifecycleProgress({
+export default function DealLifecycleProgress({
     stages,
     timezone,
-    currentStageId,
-    outcome,
-    createdAt,
-    expectedCloseDate,
-    closedAt,
-    closedReason,
-    references,
+    currentStageId: initialCurrentStageId,
+    outcome: initialOutcome,
+    createdAt: initialCreatedAt,
+    expectedCloseDate: initialExpectedCloseDate,
+    closedAt: initialClosedAt,
+    closedReason: initialClosedReason,
+    references: initialReferences,
     stageHistory,
 }: {
     stages: Stage[];
@@ -38,10 +41,18 @@ export default async function DealLifecycleProgress({
     references?: NoteReference[];
     stageHistory?: DealStageHistory[];
 }) {
-    const timeZone = await getTimeZone();
+    const snapshot = useDealDetail()?.deal;
+    const currentStageId = snapshot ? snapshot.stage ?? null : initialCurrentStageId;
+    const outcome = snapshot ? dealOutcome(snapshot.won) : initialOutcome;
+    const createdAt = snapshot ? snapshot.createdAt : initialCreatedAt;
+    const expectedCloseDate = snapshot ? snapshot.expectedCloseDate : initialExpectedCloseDate;
+    const closedAt = snapshot ? snapshot.closedAt : initialClosedAt;
+    const closedReason = snapshot ? snapshot.closedReason : initialClosedReason;
+    const references = snapshot ? snapshot.references : initialReferences;
+    const timeZone = useTimeZone() ?? DEFAULT_TIME_ZONE;
     const closeTimeZone = timezone || 'UTC';
-    const t = await getTranslations('DealsLifecycleProgress');
-    const locale = await getLocale();
+    const t = useTranslations('DealsLifecycleProgress');
+    const locale = useLocale();
 
     const achievedByStage = new Map<number, string>();
     for (const h of stageHistory ?? []) {
@@ -63,7 +74,7 @@ export default async function DealLifecycleProgress({
     const startMs = parseMysqlDateTime(createdAt);
     const expectedMs = expectedCloseDate ? parseCalendarDateUtc(expectedCloseDate) : NaN;
     const closedDayMs = closedAt ? parseCalendarDateUtc(toDatetimeLocalValue(closedAt, closeTimeZone).slice(0, 10)) : NaN;
-    const nowMs = requestNow();
+    const nowMs = useLiveNow();
     const todayStart = parseCalendarDateUtc(calendarDayInTimeZone(nowMs, timeZone));
 
     const isClosed = outcome !== 'open';

@@ -36,9 +36,12 @@ const deal: Deal = {
 };
 const unlinked: Note = {
     id: 71, content: "Original", title: "Original title", author: 1, visibility: "workspace",
-    createdAt: timestamp, updatedAt: timestamp,
+    createdAt: "2026-11-04 00:00:00", updatedAt: "2026-11-04 00:00:00",
 };
 const linked: Note = { ...unlinked, person: contact.id, deal: deal.id };
+const acknowledgedRemoval: Note = {
+    ...unlinked, content: "Removed all links", references: [], updatedAt: "2026-11-04 10:00:00",
+};
 
 function editor(note: Note) {
     return <NoteEditorView note={note} currentUserId={1} persons={[contact]} deals={[deal]}
@@ -57,9 +60,76 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("full-page note links", () => {
+    const company = { type: "company", id: 9, label: "Linked company" } as const;
+    const linkedWithCompany: Note = { ...linked, references: [company], updatedAt: "2026-11-04 09:00:00" };
+
+    it.each([
+        ["older", "2026-11-04 09:59:59"],
+        ["equal ISO", "2026-11-04T10:00:00Z"],
+        ["equal offset", "2026-11-04T12:00:00+02:00"],
+    ])("keeps acknowledged removals when %s props arrive after the save", async (_label, updatedAt) => {
+        api.update.mockResolvedValue(acknowledgedRemoval);
+        const view = render(editor(linkedWithCompany));
+        fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Removed all links" } });
+        flush();
+        await waitFor(() => expect(view.queryByRole("link", { name: company.label })).toBeNull());
+        expect(api.update.mock.calls[0]?.[1]).not.toHaveProperty("updatedAt");
+        view.rerender(editor({ ...linkedWithCompany, updatedAt }));
+
+        for (const name of [contact.name, deal.name, company.label]) {
+            expect(view.queryByRole("link", { name })).toBeNull();
+        }
+        fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Next edit" } });
+        flush();
+        await waitFor(() => expect(api.update).toHaveBeenLastCalledWith(71, expect.objectContaining({
+            content: "Next edit", person: null, deal: null,
+        }), workspacePinnedRequest(7)));
+    });
+
+    it("adopts strictly newer props after an acknowledged save without replacing unsaved text", async () => {
+        api.update.mockResolvedValue(acknowledgedRemoval);
+        const view = render(editor(linkedWithCompany));
+        fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Removed all links" } });
+        flush();
+        await waitFor(() => expect(view.queryByRole("link", { name: company.label })).toBeNull());
+        fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Unsaved text" } });
+        view.rerender(editor({ ...linkedWithCompany, updatedAt: "2026-11-04T10:00:01Z" }));
+
+        for (const name of [contact.name, deal.name, company.label]) {
+            expect(view.getByRole("link", { name })).toBeTruthy();
+        }
+        expect(view.getByRole("textbox", { name: "Note body" })).toHaveProperty("value", "Unsaved text");
+    });
+
+    it.each([
+        ["missing prop", "2026-11-04 10:00:00", undefined],
+        ["invalid prop", "2026-11-04 10:00:00", "invalid"],
+        ["missing save response", undefined, "2026-11-04 09:00:00"],
+        ["invalid save response", "invalid", "2026-11-04 09:00:00"],
+    ])("adopts props with a %s timestamp using the existing fallback", async (_label, savedAt, propAt) => {
+        const saved: Note = { ...acknowledgedRemoval, updatedAt: savedAt ?? acknowledgedRemoval.updatedAt };
+        const refreshed: Note = { ...linkedWithCompany, updatedAt: propAt ?? timestamp };
+        if (savedAt === undefined) {
+            Reflect.deleteProperty(saved, "updatedAt");
+            expect(saved).not.toHaveProperty("updatedAt");
+        }
+        if (propAt === undefined) Reflect.deleteProperty(refreshed, "updatedAt");
+        api.update.mockResolvedValue(saved);
+        const view = render(editor(linkedWithCompany));
+        fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Removed all links" } });
+        flush();
+        await waitFor(() => expect(view.queryByRole("link", { name: company.label })).toBeNull());
+        view.rerender(editor(refreshed));
+
+        for (const name of [contact.name, deal.name, company.label]) {
+            expect(view.getByRole("link", { name })).toBeTruthy();
+        }
+    });
+
     it("sends held links and reconciles an absent-link save response into the chip and next save", async () => {
         const view = render(editor(linked));
         expect(view.getByRole("link", { name: contact.name })).toBeTruthy();
+        expect(view.getByRole("link", { name: deal.name }).getAttribute("href")).toBe(`/records/deals/${deal.id}`);
         fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Edited" } });
         flush();
 
@@ -67,12 +137,33 @@ describe("full-page note links", () => {
             content: "Edited", person: 42, deal: 73,
         }), workspacePinnedRequest(7)));
         await waitFor(() => expect(view.queryByRole("link", { name: contact.name })).toBeNull());
+        expect(view.queryByRole("link", { name: deal.name })).toBeNull();
         fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Edited again" } });
         flush();
 
         await waitFor(() => expect(api.update).toHaveBeenLastCalledWith(71, expect.objectContaining({
             content: "Edited again", person: null, deal: null,
         }), workspacePinnedRequest(7)));
+    });
+
+    it("shows every resolved record reference once and adopts saved company references", async () => {
+        const company = { type: "company", id: 9, label: "Linked company" } as const;
+        const note: Note = { ...linked, references: [
+            { type: "person", id: contact.id, label: contact.name },
+            { type: "deal", id: deal.id, label: deal.name },
+            company,
+        ] };
+        api.update.mockResolvedValue({ ...linked, references: [{ ...company, id: 10, label: "Updated company" }] });
+        const view = render(editor(note));
+        expect(view.getAllByRole("link", { name: contact.name })).toHaveLength(1);
+        expect(view.getAllByRole("link", { name: deal.name })).toHaveLength(1);
+        expect(view.getByRole("link", { name: company.label }).getAttribute("href")).toBe("/records/companies/9");
+        fireEvent.change(view.getByRole("textbox", { name: "Note body" }), { target: { value: "Edited company reference" } });
+        flush();
+        await waitFor(() => expect(view.getByRole("link", { name: "Updated company" }).getAttribute("href")).toBe("/records/companies/10"));
+        expect(view.queryByRole("link", { name: company.label })).toBeNull();
+        view.rerender(editor({ ...unlinked, updatedAt: "2026-11-04T00:00:01Z" }));
+        expect(view.queryByRole("link", { name: "Updated company" })).toBeNull();
     });
 
     it.each([

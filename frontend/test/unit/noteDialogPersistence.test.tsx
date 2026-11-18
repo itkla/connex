@@ -27,7 +27,9 @@ describe("note dialog persistence", () => {
         "  Plain text  with spacing\n\nA second paragraph.\n",
         "  Existing [Kenji Tanaka](person:42)\n\n- Existing item\n",
     ])("keeps existing body bytes when saving metadata: %s", async (content) => {
-        api.update.mockResolvedValue({ id: 71 });
+        api.update.mockResolvedValue({
+            id: 71, createdAt: "2026-11-04 00:00:00", updatedAt: "2026-11-04 10:00:00",
+        });
         const { getByRole } = render(<NoteDialogForm
             note={{ id: 71, content, title: "Original", author: 1, person: 42, deal: 73,
                 createdAt: "2026-11-04T00:00:00Z", updatedAt: "2026-11-04T00:00:00Z" }}
@@ -40,6 +42,7 @@ describe("note dialog persistence", () => {
         await waitFor(() => expect(api.update).toHaveBeenCalledWith(71, expect.objectContaining({
             content, title: "Revised", person: 42, deal: 73,
         }), undefined));
+        await waitFor(() => expect(api.refresh).toHaveBeenCalledOnce());
         expect(api.report).not.toHaveBeenCalled();
     });
 });
