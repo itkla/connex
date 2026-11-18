@@ -238,8 +238,8 @@ export type AppAction = {
      */
     keywordsMessageKey?: string;
     /**
-     * A single canonical chord (e.g. `mod+alt+t`). Metadata only for now — normalized and checked for
-     * conflicts at registration, but not yet dispatched; the shortcut dispatcher lands with the palette.
+     * A single canonical chord (e.g. `mod+alt+t`), normalized and checked for conflicts at registration.
+     * The provider dispatches available actions outside editable targets and IME composition.
      */
     shortcut?: string;
     /** Leading icon. */

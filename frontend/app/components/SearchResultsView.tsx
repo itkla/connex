@@ -27,7 +27,7 @@ export default function SearchResultsView({
 
     const actions = useMemo<readonly AppAction[]>(() => [{
         id: "record.run-search-workflow",
-        group: "record",
+        group: "workspace",
         labelKey: "record.runWorkflow",
         descriptionKey: "description.record.runWorkflow",
         icon: BoltIcon,

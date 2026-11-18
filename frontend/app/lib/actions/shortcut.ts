@@ -1,8 +1,8 @@
 /**
- * Chords owned by existing global keyboard listeners (the search `/` shortcut and the shell `Escape`
+ * Chords owned by existing global keyboard listeners (search and the shell `Escape`
  * handler). The registry refuses to bind them so its metadata never promises a chord it cannot honor.
  */
-export const RESERVED_CHORDS: ReadonlySet<string> = new Set(["/", "escape"]);
+export const RESERVED_CHORDS: ReadonlySet<string> = new Set(["/", "escape", "mod+k"]);
 
 const MODIFIER_ORDER = ["mod", "ctrl", "alt", "shift"] as const;
 
@@ -90,6 +90,29 @@ export type ShortcutPlatform = "apple" | "other";
  */
 export function resolveShortcutPlatform(platform: string): ShortcutPlatform {
     return /^(?:Mac|iPhone|iPad|iPod)/i.test(platform) ? "apple" : "other";
+}
+
+/** Matches the registered chord against exact platform modifiers, including Option-modified letters. */
+export function matchesShortcut(event: KeyboardEvent, chord: string, platform: ShortcutPlatform): boolean {
+    const tokens = normalizeShortcut(chord).split("+");
+    const key = tokens.pop();
+    const mod = tokens.includes("mod");
+    const ctrl = tokens.includes("ctrl") || (mod && platform === "other");
+    const meta = mod && platform === "apple";
+    const eventKey = /^Key[A-Z]$/.test(event.code)
+        ? event.code.slice(3).toLowerCase()
+        : event.key === " " ? "space" : event.key.toLowerCase();
+    return key === eventKey
+        && event.ctrlKey === ctrl
+        && event.metaKey === meta
+        && event.altKey === tokens.includes("alt")
+        && event.shiftKey === tokens.includes("shift");
+}
+
+/** Editable controls retain their native typing shortcuts, including descendants of rich-text editors. */
+export function isEditableShortcutTarget(target: EventTarget): boolean {
+    return target instanceof Element
+        && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
 }
 
 /**

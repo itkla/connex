@@ -17,6 +17,7 @@ import { useShortcutPlatform } from '@/app/hooks/useShortcutPlatform';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
 import { actionLabel, actionSearchText, type MessageResolver } from '@/app/lib/actions/actionLabels';
 import { formatShortcut } from '@/app/lib/actions/shortcut';
+import { publishPaletteOpened } from '@/app/lib/actions/paletteEvents';
 import { search as searchApi } from '@/app/lib/api';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
 import { isSearchComposing } from '@/app/lib/search/composition';
@@ -263,7 +264,11 @@ export default function GlobalSearch() {
 
     useEffect(() => {
         if (mode !== 'palette') return;
-        const raf = requestAnimationFrame(() => paletteInputRef.current?.focus());
+        publishPaletteOpened();
+        const raf = requestAnimationFrame(() => {
+            paletteInputRef.current?.focus();
+            paletteInputRef.current?.select();
+        });
         return () => cancelAnimationFrame(raf);
     }, [mode]);
 

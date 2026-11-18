@@ -23,6 +23,7 @@ import { ActionProvider } from "@/app/hooks/useActions";
 import { PinnedViewsProvider } from "@/app/hooks/usePinnedViews";
 import { RecentRecordsProvider } from "@/app/hooks/useRecentRecords";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
+import WorkflowActionsBridge from "@/app/components/actions/WorkflowActionsBridge";
 import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
 import PinnedViewsActionsBridge from "@/app/components/actions/PinnedViewsActionsBridge";
 import RecentRecordsActionsBridge from "@/app/components/actions/RecentRecordsActionsBridge";
@@ -93,6 +94,7 @@ export default async function AppLayout({
                             <NavTrailProvider userId={user.id} navAccess={navAccess}>
                                 <ActionProvider user={user}>
                                     <NotificationActionsBridge />
+                                    <WorkflowActionsBridge />
                                     <PreferenceActionsBridge
                                         userLocale={resolveLocale(user.locale)}
                                         cookieLocale={localePreferenceFromCookieHeader(cookie)}
