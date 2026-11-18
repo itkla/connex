@@ -21,7 +21,7 @@ import { type Notification, type SnoozeRequest } from "@/app/lib/types";
 import { useLiveNow } from "@/app/hooks/useNow";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
-import { useNotifications } from "@/app/hooks/useNotifications";
+import { useNotifications, useUnexpiredNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationIcon, notificationSeverityStyle } from "@/app/components/notifications/notificationContent";
 import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
@@ -41,6 +41,8 @@ export default function NotificationBell() {
     const { recipientId, unread, refreshUnread } = useNotifications();
     const { executeInNotificationWorkspace, openNotification } = useNotificationWorkspaceActions();
     const [items, setItems] = useState<Notification[]>([]);
+    const [pageStateVersion, setPageStateVersion] = useState(0);
+    const visibleItems = useUnexpiredNotifications(items, "", pageStateVersion);
     const [completing, setCompleting] = useState<Set<number>>(new Set());
     const [loading, setLoading] = useState(false);
     const loadGenerationRef = useRef(0);
@@ -58,6 +60,7 @@ export default function NotificationBell() {
                 if (page.stateVersion < requiredStateVersionRef.current) return;
                 loadedStateVersionRef.current = page.stateVersion;
                 setItems(page.items);
+                setPageStateVersion(page.stateVersion);
             }
         } catch {
             if (loadGenerationRef.current === generation) toastError(t("loadError"));
@@ -219,14 +222,14 @@ export default function NotificationBell() {
                                     </div>
                                 ))}
                             </div>
-                        ) : items.length === 0 ? (
+                        ) : visibleItems.length === 0 ? (
                             <div className="flex flex-col items-center gap-2 px-2 py-10 text-center">
                                 <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
                                     <CheckCircleIcon className="size-5" />
                                 </span>
                                 <p className="text-sm font-medium">{t("empty")}</p>
                             </div>
-                        ) : items.map((item) => {
+                        ) : visibleItems.map((item) => {
                             const content = notificationContent(item, t, locale);
                             const Icon = notificationIcon(item);
                             const style = notificationSeverityStyle(item.severity);

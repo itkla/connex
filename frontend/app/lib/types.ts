@@ -4173,6 +4173,7 @@ export type Notification = {
     resolvedAt?: string | null;
     snoozedUntil?: string | null;
     snoozeTimezone?: string | null;
+    invitationExpiresAt?: string | null;
     createdAt: string;
     updatedAt: string;
     stateVersion?: number;

@@ -97,6 +97,22 @@ The inbox/bell is **recipient-scoped across every workspace the user belongs to*
 nothing is missed while viewing another workspace; each notification is labeled with its source
 workspace. Delivery prefs stay per-user-global. (The reminder *generation* jobs still run per-workspace.)
 
+Pending `workspace.join` inbox responses expose `invitationExpiresAt` as a UTC instant from the
+recipient's canonical pending membership, including the fixed V247 cutover fallback. Other notices
+and active memberships have no invitation deadline. Inbox, bell and dashboard clients hide loaded
+invitations at that deadline, with one bounded timeout per surface for the earliest deadline and
+cleanup on unmount or workspace changes. Local unread/snoozed adjustments account for the server
+count snapshot's `asOf` and a query-clock bound from the request duration, so fresh counts are not
+decremented twice. Invitation visibility uses the query clock rather than the earlier `asOf`, and
+database timestamps have whole-second precision. Requests that could span a deadline receive one
+fresh count read. Loaded notices also retain the
+page state version: when cached notice state differs from the count snapshot, expiry refreshes the
+counts instead of subtracting a possibly outdated unread/snoozed state. An older in-flight count
+snapshot receives at most one immediate retry. Matching expired states remain available until the
+count snapshot advances, so a newer surface cannot undo an established count deduction.
+Duplicate surfaces share the same reconciliation request. Row visibility updates locally without waiting for
+those reads. Clock expiry requires no writes or notification state-version bump.
+
 Notification email record links enter the authenticated notifications page with only a notification
 id. The existing recipient-authorized read-state endpoint supplies its current workspace and record
 URL; the client selects that workspace through the same helper as inbox/bell navigation before opening

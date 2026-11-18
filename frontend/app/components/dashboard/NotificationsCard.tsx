@@ -9,6 +9,7 @@ import { getNotifications } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import type { Notification } from '@/app/lib/types';
 import { useLiveNow } from '@/app/hooks/useNow';
+import { useUnexpiredNotifications } from '@/app/hooks/useNotifications';
 import { formatRelativeTime } from '@/app/lib/utils';
 import {
     notificationContent,
@@ -29,6 +30,7 @@ type ReconciledNotifications = {
     sourceItems: Notification[];
     sourceStateVersion: number;
     items: Notification[];
+    stateVersion: number;
 };
 
 /** Keeps the dashboard notification snapshot reconciled with recipient-wide state changes. */
@@ -40,10 +42,13 @@ export default function NotificationsCard({
     const t = useTranslations('Notifications');
     const { openNotification } = useNotificationWorkspaceActions();
     const [reconciled, setReconciled] = useState<ReconciledNotifications | null>(null);
-    const visibleItems = reconciled?.sourceItems === items
+    const currentSnapshot = reconciled?.sourceItems === items
         && reconciled.sourceStateVersion === initialStateVersion
-        ? reconciled.items
-        : items;
+        ? reconciled
+        : null;
+    const visibleItems = useUnexpiredNotifications(
+        currentSnapshot?.items ?? items, "", currentSnapshot?.stateVersion ?? initialStateVersion,
+    );
 
     useEffect(() => {
         let active = true;
@@ -69,6 +74,7 @@ export default function NotificationsCard({
                     sourceItems: items,
                     sourceStateVersion: initialStateVersion,
                     items: page.items,
+                    stateVersion: page.stateVersion,
                 });
             } catch {
                 return;

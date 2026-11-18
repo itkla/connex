@@ -1,10 +1,13 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -20,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -53,6 +57,7 @@ class NotificationIntegrationTest {
     @Autowired private TaskMapper taskMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private JdbcTemplate jdbc;
 
     private MockMvc mockMvc;
     private Workspace workspace;
@@ -197,6 +202,65 @@ class NotificationIntegrationTest {
 
         assertSnoozeNotFound(session, removedMembershipNotification.getId());
         assertSnoozeNotFound(session, deletedSourceNotification.getId());
+    }
+
+    @Test
+    void invitationDeadlineIsOnlyDisclosedToItsAuthenticatedInvitee() throws Exception {
+        User invitee = newMember();
+        User administrator = newMember();
+        User outsider = newMember();
+        Workspace invitedWorkspace = new Workspace();
+        invitedWorkspace.setName("Private invitation workspace");
+        invitedWorkspace.setSlug("invitation-deadline-" + suffix());
+        invitedWorkspace.setOrgId(workspace.getOrgId());
+        workspaceMapper.insert(invitedWorkspace);
+        workspaceMapper.addPendingMember(invitedWorkspace.getId(), invitee.getId(), "member");
+        workspaceMapper.addMember(invitedWorkspace.getId(), administrator.getId(), "admin");
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbc, administrator);
+        jdbc.update("""
+            UPDATE workspace_member SET expires_at = ?
+            WHERE workspace_id = ? AND user_id = ?
+            """, "2099-01-01 00:00:00", invitedWorkspace.getId(), invitee.getId());
+        Notification invitation = notification(invitee);
+        invitation.setWorkspaceId(invitedWorkspace.getId());
+        invitation.setType("workspace.join");
+        invitation.setCategory("workspace");
+        notificationMapper.upsert(invitation);
+        MockHttpSession inviteeSession = login(invitee.getUsername());
+
+        mockMvc.perform(get("/api/notifications")
+                .session(inviteeSession)
+                .param("type", "workspace.join"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(1))
+            .andExpect(jsonPath("$.items[0].id").value(invitation.getId()))
+            .andExpect(jsonPath("$.items[0].invitationExpiresAt").value("2099-01-01T00:00:00Z"));
+
+        for (User nonInvitee : List.of(administrator, outsider)) {
+            MockHttpSession session = login(nonInvitee.getUsername());
+            mockMvc.perform(get("/api/notifications")
+                    .session(session)
+                    .param("type", "workspace.join"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0))
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$..invitationExpiresAt").isEmpty());
+            mockMvc.perform(post("/api/notifications/{id}/read", invitation.getId())
+                    .session(session)
+                    .with(csrf().asHeader()))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(not(containsString("invitationExpiresAt"))));
+        }
+
+        mockMvc.perform(post("/api/notifications/{id}/read", invitation.getId())
+                .session(inviteeSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.readAt").exists())
+            .andExpect(jsonPath("$.invitationExpiresAt").value("2099-01-01T00:00:00Z"));
+        mockMvc.perform(get("/api/notifications"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(content().string(not(containsString("invitationExpiresAt"))));
     }
 
     private User newMember() {

@@ -44,6 +44,7 @@ public class NotificationDto {
     private String resolvedAt;
     private String snoozedUntil;
     private String snoozeTimezone;
+    private String invitationExpiresAt;
     private String createdAt;
     private String updatedAt;
     private long stateVersion;
@@ -83,6 +84,7 @@ public class NotificationDto {
         dto.setResolvedAt(notification.getResolvedAt());
         dto.setSnoozedUntil(toUtcInstant(notification.getSnoozedUntil()));
         dto.setSnoozeTimezone(notification.getSnoozeTimezone());
+        dto.setInvitationExpiresAt(toUtcInstant(notification.getInvitationExpiresAt()));
         dto.setCreatedAt(notification.getCreatedAt());
         dto.setUpdatedAt(notification.getUpdatedAt());
         return dto;
