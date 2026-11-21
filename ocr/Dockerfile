@@ -7,7 +7,7 @@ ARG SOURCE_DATE_EPOCH
 # (see AGENTS.md). Bumping this base past 3.12 makes the hash-pinned install unresolvable and
 # the sidecar image unbuildable. Move it only together with a paddlepaddle release that ships
 # wheels for the new interpreter, and regenerate requirements.lock on the same version.
-FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+FROM python:3.15-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9
 
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-ocr" \
