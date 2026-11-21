@@ -333,14 +333,14 @@ public class NativeConnectService {
             String errorCode) {
         String reportedCode = errorCode;
         try {
-            tenantWorkScope.unrouted(() -> {
-                sessionPersistence.failExchange(session, errorCode);
-                return null;
-            });
+            boolean failed = tenantWorkScope.unrouted(
+                () -> sessionPersistence.failExchange(session, errorCode));
+            if (failed) {
+                auditFailure(session.getUserId(), session.getProvider(), errorCode);
+            }
         } catch (RuntimeException exception) {
             reportedCode = "connection_failed";
         }
-        auditFailure(session.getUserId(), session.getProvider(), reportedCode);
         return new NativeConnectException(
             reportedCode, "Native provider authorization failed");
     }
